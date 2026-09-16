@@ -1,22 +1,71 @@
 /* ── picklists ───────────────────────────── */
-const SALUTATION=["","Mr.","Ms.","Mrs.","Dr."];
+const SALUTATION=["","MR","MRS","MISS"];
 const EMAIL_TYPES=["Office","Personal","Other"];
 const PHONE_TYPES=["Mobile","Work","Home","Other"];
-const STAGES=["LinkedIn Outreach Initiated","Cold Call Initiated","Could Not Connect","Contacted","Wrong POC","Qualifying","Discovery Call Booked","Discovery Call Done","SQL — Active","Holding Pad","Lost"];
-const MEETING_STAGES=["Discovery Call Booked","Discovery Call Done","SQL — Active"];
-const SOURCES=["","Lost Deals","Apollo","LinkedIn Scrape","Referral","Inbound Enquiry","Event / Conference"];
-const OFFSITE_TIMELINE=["","Q2 FY27","Q3 FY27","Q4 FY27","Q1 FY28","Q2 FY28","Not decided"];
+/* Real cfPipelineStageBd values — docs/kylas-picklists.md. Codes are what the
+   API stores and what everything joins on; LABEL is display only. */
+const STAGES=[
+  "YET_TO_BE_MINED",
+  "CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC",
+  "CONNECT_LATER","RESCHEDULE_PENDING",
+  "FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3",
+  "MQL_MARKETING_QUALIFIED_LEAD","ACTIVATION",
+  "DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+  "SQL_SALES_QUALIFIED_LEAD",
+  "OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT",
+  "CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT",
+  "DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
+
+/* Nobody picked up, in escalating order. The outcome button walks this. */
+const CNC_LADDER=["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
+/* Dead ends. Reaching one is an outcome, not a rung — it never lowers the rank. */
+const EXIT_STAGES=["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT",
+  "DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
+/* Nothing has been attempted yet. */
+const UNTOUCHED=["YET_TO_BE_MINED"];
+
+const MEETING_STAGES=["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+  "ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+const SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
+/* MULTI_PICKLIST in Kylas — more than one quarter can be selected. */
+const OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
+
+const LABEL={
+  MR:"Mr.", MRS:"Mrs.", MISS:"Miss",
+  GOOGLE:"Google", FACEBOOK:"Facebook", LINKEDIN:"LinkedIn",
+  EXHIBITION:"Exhibition", COLD_CALLING:"Cold calling",
+  JAN_MAR:"Jan–Mar", APR_JUN:"Apr–Jun", JUL_SEP:"Jul–Sep", OCT_DEC:"Oct–Dec",
+  YET_TO_BE_MINED:"Yet to be mined",
+  CNC_COULD_NOT_CONNECT:"CNC 1", CNC_COULD_NOT_CONNECT_2:"CNC 2",
+  CNC_COULD_NOT_CONNECT_3:"CNC 3", FOLLOWUP_CNC:"Follow-up CNC",
+  CONNECT_LATER:"Connect later", RESCHEDULE_PENDING:"Reschedule pending",
+  FOLLOW_UP_1:"Follow-up 1", FOLLOW_UP_2:"Follow-up 2", FOLLOW_UP_3:"Follow-up 3",
+  MQL_MARKETING_QUALIFIED_LEAD:"MQL", ACTIVATION:"Activation",
+  DISCOVERY_CALL_BOOKED:"Discovery booked",
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:"Discovery done",
+  SQL_SALES_QUALIFIED_LEAD:"SQL",
+  OFFSITE_DELAYED:"Offsite delayed", OFFSITE_DONE_LATE_REACHOUT:"Offsite done, late reachout",
+  CLOSING_LOOPS_LOW_VALUE:"Closing loops, low value", GHOSTED:"Ghosted",
+  NOT_INTERESTED:"Not interested", INVALID_CONTACT:"Invalid contact",
+  DISQUALIFIED_WRONG_POC:"Wrong POC", NOT_A_DECISION_MAKER_NDM:"Not a decision maker",
+  POC_ORGANIZATION_CHANGED:"POC changed org",
+};
+const label=v=>LABEL[v]||v;
 const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
 const MODE_OF_MEETING=["","In Person","Virtual","Calls","Text"];
 
+/* No answer escalates rather than repeating: CNC 1 -> 2 -> 3 -> Follow-up CNC.
+   Kylas models the repeat attempts as distinct stages, so the button walks them
+   instead of writing the same value every time. */
 const OUTCOMES=[
-  {k:"1",t:"No answer",   stage:"Could Not Connect"},
-  {k:"2",t:"Wrong POC",   stage:"Wrong POC"},
-  {k:"3",t:"Right POC",   stage:"Qualifying"},
-  {k:"4",t:"Discovery",   stage:"Discovery Call Done"}
+  {k:"1",t:"No answer",   stage:a=>CNC_LADDER[Math.min(CNC_LADDER.indexOf(a.stage)+1,CNC_LADDER.length-1)]||CNC_LADDER[0]},
+  {k:"2",t:"Wrong POC",   stage:"DISQUALIFIED_WRONG_POC"},
+  {k:"3",t:"Right POC",   stage:"MQL_MARKETING_QUALIFIED_LEAD"},
+  {k:"4",t:"Discovery",   stage:"DISCOVERY_CALL_BOOKED"}
 ];
+const outcomeStage=(o,a)=>typeof o.stage==="function"?o.stage(a):o.stage;
 const QUICK={
   budget:["Approx","₹L","₹Cr","Not approved","Signed off","No budget yet","Last year was"],
   timeline:["Q2 FY27","Q3 FY27","Q4 FY27","Q1 FY28","Not decided","Month:","Tentative"],
@@ -28,38 +77,38 @@ const emptyRow=()=>({eventType:"",budget:"",timeline:"",pax:"",remarks:""});
 const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linkedin:"",designation:"",
   emails:[{type:"Office",value:"",primary:true}],
   phones:[{type:"Mobile",cc:"+91",value:"",primary:true}],
-  stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",
+  stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
   source:"",remarks:"",offsiteTimeline:"",owner:ME,
   past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
   done:false,flagged:false});
 
 let DATA=[
-{kid:"40912",salutation:"Mr.",pocName:"Priyank Tewari",company:"nutritap",companyId:"901",linkedin:"",designation:"",
+{kid:"40912",salutation:"MR",pocName:"Priyank Tewari",company:"nutritap",companyId:"901",linkedin:"",designation:"",
  emails:[{type:"Office",value:"priyank.tewari@nutritap.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9873915513",primary:true}],
- stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",
- source:"Lost Deals",remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",
+ stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
+ source:"COLD_CALLING",remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",
  past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"41155",salutation:"Mr.",pocName:"Arjun Sethi",company:"Kritsnam Analytics",companyId:"902",
+{kid:"41155",salutation:"MR",pocName:"Arjun Sethi",company:"Kritsnam Analytics",companyId:"902",
  linkedin:"linkedin.com/in/arjun-sethi-cos",designation:"Chief of Staff",
  emails:[{type:"Office",value:"arjun@kritsnam.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9100044582",primary:true}],
- stage:"Qualifying",nextCallDate:"2026-09-18",nextCallTime:"16:00",
- source:"Apollo",remarks:"Call back after their board meet.",
- offsiteTimeline:"Q4 FY27",owner:"Ayush Tiwari",past:[],
+ stage:"MQL_MARKETING_QUALIFIED_LEAD",nextCallDate:"2026-09-18",nextCallTime:"16:00",
+ source:"LINKEDIN",remarks:"Call back after their board meet.",
+ offsiteTimeline:"OCT_DEC",owner:"Ayush Tiwari",past:[],
  current:[{eventType:"Employee offsites",budget:"Approx 8L, not approved",
   timeline:"Q4 FY27, January if budget clears",pax:"60-70 incl. contractors",
   remarks:"First ever company offsite. Founder wants it near Hyderabad."}],
  vendorInfo:"First Event",serviceOffering:true,modeOfMeeting:"Virtual",done:false,flagged:true},
 
-{kid:"38470",salutation:"Ms.",pocName:"Devanshi Kalro",company:"Shorehouse Retail",companyId:"903",
+{kid:"38470",salutation:"MISS",pocName:"Devanshi Kalro",company:"Shorehouse Retail",companyId:"903",
  linkedin:"linkedin.com/in/devanshikalro",designation:"AVP Marketing",
  emails:[{type:"Office",value:"d.kalro@shorehouse.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9920477103",primary:true}],
- stage:"Discovery Call Done",nextCallDate:"2026-09-24",nextCallTime:"11:30",
- source:"Lost Deals",remarks:"Reopened after last year's loss. Warm.",
- offsiteTimeline:"Q3 FY27",owner:"Shreya Bodwal",
+ stage:"DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",nextCallDate:"2026-09-24",nextCallTime:"11:30",
+ source:"COLD_CALLING",remarks:"Reopened after last year's loss. Warm.",
+ offsiteTimeline:"JUL_SEP",owner:"Shreya Bodwal",
  past:[{eventType:"Sales conference / dealer meet",budget:"Approx 40L, signed off by CFO",
   timeline:"Q1 FY27, first week of April",pax:"300 dealers + 40 internal",
   remarks:"Annual dealer meet in Jaipur. Ran over budget on AV."}],
@@ -68,46 +117,46 @@ let DATA=[
   remarks:"AW line launch. Needs a press-friendly venue in south Bombay."}],
  vendorInfo:"Internal",serviceOffering:true,modeOfMeeting:"In Person",done:true,flagged:false},
 
-{kid:"39901",salutation:"Mr.",pocName:"Ishaan Grover",company:"Pralay Fintech",companyId:"904",
+{kid:"39901",salutation:"MR",pocName:"Ishaan Grover",company:"Pralay Fintech",companyId:"904",
  linkedin:"",designation:"Senior Manager, HR",
  emails:[{type:"Office",value:"ishaan.g@pralay.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9811062234",primary:true}],
- stage:"Wrong POC",nextCallDate:"",nextCallTime:"",source:"Apollo",
+ stage:"DISQUALIFIED_WRONG_POC",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"Offsites decided by the CHRO, will share the name.",
  offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
  vendorInfo:"No Info",serviceOffering:false,modeOfMeeting:"",done:true,flagged:false},
 
-{kid:"42308",salutation:"Ms.",pocName:"Meera Raghunathan",company:"Anvaya Labs",companyId:"905",
+{kid:"42308",salutation:"MISS",pocName:"Meera Raghunathan",company:"Anvaya Labs",companyId:"905",
  linkedin:"linkedin.com/in/meera-raghunathan",designation:"Founder's Office",
  emails:[{type:"Office",value:"meera@anvayalabs.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"8806019945",primary:true}],
- stage:"Cold Call Initiated",nextCallDate:"",nextCallTime:"",source:"LinkedIn Scrape",
+ stage:"FOLLOW_UP_1",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"37622",salutation:"Mr.",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",companyId:"906",
+{kid:"37622",salutation:"MR",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",companyId:"906",
  linkedin:"",designation:"GM Admin",
  emails:[{type:"Office",value:"balaji.v@tatvik.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9444030871",primary:true}],
- stage:"Could Not Connect",nextCallDate:"2026-09-17",nextCallTime:"10:00",
- source:"Apollo",remarks:"",offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
+ stage:"CNC_COULD_NOT_CONNECT",nextCallDate:"2026-09-17",nextCallTime:"10:00",
+ source:"LINKEDIN",remarks:"",offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"38512",salutation:"Mr.",pocName:"Rohit Nambiar",company:"Shorehouse Retail",companyId:"903",
+{kid:"38512",salutation:"MR",pocName:"Rohit Nambiar",company:"Shorehouse Retail",companyId:"903",
  linkedin:"",designation:"Head of Admin",
  emails:[{type:"Office",value:"r.nambiar@shorehouse.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9833126740",primary:true}],
- stage:"Qualifying",nextCallDate:"",nextCallTime:"",
- source:"Referral",remarks:"Devanshi's counterpart on logistics. Handles venue contracts.",
- offsiteTimeline:"Q3 FY27",owner:"Ayush Tiwari",past:[],
+ stage:"MQL_MARKETING_QUALIFIED_LEAD",nextCallDate:"",nextCallTime:"",
+ source:"EXHIBITION",remarks:"Devanshi's counterpart on logistics. Handles venue contracts.",
+ offsiteTimeline:"JUL_SEP",owner:"Ayush Tiwari",past:[],
  current:[{eventType:"Team-building activities",budget:"",timeline:"Q3 FY27",pax:"",remarks:""}],
  vendorInfo:"Vendor Exists",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"43017",salutation:"Ms.",pocName:"Simran Kohli",company:"Meghdoot Cloud",companyId:"907",
+{kid:"43017",salutation:"MISS",pocName:"Simran Kohli",company:"Meghdoot Cloud",companyId:"907",
  linkedin:"",designation:"People Partner",
  emails:[{type:"Office",value:"simran.k@meghdoot.example",primary:true}],
  phones:[{type:"Mobile",cc:"+91",value:"9871855420",primary:true}],
- stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",source:"Apollo",
+ stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"",offsiteTimeline:"",owner:"",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false}
 ];
@@ -138,7 +187,7 @@ function liUrl(v){
 /* ── helpers ─────────────────────────────── */
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const opts=(l,v)=>l.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(o)}</option>`).join("");
+const opts=(l,v)=>l.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(label(o))}</option>`).join("");
 let undoState=null;
 function toast(m,undo){
   document.querySelectorAll(".toast").forEach(t=>t.remove());
@@ -214,7 +263,10 @@ function renderCallbar(){
   const ocs=el("div","ocs");
   OUTCOMES.forEach(o=>{
     const b=el("button","oc",`<kbd>${o.k}</kbd>${esc(o.t)}`);
-    b.type="button";b.dataset.oc=o.k;b.setAttribute("aria-pressed",a.stage===o.stage?"true":"false");
+    b.type="button";b.dataset.oc=o.k;
+    const target=outcomeStage(o,a);
+    b.setAttribute("aria-pressed",a.stage===target||(o.k==="1"&&CNC_LADDER.includes(a.stage))?"true":"false");
+    b.title=`Sets stage to ${label(target)}`;
     b.onclick=()=>setOutcome(o);
     ocs.appendChild(b);
   });
@@ -246,16 +298,18 @@ function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;pain
 function setOutcome(o){
   const a=rec();
   lastOutcome=o;
-  a.stage=o.stage;
+  const target=outcomeStage(o,a);
+  a.stage=target;
+  if(EXIT_STAGES.includes(target))a.exitReason=target;
   /* Dialled from the console: that timer is the truth, so freeze it. Otherwise
      start estimating from here rather than logging a zero-second call. */
   if(tmode==="dial"&&ringing){stopTimer();}
   else if(tmode!=="est"){startTimer("est");}
   /* They did not pick up today; calling again today is not the plan. */
-  if(!a.nextCallDate&&o.stage==="Could Not Connect"){a.nextCallDate=dateIn(1);}
+  if(!a.nextCallDate&&CNC_LADDER.includes(target)){a.nextCallDate=dateIn(1);}
   render();
   resetScroll();
-  if(o.stage!=="Could Not Connect"&&matchMedia("(max-width:900px)").matches)setTab("more");
+  if(!CNC_LADDER.includes(target)&&matchMedia("(max-width:900px)").matches)setTab("more");
 }
 
 /* ── session order ───────────────────────── */
@@ -364,7 +418,7 @@ function render(){
 
 /* Everything here is derived from the contacts we hold for this company, so it
    moves the moment a call is saved. Mirrors the ladder in docs/kpi-spec.md. */
-const INITIATED=["LinkedIn Outreach Initiated","Cold Call Initiated"];
+const NOT_CONNECTED=[...UNTOUCHED,...CNC_LADDER];
 function companyRoster(id){return DATA.filter(a=>String(a.companyId)===String(id));}
 function hasSignal(a){
   return a.past.concat(a.current).some(r=>r.eventType||r.budget||r.timeline||r.pax);
@@ -373,14 +427,19 @@ function isComplete(a){
   return a.past.concat(a.current).some(r=>r.eventType&&r.budget&&r.timeline&&r.pax);
 }
 function connected(a){
-  return a.stage!=="Could Not Connect"&&!INITIATED.includes(a.stage);
+  return !!a.stage&&!NOT_CONNECTED.includes(a.stage);
 }
+/* Highest rung any contact at this company has reached — see kpi-spec.md §13.
+   Ordering follows the Kylas stage list; confirm before it drives reporting. */
 function companyStage(list){
-  if(list.some(a=>a.stage==="SQL — Active"))return{r:6,t:"SQL Accepted",k:"sql"};
-  if(list.some(a=>a.stage==="Discovery Call Booked"))return{r:5,t:"SQL Call Booked",k:"booked"};
-  if(list.some(isComplete))return{r:4,t:"Successful Discovery",k:"disc"};
+  const at=s=>list.some(a=>a.stage===s);
+  if(at("SQL_SALES_QUALIFIED_LEAD"))return{r:8,t:"SQL",k:"sql"};
+  if(at("ACTIVATION"))return{r:7,t:"Activation",k:"sql"};
+  if(at("DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS")||list.some(isComplete))return{r:6,t:"Discovery Done",k:"disc"};
+  if(at("DISCOVERY_CALL_BOOKED"))return{r:5,t:"Discovery Booked",k:"booked"};
+  if(at("MQL_MARKETING_QUALIFIED_LEAD"))return{r:4,t:"MQL",k:"rpoc"};
   if(list.some(hasSignal))return{r:3,t:"Right POC",k:"rpoc"};
-  if(list.some(connected))return{r:2,t:"Phone Picked",k:"picked"};
+  if(list.some(connected))return{r:2,t:"Connected",k:"picked"};
   if(list.some(a=>a.lastCallAt))return{r:1,t:"Reached",k:"reach"};
   return{r:0,t:"Not reached",k:"none"};
 }
@@ -591,7 +650,7 @@ function renderRight(){
   document.getElementById("tabCount").textContent=n?String(n):"";
 
   /* no-answer short circuit */
-  if(a.stage==="Could Not Connect"){
+  if(CNC_LADDER.includes(a.stage)){
     const s=el("section","sec");
     s.innerHTML=`<div class="skipnote">No answer — nothing else to capture. Set a next call date on the left, then
       <kbd>⏎</kbd> to save and move to the next contact.</div>`;

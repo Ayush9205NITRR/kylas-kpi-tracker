@@ -348,3 +348,65 @@ sending them would be rejected.
 Running it answers the question the schema alone cannot: do the rollups produce
 the right numbers on real captured shapes. If Companies shows sensible Last Call
 At, Right POC Contacts and KPI Stage after a seed, the data model holds.
+
+---
+
+## 13. The ladder, against the real stages — NEEDS CONFIRMING
+
+The 24 real `cfPipelineStageBd` values are now known
+(`docs/kylas-picklists.md`). Mapped onto the ladder, and renamed to the
+vocabulary already on your Kylas company overlay (`TOTAL POCS / CONNECTED / MQL`):
+
+| Rank | Rung | Reached when |
+|---|---|---|
+| 0 | Not reached | `YET_TO_BE_MINED`, no call logged |
+| 1 | Reached | any call logged |
+| 2 | Connected | stage is not `YET_TO_BE_MINED` and not a CNC |
+| 3 | Right POC | any event signal field filled |
+| 4 | MQL | `MQL_MARKETING_QUALIFIED_LEAD` |
+| 5 | Discovery Booked | `DISCOVERY_CALL_BOOKED` |
+| 6 | Discovery Done | `DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS`, or a complete event row |
+| 7 | Activation | `ACTIVATION` |
+| 8 | SQL | `SQL_SALES_QUALIFIED_LEAD` |
+
+Taken from the standard `Pipeline Stage` field, whose six values run
+`YET_TO_BE_MINED → CNC → MQL → ACTIVATION → SQL`. So Activation sits **above**
+MQL and **below** SQL. Where Discovery Booked and Discovery Done belong relative
+to Activation is the guess — they may well sit above it.
+
+> **OPEN.** Confirm the order, and specifically whether Activation comes before
+> or after the discovery calls. Everything else in the model is settled.
+
+### Stages that are not rungs
+
+Seven values are dead ends: `CLOSING_LOOPS_LOW_VALUE`, `GHOSTED`,
+`NOT_INTERESTED`, `INVALID_CONTACT`, `DISQUALIFIED_WRONG_POC`,
+`NOT_A_DECISION_MAKER_NDM`, `POC_ORGANIZATION_CHANGED`.
+
+Landing on one is an **outcome, not a rung**. They are recorded in
+`Contacts.Exit Reason` and never lower `KPI Rank` — otherwise a contact
+disqualified in April would erase the MQL it earned in March, and the funnel
+would leak backwards. This is the monotonic rule from §8, applied to the real
+list.
+
+Six more are holding states — `CONNECT_LATER`, `RESCHEDULE_PENDING`,
+`FOLLOW_UP_1/2/3`, `OFFSITE_DELAYED`, `OFFSITE_DONE_LATE_REACHOUT`. They keep
+whatever rank was already earned.
+
+### Outcome buttons, remapped
+
+| Key | Outcome | Sets `cfPipelineStageBd` to |
+|---|---|---|
+| `1` | No answer | the next CNC: `CNC_1 → CNC_2 → CNC_3 → FOLLOWUP_CNC` |
+| `2` | Wrong POC | `DISQUALIFIED_WRONG_POC` |
+| `3` | Right POC | `MQL_MARKETING_QUALIFIED_LEAD` |
+| `4` | Discovery | `DISCOVERY_CALL_BOOKED` |
+
+Kylas models repeat no-answers as distinct stages, so key `1` **walks the
+ladder** rather than writing the same value each time. That also answers the
+concern in §2 for the first three attempts — a second no-answer is now visible
+in the stage itself, not only in the call log.
+
+> **OPEN.** Key `2` currently sets `DISQUALIFIED_WRONG_POC`, but
+> `NOT_A_DECISION_MAKER_NDM` also exists. Which should the button set? And
+> should key `4` set Discovery **Booked** or Discovery **Done**?

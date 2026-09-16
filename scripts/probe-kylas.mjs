@@ -178,15 +178,14 @@ if (COMPANY) {
      jQuery-QueryBuilder backend normally accepts and see which lands. */
   /* The first run returned 400 "Invalid Type" for type:"integer", so lead with
      whatever type the schema itself declares for the company field. */
-  const declared = companyField ? fieldType(companyField) : null;
+  /* Settled on 2026-09-16: the schema calls company a LOOK_UP, but the query
+     builder rejects that type and wants "long". Keep the others as fallbacks in
+     case a future field behaves differently. */
   const key = companyField ? fieldKey(companyField) : "company";
   const attempts = [
-    ...(declared ? [[`${key} equal (declared type ${declared})`, rule(key, "equal", Number(COMPANY), declared, "select")]] : []),
     [`${key} equal (long)`, rule(key, "equal", Number(COMPANY), "long")],
-    [`${key} equal (lookup)`, rule(key, "equal", Number(COMPANY), "lookup")],
+    [`${key} in [long]`, rule(key, "in", [Number(COMPANY)], "long")],
     [`${key} equal (string)`, rule(key, "equal", String(COMPANY), "string", "text")],
-    [`${key} in [number]`, rule(key, "in", [Number(COMPANY)], "long")],
-    ["companyId equal (long)", rule("companyId", "equal", Number(COMPANY), "long")],
   ];
   for (const [label, jsonRule] of attempts) {
     const r = await api(`search/contact ${label}`, "POST", "/v1/search/contact?page=0&size=10",
@@ -200,9 +199,14 @@ if (COMPANY) {
   }
 }
 
-const ownerType = ownerField ? fieldType(ownerField) : "long";
+/* ownerId is a LOOK_UP too, so it takes "long" for the same reason. */
 await api("search/contact by owner", "POST", "/v1/search/contact?sort=updatedAt,desc&page=0&size=5",
-  { fields: CFIELDS, jsonRule: rule(ownerField ? fieldKey(ownerField) : "ownerId", "equal", me.id, ownerType) });
+  { fields: CFIELDS, jsonRule: rule("ownerId", "equal", me.id, "long") });
+await api("search/contact due for a call", "POST", "/v1/search/contact?sort=updatedAt,desc&page=0&size=20",
+  { fields: CFIELDS, jsonRule: { condition: "AND", valid: true, rules: [
+      { id: "ownerId", field: "ownerId", type: "long", input: "select", operator: "equal", value: me.id },
+      { id: "cfPipelineStageBd", field: "cfPipelineStageBd", type: "string", input: "select",
+        operator: "not_in", value: ["NOT_INTERESTED", "INVALID_CONTACT", "GHOSTED"] }] } });
 await api("search/contact sorted+paged", "POST", "/v1/search/contact?sort=updatedAt,desc&page=1&size=100",
   { fields: CFIELDS, jsonRule: freeText("") });
 

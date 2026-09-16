@@ -13,18 +13,34 @@ export const sel = (...names) => ({ choices: names.map((name) => ({ name })) });
 export const num = { precision: 0 };
 export const check = { icon: "check", color: "greenBright" };
 
-/* Placeholders until the real picklist is pulled from
-   GET /v1/entities/contact/fields?custom-only=false — see kpi-spec.md §7. */
+/* The real cfPipelineStageBd values, pulled live — see docs/kylas-picklists.md.
+   Stored as the API codes so Airtable and Kylas join without translation. */
 export const STAGES = [
-  "LinkedIn Outreach Initiated", "Cold Call Initiated", "Could Not Connect",
-  "Contacted", "Wrong POC", "Qualifying", "Discovery Call Booked",
-  "Discovery Call Done", "SQL — Active", "Holding Pad", "Lost",
+  "YET_TO_BE_MINED",
+  "CNC_COULD_NOT_CONNECT", "CNC_COULD_NOT_CONNECT_2", "CNC_COULD_NOT_CONNECT_3", "FOLLOWUP_CNC",
+  "CONNECT_LATER", "RESCHEDULE_PENDING",
+  "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3",
+  "MQL_MARKETING_QUALIFIED_LEAD", "ACTIVATION",
+  "DISCOVERY_CALL_BOOKED", "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+  "SQL_SALES_QUALIFIED_LEAD",
+  "OFFSITE_DELAYED", "OFFSITE_DONE_LATE_REACHOUT",
+  "CLOSING_LOOPS_LOW_VALUE", "GHOSTED", "NOT_INTERESTED", "INVALID_CONTACT",
+  "DISQUALIFIED_WRONG_POC", "NOT_A_DECISION_MAKER_NDM", "POC_ORGANIZATION_CHANGED",
 ];
 
+/* Reaching an exit stage is an outcome, not a rung. It must not pull the KPI
+   rank down — that is what Exit Reason on Contacts records instead. */
+export const EXIT_STAGES = [
+  "CLOSING_LOOPS_LOW_VALUE", "GHOSTED", "NOT_INTERESTED", "INVALID_CONTACT",
+  "DISQUALIFIED_WRONG_POC", "NOT_A_DECISION_MAKER_NDM", "POC_ORGANIZATION_CHANGED",
+];
+
+/* Renamed to match the vocabulary already on the Kylas company overlay
+   (TOTAL POCS / CONNECTED / MQL). Ordering is proposed — see kpi-spec.md §13. */
 export const LADDER = [
-  [0, "0 · Not reached"], [1, "1 · Reached"], [2, "2 · Phone Picked"],
-  [3, "3 · Right POC"], [4, "4 · Successful Discovery"], [5, "5 · Active Requirement"],
-  [6, "6 · SQL Call Booked"], [7, "7 · SQL Call Held"], [8, "8 · SQL Accepted"],
+  [0, "0 · Not reached"], [1, "1 · Reached"], [2, "2 · Connected"],
+  [3, "3 · Right POC"], [4, "4 · MQL"], [5, "5 · Discovery Booked"],
+  [6, "6 · Discovery Done"], [7, "7 · Activation"], [8, "8 · SQL"],
 ];
 
 export const ladderFormula = (rankField) =>
@@ -68,6 +84,8 @@ export const TABLES = [
         description: "When KPI Rank last increased — the last qualitative update." },
       { name: "Pending Create", type: "checkbox", options: check,
         description: "Captured in the console but not yet in Kylas. Tells the writer POST rather than PUT." },
+      { name: "Exit Reason", type: "singleSelect", options: sel(...EXIT_STAGES),
+        description: "Set when the contact lands on a dead-end stage. Kept apart from KPI Rank so an exit cannot pull the funnel backwards." },
       { name: "Flagged", type: "checkbox", options: check },
     ],
   },
