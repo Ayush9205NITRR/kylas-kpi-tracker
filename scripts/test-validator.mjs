@@ -40,18 +40,26 @@ const FAULTS = [
 const src = readFileSync("schema.mjs", "utf8");
 const dir = mkdtempSync(join(tmpdir(), "schema-"));
 copyFileSync("validate-schema.mjs", join(dir, "validate-schema.mjs"));
+/* schema.mjs imports the generated stage tables, so they have to travel with
+   it. Without this every run dies on a missing module and each fault looks
+   "caught" when nothing was actually validated. */
+copyFileSync("stages.mjs", join(dir, "stages.mjs"));
 
 let pass = 0;
 for (const [name, mutate] of FAULTS) {
   const broken = mutate(src);
   if (broken === src) { console.log(`  ?? ${name} — fault did not apply, test is stale`); continue; }
   writeFileSync(join(dir, "schema.mjs"), broken);
-  let caught = false, out = "";
+  let failed = false, out = "", err = "";
   try { execFileSync("node", [join(dir, "validate-schema.mjs")], { encoding: "utf8" }); }
-  catch (e) { caught = true; out = e.stdout || ""; }
+  catch (e) { failed = true; out = e.stdout || ""; err = e.stderr || ""; }
   const first = (out.match(/ERROR {2}(.+)/) || [])[1] || "";
-  console.log(`  ${caught ? "caught " : "MISSED "} ${name}`);
+  /* A crash is not a catch. The run has to fail *with a reported error*,
+     otherwise a broken import would make every fault look detected. */
+  const caught = failed && Boolean(first);
+  console.log(`  ${caught ? "caught " : failed ? "CRASHED" : "MISSED "} ${name}`);
   if (caught) { pass++; console.log(`           ${first.slice(0, 96)}`); }
+  else if (failed) console.log(`           ${(err.split("\n").find((l) => l.trim()) || "").slice(0, 96)}`);
 }
 
 /* and the real schema must still pass */

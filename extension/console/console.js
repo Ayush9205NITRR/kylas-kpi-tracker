@@ -2,84 +2,17 @@
 const SALUTATION=["","MR","MRS","MISS"];
 const EMAIL_TYPES=["Office","Personal","Other"];
 const PHONE_TYPES=["Mobile","Work","Home","Other"];
-/* Real cfPipelineStageBd values — docs/kylas-picklists.md. Codes are what the
-   API stores and what everything joins on; LABEL is display only. */
-const STAGES=[
-  "YET_TO_BE_MINED",
-  "CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC",
-  "CONNECT_LATER","RESCHEDULE_PENDING",
-  "FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3",
-  "MQL_MARKETING_QUALIFIED_LEAD","ACTIVATION",
-  "DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
-  "SQL_SALES_QUALIFIED_LEAD",
-  "OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT",
-  "CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT",
-  "DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-
-/* Nobody picked up, in escalating order. The outcome button walks this. */
-const CNC_LADDER=["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
-/* Dead ends. Reaching one is an outcome, not a rung — it never lowers the rank. */
-const EXIT_STAGES=["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT",
-  "DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-/* Nothing has been attempted yet. */
-const UNTOUCHED=["YET_TO_BE_MINED"];
-
-const MEETING_STAGES=["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
-  "ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+/* Stage tables live in stages.js, generated from docs/stages.json. */
 const SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
 /* MULTI_PICKLIST in Kylas — more than one quarter can be selected. */
 const OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
 
-const LABEL={
-  MR:"Mr.", MRS:"Mrs.", MISS:"Miss",
-  GOOGLE:"Google", FACEBOOK:"Facebook", LINKEDIN:"LinkedIn",
-  EXHIBITION:"Exhibition", COLD_CALLING:"Cold calling",
-  JAN_MAR:"Jan–Mar", APR_JUN:"Apr–Jun", JUL_SEP:"Jul–Sep", OCT_DEC:"Oct–Dec",
-  YET_TO_BE_MINED:"Yet to be mined",
-  CNC_COULD_NOT_CONNECT:"CNC 1", CNC_COULD_NOT_CONNECT_2:"CNC 2",
-  CNC_COULD_NOT_CONNECT_3:"CNC 3", FOLLOWUP_CNC:"Follow-up CNC",
-  CONNECT_LATER:"Connect later", RESCHEDULE_PENDING:"Reschedule pending",
-  FOLLOW_UP_1:"Follow-up 1", FOLLOW_UP_2:"Follow-up 2", FOLLOW_UP_3:"Follow-up 3",
-  MQL_MARKETING_QUALIFIED_LEAD:"MQL", ACTIVATION:"Activation",
-  DISCOVERY_CALL_BOOKED:"Discovery booked",
-  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:"Discovery done",
-  SQL_SALES_QUALIFIED_LEAD:"SQL",
-  OFFSITE_DELAYED:"Offsite delayed", OFFSITE_DONE_LATE_REACHOUT:"Offsite done, late reachout",
-  CLOSING_LOOPS_LOW_VALUE:"Closing loops, low value", GHOSTED:"Ghosted",
-  NOT_INTERESTED:"Not interested", INVALID_CONTACT:"Invalid contact",
-  DISQUALIFIED_WRONG_POC:"Wrong POC", NOT_A_DECISION_MAKER_NDM:"Not a decision maker",
-  POC_ORGANIZATION_CHANGED:"POC changed org",
-};
 const label=v=>LABEL[v]||v;
 
-/* One ordering, read two ways. STAGE_PRIORITY is the call order Ayush gave —
-   1 = call first. The funnel is the same list reversed, so a contact further
-   along is also higher priority: rung = 25 - priority. Keeping them as one list
-   means they can never drift apart. */
-const STAGE_PRIORITY={
-  SQL_SALES_QUALIFIED_LEAD:1,
-  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:2,
-  CLOSING_LOOPS_LOW_VALUE:3,
-  RESCHEDULE_PENDING:4,
-  GHOSTED:5,                      /* "Discovery call no-show" */
-  DISCOVERY_CALL_BOOKED:6,
-  FOLLOW_UP_1:7, FOLLOW_UP_2:8, FOLLOW_UP_3:9,
-  FOLLOWUP_CNC:10,
-  MQL_MARKETING_QUALIFIED_LEAD:11,
-  ACTIVATION:12,
-  OFFSITE_DELAYED:13,
-  OFFSITE_DONE_LATE_REACHOUT:14,
-  NOT_INTERESTED:15,
-  CONNECT_LATER:16,
-  CNC_COULD_NOT_CONNECT_3:17, CNC_COULD_NOT_CONNECT_2:18, CNC_COULD_NOT_CONNECT:19,
-  DISQUALIFIED_WRONG_POC:20, INVALID_CONTACT:21,
-  NOT_A_DECISION_MAKER_NDM:22, POC_ORGANIZATION_CHANGED:23,
-  YET_TO_BE_MINED:24,             /* "LinkedIn outreach initiated" */
-};
 const priority=a=>STAGE_PRIORITY[a.stage]??99;
 /* 24 = SQL, the top of the funnel. 0 means the stage is unknown. */
-const rung=a=>STAGE_PRIORITY[a.stage]?25-STAGE_PRIORITY[a.stage]:0;
-const rungLabel=r=>label(Object.keys(STAGE_PRIORITY).find(k=>25-STAGE_PRIORITY[k]===r))||"Not reached";
+const rung=a=>STAGE_RUNG[a.stage]||0;
+const rungLabel=r=>label(STAGES.find(c=>STAGE_RUNG[c]===r))||"Not reached";
 const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];

@@ -112,13 +112,20 @@ Read the other way up, the same list is the funnel: `rung = 25 - callOrder`.
 A contact further along is a contact worth calling sooner, so one ordering
 serves both. The identity is asserted in the code, so they cannot drift.
 
-Confirmed picklist value ids, which a write needs (Kylas sets a picklist by id,
-not by code):
+All 24 picklist value ids are now known — a write sends the id, not the code.
+They live in **`docs/stages.json`**, which is the single source of truth for
+stage codes, ids, display names and funnel position.
 
-| Code | Display | Id |
-|---|---|---|
-| `YET_TO_BE_MINED` | LinkedIn Outreach Initiated | `2862826` |
-| `GHOSTED` | Discovery Call No-Show | `2909382` |
+```
+node scripts/gen-stages.mjs
+```
+
+regenerates `extension/console/stages.js` (browser) and `scripts/stages.mjs`
+(node) from it. The console runs in a page and the scripts run in node, so the
+table has to exist twice; generating both from one file is what stops a stage
+renamed in one place and not the other from silently mis-ranking contacts.
+`scripts/test-stages-live.mjs` loads the extension in a real browser and checks
+every id, rung and label against `stages.json`.
 
 The order turned out to be the funnel itself, not a separate priority list — see
 docs/kpi-spec.md §13. `callOrder = 25 - rung`, asserted in the code.

@@ -395,15 +395,10 @@ captured, regardless of where the stage sits.
 
 ### Writing a stage
 
-Kylas sets a picklist **by value id**, not by code. Two confirmed:
-
-| Code | Display | Id |
-|---|---|---|
-| `YET_TO_BE_MINED` | LinkedIn Outreach Initiated | `2862826` |
-| `GHOSTED` | Discovery Call No-Show | `2909382` |
-
-The probe now prints all 24 ids and writes `kylas-probe/stage-ids.json`, which
-drops straight into `STAGE_VALUE_ID` in `scripts/schema.mjs`.
+Kylas sets a picklist **by value id**, not by code — sending
+`cfPipelineStageBd: "MQL_MARKETING_QUALIFIED_LEAD"` will not work, it needs
+`2862828`. All 24 ids are in `docs/stages.json` and reach both the console and
+the scripts through `scripts/gen-stages.mjs`.
 
 ---
 
