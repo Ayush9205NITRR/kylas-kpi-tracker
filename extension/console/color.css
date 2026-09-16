@@ -235,3 +235,17 @@
   padding:2px 8px;font-size:11px;font-weight:600;color:var(--flag);
 }
 .dupe button:hover{background:var(--flag);color:var(--panel);border-color:var(--flag)}
+
+/* company / session switch */
+.qmode{display:flex;gap:4px;padding:8px 9px 0}
+.qm{
+  flex:1;border:1px solid var(--line2);background:transparent;border-radius:6px;
+  padding:5px 4px;font-size:11.5px;color:var(--text2);
+}
+.qm i{font-style:normal;font-family:var(--m);font-size:9.5px;opacity:.75}
+.qm[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--onAccent);font-weight:600}
+.qm[disabled]{opacity:.42;cursor:default}
+.qi .due{
+  font-family:var(--m);font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--w-rose);color:var(--c-rose);border-radius:3px;padding:1px 4px;margin-left:auto;
+}

@@ -115,6 +115,7 @@ let DATA=[
 let cur=0, isNew=false, filter="todo", target=100;
 let scope=null;   /* {id,name} when opened from a Kylas company page */
 let ME="";        /* the associate using the console; learned, then remembered */
+let mode="company";  /* company: follow the Kylas page · session: one flat queue */
 let timer=null, secs=0, ringing=false;
 let lastOutcome=null;
 let tmode="idle";   /* idle | dial | est */
@@ -257,6 +258,46 @@ function setOutcome(o){
   if(o.stage!=="Could Not Connect"&&matchMedia("(max-width:900px)").matches)setTab("more");
 }
 
+/* ── session order ───────────────────────── */
+/* A placeholder until the real priority rule lands: anyone due today or
+   overdue, oldest promise first; then contacts never called; then the rest,
+   longest untouched first. Replace this one function when the V/W score is
+   available — nothing else depends on the ordering. */
+function sessionRank(a){
+  const t=today();
+  if(a.nextCallDate&&a.nextCallDate<=t)return[0,a.nextCallDate];
+  if(!a.lastCallAt)return[1,a.company||""];
+  return[2,a.lastCallAt];
+}
+function bySession(x,y){
+  const [ax,av]=sessionRank(x.a),[bx,bv]=sessionRank(y.a);
+  return ax!==bx?ax-bx:String(av).localeCompare(String(bv));
+}
+
+function renderMode(){
+  const w=document.getElementById("qmode");
+  if(!w)return;
+  w.innerHTML="";
+  const due=DATA.filter(a=>!a.done&&a.nextCallDate&&a.nextCallDate<=today()).length;
+  [["company","Company",scope?DATA.filter(a=>String(a.companyId)===String(scope.id)).length:0],
+   ["session","Session",DATA.filter(a=>!a.done).length]].forEach(([k,label,n])=>{
+    const b=el("button","qm",`${label}${n?` <i>${n}</i>`:""}`);
+    b.type="button";
+    b.setAttribute("aria-pressed",mode===k?"true":"false");
+    b.disabled=(k==="company"&&!scope);
+    b.title=k==="company"
+      ? (scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
+      : "Every contact due, in call order"+(due?` · ${due} due now`:"");
+    b.onclick=()=>{mode=k;cur=firstIn();render();resetScroll();};
+    w.appendChild(b);
+  });
+}
+/* Land on the first record of whichever list is now showing. */
+function firstIn(){
+  const rows=visible();
+  return rows.length?rows[0].i:cur;
+}
+
 /* ── queue ───────────────────────────────── */
 const FILTERS=[["todo","To call"],["flag","Flagged"],["all","All"]];
 function renderFilters(){
@@ -270,15 +311,16 @@ function renderFilters(){
 }
 function visible(){
   const q=(document.getElementById("q").value||"").toLowerCase();
-  return DATA.map((a,i)=>({a,i}))
-    .filter(({a})=>!scope||String(a.companyId)===String(scope.id))
+  const rows=DATA.map((a,i)=>({a,i}))
+    .filter(({a})=>mode==="session"||!scope||String(a.companyId)===String(scope.id))
     .filter(({a})=>!q||(a.pocName+" "+a.company+" "+a.phones.map(p=>p.value).join(" ")).toLowerCase().includes(q))
     .filter(({a})=>filter==="all"||(filter==="flag"?a.flagged:!a.done));
+  return mode==="session"?rows.sort(bySession):rows;
 }
 function renderScope(){
   const w=document.getElementById("qscope");
   if(!w)return;
-  if(!scope){w.innerHTML="";w.hidden=true;return;}
+  if(!scope||mode!=="company"){w.innerHTML="";w.hidden=true;return;}
   w.hidden=false;
   const n=DATA.filter(a=>String(a.companyId)===String(scope.id)).length;
   w.innerHTML=`<span class="cn">${esc(scope.name)}</span>
@@ -288,7 +330,7 @@ function renderScope(){
   w.appendChild(x);
 }
 function renderQueue(){
-  renderScope();
+  renderMode();renderScope();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
   if(!rows.length){
@@ -302,7 +344,8 @@ function renderQueue(){
     b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
     b.dataset.stage=a.stage;
     b.innerHTML=`<span class="n">${esc(a.pocName)}${a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
-      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span></span>`;
+      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span>${
+        mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>':""}</span>`;
     b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
   });
@@ -344,7 +387,7 @@ function companyStage(list){
 function renderCompany(){
   const w=document.getElementById("cohead");
   if(!w)return;
-  if(!scope){w.hidden=true;w.innerHTML="";return;}
+  if(!scope||mode!=="company"){w.hidden=true;w.innerHTML="";return;}
   const list=companyRoster(scope.id);
   const st=companyStage(list);
   const last=list.map(a=>a.lastCallAt).filter(Boolean).sort().pop();

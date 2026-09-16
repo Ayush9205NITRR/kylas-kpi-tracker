@@ -27,6 +27,7 @@
         DATA = [b, ...DATA];
         cur = 0; isNew = true;
       }
+      mode = "company";
       filter = "all"; renderFilters();
       stopTimer(); secs = 0; render(); resetScroll();
       return;
@@ -41,6 +42,7 @@
         cur = i; isNew = false;
         const a = DATA[i];
         scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
+        if (scope) mode = "company";
         renderFilters();
       } else {
         DATA = [Object.assign(blank(), { kid: String(m.kylasId) }), ...DATA];

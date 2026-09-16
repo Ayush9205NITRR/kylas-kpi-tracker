@@ -260,3 +260,53 @@ Blocking the build, not the formulas:
 8. Are BD prospects Contacts or Leads in Kylas (see `kylas-api-notes.md` §2)
 9. Kylas API key, for the real picklists
 10. Airtable base — existing one to extend, or a new one to create
+
+---
+
+## 10. Per-contact call history
+
+Every call is a row in `Call Log` linked to the contact, so the contact carries
+its own history as rollups rather than as a separate summary anyone has to keep
+in step:
+
+| Field on `Contacts` | How |
+|---|---|
+| `Call Count` | `COUNTA` of linked calls |
+| `First Call At` / `Last Call At` | `MIN` / `MAX` of `Called At` |
+| `Talk Seconds` | `SUM` of `Measured Seconds` |
+| `Measured Calls` | how many of those calls were actually timed |
+| `Avg Call Seconds` | `Talk Seconds / Call Count` |
+
+`Call Log.Duration Source` separates a measured duration from an inferred one.
+A rollup cannot filter on a sibling field, so `Measured Seconds` is a formula on
+the call row that zeroes out anything not `dialed`, and the sum runs over that.
+Without it, inferred seconds would inflate real talk time and the average would
+look precise while being partly made up.
+
+`Companies` sums both `Call Count` and `Talk Seconds` from its contacts, so
+effort per account is visible next to the outcome per account.
+
+## 11. Testing the schema before building it
+
+The Airtable Meta API has no dry run, and a bad field definition fails partway
+through, leaving a half-built base to delete by hand. So the schema is data
+(`scripts/schema.mjs`) with two checks around it:
+
+```
+node scripts/validate-schema.mjs     # no network: types, options, ordering, formula refs
+node scripts/test-validator.mjs      # checks the validator itself catches 10 planted faults
+node scripts/create-base.mjs --dry-run   # prints every request without sending
+```
+
+The validator replays creation in order and fails on: a primary field of a type
+Airtable will not accept, missing required options, duplicate or
+case-colliding field names, formula or rollup fields declared inside the initial
+create call, rollups routed through a field that is not a link, rollups onto a
+column the linked table does not have, formulas referring to fields that do not
+exist yet, unbalanced brackets or quotes, and links that do not declare their
+reverse.
+
+That last one found a real bug: Airtable creates the other half of a link
+itself, with a name it chooses, and every rollup here travels back down those
+reverse links. They are now declared explicitly and `create-base.mjs` renames
+the generated field to match.

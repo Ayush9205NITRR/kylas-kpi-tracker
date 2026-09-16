@@ -66,6 +66,30 @@ These mirror `docs/kpi-spec.md`. The badge next to the company name is the
 ladder rung. Once the proxy exists these come from Airtable instead of being
 recomputed in the browser, and the rules stop being duplicated.
 
+## Two modes
+
+A switch sits above the roster.
+
+- **Company** — follows the Kylas page you are on. The roster is that company's
+  contacts and the strip above shows its rolled-up state. Good for working one
+  account.
+- **Session** — one flat queue across every company, in call order, ignoring
+  which Kylas page is open. `Save & next` crosses company boundaries. This is
+  the mode for a dialling run.
+
+Opening the console on a company page starts you in Company mode. The company
+strip and scope banner hide in Session mode, since neither applies.
+
+### Call order
+
+Session order is, in turn: anyone due today or overdue (oldest promise first),
+then contacts never called, then the rest longest-untouched first. Rows due now
+carry a **due** badge.
+
+This is a placeholder for the real priority rule. It lives in one function —
+`sessionRank` in `console.js` — so swapping in the V/W score touches nothing
+else.
+
 ## Keyboard
 
 | Key | Does |
