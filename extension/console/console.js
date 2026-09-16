@@ -1,59 +1,56 @@
 /* ── picklists ───────────────────────────── */
+/* STAGES, STAGE_ID, STAGE_RUNG, STAGE_PRIORITY, LABEL, CNC_LADDER, EXIT_STAGES,
+   MEETING_STAGES and UNTOUCHED all come from stages.js, generated from
+   docs/stages.json. Do not redeclare them here. */
 const SALUTATION=["","MR","MRS","MISS"];
-/* Kylas stores these uppercase. A title-case list never matches a fetched
-   record, so the dropdown grew a duplicate rather than selecting one. */
 const EMAIL_TYPES=["OFFICE","PERSONAL","OTHER"];
 const PHONE_TYPES=["MOBILE","WORK","HOME","OTHER"];
-/* Stage tables live in stages.js, generated from docs/stages.json. */
-/* Seeded from the picklist dump, then replaced by whatever this account
-   actually defines — see adoptPicklists. cfSourceOfData is a custom field, so
-   its values differ per account ("Round-Robin" on Ayush's). */
+/* The three counted metrics, in ladder order. Company-level reporting reads
+   these off pipeline_stage_bd — they are not shown in the console chrome. */
+/* The three counted metrics, in ladder order and cumulative — an SQL contact
+   also counts in Discovery and Right POC, so the funnel reads straight down.
+   Right POC and Discovery come from the event data, not the stage: see
+   docs/kpi-spec.md §5. SQL is the only one the stage decides. */
+const METRICS=[
+  {label:"RIGHT POC", test:a=>hasSignal(a)},
+  {label:"DISCOVERY", test:a=>isComplete(a)},
+  {label:"SQL",       test:a=>a.stage==="SQL_SALES_QUALIFIED_LEAD"},
+];
+/* Replaced at runtime by whatever this Kylas account actually defines. */
 let SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
-/* MULTI_PICKLIST in Kylas — more than one quarter can be selected. */
 let OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
-
-/* Kylas is the authority on what its own fields offer. */
-function adoptPicklists(picklists){
-  if(!picklists)return;
-  const take=(...names)=>{
-    for(const n of names){
-      const v=picklists[n];
-      if(v&&v.length)return ["",...v.map(o=>o.code)];
-    }
-    return null;
-  };
-  const src=take("cfSourceOfData","sourceOfData","source");
-  if(src)SOURCES=src;
-  const off=take("cfOffsiteTimeline","offsiteTimeline");
-  if(off)OFFSITE_TIMELINE=off;
-  for(const list of Object.values(picklists))
-    for(const o of list) if(o.code&&o.label&&!LABEL[o.code])LABEL[o.code]=o.label;
-}
-
-const label=v=>LABEL[v]||v;
-
-const priority=a=>STAGE_PRIORITY[a.stage]??99;
-/* 24 = SQL, the top of the funnel. 0 means the stage is unknown. */
-const rung=a=>STAGE_RUNG[a.stage]||0;
-const rungLabel=r=>label(STAGES.find(c=>STAGE_RUNG[c]===r))||"Not reached";
-/* Seeded empty and filled from whoever Kylas reports — see API.owners. */
 let OWNERS=[""];
 function addOwners(names){
   for(const n of names){ if(n&&!OWNERS.includes(n))OWNERS.push(n); }
   OWNERS=[OWNERS[0],...OWNERS.slice(1).sort((a,b)=>a.localeCompare(b))];
 }
+function adoptPicklists(picklists){
+  if(!picklists)return;
+  const take=(...names)=>{
+    for(const n of names){const v=picklists[n];if(v&&v.length)return ["",...v.map(o=>o.code)];}
+    return null;
+  };
+  const src=take("cfSourceOfData","sourceOfData","source"); if(src)SOURCES=src;
+  const off=take("cfOffsiteTimeline","offsiteTimeline");    if(off)OFFSITE_TIMELINE=off;
+  for(const list of Object.values(picklists))
+    for(const o of list) if(o.code&&o.label&&!LABEL[o.code])LABEL[o.code]=o.label;
+}
+const label=v=>LABEL[v]||v;
+const priority=a=>STAGE_PRIORITY[a.stage]??99;
+const rung=a=>STAGE_RUNG[a.stage]||0;
+const rungLabel=r=>label(STAGES.find(c=>STAGE_RUNG[c]===r))||"Not reached";
+const NOT_CONNECTED=[...UNTOUCHED,...CNC_LADDER];
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
 const MODE_OF_MEETING=["","In Person","Virtual","Calls","Text"];
 
-/* No answer escalates rather than repeating: CNC 1 -> 2 -> 3 -> Follow-up CNC.
-   Kylas models the repeat attempts as distinct stages, so the button walks them
-   instead of writing the same value every time. */
+/* No answer escalates rather than repeating: Kylas models the repeat attempts
+   as distinct stages, so the key walks them. */
 const OUTCOMES=[
   {k:"1",t:"No answer",   stage:a=>CNC_LADDER[Math.min(CNC_LADDER.indexOf(a.stage)+1,CNC_LADDER.length-1)]||CNC_LADDER[0]},
-  {k:"2",t:"Wrong POC",   stage:"DISQUALIFIED_WRONG_POC"},
-  {k:"3",t:"Right POC",   stage:"MQL_MARKETING_QUALIFIED_LEAD"},
-  {k:"4",t:"Discovery",   stage:"DISCOVERY_CALL_BOOKED"}
+  {k:"2",t:"Right POC",   stage:"MQL_MARKETING_QUALIFIED_LEAD"},
+  {k:"3",t:"Discovery",   stage:"DISCOVERY_CALL_BOOKED"},
+  {k:"4",t:"SQL",         stage:"SQL_SALES_QUALIFIED_LEAD"}
 ];
 const outcomeStage=(o,a)=>typeof o.stage==="function"?o.stage(a):o.stage;
 const QUICK={
@@ -64,23 +61,33 @@ const QUICK={
 
 /* ── data ────────────────────────────────── */
 const emptyRow=()=>({eventType:"",budget:"",timeline:"",pax:"",remarks:""});
-const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linkedin:"",designation:"",
+const blank=()=>({kid:"",salutation:"",pocName:"",company:"",linkedin:"",designation:"",
   emails:[{type:"OFFICE",value:"",primary:true}],
   phones:[{type:"MOBILE",cc:"+91",value:"",primary:true}],
   stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
-  source:"",remarks:"",offsiteTimeline:"",owner:ME,
+  source:"",remarks:"",offsiteTimeline:"",owner:"",
   past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
   done:false,flagged:false});
 
 let DATA=[
-{kid:"40912",salutation:"MR",pocName:"Priyank Tewari",company:"nutritap",companyId:"901",linkedin:"",designation:"",
+{kid:"40912",salutation:"MR",pocName:"Priyank Tewari",company:"nutritap",linkedin:"",designation:"",
  emails:[{type:"OFFICE",value:"priyank.tewari@nutritap.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9873915513",primary:true}],
  stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
  source:"COLD_CALLING",remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",
  past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"41155",salutation:"MR",pocName:"Arjun Sethi",company:"Kritsnam Analytics",companyId:"902",
+{kid:"40988",salutation:"MISS",pocName:"Shipra Gupta",company:"nutritap",
+ linkedin:"linkedin.com/in/shipra-gupta",designation:"Marketing Lead",
+ emails:[{type:"OFFICE",value:"shipra@nutritap.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9560313450",primary:true}],
+ stage:"DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",nextCallDate:"",nextCallTime:"",source:"COLD_CALLING",
+ remarks:"Runs the dealer meet budget.",offsiteTimeline:"JUL_SEP",owner:"Shreya Bodwal",
+ past:[],current:[{eventType:"Marketing events",budget:"6-8L",timeline:"Q3 FY27",
+   pax:"80 partners",remarks:"Regional roadshow, three cities."}],
+ vendorInfo:"Vendor Exists",serviceOffering:true,modeOfMeeting:"",done:false,flagged:false},
+
+{kid:"41155",salutation:"MR",pocName:"Arjun Sethi",company:"Kritsnam Analytics",
  linkedin:"linkedin.com/in/arjun-sethi-cos",designation:"Chief of Staff",
  emails:[{type:"OFFICE",value:"arjun@kritsnam.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9100044582",primary:true}],
@@ -92,11 +99,11 @@ let DATA=[
   remarks:"First ever company offsite. Founder wants it near Hyderabad."}],
  vendorInfo:"First Event",serviceOffering:true,modeOfMeeting:"Virtual",done:false,flagged:true},
 
-{kid:"38470",salutation:"MISS",pocName:"Devanshi Kalro",company:"Shorehouse Retail",companyId:"903",
+{kid:"38470",salutation:"MISS",pocName:"Devanshi Kalro",company:"Shorehouse Retail",
  linkedin:"linkedin.com/in/devanshikalro",designation:"AVP Marketing",
  emails:[{type:"OFFICE",value:"d.kalro@shorehouse.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9920477103",primary:true}],
- stage:"DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",nextCallDate:"2026-09-24",nextCallTime:"11:30",
+ stage:"SQL_SALES_QUALIFIED_LEAD",nextCallDate:"2026-09-24",nextCallTime:"11:30",
  source:"COLD_CALLING",remarks:"Reopened after last year's loss. Warm.",
  offsiteTimeline:"JUL_SEP",owner:"Shreya Bodwal",
  past:[{eventType:"Sales conference / dealer meet",budget:"Approx 40L, signed off by CFO",
@@ -107,16 +114,16 @@ let DATA=[
   remarks:"AW line launch. Needs a press-friendly venue in south Bombay."}],
  vendorInfo:"Internal",serviceOffering:true,modeOfMeeting:"In Person",done:true,flagged:false},
 
-{kid:"39901",salutation:"MR",pocName:"Ishaan Grover",company:"Pralay Fintech",companyId:"904",
+{kid:"39901",salutation:"MR",pocName:"Ishaan Grover",company:"Pralay Fintech",
  linkedin:"",designation:"Senior Manager, HR",
  emails:[{type:"OFFICE",value:"ishaan.g@pralay.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9811062234",primary:true}],
- stage:"DISQUALIFIED_WRONG_POC",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
+ stage:"FOLLOW_UP_2",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"Offsites decided by the CHRO, will share the name.",
  offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
  vendorInfo:"No Info",serviceOffering:false,modeOfMeeting:"",done:true,flagged:false},
 
-{kid:"42308",salutation:"MISS",pocName:"Meera Raghunathan",company:"Anvaya Labs",companyId:"905",
+{kid:"42308",salutation:"MISS",pocName:"Meera Raghunathan",company:"Anvaya Labs",
  linkedin:"linkedin.com/in/meera-raghunathan",designation:"Founder's Office",
  emails:[{type:"OFFICE",value:"meera@anvayalabs.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"8806019945",primary:true}],
@@ -124,7 +131,7 @@ let DATA=[
  remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"37622",salutation:"MR",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",companyId:"906",
+{kid:"37622",salutation:"MR",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",
  linkedin:"",designation:"GM Admin",
  emails:[{type:"OFFICE",value:"balaji.v@tatvik.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9444030871",primary:true}],
@@ -132,17 +139,7 @@ let DATA=[
  source:"LINKEDIN",remarks:"",offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
-{kid:"38512",salutation:"MR",pocName:"Rohit Nambiar",company:"Shorehouse Retail",companyId:"903",
- linkedin:"",designation:"Head of Admin",
- emails:[{type:"OFFICE",value:"r.nambiar@shorehouse.example",primary:true}],
- phones:[{type:"MOBILE",cc:"+91",value:"9833126740",primary:true}],
- stage:"MQL_MARKETING_QUALIFIED_LEAD",nextCallDate:"",nextCallTime:"",
- source:"EXHIBITION",remarks:"Devanshi's counterpart on logistics. Handles venue contracts.",
- offsiteTimeline:"JUL_SEP",owner:"Ayush Tiwari",past:[],
- current:[{eventType:"Team-building activities",budget:"",timeline:"Q3 FY27",pax:"",remarks:""}],
- vendorInfo:"Vendor Exists",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
-
-{kid:"43017",salutation:"MISS",pocName:"Simran Kohli",company:"Meghdoot Cloud",companyId:"907",
+{kid:"43017",salutation:"MISS",pocName:"Simran Kohli",company:"Meghdoot Cloud",
  linkedin:"",designation:"People Partner",
  emails:[{type:"OFFICE",value:"simran.k@meghdoot.example",primary:true}],
  phones:[{type:"MOBILE",cc:"+91",value:"9871855420",primary:true}],
@@ -151,15 +148,30 @@ let DATA=[
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false}
 ];
 
-let cur=0, isNew=false, filter="todo", target=100;
-let scope=null;   /* {id,name} when opened from a Kylas company page */
-let ME="";        /* the associate using the console; learned, then remembered */
+let cur=0, isNew=false, filter="todo", target=100, tried=false;
+let scope=null;      /* {id,name} when opened from a Kylas company page */
 let mode="company";  /* company: follow the Kylas page · session: one flat queue */
+let ME="";           /* the associate using the console; learned, then remembered */
 let timer=null, secs=0, ringing=false;
+let tmode="idle";     /* idle | dial | est */
 let lastOutcome=null;
-let tmode="idle";   /* idle | dial | est */
 let collapsed={past:false,current:false};
-const rec=()=>DATA[cur];
+/* Right POC the moment ANY of budget | timeline | pax is filled on ANY row,
+   past or current. Until then the contact is only an MQL. Derived, never typed. */
+const filled=v=>String(v||"").trim()!=="";
+function hasSignal(a){
+  return [...a.past,...a.current].some(r=>r.eventType&&(
+    (r.budget||"").trim()||(r.timeline||"").trim()||(r.pax||"").trim()));
+}
+const qualOf=a=>hasSignal(a)?"Right POC":"MQL";
+/* swap just the badge — re-rendering the call bar would steal focus mid-typing */
+function refreshQual(){
+  const a=rec(),q=qualOf(a),n=document.querySelector(".qual");
+  if(!n)return;
+  n.textContent=q;n.className="qual "+(q==="MQL"?"mql":"poc");
+  renderQueue();
+}
+const rec=()=>{const a=DATA[cur];if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
 const today=()=>new Date().toISOString().slice(0,10);
 const dateIn=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
 /* Associates paste "linkedin.com/in/x", "www.linkedin.com/in/x" or a full url.
@@ -168,22 +180,21 @@ function liUrl(v){
   const t=String(v||"").trim();
   if(!t)return null;
   const u=/^https?:\/\//i.test(t)?t:"https://"+t.replace(/^\/+/,"");
-  try{
-    const p=new URL(u);
-    return /(^|\.)linkedin\.com$/i.test(p.hostname)?p.href:null;
-  }catch(e){return null;}
+  try{const p=new URL(u);return /(^|\.)linkedin\.com$/i.test(p.hostname)?p.href:null;}catch(e){return null;}
 }
 
 /* ── helpers ─────────────────────────────── */
+const fmtD=d=>d?new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short"}):"";
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 /* If the stored value is not one of the options, Kylas knows something this
-   list does not — show it rather than silently rendering "Choose" over real
-   data. This is what was blanking Owner and Source of data on fetched records. */
+   list does not — show it rather than rendering "Choose" over real data. */
 const opts=(l,v)=>{
   const list=(v!==undefined&&v!==null&&v!==""&&!l.includes(v))?[...l,v]:l;
   return list.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(label(o))}</option>`).join("");
 };
+let dirty=new Set();
+const touch=f=>dirty.add(f);
 let undoState=null;
 function toast(m,undo){
   document.querySelectorAll(".toast").forEach(t=>t.remove());
@@ -243,31 +254,36 @@ function renderCallbar(){
   const ph=a.phones.find(p=>p.primary)||a.phones[0];
   const num=ph?(ph.cc+" "+ph.value).trim():"";
 
-  const who=el("div","who",`<b>${esc(a.pocName||"New contact")}</b><span>${esc(a.company||"—")}${a.designation?" · "+esc(a.designation):""}</span>`);
+  const q=qualOf(a);
+  const who=el("div","who",
+    `<b>${esc(a.pocName||"New contact")}</b>
+     <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
+     <span>${esc(a.company||"—")}${a.designation?" · "+esc(a.designation):""}</span></span>`);
   C.appendChild(who);
 
   const d=el("div","dial");
-  const link=el("a",null,`<span>☏</span>${esc(num||"no number")}`);
+  const link=el("a",null,`<span class="ico">☎</span><span>${esc(num||"no number")}</span>`);
   link.href=num?"tel:"+num.replace(/\s/g,""):"#";
-  link.onclick=e=>{if(!num){e.preventDefault();return;}startTimer("dial");};
-  d.appendChild(link);
-  const tm=el("span","tm",fmtSecs(secs));
-  tm.id="tm";d.appendChild(tm);
-  setTimeout(paintTimer,0);
-  C.appendChild(d);
+  link.setAttribute("aria-label",num?"Call "+a.pocName+" on "+num:"No number on file");
+  link.onclick=e=>{
+    if(!num){e.preventDefault();toast("No number on file for "+a.pocName);return;}
+    /* the tel: href is what actually hands off to the dialler — this just makes
+       it obvious that the request left the app */
+    link.classList.add("calling");
+    toast("Dialling "+num+" — request sent to the dialler");
+    setTimeout(()=>link.classList.remove("calling"),2600);
+  };
+  d.appendChild(link);C.appendChild(d);
 
-  const ocs=el("div","ocs");
-  OUTCOMES.forEach(o=>{
-    const b=el("button","oc",`<kbd>${o.k}</kbd>${esc(o.t)}`);
-    b.type="button";b.dataset.oc=o.k;
-    const target=outcomeStage(o,a);
-    b.setAttribute("aria-pressed",a.stage===target||(o.k==="1"&&CNC_LADDER.includes(a.stage))?"true":"false");
-    b.title=`Sets stage to ${label(target)}`;
-    b.onclick=()=>setOutcome(o);
-    ocs.appendChild(b);
-  });
-  C.appendChild(ocs);
-
+  renderAccount();
+  const em=(a.emails.find(x=>x.primary)||a.emails[0]||{}).value;
+  const meta=el("div","cbmeta");
+  const bits=[];
+  if(em)bits.push(`<span class="mail">${esc(em)}</span>`);
+  if(a.nextCallDate)bits.push(`<span class="due">Call back ${esc(fmtD(a.nextCallDate))}${a.nextCallTime?" · "+esc(a.nextCallTime):""}</span>`);
+  bits.push(`<span class="kid">${esc(a.kid||"unsaved")}</span>`);
+  meta.innerHTML=bits.join("");
+  C.appendChild(meta);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
   btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
@@ -276,11 +292,11 @@ function renderCallbar(){
 const fmtSecs=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
 function startTimer(mode){
   if(timer)clearInterval(timer);
-  secs=0;ringing=true;tmode=mode||"dial";
-  timer=setInterval(tick,1000);
-  paintTimer();
+  secs=0;ringing=true;
+  timer=setInterval(()=>{secs++;const t=document.getElementById("tm");if(t)t.textContent=fmtSecs(secs);},1000);
+  const t=document.getElementById("tm");if(t)t.className="tm run";
 }
-function tick(){secs++;paintTimer();}
+function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;paintTimer();}
 function paintTimer(){
   const t=document.getElementById("tm");
   if(!t)return;
@@ -290,72 +306,23 @@ function paintTimer(){
     ?"Estimated from when you logged the outcome — dial from the console for a real duration."
     :"Call duration";
 }
-function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;paintTimer();}
 function setOutcome(o){
   const a=rec();
   lastOutcome=o;
   const target=outcomeStage(o,a);
   /* Last quality date is the most recent STAGE CHANGE, not the most recent
-     call — a second no-answer moves the call log but not the company's
-     position. Only stamp when the stage actually moves. */
+     call — a repeat no-answer moves the call log but not the company. */
   if(a.stage!==target)a.lastStageChangeAt=new Date().toISOString();
   a.stage=target;
   if(EXIT_STAGES.includes(target))a.exitReason=target;
+  if(!a.nextCallDate&&CNC_LADDER.includes(target))a.nextCallDate=dateIn(1);
   /* Dialled from the console: that timer is the truth, so freeze it. Otherwise
      start estimating from here rather than logging a zero-second call. */
-  if(tmode==="dial"&&ringing){stopTimer();}
-  else if(tmode!=="est"){startTimer("est");}
-  /* They did not pick up today; calling again today is not the plan. */
-  if(!a.nextCallDate&&CNC_LADDER.includes(target)){a.nextCallDate=dateIn(1);}
+  if(tmode==="dial"&&ringing)stopTimer();
+  else if(tmode!=="est")startTimer("est");
   render();
   resetScroll();
   if(!CNC_LADDER.includes(target)&&matchMedia("(max-width:900px)").matches)setTab("more");
-}
-
-/* ── session order ───────────────────────── */
-/* A promise to call on a date beats everything — breaking those is what loses
-   deals. After that it is Ayush's stage order, and within a stage the contact
-   left longest goes first. */
-function sessionRank(a){
-  const due=a.nextCallDate&&a.nextCallDate<=today();
-  return [
-    due?0:1,
-    due?a.nextCallDate:"",
-    priority(a),
-    a.lastCallAt||"",              /* never called sorts first, then oldest */
-  ];
-}
-function bySession(x,y){
-  const A=sessionRank(x.a),B=sessionRank(y.a);
-  for(let i=0;i<A.length;i++){
-    if(A[i]===B[i])continue;
-    return typeof A[i]==="number"?A[i]-B[i]:String(A[i]).localeCompare(String(B[i]));
-  }
-  return 0;
-}
-
-function renderMode(){
-  const w=document.getElementById("qmode");
-  if(!w)return;
-  w.innerHTML="";
-  const due=DATA.filter(a=>!a.done&&a.nextCallDate&&a.nextCallDate<=today()).length;
-  [["company","Company",scope?DATA.filter(a=>String(a.companyId)===String(scope.id)).length:0],
-   ["session","Session",DATA.filter(a=>!a.done).length]].forEach(([k,label,n])=>{
-    const b=el("button","qm",`${label}${n?` <i>${n}</i>`:""}`);
-    b.type="button";
-    b.setAttribute("aria-pressed",mode===k?"true":"false");
-    b.disabled=(k==="company"&&!scope);
-    b.title=k==="company"
-      ? (scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
-      : "Every contact due, in call order"+(due?` · ${due} due now`:"");
-    b.onclick=()=>{mode=k;cur=firstIn();render();resetScroll();};
-    w.appendChild(b);
-  });
-}
-/* Land on the first record of whichever list is now showing. */
-function firstIn(){
-  const rows=visible();
-  return rows.length?rows[0].i:cur;
 }
 
 /* ── queue ───────────────────────────────── */
@@ -369,6 +336,20 @@ function renderFilters(){
     w.appendChild(b);
   });
 }
+/* A dated promise beats everything; then Ayush's stage order; then longest
+   untouched. STAGE_PRIORITY is the funnel read backwards — see stages.js. */
+function sessionRank(a){
+  const due=a.nextCallDate&&a.nextCallDate<=today();
+  return [due?0:1, due?a.nextCallDate:"", priority(a), a.lastCallAt||""];
+}
+function bySession(x,y){
+  const A=sessionRank(x.a),B=sessionRank(y.a);
+  for(let i=0;i<A.length;i++){
+    if(A[i]===B[i])continue;
+    return typeof A[i]==="number"?A[i]-B[i]:String(A[i]).localeCompare(String(B[i]));
+  }
+  return 0;
+}
 function visible(){
   const q=(document.getElementById("q").value||"").toLowerCase();
   const rows=DATA.map((a,i)=>({a,i}))
@@ -377,117 +358,120 @@ function visible(){
     .filter(({a})=>filter==="all"||(filter==="flag"?a.flagged:!a.done));
   return mode==="session"?rows.sort(bySession):rows;
 }
+function renderQueue(){
+  renderMode();renderScope();
+  const L=document.getElementById("qlist");L.innerHTML="";
+  const rows=visible();
+  if(!rows.length){L.appendChild(el("li","qempty","Nothing here right now."));return;}
+  rows.forEach(({a,i})=>{
+    const li=el("li"),b=el("button");
+    b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
+    const q=qualOf(a);
+    b.className="qi "+(q==="MQL"?"q-mql":"q-poc");
+    /* Whether the record has reached Kylas yet, and whether a promise is due. */
+    const sync=a.syncing?'<i class="pend sync" title="Saving to Kylas…">…</i>'
+      :a.syncError?`<i class="pend err" title="${esc(a.syncError)}">queued</i>`
+      :a.pendingCreate?'<i class="pend" title="Not in Kylas yet">new</i>':"";
+    const due=mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()
+      ?'<span class="due">due</span>'
+      :mode==="session"?`<span class="pri">#${priority(a)}</span>`:"";
+    b.innerHTML=`<span class="n">${esc(a.pocName)}${sync}</span>
+      <span class="c">${esc([a.company,a.designation].filter(Boolean).join(" · "))}</span>
+      <span class="row">
+        <span class="badge ${q==="MQL"?"mql":"poc"}">${esc(q)}</span>
+        <span class="stage">${esc(label(a.stage))}</span>
+        <span class="marks">
+          <i class="li${a.linkedin?"":" off"}" title="${a.linkedin?"LinkedIn on file":"No LinkedIn"}">in</i>
+          ${a.flagged?'<span class="fl" title="Flagged">⚑</span>':""}
+          ${a.done?'<span class="ok" title="Logged today">✓</span>':""}
+        </span>
+        ${due}
+      </span>`;
+    b.onclick=()=>{cur=i;isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+    li.appendChild(b);L.appendChild(li);
+  });
+}
+/* account-level rollup: how this company is doing across all its contacts */
+function renderAccount(){
+  const a=rec();
+  /* Match on the Kylas company id, not the typed name — two spellings of one
+     account would otherwise split its rollup in two. */
+  const peers=a.companyId?companyRoster(a.companyId):[];
+  const W=document.getElementById("acct");
+  if(!W)return;
+  /* Cumulative: each metric counts everyone at or above it. */
+  const counts=METRICS.map((m,i)=>peers.filter(x=>METRICS.slice(i).some(n=>n.test(x))).length);
+  W.innerHTML=`<span class="scope">${esc(a.company||"No company")}</span>
+    <span class="tiles">${METRICS.map((m,i)=>
+      `<span class="kpi${counts[i]?" hit":""}"><b>${counts[i]}</b>${esc(m.label)}</span>`).join("")}</span>
+    <span class="of">${peers.length} contact${peers.length===1?"":"s"}</span>`;
+}
+function renderPace(){
+  const logged=DATA.filter(a=>a.done);
+  document.getElementById("pcount").textContent=logged.length;
+  document.getElementById("ptarget").textContent="/ "+target;
+  document.getElementById("pbar").style.width=Math.min(100,logged.length/target*100)+"%";
+}
+
+/* ── form ────────────────────────────────── */
+const rowsOf=c=>[...(c.past||[]),...(c.current||[])];
+function isComplete(a){
+  return rowsOf(a).some(r=>filled(r.budget)&&filled(r.timeline)&&filled(r.pax));
+}
+function connected(a){return !!a.stage&&!NOT_CONNECTED.includes(a.stage);}
+function companyRoster(id){return DATA.filter(a=>String(a.companyId)===String(id));}
+/* The company sits at the best rung any of its POCs has reached. Highest ever,
+   never current — a contact slipping back does not drag the company down. */
+function companyStage(list){
+  const r=list.reduce((m,a)=>Math.max(m,rung(a)),0);
+  return {r,t:r?rungLabel(r):"Not reached"};
+}
+
+
+function renderMode(){
+  const w=document.getElementById("qmode");
+  if(!w)return;
+  w.innerHTML="";
+  const due=DATA.filter(a=>!a.done&&a.nextCallDate&&a.nextCallDate<=today()).length;
+  [["company","Company",scope?companyRoster(scope.id).length:0],
+   ["session","Session",DATA.filter(a=>!a.done).length]].forEach(([k,lab,n])=>{
+    const b=el("button","qm",`${lab}${n?` <i>${n}</i>`:""}`);
+    b.type="button";
+    b.setAttribute("aria-pressed",mode===k?"true":"false");
+    b.disabled=(k==="company"&&!scope);
+    b.title=k==="company"
+      ?(scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
+      :"Every contact due, in call order"+(due?` · ${due} due now`:"");
+    b.onclick=()=>{mode=k;const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();};
+    w.appendChild(b);
+  });
+}
 function renderScope(){
   const w=document.getElementById("qscope");
   if(!w)return;
   if(!scope||mode!=="company"){w.innerHTML="";w.hidden=true;return;}
   w.hidden=false;
-  const n=DATA.filter(a=>String(a.companyId)===String(scope.id)).length;
-  w.innerHTML=`<span class="cn">${esc(scope.name)}</span>
-    <span class="cc">${n} contact${n===1?"":"s"}</span>`;
+  const n=companyRoster(scope.id).length;
+  w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cc">${n} contact${n===1?"":"s"}</span>`;
   const x=el("button","cx","×");x.type="button";x.title="Show the whole queue";
-  x.onclick=()=>{scope=null;render();};
+  x.onclick=()=>{scope=null;mode="session";render();};
   w.appendChild(x);
 }
-function renderQueue(){
-  renderMode();renderScope();
-  const L=document.getElementById("qlist");L.innerHTML="";
-  const rows=visible();
-  if(!rows.length){
-    L.appendChild(el("li","qempty",scope
-      ? "No contacts held for "+esc(scope.name)+" yet.<br>Use <b>New contact</b> to add the first one."
-      : "Nothing here."));
-    return;
-  }
-  rows.forEach(({a,i})=>{
-    const li=el("li"),b=el("button","qi");
-    b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
-    b.dataset.stage=a.stage;
-    b.innerHTML=`<span class="n">${esc(a.pocName)}${a.syncing?' <i class="pend sync" title="Saving to Kylas…">…</i>'
-        :a.syncError?' <i class="pend err" title="'+esc(a.syncError)+'">queued</i>'
-        :a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
-      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(label(a.stage))}</span>${
-        mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>'
-        :mode==="session"?`<span class="pri">#${priority(a)}</span>`:""}</span>`;
-    b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};
-    li.appendChild(b);L.appendChild(li);
-  });
-}
-function renderPace(){
-  const n=DATA.filter(a=>a.done).length;
-  document.getElementById("pcount").textContent=n;
-  document.getElementById("ptarget").textContent="/ "+target;
-  document.getElementById("pbar").style.width=Math.min(100,n/target*100)+"%";
-}
 
-/* ── form ────────────────────────────────── */
 function render(){
-  renderCompany();renderCallbar();renderQueue();renderPace();renderBasic();renderRight();validate();
+  renderCallbar();renderQueue();renderPace();renderBasic();renderRight();validate();
 }
 
-/* Everything here is derived from the contacts we hold for this company, so it
-   moves the moment a call is saved. Mirrors the ladder in docs/kpi-spec.md. */
-const NOT_CONNECTED=[...UNTOUCHED,...CNC_LADDER];
-function companyRoster(id){return DATA.filter(a=>String(a.companyId)===String(id));}
-/* Right POC the moment ANY of budget | timeline | pax is filled on ANY row,
-   past or current. Event type alone is not signal — picking "Employee offsites"
-   from a dropdown says nothing about whether they have a requirement. */
-const filled=v=>String(v||"").trim()!=="";
-function hasSignal(a){
-  return [...(a.past||[]),...(a.current||[])]
-    .some(r=>filled(r.budget)||filled(r.timeline)||filled(r.pax));
-}
-/* A successful discovery call is one row carrying the whole picture. */
-function isComplete(a){
-  return [...(a.past||[]),...(a.current||[])]
-    .some(r=>filled(r.budget)&&filled(r.timeline)&&filled(r.pax));
-}
-function connected(a){
-  return !!a.stage&&!NOT_CONNECTED.includes(a.stage);
-}
-/* The company sits at the best rung any of its contacts has reached. Highest
-   ever, not current — a contact slipping back never drags the company down. */
-function companyStage(list){
-  const r=list.reduce((m,a)=>Math.max(m,rung(a)),0);
-  const k=r>=23?"sql":r>=19?"disc":r>=13?"booked":r>=6?"rpoc":r>0?"picked":"none";
-  return{r,t:r?rungLabel(r):"Not reached",k};
-}
-function renderCompany(){
-  const w=document.getElementById("cohead");
-  if(!w)return;
-  if(!scope||mode!=="company"){w.hidden=true;w.innerHTML="";return;}
-  const list=companyRoster(scope.id);
-  const st=companyStage(list);
-  const last=list.map(a=>a.lastCallAt).filter(Boolean).sort().pop();
-  const days=last?Math.floor((Date.now()-new Date(last))/864e5):null;
-  const fresh=days===null?"never":days<=14?"fresh":"stale";
-  const tile=(n,l,k)=>`<div class="tile ${k}"><b>${n}</b><span>${l}</span></div>`;
-  w.hidden=false;
-  w.innerHTML=`
-    <div class="coIn">
-      <div class="coName">
-        <span class="av">${esc((scope.name||"?").slice(0,2).toUpperCase())}</span>
-        <span class="nm"><b>${esc(scope.name)}</b><em>kylas ${esc(String(scope.id))}</em></span>
-        <span class="kpi ${st.k}">${esc(st.t)}</span>
-      </div>
-      <div class="tiles">
-        ${tile(list.length,"total POCs","t1")}
-        ${tile(list.filter(connected).length,"connected","t2")}
-        ${tile(list.filter(hasSignal).length,"right POC","t3")}
-        ${tile(list.filter(isComplete).length,"discovery","t4")}
-      </div>
-      <div class="reach ${fresh}">
-        <span class="lbl">Status of reachout</span>
-        <b>${fresh==="never"?"Never called":(fresh==="fresh"?"Fresh":"Stale")}${last?" · last call "+esc(last.slice(0,10)):""}</b>
-      </div>
-    </div>`;
-}
-
-function group(title,nodes){
-  const g=el("div","grp");
-  g.appendChild(el("div","grpH",`<span>${esc(title)}</span>`));
-  nodes.forEach(n=>g.appendChild(n));
-  return g;
+/* Every section is a card: header band, then body. Structure does the
+   separating, so the palette stays at one accent. */
+function group(title,nodes,sub){
+  const c=el("section","card");
+  c.appendChild(el("div","cardH",
+    `<h2>${esc(title)}</h2>${sub?`<span class="sub">${esc(sub)}</span>`:""}`));
+  const b=el("div","cardB grp");
+  nodes.forEach(n=>b.appendChild(n));
+  c.appendChild(b);
+  return c;
 }
 function mini(list,val,on){
   const s=el("select","mini");s.innerHTML=opts(list,val);
@@ -503,29 +487,12 @@ function contactField(a,kind){
   head.innerHTML=`<label>${isPh?'Phone number <span class="req">*</span>':"Email"}</label>`;
   f.appendChild(head);
 
-  const valueInput=(e,idx)=>{
-    const i=el("input","in vl2");
-    if(idx===0)i.id=isPh?"f-ph":"f-em";
-    i.type=isPh?"tel":"email";i.value=e.value;
-    i.placeholder=isPh?"9876543210":"name@company.com";
-    i.setAttribute("aria-label",isPh?"Phone number":"Email address");
-    if(isPh)i.inputMode="tel";
-    i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();dialBtn.disabled=!e.value.trim();};
-    /* A pasted number often carries its own country code or a trunk 0. Left as
-       is it doubles up against the code beside it and the tel: link dials
-       nothing. Tidy on blur rather than mid-keystroke. */
-    if(isPh)i.onblur=v=>{
-      const t=localPart(v.target.value,e.cc);
-      if(t!==v.target.value){v.target.value=t;e.value=t;renderCallbar();validate();persist();}
-    };
-    return i;
-  };
+  let dialBtn=null;
   /* Every number gets its own dial button, so a second or third number is one
      click away instead of needing to be made primary first. */
   const dialButton=e=>{
     const b=el("button","dialbtn","\u260E");
-    b.type="button";b.tabIndex=-1;
-    b.title="Call this number";
+    b.type="button";b.tabIndex=-1;b.title="Call this number";
     b.disabled=!String(e.value||"").trim();
     b.onclick=()=>{
       const num=((e.cc||"")+String(e.value||"")).replace(/\s/g,"");
@@ -534,6 +501,23 @@ function contactField(a,kind){
       window.open("tel:"+num,"_self");
     };
     return b;
+  };
+  const valueInput=(e,idx)=>{
+    const i=el("input","in vl2");
+    if(idx===0)i.id=isPh?"f-ph":"f-em";
+    i.type=isPh?"tel":"email";i.value=e.value;
+    i.placeholder=isPh?"9876543210":"name@company.com";
+    i.setAttribute("aria-label",isPh?"Phone number":"Email address");
+    if(isPh)i.inputMode="tel";
+    i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();if(dialBtn)dialBtn.disabled=!e.value.trim();};
+    /* A pasted number often carries its own country code or a trunk 0. Left as
+       is it doubles against the code beside it and the tel: link dials
+       nothing. Tidy on blur rather than mid-keystroke. */
+    if(isPh)i.onblur=v=>{
+      const t=localPart(v.target.value,e.cc);
+      if(t!==v.target.value){v.target.value=t;e.value=t;renderCallbar();validate();persist();}
+    };
+    return i;
   };
   const ccInput=e=>{
     const c=el("input","in cc");c.value=e.cc;c.setAttribute("aria-label","Country code");
@@ -545,7 +529,7 @@ function contactField(a,kind){
     head.appendChild(mini(TYPES,e.type,v=>e.type=v));
     const row=el("div","entry");
     if(isPh)row.appendChild(ccInput(e));
-    var dialBtn=isPh?dialButton(e):null;
+    dialBtn=isPh?dialButton(e):null;
     row.appendChild(valueInput(e,0));
     if(dialBtn)row.appendChild(dialBtn);
     f.appendChild(row);
@@ -560,9 +544,9 @@ function contactField(a,kind){
       ty.setAttribute("aria-label","Type");ty.onchange=v=>e.type=v.target.value;
       row.appendChild(ty);
       if(isPh)row.appendChild(ccInput(e));
-      var dialBtn=isPh?dialButton(e):null;
+      const db=isPh?dialButton(e):null;
       row.appendChild(valueInput(e,i));
-      if(dialBtn)row.appendChild(dialBtn);
+      if(db)row.appendChild(db);
       const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove");
       d.onclick=()=>{list.splice(i,1);if(list.length&&!list.some(x=>x.primary))list[0].primary=true;render();};
       row.appendChild(d);
@@ -584,25 +568,19 @@ function knownCompanies(){
   return m;
 }
 /* A contact belongs to a company in Kylas, and typing a name here never made
-   that link — it only produced a second spelling of an existing account. So the
-   name is chosen, not typed, and inside a company scope it is fixed. */
+   that link — it only produced a second spelling of an existing account. So it
+   is chosen, and inside a company scope it is fixed. */
 function companyField(a){
   const f=el("div","f");
-  const head=el("div","fhead");
-  head.innerHTML=`<label for="f-co">Company</label>`;
-  f.appendChild(head);
-
-  const locked=!!scope&&String(a.companyId)===String(scope.id);
-  if(locked){
+  f.innerHTML=`<label for="f-co">Where do they work?</label>`;
+  if(scope&&String(a.companyId)===String(scope.id)){
     const w=el("div","fixed");
     w.innerHTML=`<b id="f-co" data-value="${esc(a.companyId)}">${esc(a.company||scope.name)}</b>
       <em>kylas ${esc(String(a.companyId))}</em>`;
     f.appendChild(w);
     return f;
   }
-
-  const m=knownCompanies();
-  const ids=[...m.keys()];
+  const m=knownCompanies(), ids=[...m.keys()];
   const sel=el("select","in");sel.id="f-co";
   sel.innerHTML=[`<option value="">Choose a company</option>`,
     ...ids.map(id=>`<option value="${esc(id)}"${String(a.companyId)===id?" selected":""}>${esc(m.get(id))}</option>`)].join("");
@@ -612,34 +590,50 @@ function companyField(a){
     renderCallbar();renderQueue();validate();
   };
   f.appendChild(sel);
-  if(!ids.length){
-    const n=el("div","rmnote");
-    n.innerHTML="<span>Open a company in Kylas first — the console lists the ones it has seen.</span>";
-    f.appendChild(n);
-  }
   return f;
+}
+
+/* Strip a leading +cc, bare cc or trunk 0 so the field holds the local number
+   the country code beside it expects. */
+function localPart(v,cc){
+  let t=String(v||"").trim().replace(/[^\d+]/g,"");
+  const code=String(cc||"").replace(/\D/g,"");
+  if(t.startsWith("+"))t=t.slice(1);
+  if(code&&t.length>code.length&&t.startsWith(code))t=t.slice(code.length);
+  t=t.replace(/^0+/,"");
+  return t||String(v||"").trim();
+}
+
+/* ── duplicates ──────────────────────────── */
+/* Three associates working shared lists will re-add the same person. Compare on
+   the last 10 digits so +91/0 prefixes and spacing cannot hide a match. */
+const digits=v=>String(v||"").replace(/\D/g,"").slice(-10);
+function findDupe(a){
+  const mine=new Set((a.phones||[]).map(p=>digits(p.value)).filter(d=>d.length===10));
+  if(!mine.size)return null;
+  for(let i=0;i<DATA.length;i++){
+    if(i===cur)continue;
+    if((DATA[i].phones||[]).some(p=>mine.has(digits(p.value))))return{i,b:DATA[i]};
+  }
+  return null;
+}
+function renderDupe(){
+  document.querySelectorAll(".dupe").forEach(n=>n.remove());
+  const host=document.getElementById("f-ph")?.closest(".f");
+  if(!host)return;
+  const d=findDupe(rec());
+  if(!d)return;
+  const w=el("div","dupe");
+  w.innerHTML=`<span>Already on <b>${esc(d.b.pocName||"another contact")}</b>${d.b.company?" · "+esc(d.b.company):""}</span>`;
+  const go=el("button",null,"Open");go.type="button";
+  go.onclick=()=>{cur=d.i;isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+  w.appendChild(go);
+  host.appendChild(w);
 }
 
 function renderBasic(){
   const a=rec(),W=document.getElementById("formL");W.innerHTML="";
-  document.getElementById("phL").textContent=isNew?"new contact":(a.kid?"kylas "+a.kid:"unsaved");
-
-  /* A new contact has no Kylas id yet, so say so plainly rather than letting it
-     look like an existing record that failed to load. */
-  if(isNew){
-    const nb=el("div","newbar");
-    nb.innerHTML=`<span class="tag">New</span>
-      <span class="tx">Not in Kylas yet${scope?` · will be added under <b>${esc(scope.name)}</b>`:""}.
-        Name, phone and owner are required before it can be saved.</span>`;
-    const dc=el("button","dc","Discard");dc.type="button";
-    dc.onclick=()=>{
-      DATA.splice(cur,1);
-      if(!DATA.length)DATA=[blank()];
-      cur=0;isNew=false;render();resetScroll();toast("Discarded");
-    };
-    nb.appendChild(dc);
-    W.appendChild(nb);
-  }
+  document.getElementById("phL").textContent=isNew?"new contact":(a.kid||"unsaved");
 
   /* Name — salutation rides in the label row */
   const fName=el("div","f");
@@ -656,8 +650,8 @@ function renderBasic(){
   liw.appendChild(el("span","ic","in"));
   const liIn=input("f-li",a.linkedin,"linkedin.com/in/…",v=>{a.linkedin=v;syncGo();});
   liw.appendChild(liIn);
-  const go=el("button","go","↗");
-  go.type="button";go.tabIndex=-1;go.title="Open this profile in a new tab";
+  const go=el("button","go","\u2197");
+  go.type="button";go.tabIndex=-1;
   go.onclick=()=>{const u=liUrl(a.linkedin);if(u)window.open(u,"_blank","noopener");};
   function syncGo(){
     const ok=!!liUrl(liIn.value);
@@ -674,22 +668,18 @@ function renderBasic(){
   grid.appendChild(contactField(a,"phones"));
   grid.appendChild(fLi);
   grid.appendChild(companyField(a));
-  grid.appendChild(field("Designation","f-dg",false,input("f-dg",a.designation,"Job title",v=>{a.designation=v;renderCallbar();})));
-  W.appendChild(group("POC",[grid]));
+  grid.appendChild(field("Role","f-dg",false,input("f-dg",a.designation,"What do they do?",v=>{a.designation=v;renderCallbar();})));
+  W.appendChild(group("Who you're calling",[grid]));
 
   /* Source */
   const srcRow=el("div","g2");
-  srcRow.appendChild(field("Source of data","f-src",false,select("f-src",SOURCES,a.source,v=>a.source=v)));
-  /* Picking an owner teaches the console who is sitting here, so the next new
-     contact does not ask again. */
-  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>{
-    a.owner=v;
-    if(v){ME=v;Store.setSetting("me",v);}
-  })));
-  W.appendChild(group("Source",[srcRow]));
+  srcRow.appendChild(field("Came from","f-src",false,select("f-src",SOURCES,a.source,v=>a.source=v)));
+  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
+  W.appendChild(group("Where they came from",[srcRow]));
 
   /* Stage & follow-up */
-  const ncd=el("div","f");ncd.innerHTML=`<label>Next call date (call later)</label>`;
+  const ncd=el("div","f");ncd.id="f-next";
+  ncd.innerHTML=`<label>Call them back on${isReq(a,"f-next")?' <span class="req">*</span>':""}</label>`;
   const ncr=el("div","mrow");
   const d1=el("input","in dt");d1.type="date";d1.value=a.nextCallDate;d1.setAttribute("aria-label","Next call date");
   d1.oninput=e=>a.nextCallDate=e.target.value;ncr.appendChild(d1);
@@ -699,206 +689,245 @@ function renderBasic(){
   const qc=el("div","qchips");
   [["Tomorrow",1],["+3 days",3],["Next week",7]].forEach(([l,n])=>{
     const b=el("button","qc",l);b.type="button";b.tabIndex=-1;
-    b.onclick=()=>{a.nextCallDate=dateIn(n);render();};
+    b.onclick=()=>{const dt=new Date();dt.setDate(dt.getDate()+n);a.nextCallDate=dt.toISOString().slice(0,10);render();};
     qc.appendChild(b);
   });
   ncd.appendChild(qc);
 
   const sRow=el("div","g2");
-  sRow.appendChild(field("Pipeline stage — BD","f-stage",false,select("f-stage",STAGES,a.stage,v=>{a.stage=v;render();})));
+  sRow.appendChild(field("Stage","f-stage",false,select("f-stage",STAGES,a.stage,v=>{a.stage=v;render();})));
   sRow.appendChild(ncd);
 
   const rRow=el("div","g2");
-  const fRm=field("Remarks","f-rm",false,textarea("f-rm",a.remarks,"Notes on this contact",v=>a.remarks=v));
-  /* This field is what Kylas already holds, and where the overlay's summary will
-     be written. Say so, so nobody is surprised when a block appears in it. */
-  const rmNote=el("div","rmnote");
-  rmNote.innerHTML=a.kid
-    ? `<span>From Kylas · editable here${a.remarks?"":" · currently empty"}</span>`
-    : `<span>Saved to Kylas once this contact is created</span>`;
-  fRm.appendChild(rmNote);
-  rRow.appendChild(fRm);
+  rRow.appendChild(field("Notes from the call","f-rm",false,textarea("f-rm",a.remarks,"Whatever they said",v=>a.remarks=v)));
   rRow.appendChild(field("Offsite timeline","f-ot",false,select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
 
-  W.appendChild(group("Stage & follow-up",[sRow,rRow]));
+  W.appendChild(group("Where this stands",[sRow,rRow]));
 }
 
 function renderRight(){
   const a=rec(),F=document.getElementById("formR");F.innerHTML="";
   const n=a.past.length+a.current.length;
-  document.getElementById("phR").textContent=n?n+(n===1?" row":" rows"):"empty";
+  document.getElementById("phR").textContent=n?n+(n===1?" event":" events"):"nothing yet";
   document.getElementById("tabCount").textContent=n?String(n):"";
 
-  /* no-answer short circuit */
-  if(CNC_LADDER.includes(a.stage)){
-    const s=el("section","sec");
-    s.innerHTML=`<div class="skipnote">No answer — nothing else to capture. Set a next call date on the left, then
-      <kbd>⏎</kbd> to save and move to the next contact.</div>`;
-    F.appendChild(s);return;
+  if(a.stage==="Could Not Connect"){
+    F.appendChild(group("No answer",[el("p","skipnote",
+      "Nobody picked up — nothing to write down here. Pick a day to try again on the left, then hit <kbd>↵</kbd>.")]));
+    return;
   }
 
-  /* Past first: what they have already run is the context for what is on the
-     table now. Both feed the KPI rules the same way — see companyStage(). */
-  F.appendChild(eventSection("past","Past","One row per event they have already run."));
-  F.appendChild(eventSection("current","Current","One row per event on the table now."));
+  F.appendChild(eventsGroup());
 
-  /* vendor & offering */
-  const s4=el("section","sec");
-  s4.dataset.kind="vendor";
-  s4.innerHTML=`<div class="sh"><h2>Vendor &amp; offering</h2></div>`;
-  const b4=el("div","sb");
-  b4.appendChild(field("Vendor info","f-vi",false,select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
+  /* close-out */
+  const g3c=el("section","card");
+  g3c.appendChild(el("div","cardH","<h2>Before you hang up</h2>"));
+  const g3=el("div","cardB grp");g3c.appendChild(g3);
+  g3.appendChild(field("Who handles this for them today?","f-vi",isReq(a,"f-vi"),
+    select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
 
-  const sf=el("div","f");
   const lab=el("label","cb1"+(a.serviceOffering?" on":""));
   lab.style.marginBottom="0";
   const c=el("input");c.type="checkbox";c.checked=a.serviceOffering;
   c.onchange=()=>{a.serviceOffering=c.checked;lab.className="cb1"+(c.checked?" on":"");};
   lab.appendChild(c);
-  lab.appendChild(el("span",null,"Enout service offering<em>Tick if the offering was pitched on this call.</em>"));
-  sf.appendChild(lab);b4.appendChild(sf);
+  lab.appendChild(el("span",null,"I pitched what Enout does<em>Tick it if you got the pitch in.</em>"));
+  g3.appendChild(lab);
 
   if(MEETING_STAGES.includes(a.stage)){
-    b4.appendChild(field("Mode of meeting","f-mm",false,select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
+    g3.appendChild(field("How are you meeting them?","f-mm",isReq(a,"f-mm"),
+      select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
   }else{
-    const lk=el("div","f");
-    lk.innerHTML=`<div class="locked"><b>hidden</b><span>Mode of meeting opens once a
-      meeting is booked or held.</span></div>`;
-    b4.appendChild(lk);
+    g3.appendChild(el("div","locked",
+      `<b>later</b><span>Once a meeting is booked we'll ask how you're meeting them.</span>`));
   }
-  s4.appendChild(b4);F.appendChild(s4);
+  F.appendChild(g3c);
 }
 
-function eventSection(key,title,sub){
-  const a=rec();
-  const s=el("section","sec"+(collapsed[key]?" collapsed":""));
-  s.dataset.kind=key;
-  const h=el("div","sh");
-  h.innerHTML=`<h2>${esc(title)}</h2><p>${esc(sub)}</p>`;
-  const tg=el("button","shbtn",collapsed[key]?`▸ ${a[key].length} row${a[key].length===1?"":"s"}`:"▾ Hide");
-  tg.type="button";tg.onclick=()=>{collapsed[key]=!collapsed[key];render();};
-  h.appendChild(tg);s.appendChild(h);
-
-  const b=el("div","sb");
-  const rows=el("div","rows");
-  if(!a[key].length)rows.appendChild(el("div","empty","No "+title.toLowerCase()+" events."));
-  a[key].forEach((r,i)=>{
-    const c=el("div","row");
-    const rh=el("div","rowh");
-    rh.innerHTML=`<span class="n">${esc(title)} ${i+1}</span>`;
-    const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove row");
-    d.onclick=()=>{a[key].splice(i,1);render();};
-    rh.appendChild(d);c.appendChild(rh);
-
-    const g=el("div","g2");
-    g.appendChild(field("Event type",`${key}-et-${i}`,false,select(`${key}-et-${i}`,EVENT_TYPES,r.eventType,v=>{r.eventType=v;})));
-    g.appendChild(quickField("Budget",`${key}-bd-${i}`,r.budget,"Whatever they said",v=>r.budget=v,QUICK.budget));
-    c.appendChild(g);c.appendChild(el("div","f"));
-
-    const g2=el("div","g2");
-    g2.appendChild(quickField("Timeline",`${key}-tl-${i}`,r.timeline,"Quarter or month",v=>r.timeline=v,QUICK.timeline));
-    g2.appendChild(quickField("Pax",`${key}-px-${i}`,r.pax,"Headcount",v=>r.pax=v,QUICK.pax));
-    c.appendChild(g2);c.appendChild(el("div","f"));
-
-    c.appendChild(field("Remarks",`${key}-rm-${i}`,false,textarea(`${key}-rm-${i}`,r.remarks,"Detail for the next call",v=>r.remarks=v)));
-    rows.appendChild(c);
-  });
-  b.appendChild(rows);
-  const add=el("button","add","+ Add "+title.toLowerCase()+" event");add.type="button";
-  add.style.marginTop="10px";
-  add.onclick=()=>{a[key].push(emptyRow());collapsed[key]=false;render();};
-  b.appendChild(add);
-  s.appendChild(b);return s;
-}
-
-/* ── duplicates ──────────────────────────── */
-/* Three associates working shared lists will re-add the same person. Compare on
-   the last 10 digits so +91/0 prefixes and spacing do not hide a match. */
-const digits=v=>String(v||"").replace(/\D/g,"").slice(-10);
-/* Strip a leading +cc, bare cc or trunk 0 so the field holds the local number
-   the country code beside it expects. */
-function localPart(v,cc){
-  let t=String(v||"").trim().replace(/[^\d+]/g,"");
-  const code=String(cc||"").replace(/\D/g,"");
-  if(t.startsWith("+"))t=t.slice(1);
-  if(code&&t.length>code.length&&t.startsWith(code))t=t.slice(code.length);
-  t=t.replace(/^0+/,"");
-  return t||String(v||"").trim();
-}
-function findDupe(a){
-  const mine=new Set(a.phones.map(p=>digits(p.value)).filter(d=>d.length===10));
-  if(!mine.size)return null;
-  for(let i=0;i<DATA.length;i++){
-    if(i===cur)continue;
-    const b=DATA[i];
-    if(b.phones.some(p=>mine.has(digits(p.value))))return{i,b};
-  }
+/* One chip per event type, one card per chip. Tapping a lit chip removes its
+   card. Past vs Now lives on the card and is echoed back onto the chip, so the
+   same six types never get printed on screen twice. */
+function bucketOf(a,t){
+  if(a.past.some(r=>r.eventType===t))return "past";
+  if(a.current.some(r=>r.eventType===t))return "current";
   return null;
 }
-function renderDupe(){
-  const host=document.getElementById("f-ph")?.closest(".f");
-  document.querySelectorAll(".dupe").forEach(n=>n.remove());
-  if(!host)return;
-  const d=findDupe(rec());
-  if(!d)return;
-  const w=el("div","dupe");
-  w.innerHTML=`<span>Already on <b>${esc(d.b.pocName||"another contact")}</b>${d.b.company?" · "+esc(d.b.company):""}</span>`;
-  const go=el("button",null,"Open");go.type="button";
-  go.onclick=()=>{cur=d.i;isNew=false;errFor=-1;stopTimer();secs=0;tmode="idle";render();resetScroll();};
-  w.appendChild(go);
-  host.appendChild(w);
+function eventsGroup(){
+  const a=rec();
+  const g=el("section","card");g.id="s-events";
+  const nEv=a.past.length+a.current.length;
+  g.appendChild(el("div","cardH",
+    `<h2>Events</h2><span class="sub">${nEv?nEv+" tagged":"none yet"}</span>`));
+  const gb=el("div","cardB");g.appendChild(gb);
+  gb.appendChild(el("p","ask","Tap a type the moment they mention it, then mark it past or now."));
+
+  const chips=el("div","tcs");
+  EVENT_TYPES.filter(Boolean).forEach(t=>{
+    const bk=bucketOf(a,t);
+    const btn=el("button","tc"+(bk==="past"?" past-on":bk==="current"?" now-on":""),
+      `<i class="dot"></i>${esc(t)}`);
+    btn.type="button";
+    btn.setAttribute("aria-pressed",bk?"true":"false");
+    btn.title=bk?"Tap to remove":"Tap to add";
+    btn.onclick=()=>{
+      if(bk){a.past=a.past.filter(r=>r.eventType!==t);a.current=a.current.filter(r=>r.eventType!==t);}
+      else a.current=[...a.current,{...emptyRow(),eventType:t}];
+      touch("record");renderRight();refreshQual();
+      if(!bk)setTimeout(()=>{
+        const cards=document.querySelectorAll("#formR .ev");
+        cards[cards.length-1]?.querySelector(".bl input")?.focus();
+      },30);
+    };
+    chips.appendChild(btn);
+  });
+  gb.appendChild(chips);
+
+  const list=el("div");
+  a.past.forEach(r=>{if(r.eventType)list.appendChild(eventCard(a,"past",r));});
+  a.current.forEach(r=>{if(r.eventType)list.appendChild(eventCard(a,"current",r));});
+  if(!a.past.length&&!a.current.length){
+    const e=el("div","empty","Nothing yet — details can wait, just tag the type.");
+    e.style.marginTop="9px";list.appendChild(e);
+  }
+  gb.appendChild(list);
+  return g;
 }
 
-/* ── validate + actions ──────────────────── */
+function eventCard(a,key,r){
+  const card=el("div","ev "+(key==="past"?"is-past":"is-now"));
+  const h=el("div","evh");
+
+  const seg=el("div","seg");
+  [["past","Past"],["current","Now"]].forEach(([k,lbl])=>{
+    const bb=el("button",null,lbl);bb.type="button";
+    bb.setAttribute("aria-pressed",key===k?"true":"false");
+    bb.setAttribute("aria-label",lbl+" — "+r.eventType);
+    bb.onclick=()=>{
+      if(key===k)return;
+      a[key]=a[key].filter(x=>x!==r);a[k]=[...a[k],r];
+      touch("record");renderRight();
+    };
+    seg.appendChild(bb);
+  });
+  h.appendChild(seg);
+  h.appendChild(el("span","t",esc(r.eventType)));
+  const x=el("button","del","×");x.type="button";
+  x.setAttribute("aria-label","Remove "+r.eventType);
+  x.onclick=()=>{a[key]=a[key].filter(o=>o!==r);touch("record");renderRight();};
+  h.appendChild(x);
+  card.appendChild(h);
+
+  const body=el("div","evb");
+  const strip=el("div","strip");
+  const blank=(k,ph,chips,min)=>{
+    const w=el("span","bl");
+    const i=el("input");i.value=r[k]||"";i.placeholder=ph;
+    i.setAttribute("aria-label",r.eventType+" — "+ph);
+    const size=()=>{i.style.width=Math.max(min,(i.value||ph).length*9+22)+"px";};
+    size();
+    i.oninput=()=>{r[k]=i.value;size();touch("record");refreshQual();validate();};
+    i.onfocus=()=>{
+      strip.innerHTML="";strip.appendChild(el("span","lbl","Tap to add:"));
+      chips.forEach(c=>{
+        const bb=el("button","qc",esc(c));bb.type="button";bb.tabIndex=-1;
+        bb.onmousedown=e=>e.preventDefault();
+        bb.onclick=()=>{const v=(i.value||"").trim();
+          i.value=v?v+(/[,;]$/.test(v)?" ":", ")+c:c;r[k]=i.value;size();i.focus();
+          i.setSelectionRange(i.value.length,i.value.length);refreshQual();validate();};
+        strip.appendChild(bb);
+      });
+    };
+    i.onblur=()=>setTimeout(()=>{if(!card.contains(document.activeElement))strip.innerHTML="";},120);
+    w.appendChild(i);return w;
+  };
+
+  const l=el("p","sent");
+  l.append("Around ",blank("pax","how many?",QUICK.pax,116)," people, ",
+           blank("timeline","when?",QUICK.timeline,116),
+           ". Budget ",blank("budget","how much?",QUICK.budget,128),".");
+  body.append(l,strip);
+  card.appendChild(body);
+
+  /* remarks lives in its own block so it never competes with the numbers */
+  const nb=el("div","evnote");
+  const nid="rm-"+key+"-"+r.eventType.replace(/\W+/g,"");
+  nb.innerHTML=`<label for="${nid}">Remarks</label>`;
+  const note=el("textarea");note.id=nid;note.rows=2;note.value=r.remarks||"";
+  note.placeholder="Anything worth reading before the next call…";
+  note.oninput=e=>{r.remarks=e.target.value;touch("record");};
+  nb.appendChild(note);
+  card.appendChild(nb);
+  return card;
+}
+
+function renderRight_counts(){
+  const a=rec(),n=a.past.length+a.current.length;
+  document.getElementById("phR").textContent=n?n+(n===1?" event":" events"):"nothing yet";
+  document.getElementById("tabCount").textContent=n?String(n):"";
+}
+
+/* What is required depends on how far the call got. The further along the
+   stage, the more the record has to carry before it can be saved. */
 function missing(){
   const a=rec(),m=[];
-  if(!a.pocName.trim())m.push({label:"POC name",id:"f-poc"});
-  if(!a.phones.some(p=>p.value.trim()))m.push({label:"phone",id:"f-ph"});
-  if(!a.owner)m.push({label:"owner",id:"f-ow"});
+  if(!a.pocName.trim())m.push(["Name","f-poc"]);
+  if(!a.phones.some(p=>p.value.trim()))m.push(["Phone number","f-poc"]);
+  if(!a.owner)m.push(["Owner","f-ow"]);
+  if(a.stage==="Could Not Connect"&&!a.nextCallDate)m.push(["A day to call back","f-next"]);
+  if(/Qualifying|Discovery|SQL/.test(a.stage)){
+    if(!blocks(a).length)m.push(["At least one event","s-events"]);
+    else if(!hasSignal(a))m.push(["Budget, timeline or pax","s-events"]);
+  }
+  if(/Discovery Call Done|SQL/.test(a.stage)&&!a.vendorInfo)m.push(["Who handles their events","f-vi"]);
+  if(MEETING_STAGES.includes(a.stage)){
+    if(!a.nextCallDate)m.push(["Meeting date","f-next"]);
+    if(!a.modeOfMeeting)m.push(["Mode of meeting","f-mm"]);
+  }
   return m;
 }
-/* Red fields only after a save has actually been blocked — marking them while
-   the name is still half-typed is just nagging. Tied to the record the save was
-   attempted on, so moving to another contact clears it with no bookkeeping. */
-let errFor=-1;
+const blocks=a=>[...a.past,...a.current].filter(r=>r.eventType);
+const isReq=(a,id)=>missing().some(([,anc])=>anc===id);
 function validate(){
-  const m=missing(),msg=document.getElementById("msg"),a=rec();
+  setTimeout(renderDupe,0);
+  const m=missing(),msg=document.getElementById("msg"),a=rec(),sv=document.getElementById("saveBtn");
   document.getElementById("flagBtn").className="flagbtn"+(a.flagged?" on":"");
-
-  document.querySelectorAll(".in.bad").forEach(n=>n.classList.remove("bad"));
-  if(errFor===cur)m.forEach(x=>document.getElementById(x.id)?.classList.add("bad"));
-
-  if(m.length){msg.textContent="Needs "+m.map(x=>x.label).join(", ");msg.className="msg bad";}
-  else{msg.textContent=a.done?"Logged today.":"Ready to save.";msg.className="msg";}
-  renderDupe();
+  sv.disabled=m.length>0;
+  if(m.length){
+    msg.className="msg bad";msg.innerHTML="";
+    msg.append("Still needed: ");
+    m.forEach(([lbl,anc],i)=>{
+      if(i)msg.append(i===m.length-1?" and ":", ");
+      const b=el("button",null,esc(lbl));b.type="button";b.onclick=()=>jump(anc);
+      msg.appendChild(b);
+    });
+  }
+  else if(a.done){msg.textContent="Logged \u2014 nice one.";msg.className="msg";}
+  else{msg.textContent="Everything needed is in. Save & next when you're ready.";msg.className="msg";}
+}
+function jump(anc){
+  const t=document.getElementById(anc);if(!t)return;
+  if(matchMedia("(max-width:920px)").matches)setTab(anc==="s-events"||anc==="f-vi"||anc==="f-mm"?"more":"basic");
+  t.scrollIntoView({behavior:"smooth",block:"center"});
+  const f=t.querySelector("input,textarea,select,button");
+  if(f&&!f.disabled)setTimeout(()=>f.focus({preventScroll:true}),260);
 }
 function saveNext(){
   const m=missing();
-  if(m.length){
-    errFor=cur;
-    validate();
-    const first=document.getElementById(m[0].id);
-    if(first){
-      if(matchMedia("(max-width:900px)").matches)setTab("basic");
-      first.focus();first.scrollIntoView({block:"center",behavior:"smooth"});
-    }
-    toast("Missing "+m.map(x=>x.label).join(", "));
-    return;
-  }
-  errFor=-1;
+  if(m.length){tried=true;validate();toast("Still needed: "+m.map(x=>x[0]).join(", "));return;}
+  tried=false;
   const a=rec(),was=a.done;
   const wasNew=isNew||!a.kid;
-  const duration=secs||null, durationSource=secs?(tmode==="est"?"estimated":"dialed"):"none", outcome=lastOutcome;
-
+  const duration=secs||null;
+  const durationSource=secs?(tmode==="est"?"estimated":"dialed"):"none";
+  const outcome=lastOutcome;
   /* No Kylas id yet, so this record has to be created there rather than
-     updated. Mark it and leave it marked until a sync clears it — that flag is
-     what tells the writer POST /v1/contacts instead of PUT /v1/contacts/{id}. */
+     updated. That flag is what tells the writer POST rather than PUT. */
   if(wasNew)a.pendingCreate=true;
+  a.lastCallAt=new Date().toISOString();
   a.done=true;stopTimer();secs=0;tmode="idle";lastOutcome=null;
   const from=cur;
 
   /* One entry per save, whether or not the stage moved — see kpi-spec.md §2. */
-  a.lastCallAt=new Date().toISOString();
   Store.appendCall({
     kid:a.kid, pocName:a.pocName, company:a.company, owner:a.owner,
     outcome:outcome?outcome.t:null, stageSet:a.stage, duration, durationSource,
@@ -906,51 +935,13 @@ function saveNext(){
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
-
-  /* Push to Kylas. The UI has already moved on — an associate should not wait
-     on a network round trip between calls. */
   syncToKylas(a,{outcome:outcome?outcome.t:null,duration,at:new Date().toISOString(),
                  note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});
   const rows=visible().filter(r=>r.i!==from);
   const nxt=rows.length?rows[0].i:cur;
   cur=nxt;isNew=false;collapsed={past:false,current:false};
   render();resetScroll();setTab("basic");
-  toast(wasNew?`${a.pocName} added`:`${a.pocName} saved`,
-        ()=>{a.done=was;cur=from;render();});
-}
-
-/* Budget, timeline and pax are the only fields a connected call really needs,
-   and they sit in the other pane. Jump straight into them, creating the current
-   event row first if there is not one yet. */
-const EVENT_KEYS={e:"et",b:"bd",t:"tl",x:"px",r:"rm"};
-function focusEvent(k){
-  const a=rec();
-  if(a.stage==="Could Not Connect")return;       /* right pane is collapsed */
-  if(!a.current.length){a.current.push(emptyRow());collapsed.current=false;render();}
-  if(matchMedia("(max-width:900px)").matches)setTab("more");
-  const n=document.getElementById(`current-${EVENT_KEYS[k]}-0`);
-  if(!n)return;
-  n.focus();
-  n.scrollIntoView({block:"center"});
-  if(n.setSelectionRange&&n.value)n.setSelectionRange(n.value.length,n.value.length);
-}
-
-/* ── sync ────────────────────────────────── */
-async function syncToKylas(a,call){
-  a.syncing=true;renderQueue();
-  const res=await API.queueSave(a,call);
-  a.syncing=false;
-  if(res.ok){
-    if(res.created&&res.kid){a.kid=res.kid;a.pendingCreate=false;}
-    a.syncedAt=new Date().toISOString();
-    a.syncError=null;
-    if(res.callLogError)a.syncError="call log: "+res.callLogError;
-  }else{
-    a.syncError=res.error||"not sent";
-  }
-  persist();renderQueue();
-  if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
-  else if(res.created)toast(`${a.pocName} created in Kylas`);
+  toast(`${a.pocName} logged \u2014 next up: ${DATA[cur].pocName}`,()=>{a.done=was;cur=from;render();});
 }
 
 /* ── shortcuts sheet ─────────────────────── */
@@ -959,11 +950,9 @@ function openKb(){
   s.innerHTML=`<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="kh">
     <div class="h"><h3 id="kh">Keyboard</h3><button class="gbtn" id="kx" type="button">Close</button></div>
     <div class="b">
-      <div class="krow"><span class="kk"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span><span>Set the call outcome</span></div>
+      <div class="krow"><span class="kk"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span><span>Set the stage — no answer, right POC, discovery, SQL</span></div>
       <div class="krow"><span class="kk"><kbd>Enter</kbd></span><span>Save and jump to the next contact</span></div>
       <div class="krow"><span class="kk"><kbd>C</kbd></span><span>Dial the primary number</span></div>
-      <div class="krow"><span class="kk"><kbd>E</kbd> <kbd>B</kbd> <kbd>T</kbd> <kbd>X</kbd></span><span>Jump to event type, budget, timeline, pax</span></div>
-      <div class="krow"><span class="kk"><kbd>R</kbd></span><span>Jump to the event remarks</span></div>
       <div class="krow"><span class="kk"><kbd>F</kbd></span><span>Flag this record for end-of-day cleanup</span></div>
       <div class="krow"><span class="kk"><kbd>J</kbd> <kbd>K</kbd></span><span>Next / previous contact in the queue</span></div>
       <div class="krow"><span class="kk"><kbd>/</kbd></span><span>Jump to search</span></div>
@@ -979,11 +968,18 @@ function openKb(){
 document.getElementById("q").addEventListener("input",renderQueue);
 const on=(id,ev,fn)=>{const n=document.getElementById(id);if(n)n.addEventListener(ev,fn);};
 on("kbBtn","click",openKb);
+on("qToggle","click",e=>{
+  const m=document.getElementById("mid");m.classList.toggle("noq");
+  e.target.classList.toggle("on",!m.classList.contains("noq"));
+});
+
+
 document.querySelectorAll(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 function newContact(){
   const b=blank();
   /* Inside a company scope the new POC belongs to that company. */
   if(scope){b.company=scope.name;b.companyId=String(scope.id);}
+  if(ME)b.owner=ME;
   DATA=[b,...DATA];cur=0;isNew=true;filter="all";renderFilters();render();
   resetScroll();setTab("basic");
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
@@ -997,7 +993,6 @@ document.getElementById("flagBtn").addEventListener("click",()=>{
   toast(a.flagged?"Flagged for cleanup":"Flag removed");
 });
 
-
 document.addEventListener("keydown",e=>{
   const typing=e.target.matches("input,textarea,select");
   if(e.key==="Escape"){
@@ -1010,9 +1005,8 @@ document.addEventListener("keydown",e=>{
   if(o){e.preventDefault();setOutcome(o);return;}
   const k=e.key.toLowerCase();
   if(k==="c"){const a=rec(),p=a.phones.find(x=>x.primary)||a.phones[0];
-    if(p&&p.value){startTimer("dial");window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
+    if(p&&p.value){startTimer();window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
   if(k==="f"){document.getElementById("flagBtn").click();return;}
-  if(EVENT_KEYS[k]){e.preventDefault();focusEvent(k);return;}
   if(k==="j"||k==="k"){
     const rows=visible();const at=rows.findIndex(r=>r.i===cur);
     const nx=k==="j"?at+1:at-1;
@@ -1036,6 +1030,23 @@ document.addEventListener("input",()=>{
   if(a&&a.kid)Store.saveDraft(a.kid,a);
 },true);
 document.addEventListener("change",persist,true);
+
+/* ── sync ─────────────────────────────────── */
+async function syncToKylas(a,call){
+  a.syncing=true;renderQueue();
+  const res=await API.queueSave(a,call);
+  a.syncing=false;
+  if(res.ok){
+    if(res.created&&res.kid){a.kid=res.kid;a.pendingCreate=false;}
+    a.syncedAt=new Date().toISOString();
+    a.syncError=res.callLogError?("call log: "+res.callLogError):null;
+  }else{
+    a.syncError=res.error||"not sent";
+  }
+  persist();renderQueue();
+  if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
+  else if(res.created)toast(`${a.pocName} created in Kylas`);
+}
 
 async function boot(){
   ME=(await Store.getSetting("me"))||"";

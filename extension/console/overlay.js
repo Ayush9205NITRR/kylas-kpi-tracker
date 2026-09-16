@@ -258,7 +258,10 @@
     };
   }
 
-  document.getElementById("dataBtn").onclick = openData;
+  /* The Data sheet is now reached from the Dashboard rather than its own
+     button — the top bar was already carrying the account rollup. */
+  const dataBtn = document.getElementById("dataBtn");
+  if (dataBtn) dataBtn.onclick = openData;
 
   /* ── dashboard ───────────────────────────── */
   /* Days that are over are read from the freeze; today is counted live and
@@ -325,14 +328,18 @@
             <span class="dl">${d.live ? "live" : "frozen"}</span>
           </div>`;
         }).join("")}</div>` : ""}
+        <div class="dactions"><button class="gbtn" id="gdata" type="button">Captured data &amp; export</button></div>
         <p class="dnote">${liveDays
           ? "Today is still running, so its numbers can still move. Every earlier day is frozen — counted once when the day ended and never recounted, so a report reads the same tomorrow as it does now."
           : "All days shown are frozen."}</p>`;
+      const gd = document.getElementById("gdata");
+      if (gd) gd.onclick = () => { s.remove(); openData(); };
     }
     paint();
   }
 
-  document.getElementById("dashBtn").onclick = openDash;
+  const dashBtn = document.getElementById("dashBtn");
+  if (dashBtn) dashBtn.onclick = openDash;
 
   /* Catch up on any days that ended while the console was closed. */
   Store.freezeDays();

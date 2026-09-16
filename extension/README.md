@@ -66,6 +66,24 @@ These mirror `docs/kpi-spec.md`. The badge next to the company name is the
 ladder rung. Once the proxy exists these come from Airtable instead of being
 recomputed in the browser, and the rules stop being duplicated.
 
+## The UI
+
+The console is the v2 design in `docs/UI-SPEC.md`: Plus Jakarta Sans, a
+five-size type scale, one blue accent with violet for "past", and every section
+a card. `prototype/enout-call-console-v2.html` is the reference — open it in a
+browser before changing anything visual, and change a **token**, never a call
+site.
+
+`console.css` is that prototype's stylesheet, unmodified. `production.css` is
+everything the real build adds on top: the company/session switch, the proxy
+link badge, sync state in the queue, the dial buttons and the report views. It
+uses the v2 tokens only — no new hue.
+
+The right pane is a conversation, not a form. Event types are tap chips, one
+card per chip, and each card is a fill-in-the-blank sentence rather than four
+labelled boxes. That is deliberate and documented in `docs/HANDOFF-v2.md` §5 as
+the part most likely to get "cleaned up" during a rewrite. Do not.
+
 ## Two modes
 
 A switch sits above the roster.

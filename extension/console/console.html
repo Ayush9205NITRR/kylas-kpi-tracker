@@ -5,10 +5,9 @@
 <title>Enout Call Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="console.css">
-<link rel="stylesheet" href="color.css">
-<link rel="stylesheet" href="overlay.css">
+<link rel="stylesheet" href="production.css">
 </head>
 <body>
 
@@ -16,17 +15,16 @@
 
   <header class="bar">
     <div class="id"><div class="g">EN</div><h1>Call console</h1></div>
-    <div class="pace"><span>Today</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span></div>
+    <div class="pace"><span>Calls</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span></div>
+    <div class="acct" id="acct"></div>
     <div class="sp"></div>
     <button class="gbtn" id="newBtn">+ New contact</button>
     <span class="link" id="linkState" title="Checking the proxy…">·</span>
-    <button class="gbtn" id="dashBtn" title="Numbers by day, week and month">Dashboard</button>
-    <button class="gbtn" id="dataBtn" title="Captured data">Data <span id="logCount" class="cnt">0</span></button>
+    <button class="gbtn" id="dashBtn" title="Numbers, and the captured data">Dashboard</button>
+    <span id="logCount" hidden>0</span>
     <button class="gbtn ovOnly" id="dockBtn" title="Dock to the side">Dock</button>
     <button class="gbtn ovOnly" id="closeBtn" title="Close (Esc)">Close</button>
   </header>
-
-  <div class="cohead" id="cohead" hidden></div>
 
   <div class="callbar"><div class="cbIn" id="callbar"></div></div>
 
@@ -61,7 +59,7 @@
 
   <div class="viewport" id="viewport" hidden><div class="vwrap" id="vwrap"></div></div>
 
-  <div class="foot"><div class="footIn">
+  <div class="foot" id="foot"><div class="footIn">
     <span class="msg" id="msg"></span>
     <button class="flagbtn" id="flagBtn" type="button">⚑ Flag for cleanup</button>
     <button class="gbtn" id="resetBtn" type="button">Reset</button>
