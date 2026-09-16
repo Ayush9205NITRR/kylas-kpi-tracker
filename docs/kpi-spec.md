@@ -1,0 +1,262 @@
+# KPI specification
+
+Written from Ayush's definitions. Everything marked **OPEN** is a definitional
+gap that will change the numbers — these need answers before the formulas are
+built, not after.
+
+---
+
+## 1. Airtable schema
+
+Five tables. Two are append-only logs; three are current-state.
+
+### `Contacts`
+| Field | Type | Notes |
+|---|---|---|
+| `Kylas Contact ID` | text, unique | join key, primary source of identity |
+| `Name`, `Designation`, `LinkedIn`, `Owner` | text | mirrored from Kylas |
+| `Company` | link → Companies | |
+| `Current Stage` | single select | mirror of Kylas pipeline stage |
+| `Previous Stage` | single select | set on every transition |
+| `First Call At` | rollup MIN(`Stage Transitions.Changed At`) | §2 |
+| `Last Call At` | rollup MAX(`Stage Transitions.Changed At`) | §2 |
+| `Event Rows` | link → Event Rows | |
+| `Vendor Info`, `Mode of Meeting` | single select | overlay-owned |
+| `Service Offering` | checkbox | overlay-owned |
+| `Has Signal` | rollup `OR(values)` of `Event Rows.Has Any Signal` | §5 |
+| `Has Complete Row` | rollup `OR(values)` of `Event Rows.Is Complete` | §6 |
+| `KPI Stage` | formula | §8 — the ladder |
+| `KPI Rank` | formula | numeric form of the above, for MAX rollups |
+
+### `Companies`
+| Field | Type | Notes |
+|---|---|---|
+| `Kylas Company ID`, `Name` | text | |
+| `Contacts` | link → Contacts | |
+| `First Call At` | rollup MIN(`Contacts.First Call At`) | |
+| `Last Call At` | rollup MAX(`Contacts.Last Call At`) | §3 — "companies reached" |
+| `Reached` | formula `Last Call At` is not blank | |
+| `Phone Picked` | rollup `OR(values)` of `Contacts.Picked` | §4 |
+| `Right POC Contacts` | rollup `ARRAYJOIN(values)` over contacts where right-POC | §5 |
+| `Company KPI Stage` | rollup `MAX(values)` of `Contacts.KPI Rank`, mapped to label | §8 |
+
+### `Event Rows`
+One row per past or current event. Hangs off the **contact**, not the company.
+
+| Field | Type |
+|---|---|
+| `Contact` | link → Contacts |
+| `Period` | single select — `Past` \| `Current` |
+| `Event Type`, `Budget`, `Timeline`, `Pax`, `Remarks` | long text |
+| `Has Any Signal` | formula — §5 |
+| `Is Complete` | formula — §6 |
+
+### `Stage Transitions` — append-only
+| Field | Type |
+|---|---|
+| `Contact` | link → Contacts |
+| `From Stage`, `To Stage` | single select |
+| `Changed At` | datetime |
+| `Owner` | text |
+| `Source` | single select — `Console` \| `Kylas webhook` |
+
+### `Call Log` — append-only, recommended, see §2
+| Field | Type |
+|---|---|
+| `Contact` | link → Contacts |
+| `Called At` | datetime |
+| `Outcome` | single select — the four console outcomes |
+| `Duration` | number, seconds |
+| `Owner` | text |
+| `Stage Set` | single select |
+
+---
+
+## 2. First Call At / Last Call At
+
+**As specified.** Each contact carries a current and a previous pipeline stage.
+When the stage changes, current shifts into previous and `Last Call At` is stamped
+at the moment of the change. `First Call At` is the first such stamp.
+
+**Implementation.** Do not maintain this as two mutable columns. Append a row to
+`Stage Transitions` on every change and derive both as rollups —
+`MIN(Changed At)` and `MAX(Changed At)`. Same numbers, but it is self-healing if a
+write is missed, it survives backfill, and the transition history is what Root
+Cause Analysis actually needs: you can see that a contact sat at `Qualifying` for
+41 days before moving, which two mutable columns can never tell you.
+
+> **OPEN — this definition undercounts calls.**
+> A stage change is not the same event as a call. Two cases break it:
+> - Second and third no-answers on a contact already at `Could Not Connect`. The
+>   stage does not change, so `Last Call At` stays frozen at the first attempt.
+>   A contact dialled six times looks untouched since attempt one.
+> - A connected call that confirms the existing stage — real contact, no movement.
+>
+> Both inflate "days since last touched" and understate dialling effort, which is
+> exactly what the pace counter is meant to prove.
+>
+> Fix: write a `Call Log` row on **every** save, and define
+> `Last Call At = MAX(Call Log.Called At)`, keeping
+> `Last Stage Change At = MAX(Stage Transitions.Changed At)` as a separate field.
+> You get both, and the funnel stops lying about activity. Kylas' native
+> `POST /v1/call-logs/` gives you this for free on the CRM side anyway.
+>
+> Decide: keep as specified, or switch `Last Call At` to call-based.
+
+---
+
+## 3. Companies Reached
+
+```
+Company.Last Call At  = MAX(linked Contacts.Last Call At)
+Company.Reached       = Last Call At is not blank
+Companies Reached     = COUNT(Companies where Reached)
+```
+
+For a period: `COUNT(Companies where Last Call At within [from, to])`.
+
+> **OPEN.** "Reached this month" — does a company count if it was reached in
+> March and not since? Above, it counts in March only. Confirm that is what you
+> want for the monthly number.
+
+---
+
+## 4. Phone Picked
+
+**As specified:** picked when the pipeline stage is not `Could Not Connect`.
+
+```
+Contact.Picked        = Current Stage != "Could Not Connect"
+Company.Phone Picked  = OR(linked Contacts.Picked)
+Phone Picked Rate     = Companies picked / Companies reached
+```
+
+> **OPEN — current stage vs ever.**
+> Reading `Current Stage` means a contact who picked up, was qualified, then
+> later got re-dialled to a no-answer and moved back to `Could Not Connect` is
+> counted as never having picked up. Deriving it from `Stage Transitions`
+> instead — *did this contact ever hold a stage other than CNC and the initiated
+> stages* — is monotonic and cannot regress. Recommended, and free once the
+> transitions table exists.
+>
+> **OPEN — denominator.** Rate over companies *reached*, or over companies
+> *dialled*? These differ by every company where dialling never produced a stage
+> change at all. Reached is the more flattering number; dialled is the true one.
+>
+> **OPEN — level.** Company counts as picked if *any* contact picked up. Stated
+> as "account pipeline stage", so confirming company-level is intended.
+
+---
+
+## 5. Right POC
+
+**As specified:** a contact is a right POC if **any** event-row signal field is
+non-empty, in either the past or current section.
+
+```
+Event Rows.Has Any Signal =
+    OR( Event Type != "", Budget != "", Timeline != "", Pax != "" )
+
+Contact.Is Right POC      = OR(Event Rows.Has Any Signal)
+Company.KPI Stage         ≥ "Right POC" if any contact qualifies
+Company.Right POC Contacts = names of every qualifying contact
+```
+
+The company-level name list is the `ARRAYJOIN` rollup in §1.
+
+> **OPEN — exact field list.** Two slightly different lists were given: one had
+> budget / timeline / pax, the other added event type. Above includes event type.
+> `Remarks` is deliberately excluded — an associate typing "call back Monday" in
+> remarks is not qualification signal, and including it would mark nearly every
+> connected call as a right POC. Confirm both choices.
+
+---
+
+## 6. Successful Discovery Call
+
+**As specified:** one *whole* row — past or current — is filled.
+
+```
+Event Rows.Is Complete =
+    AND( Event Type != "", Budget != "", Timeline != "", Pax != "" )
+
+Contact.Successful Discovery = OR(Event Rows.Is Complete)
+```
+
+Segmented by `Mode of Meeting`, giving the in-person / virtual / text split.
+
+> **OPEN — what "whole row" includes.** Above requires all four signal fields and
+> ignores `Remarks`. If `Remarks` must also be filled, the count will drop
+> noticeably. Confirm.
+>
+> **OPEN — mode of meeting values.** The prototype has four (`In Person`,
+> `Virtual`, `Calls`, `Text`); you described three (online, in person, text).
+> `Virtual` and `Calls` are probably the same thing split two ways. Confirm the
+> final list — this is a reporting dimension, so merging later is messy.
+
+---
+
+## 7. The SQL stages
+
+| KPI stage | Source | Status |
+|---|---|---|
+| Active Requirement Call | — | **OPEN — undefined.** Pipeline stage, or an event-data condition? |
+| SQL Call Booked | derived from contact pipeline stage | **OPEN** — which stage value(s) |
+| SQL Call Held | — | deferred, you said you'd come back to this |
+| SQL Accepted | derived from contact pipeline stage | **OPEN** — which stage value(s) |
+
+The prototype's `STAGES` list is a guess. Real values come from
+`GET /v1/entities/contact/fields?custom-only=false`, as ids plus labels. Once I
+have a key I can pull the real list and you map stages to KPI stages against it
+rather than from memory.
+
+---
+
+## 8. The ladder
+
+Every metric above is a rung. Making them an ordered ladder — where each rung
+implies all the ones below — is what turns them into a funnel with conversion
+rates between steps, and what lets a company inherit `MAX` across its contacts.
+
+| Rank | KPI Stage | Condition |
+|---|---|---|
+| 0 | Not reached | no calls logged |
+| 1 | Reached | `Last Call At` not blank |
+| 2 | Phone Picked | stage ever ≠ CNC |
+| 3 | Right POC | any event-row signal field filled |
+| 4 | Successful Discovery | any complete event row |
+| 5 | Active Requirement Call | **OPEN** |
+| 6 | SQL Call Booked | from pipeline stage |
+| 7 | SQL Call Held | **deferred** |
+| 8 | SQL Accepted | from pipeline stage |
+
+```
+Company.KPI Rank  = MAX(linked Contacts.KPI Rank)
+Company.KPI Stage = label for that rank
+```
+
+> **Compute the rank as highest-ever, not current.**
+> If it reads current state, a contact that reached SQL Call Booked and then went
+> cold drops back down the ladder, and your funnel leaks backwards — month-on-month
+> the count at each rung can *fall*, which makes conversion rates meaningless and
+> RCA impossible. Highest-ever is monotonic: it only ever moves up, and "SQL
+> booked in March, dead in April" is then a separate *status* field, not a lower
+> rank. This is the single most important modelling decision in the spec.
+
+---
+
+## 9. Everything still needed
+
+Blocking the formulas:
+1. Last Call At — stage-change-based as specified, or call-based (§2)
+2. Right POC — exact field list, remarks in or out (§5)
+3. "Whole row" — which fields must be filled (§6)
+4. Mode of meeting — three values or four (§6)
+5. Active Requirement Call — definition (§7)
+6. Which pipeline stages mean SQL Call Booked and SQL Accepted (§7)
+7. Highest-ever vs current for the KPI ladder (§8) — recommendation: highest-ever
+
+Blocking the build, not the formulas:
+8. Are BD prospects Contacts or Leads in Kylas (see `kylas-api-notes.md` §2)
+9. Kylas API key, for the real picklists
+10. Airtable base — existing one to extend, or a new one to create
