@@ -74,3 +74,47 @@ type is not the query type — do not pass `LOOK_UP`.
 
 A burst of 8 parallel requests returned three 429s. **450 ms between sequential
 calls ran clean** through 15 endpoints. The writer must queue.
+
+---
+
+## Call order (given 2026-09-16)
+
+Ayush's ranking of all 24 stages, 1 = call first. Mapped onto the codes; every
+one is accounted for with nothing left over.
+
+| # | Stage | Code |
+|---|---|---|
+| 1 | SQL | `SQL_SALES_QUALIFIED_LEAD` |
+| 2 | Discovery Call Done - Awaiting Client Inputs | `DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS` |
+| 3 | Closing Loops - Low Value | `CLOSING_LOOPS_LOW_VALUE` |
+| 4 | Reschedule Pending | `RESCHEDULE_PENDING` |
+| 5 | Discovery Call No-Show | `GHOSTED` ⚠️ |
+| 6 | Discovery Call Booked | `DISCOVERY_CALL_BOOKED` |
+| 7–9 | Follow-up 1 / 2 / 3 | `FOLLOW_UP_1/2/3` |
+| 10 | Followup - CNC | `FOLLOWUP_CNC` |
+| 11 | MQL | `MQL_MARKETING_QUALIFIED_LEAD` |
+| 12 | Activation | `ACTIVATION` |
+| 13 | Offsite Delayed | `OFFSITE_DELAYED` |
+| 14 | Offsite Done (Late Reachout) | `OFFSITE_DONE_LATE_REACHOUT` |
+| 15 | Not Interested | `NOT_INTERESTED` |
+| 16 | Connect Later | `CONNECT_LATER` |
+| 17–19 | CNC 3 / 2 / 1 | `CNC_COULD_NOT_CONNECT_3/_2/` |
+| 20–23 | Disqualified / Invalid / NDM / POC Changed | `DISQUALIFIED_WRONG_POC`, `INVALID_CONTACT`, `NOT_A_DECISION_MAKER_NDM`, `POC_ORGANIZATION_CHANGED` |
+| 24 | LinkedIn Outreach Initiated | `YET_TO_BE_MINED` ⚠️ |
+
+⚠️ Two were matched by elimination rather than by name — every other stage
+matched directly and these were the only pair left. Re-running the probe now
+prints `CODE = Display name`, which confirms them outright.
+
+### This is a work queue, not a funnel
+
+The order ranks **who needs attention**, not how far along they are:
+
+- `Closing Loops - Low Value` is 3rd — near the top, because somebody is waiting.
+- `MQL` is 11th, *below* the follow-ups.
+- `Not Interested` is 15th, *above* CNC — a clear no beats never getting through.
+- `Activation` is 12th, *below* MQL, which inverts the standard pipeline order.
+
+None of that describes progress toward a sale, so it drives `sessionRank` — the
+dialling order — and **not** the KPI ladder. Using it as the funnel would make a
+contact moving from MQL to "Closing Loops - Low Value" look like an advance.

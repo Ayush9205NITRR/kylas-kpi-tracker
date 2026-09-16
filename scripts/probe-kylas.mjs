@@ -99,7 +99,10 @@ function pickValues(field) {
     if (!v || depth > 4) return;
     if (Array.isArray(v)) {
       if (v.length && v.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
-        found.push(v.map((x) => x.name || x.displayName));
+        /* Keep both: the code is what the API stores, the display name is what
+           people call it. They differ, and confusing them mismaps stages. */
+        found.push(v.map((x) => x.displayName && x.name && x.displayName !== x.name
+          ? `${x.name} = ${x.displayName}` : (x.name || x.displayName)));
       else v.forEach((x) => walk(x, depth + 1));
       return;
     }

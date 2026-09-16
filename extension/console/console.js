@@ -51,6 +51,32 @@ const LABEL={
   POC_ORGANIZATION_CHANGED:"POC changed org",
 };
 const label=v=>LABEL[v]||v;
+
+/* Ayush's call order, 1 = call first. This is a WORK queue, not a funnel: it
+   ranks by who needs attention, which is why "Closing loops" sits near the top
+   and MQL sits below the follow-ups. Reporting uses the ladder in
+   companyStage(), which is a different question — see docs/kpi-spec.md §13. */
+const STAGE_PRIORITY={
+  SQL_SALES_QUALIFIED_LEAD:1,
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:2,
+  CLOSING_LOOPS_LOW_VALUE:3,
+  RESCHEDULE_PENDING:4,
+  GHOSTED:5,                      /* "Discovery call no-show" */
+  DISCOVERY_CALL_BOOKED:6,
+  FOLLOW_UP_1:7, FOLLOW_UP_2:8, FOLLOW_UP_3:9,
+  FOLLOWUP_CNC:10,
+  MQL_MARKETING_QUALIFIED_LEAD:11,
+  ACTIVATION:12,
+  OFFSITE_DELAYED:13,
+  OFFSITE_DONE_LATE_REACHOUT:14,
+  NOT_INTERESTED:15,
+  CONNECT_LATER:16,
+  CNC_COULD_NOT_CONNECT_3:17, CNC_COULD_NOT_CONNECT_2:18, CNC_COULD_NOT_CONNECT:19,
+  DISQUALIFIED_WRONG_POC:20, INVALID_CONTACT:21,
+  NOT_A_DECISION_MAKER_NDM:22, POC_ORGANIZATION_CHANGED:23,
+  YET_TO_BE_MINED:24,             /* "LinkedIn outreach initiated" */
+};
+const priority=a=>STAGE_PRIORITY[a.stage]??99;
 const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
@@ -313,19 +339,25 @@ function setOutcome(o){
 }
 
 /* ── session order ───────────────────────── */
-/* A placeholder until the real priority rule lands: anyone due today or
-   overdue, oldest promise first; then contacts never called; then the rest,
-   longest untouched first. Replace this one function when the V/W score is
-   available — nothing else depends on the ordering. */
+/* A promise to call on a date beats everything — breaking those is what loses
+   deals. After that it is Ayush's stage order, and within a stage the contact
+   left longest goes first. */
 function sessionRank(a){
-  const t=today();
-  if(a.nextCallDate&&a.nextCallDate<=t)return[0,a.nextCallDate];
-  if(!a.lastCallAt)return[1,a.company||""];
-  return[2,a.lastCallAt];
+  const due=a.nextCallDate&&a.nextCallDate<=today();
+  return [
+    due?0:1,
+    due?a.nextCallDate:"",
+    priority(a),
+    a.lastCallAt||"",              /* never called sorts first, then oldest */
+  ];
 }
 function bySession(x,y){
-  const [ax,av]=sessionRank(x.a),[bx,bv]=sessionRank(y.a);
-  return ax!==bx?ax-bx:String(av).localeCompare(String(bv));
+  const A=sessionRank(x.a),B=sessionRank(y.a);
+  for(let i=0;i<A.length;i++){
+    if(A[i]===B[i])continue;
+    return typeof A[i]==="number"?A[i]-B[i]:String(A[i]).localeCompare(String(B[i]));
+  }
+  return 0;
 }
 
 function renderMode(){
@@ -399,7 +431,8 @@ function renderQueue(){
     b.dataset.stage=a.stage;
     b.innerHTML=`<span class="n">${esc(a.pocName)}${a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
       <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span>${
-        mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>':""}</span>`;
+        mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>'
+        :mode==="session"?`<span class="pri">#${priority(a)}</span>`:""}</span>`;
     b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
   });

@@ -252,3 +252,7 @@
   font-family:var(--m);font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
   background:var(--w-rose);color:var(--c-rose);border-radius:3px;padding:1px 4px;margin-left:auto;
 }
+.qi .pri{
+  font-family:var(--m);font-size:8.5px;color:var(--text3);
+  margin-left:auto;letter-spacing:.03em;
+}
