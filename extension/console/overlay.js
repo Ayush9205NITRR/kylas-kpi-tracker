@@ -15,21 +15,7 @@
        the rolled-up view. The contacts are where the data is entered; the
        company strip is derived from them and moves as calls are saved. */
     if (m.type === "company" && m.kylasId) {
-      const roster = DATA.filter((a) => String(a.companyId) === String(m.kylasId));
-      scope = { id: String(m.kylasId), name: m.label || roster[0]?.company || ("Company " + m.kylasId) };
-      if (roster.length) {
-        const next = roster.find((a) => !a.done) || roster[0];
-        cur = DATA.indexOf(next);
-        isNew = false;
-      } else {
-        /* Nothing held for this company yet — start the first POC on it. */
-        const b = Object.assign(blank(), { company: scope.name, companyId: scope.id });
-        DATA = [b, ...DATA];
-        cur = 0; isNew = true;
-      }
-      mode = "company";
-      filter = "all"; renderFilters();
-      stopTimer(); secs = 0; render(); resetScroll();
+      openCompany(String(m.kylasId), m.label);
       return;
     }
 
@@ -57,6 +43,100 @@
       window.focus();
     }
   });
+
+  /* ── loading a company ───────────────────── */
+  /* Show whatever is already held straight away, then fetch. An associate
+     should never watch a spinner before they can start reading a record. */
+  function showCompany(id, label) {
+    const roster = DATA.filter((a) => String(a.companyId) === String(id));
+    scope = { id, name: label || roster[0]?.company || ("Company " + id) };
+    mode = "company";
+    if (roster.length) {
+      cur = DATA.indexOf(roster.find((a) => !a.done) || roster[0]);
+      isNew = false;
+    } else {
+      DATA = [Object.assign(blank(), { company: scope.name, companyId: scope.id }), ...DATA];
+      cur = 0; isNew = true;
+    }
+    filter = "all"; renderFilters();
+    stopTimer(); secs = 0; render(); resetScroll();
+    return roster.length;
+  }
+
+  async function openCompany(id, label) {
+    const had = showCompany(id, label);
+    const before = DATA[cur];
+    setLink("busy", "Loading from Kylas…");
+
+    let res;
+    try {
+      res = await API.company(id);
+    } catch (e) {
+      /* Offline is survivable: the console keeps whatever it already holds. */
+      setLink("off", `Kylas unreachable — ${e.message}`);
+      if (!had) toast("Could not reach Kylas — showing local data only");
+      return;
+    }
+
+    /* Kylas owns the contact fields; the overlay keeps its own. Merging by id
+       rather than replacing is what stops a refetch wiping notes typed a moment
+       earlier but not yet synced. */
+    const byId = new Map(DATA.map((a, i) => [String(a.kid), i]));
+    for (const fetched of res.contacts) {
+      const at = byId.get(String(fetched.kid));
+      if (at === undefined) DATA.push(fetched);
+      else DATA[at] = API.merge(DATA[at], fetched);
+    }
+
+    if (res.company?.name) scope.name = res.company.name;
+    scope.kylas = res.company || null;
+
+    /* A placeholder made because nothing was held is pointless once real
+       contacts have arrived. */
+    if (!had && res.contacts.length && before && !before.kid && !before.pocName.trim()) {
+      const ph = DATA.indexOf(before);
+      if (ph > -1) DATA.splice(ph, 1);
+    }
+
+    const roster = DATA.filter((a) => String(a.companyId) === String(id));
+    const keep = DATA.indexOf(before);
+    cur = keep > -1 && String(DATA[keep].companyId) === String(id)
+      ? keep
+      : (roster.length ? DATA.indexOf(roster.find((a) => !a.done) || roster[0]) : 0);
+    isNew = !DATA[cur]?.kid;
+
+    persist();
+    setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
+    render(); resetScroll();
+  }
+
+  /* ── proxy link indicator ────────────────── */
+  const linkEl = document.getElementById("linkState");
+  function setLink(kind, title) {
+    if (!linkEl) return;
+    linkEl.className = "link " + kind;
+    linkEl.textContent = kind === "on" ? "Kylas" : kind === "busy" ? "…" : "offline";
+    linkEl.title = title || "";
+  }
+  if (linkEl) linkEl.onclick = async () => {
+    if (API.state.online) return;
+    const next = prompt("Proxy address\n\nRun it with:  KYLAS_KEY=... node scripts/proxy.mjs", API.base);
+    if (next === null) return;
+    setLink("busy", "Checking…");
+    const ok = await API.setBase(next.trim());
+    setLink(ok ? "on" : "off", ok ? `Kylas · ${ok.user?.name || ""}` : API.state.reason);
+  };
+
+  API.onChange((st) => setLink(st.online ? "on" : "off",
+    st.online ? `Kylas · ${st.user?.name || "connected"}`
+              : `Proxy unreachable — ${st.reason}. Click to change the address.`));
+
+  (async () => {
+    await API.configure();
+    const ok = await API.health();
+    setLink(ok ? "on" : "off", ok ? `Kylas · ${ok.user?.name || ""}`
+      : `Proxy unreachable — ${API.state.reason}. Click to change the address.`);
+  })();
 
   /* ── console → host page ─────────────────── */
   document.getElementById("closeBtn").onclick = () => post("close");

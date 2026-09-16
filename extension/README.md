@@ -191,3 +191,58 @@ back to `localStorage`.
 - Fonts load from Google Fonts. Offline they fall back to the system stack;
   bundle them locally if that matters.
 - `duration` is the decorative timer until telephony is wired in.
+
+## Fetching from Kylas
+
+The console holds no API key. It talks to a small proxy that does:
+
+```
+extension  ──http──▶  proxy (your machine)  ──https──▶  Kylas
+                        holds KYLAS_KEY
+```
+
+Start it:
+
+```bash
+KYLAS_KEY=... node scripts/proxy.mjs          # listens on 127.0.0.1:8787
+```
+
+The badge in the console's top bar shows the link: **Kylas** when connected,
+**offline** when not. Click it while offline to point at a different address.
+
+Without the proxy the console still works on whatever it already holds — a dead
+proxy degrades to offline, never to a blank screen.
+
+### Routes
+
+| Route | Returns |
+|---|---|
+| `/health` | whether the key works, and who it belongs to |
+| `/company?id=` | the company plus its contacts, already in console shape |
+| `/queue?owner=` | every contact for an owner, for session mode |
+| `/contact?id=` | one contact, mapped, with the raw record alongside |
+
+The proxy queues every call ~450 ms apart and retries a 429 with a widening
+wait, because Kylas throttles even sequential requests. The handlers are plain
+functions over `fetch`, so the same code deploys to a Cloudflare Worker with
+only the server shell replaced.
+
+### Merging, not replacing
+
+A refetch merges onto what is already held rather than overwriting it. Kylas
+owns the contact fields; the overlay keeps `past`, `current`, `vendorInfo`,
+`serviceOffering`, `modeOfMeeting`, `nextCallDate`, `flagged` and the rest of
+its own. A blank from Kylas never clears a value an associate has typed but not
+yet synced.
+
+### Testing it without a key
+
+```bash
+node scripts/mock-kylas.mjs                                   # fake Kylas on 9900
+KYLAS_BASE=http://127.0.0.1:9900 KYLAS_KEY=x node scripts/proxy.mjs
+node scripts/test-fetch-live.mjs                              # drives the extension
+```
+
+The mock returns the shapes the live probe actually saw, including the awkward
+ones: stages as numeric picklist ids, company as a nested object, a contact with
+no phone or stage at all, and 429s above four requests a second.

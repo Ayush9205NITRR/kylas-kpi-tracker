@@ -366,7 +366,7 @@ function renderQueue(){
     b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
     b.dataset.stage=a.stage;
     b.innerHTML=`<span class="n">${esc(a.pocName)}${a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
-      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span>${
+      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(label(a.stage))}</span>${
         mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>'
         :mode==="session"?`<span class="pri">#${priority(a)}</span>`:""}</span>`;
     b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};

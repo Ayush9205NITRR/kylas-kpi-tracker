@@ -3,23 +3,46 @@
   "name": "Enout BD Call Console",
   "description": "Cold-call data-entry console overlaid on Kylas CRM.",
   "version": "0.1.0",
-  "permissions": ["storage"],
-  "host_permissions": ["https://app.kylas.io/*"],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_title": "Open call console (Alt+Shift+E)" },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*",
+    "https://app.kylas.io/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open call console (Alt+Shift+E)"
+  },
   "content_scripts": [
     {
-      "matches": ["https://app.kylas.io/*"],
-      "js": ["content/inject.js"],
+      "matches": [
+        "https://app.kylas.io/*"
+      ],
+      "js": [
+        "content/inject.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
-    { "resources": ["console/*"], "matches": ["https://app.kylas.io/*"] }
+    {
+      "resources": [
+        "console/*"
+      ],
+      "matches": [
+        "https://app.kylas.io/*"
+      ]
+    }
   ],
   "commands": {
     "toggle-console": {
-      "suggested_key": { "default": "Alt+Shift+E" },
+      "suggested_key": {
+        "default": "Alt+Shift+E"
+      },
       "description": "Open or close the call console"
     }
   }
