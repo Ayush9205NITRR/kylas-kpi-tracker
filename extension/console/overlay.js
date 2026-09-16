@@ -67,13 +67,17 @@
   };
 
   /* Esc closes the overlay, but only when it would otherwise do nothing —
-     console.js already uses Esc to dismiss a sheet or leave a field. */
+     console.js already uses Esc to dismiss a sheet or leave a field.
+
+     Capture phase matters: console.js listens on the bubble phase and removes
+     the sheet there, so checking for one afterwards always finds nothing and
+     the overlay would close along with the sheet. */
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !framed) return;
     if (document.querySelector(".scrim")) return;
     if (document.activeElement && document.activeElement.matches("input,textarea,select")) return;
     post("close");
-  });
+  }, true);
 
   /* ── data sheet ──────────────────────────── */
   const pad = (n) => String(n).padStart(2, "0");

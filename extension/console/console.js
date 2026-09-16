@@ -119,6 +119,17 @@ let lastOutcome=null;
 let collapsed={past:false,current:false};
 const rec=()=>DATA[cur];
 const today=()=>new Date().toISOString().slice(0,10);
+/* Associates paste "linkedin.com/in/x", "www.linkedin.com/in/x" or a full url.
+   Accept all three, reject anything that is not a linkedin address. */
+function liUrl(v){
+  const t=String(v||"").trim();
+  if(!t)return null;
+  const u=/^https?:\/\//i.test(t)?t:"https://"+t.replace(/^\/+/,"");
+  try{
+    const p=new URL(u);
+    return /(^|\.)linkedin\.com$/i.test(p.hostname)?p.href:null;
+  }catch(e){return null;}
+}
 
 /* ── helpers ─────────────────────────────── */
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
@@ -272,7 +283,7 @@ function renderQueue(){
     const li=el("li"),b=el("button","qi");
     b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
     b.dataset.stage=a.stage;
-    b.innerHTML=`<span class="n">${esc(a.pocName)}</span><span class="c">${esc(a.company)}</span>
+    b.innerHTML=`<span class="n">${esc(a.pocName)}${a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
       <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span></span>`;
     b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
@@ -413,6 +424,23 @@ function renderBasic(){
   const a=rec(),W=document.getElementById("formL");W.innerHTML="";
   document.getElementById("phL").textContent=isNew?"new contact":(a.kid?"kylas "+a.kid:"unsaved");
 
+  /* A new contact has no Kylas id yet, so say so plainly rather than letting it
+     look like an existing record that failed to load. */
+  if(isNew){
+    const nb=el("div","newbar");
+    nb.innerHTML=`<span class="tag">New</span>
+      <span class="tx">Not in Kylas yet${scope?` · will be added under <b>${esc(scope.name)}</b>`:""}.
+        Name, phone and owner are required before it can be saved.</span>`;
+    const dc=el("button","dc","Discard");dc.type="button";
+    dc.onclick=()=>{
+      DATA.splice(cur,1);
+      if(!DATA.length)DATA=[blank()];
+      cur=0;isNew=false;render();resetScroll();toast("Discarded");
+    };
+    nb.appendChild(dc);
+    W.appendChild(nb);
+  }
+
   /* Name — salutation rides in the label row */
   const fName=el("div","f");
   const nh=el("div","fhead");
@@ -426,7 +454,18 @@ function renderBasic(){
   fLi.innerHTML=`<label for="f-li">LinkedIn</label>`;
   const liw=el("div","withIcon");
   liw.appendChild(el("span","ic","in"));
-  liw.appendChild(input("f-li",a.linkedin,"linkedin.com/in/…",v=>a.linkedin=v));
+  const liIn=input("f-li",a.linkedin,"linkedin.com/in/…",v=>{a.linkedin=v;syncGo();});
+  liw.appendChild(liIn);
+  const go=el("button","go","↗");
+  go.type="button";go.tabIndex=-1;go.title="Open this profile in a new tab";
+  go.onclick=()=>{const u=liUrl(a.linkedin);if(u)window.open(u,"_blank","noopener");};
+  function syncGo(){
+    const ok=!!liUrl(liIn.value);
+    go.disabled=!ok;
+    go.title=ok?"Open this profile in a new tab":"Enter a LinkedIn URL first";
+  }
+  syncGo();
+  liw.appendChild(go);
   fLi.appendChild(liw);
 
   const grid=el("div","g2");
@@ -573,7 +612,13 @@ function saveNext(){
   const m=missing();
   if(m.length){toast("Missing "+m.join(", "));return;}
   const a=rec(),was=a.done;
+  const wasNew=isNew||!a.kid;
   const duration=secs, outcome=lastOutcome;
+
+  /* No Kylas id yet, so this record has to be created there rather than
+     updated. Mark it and leave it marked until a sync clears it — that flag is
+     what tells the writer POST /v1/contacts instead of PUT /v1/contacts/{id}. */
+  if(wasNew)a.pendingCreate=true;
   a.done=true;stopTimer();secs=0;lastOutcome=null;
   const from=cur;
 
@@ -582,6 +627,7 @@ function saveNext(){
   Store.appendCall({
     kid:a.kid, pocName:a.pocName, company:a.company, owner:a.owner,
     outcome:outcome?outcome.t:null, stageSet:a.stage, duration,
+    createdHere:wasNew,
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
@@ -589,7 +635,8 @@ function saveNext(){
   const nxt=rows.length?rows[0].i:cur;
   cur=nxt;isNew=false;collapsed={past:false,current:false};
   render();resetScroll();setTab("basic");
-  toast(`${a.pocName} saved`,()=>{a.done=was;cur=from;render();});
+  toast(wasNew?`${a.pocName} added`:`${a.pocName} saved`,
+        ()=>{a.done=was;cur=from;render();});
 }
 
 /* ── shortcuts sheet ─────────────────────── */
@@ -614,31 +661,26 @@ function openKb(){
 
 /* ── wiring ──────────────────────────────── */
 document.getElementById("q").addEventListener("input",renderQueue);
-document.getElementById("qToggle").addEventListener("click",e=>{
-  const m=document.getElementById("mid");m.classList.toggle("noq");
-  e.target.classList.toggle("on",!m.classList.contains("noq"));
-});
-document.getElementById("qToggle").classList.add("on");
-document.getElementById("kbBtn").addEventListener("click",openKb);
+const on=(id,ev,fn)=>{const n=document.getElementById(id);if(n)n.addEventListener(ev,fn);};
+on("kbBtn","click",openKb);
 document.querySelectorAll(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
-document.getElementById("newBtn").addEventListener("click",()=>{
+function newContact(){
   const b=blank();
+  /* Inside a company scope the new POC belongs to that company. */
   if(scope){b.company=scope.name;b.companyId=String(scope.id);}
   DATA=[b,...DATA];cur=0;isNew=true;filter="all";renderFilters();render();
-  resetScroll();
+  resetScroll();setTab("basic");
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
-});
+}
+on("newBtn","click",newContact);
+on("qNewBtn","click",newContact);
 document.getElementById("resetBtn").addEventListener("click",()=>{render();toast("Reset");});
 document.getElementById("saveBtn").addEventListener("click",saveNext);
 document.getElementById("flagBtn").addEventListener("click",()=>{
   const a=rec();a.flagged=!a.flagged;validate();renderQueue();
   toast(a.flagged?"Flagged for cleanup":"Flag removed");
 });
-document.getElementById("themeBtn").addEventListener("click",()=>{
-  const r=document.documentElement;
-  const dark=r.getAttribute("data-theme")==="dark"||(!r.getAttribute("data-theme")&&matchMedia("(prefers-color-scheme: dark)").matches);
-  r.setAttribute("data-theme",dark?"light":"dark");
-});
+
 
 document.addEventListener("keydown",e=>{
   const typing=e.target.matches("input,textarea,select");

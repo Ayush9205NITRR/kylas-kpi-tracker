@@ -11,7 +11,8 @@ entered against contacts, and the company view is derived from them.
 3. Open any Kylas page. A **Call console** button appears bottom-right.
 
 `Alt+Shift+E` or the toolbar button toggles it. **Dock** narrows it to a side
-panel (the split collapses to tabs, by design). `Esc` closes.
+panel (the split collapses to tabs, by design). `Esc` closes the overlay, or
+dismisses the shortcut sheet if one is open. `?` lists the shortcuts.
 
 ## How it attaches
 
@@ -65,6 +66,38 @@ These mirror `docs/kpi-spec.md`. The badge next to the company name is the
 ladder rung. Once the proxy exists these come from Airtable instead of being
 recomputed in the browser, and the rules stop being duplicated.
 
+## Adding a new contact
+
+`+ New contact` sits in the top bar and above the roster. Inside a company scope
+the new POC inherits that company, so it is added *under* the company you are
+looking at.
+
+A new record has no Kylas id, so the left pane shows a **New** banner saying so
+rather than letting it look like an existing record that failed to load. Name,
+phone and owner are required before Save will take it; Save then appends it to
+the roster with a **NEW** badge and the company tiles move.
+
+### How it will append to Kylas
+
+The record is marked `pendingCreate`, and its call-log entry carries
+`createdHere: true` with an empty `kid`. That flag is the whole signal the
+writer needs:
+
+| State | Kylas call |
+|---|---|
+| has a `kid` | `PUT /v1/contacts/{kid}` |
+| `pendingCreate`, no `kid` | `POST /v1/contacts` |
+
+On create, the company is passed as the lookup id already in `companyId` — the
+same id that was in the page URL — so the contact lands attached to the right
+company with no matching step. Kylas returns the new contact id, the proxy
+writes it back to `kid` and clears `pendingCreate`, and the record becomes an
+update from then on.
+
+Nothing is sent yet. The flags are recorded now so that when the writer is
+added, no record captured in the meantime is ambiguous about whether it needs
+creating or updating.
+
 ## Files
 
 ```
@@ -73,7 +106,7 @@ background.js          relays the toolbar button and Alt+Shift+E
 content/inject.js      shadow host, iframe, URL watching, handoff
 console/console.html   the console page
 console/console.css    the prototype's styles, unchanged
-console/color.css      colour layer — stage, outcome and KPI hues
+console/color.css      palette — blue primary, violet company, meaning hues
 console/overlay.css    overlay chrome and the data sheet
 console/console.js     the prototype's logic, plus persistence and company view
 console/store.js       chrome.storage / localStorage; swap for the proxy later
