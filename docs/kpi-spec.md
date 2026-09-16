@@ -326,3 +326,25 @@ That last one found a real bug: Airtable creates the other half of a link
 itself, with a name it chooses, and every rollup here travels back down those
 reverse links. They are now declared explicitly and `create-base.mjs` renames
 the generated field to match.
+
+## 12. Seeding the base from captured data
+
+```
+AIRTABLE_PAT=pat... AIRTABLE_BASE=app... node scripts/seed-base.mjs export.json --dry-run
+AIRTABLE_PAT=pat... AIRTABLE_BASE=app... node scripts/seed-base.mjs export.json
+```
+
+`export.json` is the file the console's **Data → Export JSON** button produces.
+
+The seeder is the proxy's write path in miniature: resolve the company, write
+the contact linked to it, append its event rows and calls, and compute the KPI
+rank from the ladder. Writing it first is how the real writer stops being
+guesswork — the mapping, the ordering and the link handling are all exercised
+against a live base before any of it runs behind a network endpoint.
+
+It writes only stored fields. Rollups and formulas are computed by Airtable, and
+sending them would be rejected.
+
+Running it answers the question the schema alone cannot: do the rollups produce
+the right numbers on real captured shapes. If Companies shows sensible Last Call
+At, Right POC Contacts and KPI Stage after a seed, the data model holds.
