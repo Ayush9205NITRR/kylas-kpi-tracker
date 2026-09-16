@@ -34,20 +34,39 @@ mkdirSync(OUT, { recursive: true });
 const results = [];
 let n = 0;
 
-async function api(label, method, path, body, { quiet = false } = {}) {
+/* Kylas rate-limits hard: back-to-back requests start returning 429 within a
+   few calls. Everything goes through one queue with a gap, and a 429 is retried
+   with a widening wait rather than recorded as a failure. Without this the
+   probe reports its own impatience as broken endpoints. */
+const GAP = Number(process.env.KYLAS_GAP || 450);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let chain = Promise.resolve();
+const queue = (fn) => (chain = chain.then(() => sleep(GAP)).then(fn));
+
+async function api(label, method, path, body, opts = {}) {
+  return queue(() => attempt(label, method, path, body, opts));
+}
+
+async function attempt(label, method, path, body, { quiet = false, tries = 4 } = {}) {
   const started = Date.now();
   let res, text;
-  try {
-    res = await fetch(`https://api.kylas.io${path}`, {
-      method,
-      headers: { "api-key": KEY, "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    text = await res.text();
-  } catch (e) {
-    results.push({ label, method, path, status: "network", note: e.message });
-    if (!quiet) console.log(`  ✗ ${label} — ${e.message}`);
-    return null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      res = await fetch(`https://api.kylas.io${path}`, {
+        method,
+        headers: { "api-key": KEY, "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      text = await res.text();
+    } catch (e) {
+      results.push({ label, method, path, status: "network", note: e.message });
+      if (!quiet) console.log(`  ✗ ${label} — ${e.message}`);
+      return null;
+    }
+    if (res.status !== 429) break;
+    const wait = 1200 * Math.pow(2, i);
+    if (!quiet) console.log(`    · ${label} rate-limited, waiting ${wait}ms`);
+    await sleep(wait);
   }
   const ms = Date.now() - started;
   const file = `${OUT}/${String(++n).padStart(2, "0")}-${label.replace(/\W+/g, "-").slice(0, 44)}.json`;
@@ -72,27 +91,54 @@ if (!me) { console.error("\nKey rejected — nothing else can run."); report(); 
 console.log(`     ${me.firstName || ""} ${me.lastName || ""} · user ${me.id}`);
 await api("users/{id}", "GET", `/v1/users/${me.id}`);
 
+/* The response shape for picklists is not documented, so find any nested array
+   of things that look like options instead of guessing at key names. */
+function pickValues(field) {
+  const found = [];
+  (function walk(v, depth) {
+    if (!v || depth > 4) return;
+    if (Array.isArray(v)) {
+      if (v.length && v.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
+        found.push(v.map((x) => x.name || x.displayName));
+      else v.forEach((x) => walk(x, depth + 1));
+      return;
+    }
+    if (typeof v === "object") for (const k of Object.keys(v)) if (k !== "picklist" || true) walk(v[k], depth + 1);
+  })(field, 0);
+  return found.sort((a, b) => b.length - a.length)[0] || null;
+}
+const fieldType = (f) => f.type || f.dataType || f.fieldType || "?";
+const fieldKey = (f) => f.name || f.displayName;
+
 head("2 · contact schema and picklists");
 const cf = await api("entities/contact/fields", "GET",
   "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
-let stageField = null;
+let stageField = null, companyField = null, ownerField = null;
+const picklists = {};
 if (cf) {
   const fs = list(cf);
   console.log(`     ${fs.length} fields, ${fs.filter((f) => f.standard === false).length} custom`);
   for (const f of fs) {
-    const name = f.displayName || f.name;
-    const picks = f.picklist?.picklistValues || f.picklistValues || f.pickLists;
-    if (picks?.length) console.log(`     · ${name}: ${picks.map((p) => p.name || p.displayName).join(" | ")}`);
-    if (/pipeline|stage/i.test(name || "")) stageField = f;
+    const label = f.displayName || f.name;
+    const vals = pickValues(f);
+    if (vals) { picklists[label] = vals; console.log(`     · ${label} [${fieldType(f)}]: ${vals.join(" | ")}`); }
+    if (/pipeline.*stage|stage.*bd/i.test(label || "")) stageField = f;
+    if (/^company$/i.test(fieldKey(f) || "")) companyField = f;
+    if (/^owner/i.test(fieldKey(f) || "")) ownerField = f;
   }
-  console.log(stageField
-    ? `     >> BD stage looks like a Contact field: "${stageField.displayName || stageField.name}"`
-    : `     >> no pipeline/stage field on Contact — it is probably on Lead`);
-  if (stageField?.id) await api("fields/{id} picklist", "GET", `/v1/fields/${stageField.id}`);
+  console.log(`\n     BD stage   : ${stageField ? `"${stageField.displayName}" key=${fieldKey(stageField)} type=${fieldType(stageField)}` : "not on Contact"}`);
+  console.log(`     company    : ${companyField ? `key=${fieldKey(companyField)} type=${fieldType(companyField)}` : "not found"}`);
+  console.log(`     owner      : ${ownerField ? `key=${fieldKey(ownerField)} type=${fieldType(ownerField)}` : "not found"}`);
+  if (stageField?.id) {
+    const sp = await api("fields/{id} picklist", "GET", `/v1/fields/${stageField.id}`);
+    const vals = sp && pickValues(sp);
+    if (vals) { picklists["Pipeline Stage - BD"] = vals; console.log(`     >> STAGES: ${vals.join(" | ")}`); }
+  }
 }
 await api("entities/lead/fields", "GET",
   "/v1/entities/lead/fields?entityType=lead&custom-only=false&page=0&size=200");
-await api("pipelines/search", "GET", "/v1/pipelines/search?sort=updatedAt,desc&page=0&size=20");
+await api("entities/company/fields", "GET",
+  "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200");
 
 head("3 · company");
 let company = null;
@@ -130,11 +176,17 @@ await api("search/contact free text", "POST", "/v1/search/contact?page=0&size=5"
 if (COMPANY) {
   /* No per-field example exists in the Postman collection, so try the shapes a
      jQuery-QueryBuilder backend normally accepts and see which lands. */
+  /* The first run returned 400 "Invalid Type" for type:"integer", so lead with
+     whatever type the schema itself declares for the company field. */
+  const declared = companyField ? fieldType(companyField) : null;
+  const key = companyField ? fieldKey(companyField) : "company";
   const attempts = [
-    ["company equal (number)", rule("company", "equal", Number(COMPANY))],
-    ["company equal (string)", rule("company", "equal", String(COMPANY), "string", "text")],
-    ["company in [number]", rule("company", "in", [Number(COMPANY)])],
-    ["companyId equal", rule("companyId", "equal", Number(COMPANY))],
+    ...(declared ? [[`${key} equal (declared type ${declared})`, rule(key, "equal", Number(COMPANY), declared, "select")]] : []),
+    [`${key} equal (long)`, rule(key, "equal", Number(COMPANY), "long")],
+    [`${key} equal (lookup)`, rule(key, "equal", Number(COMPANY), "lookup")],
+    [`${key} equal (string)`, rule(key, "equal", String(COMPANY), "string", "text")],
+    [`${key} in [number]`, rule(key, "in", [Number(COMPANY)], "long")],
+    ["companyId equal (long)", rule("companyId", "equal", Number(COMPANY), "long")],
   ];
   for (const [label, jsonRule] of attempts) {
     const r = await api(`search/contact ${label}`, "POST", "/v1/search/contact?page=0&size=10",
@@ -148,8 +200,9 @@ if (COMPANY) {
   }
 }
 
+const ownerType = ownerField ? fieldType(ownerField) : "long";
 await api("search/contact by owner", "POST", "/v1/search/contact?sort=updatedAt,desc&page=0&size=5",
-  { fields: CFIELDS, jsonRule: rule("ownerId", "equal", me.id) });
+  { fields: CFIELDS, jsonRule: rule(ownerField ? fieldKey(ownerField) : "ownerId", "equal", me.id, ownerType) });
 await api("search/contact sorted+paged", "POST", "/v1/search/contact?sort=updatedAt,desc&page=1&size=100",
   { fields: CFIELDS, jsonRule: freeText("") });
 
@@ -166,12 +219,17 @@ if (CONTACT) {
 } else console.log("     skipped — pass --contact <id>");
 
 head("6 · rate limit");
+/* Deliberately unthrottled, and last, so the recovery wait cannot affect any
+   other result. Earlier this ran mid-probe and every call after it failed. */
 const burst = Date.now();
-const codes = await Promise.all(Array.from({ length: 8 }, (_, i) =>
-  api(`burst ${i + 1}`, "GET", "/v1/users/me", null, { quiet: true }).then(() => results.at(-1).status)));
+const codes = await Promise.all(Array.from({ length: 8 }, () =>
+  fetch("https://api.kylas.io/v1/users/me", { headers: { "api-key": KEY } }).then((r) => r.status)));
 const limited = codes.filter((c) => c === 429).length;
-console.log(`     8 parallel requests in ${Date.now() - burst}ms · ${limited} rate-limited (429)`);
-console.log(limited ? `     >> there IS a per-second limit; the writer must queue` : `     >> no limit hit at this rate`);
+console.log(`     8 parallel requests in ${Date.now() - burst}ms · ${limited} returned 429`);
+console.log(limited
+  ? `     >> a burst of 8 is too fast. The writer must queue — ${GAP}ms between calls worked here.`
+  : `     >> no limit hit at this rate`);
+await sleep(3000);   // let the bucket refill before anything else runs
 
 /* ════════════════ WRITES — only with --write ════════════════════════ */
 if (WRITE) {
@@ -239,4 +297,22 @@ function report() {
   console.log(`\n  ${results.length - fails.length}/${results.length} calls succeeded`);
   console.log(`  raw responses in ./${OUT}/ — send me that folder and I will wire the fetch`);
   if (!WRITE) console.log(`  nothing was created, updated or deleted`);
+
+  const md = [
+    `# Kylas probe — ${new Date().toISOString()}`, "",
+    `User ${me?.id} · ${me?.firstName || ""} ${me?.lastName || ""}`,
+    COMPANY ? `Company ${COMPANY}: ${company?.name || "?"}` : "", "",
+    "## Picklists", "",
+    ...Object.entries(picklists).map(([k, v]) => `- **${k}**: ${v.join(" | ")}`),
+    "", "## Key fields", "",
+    `- BD stage: ${stageField ? `\`${fieldKey(stageField)}\` (${fieldType(stageField)}) on Contact` : "not on Contact"}`,
+    `- company: ${companyField ? `\`${fieldKey(companyField)}\` (${fieldType(companyField)})` : "?"}`,
+    `- owner: ${ownerField ? `\`${fieldKey(ownerField)}\` (${fieldType(ownerField)})` : "?"}`,
+    company ? `- company custom fields: ${Object.keys(company.customFieldValues || {}).join(", ") || "none"}` : "",
+    "", "## Endpoints", "",
+    "| ok | status | method | call | note |", "|---|---|---|---|---|",
+    ...results.map((r) => `| ${r.ok ? "✅" : "❌"} | ${r.status} | ${r.method} | ${r.label} | ${(r.note || "").replace(/\|/g, "/")} |`),
+  ].filter((x) => x !== "").join("\n");
+  writeFileSync(`${OUT}/SUMMARY.md`, md);
+  console.log(`\n  >> paste ./${OUT}/SUMMARY.md here — that is all I need`);
 }

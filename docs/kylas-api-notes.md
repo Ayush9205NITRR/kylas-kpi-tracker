@@ -278,3 +278,63 @@ Opt-in, and best pointed at a test contact. Three writes:
   Fully reversible, and confirms `CONTACT_UPDATED` is available.
 
 Every raw response lands in `./kylas-probe/`.
+
+---
+
+## 9. First live run — 2026-09-16
+
+Read-only probe against the real account (user 74725). What it settled:
+
+### Resolved
+
+**BD stage lives on Contact, not Lead.** `Pipeline Stage - BD` is a Contact
+field. This closes the blocking question in §2 — the console stays
+contact-shaped, the field map in `HANDOFF.md` §4 holds, and outcome buttons are
+a plain field write. No move to `/v1/leads/*`.
+
+**Contacts do not come back with the company.** `GET /v1/companies/{id}`
+returned no inline contact array, so opening a company page is two calls: the
+company, then a contact search. Fallback 1 in §7 is out.
+
+**The company already carries BD custom fields.** On company `1776620`:
+
+```
+cfBatch · cfPipelineStageBd · cfSourceOfData · cfAccountHealthBd
+cfLastCalledAtDate · cfWebsite
+```
+
+This matters. `cfPipelineStageBd` and `cfLastCalledAtDate` are company-level
+versions of two things the Airtable model computes as rollups, and
+`cfAccountHealthBd` may be the account score that queue ordering needs. They
+already exist, so they cost nothing to use.
+
+> **OPEN — who owns the company rollup.** If Kylas is already maintaining
+> `cfPipelineStageBd` and `cfLastCalledAtDate` on the company, the overlay
+> should write them rather than compute a parallel answer in Airtable that
+> disagrees. If nothing maintains them today, Airtable stays the source and the
+> overlay pushes the result into these fields. Either is fine; both at once is
+> not. Ask Ayush which.
+
+### Rate limiting is tight
+
+Six of eight parallel requests returned 429, and **sequential calls a few
+hundred milliseconds apart were also throttled** — the run lost nine endpoints
+to it. Consequences:
+
+- The probe now queues every call with a gap and retries a 429 with a widening
+  wait, instead of reporting its own impatience as a broken endpoint.
+- The burst test moved to the very end; running it mid-probe poisoned everything
+  after it.
+- **The production writer must queue.** This is the constraint that decides the
+  proxy's shape: saves go into an outbox and drain at a fixed rate, which is
+  what `architecture.md` §4 already assumes.
+
+### Still unknown
+
+- `POST /v1/search/contact` filtered by company returned `400 Invalid Type` for
+  `type: "integer"`. The field and operator are evidently right; the type is
+  not. The probe now reads the declared type from the contact schema and tries
+  that first, plus `long`, `lookup`, `string` and `in`.
+- `GET /v1/pipelines/search` returned 400. Probably lead-only, and not needed
+  now that BD stage is a Contact field.
+- Everything from `contacts/{id}` downward was lost to 429 and has not been seen.
