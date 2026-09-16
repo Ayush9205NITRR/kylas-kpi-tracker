@@ -6,9 +6,9 @@ entered against contacts, and the company view is derived from them.
 
 ## Install
 
-1. `chrome://extensions` → enable **Developer mode**
-2. **Load unpacked** → select this `extension/` folder
-3. Open any Kylas page. A **Call console** button appears bottom-right.
+See **[INSTALL.md](../INSTALL.md)** in the repo root for the step-by-step,
+including connecting it to Kylas. In short: `chrome://extensions` → Developer
+mode → Load unpacked → select this `extension/` folder.
 
 `Alt+Shift+E` or the toolbar button toggles it. **Dock** narrows it to a side
 panel (the split collapses to tabs, by design). `Esc` closes the overlay, or

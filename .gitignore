@@ -1,3 +1,4 @@
 kylas-probe/
 node_modules/
 *.local.json
+.env.local
