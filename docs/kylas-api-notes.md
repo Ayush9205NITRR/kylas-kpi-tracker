@@ -234,13 +234,47 @@ Two fallbacks if that shape is rejected:
 2. Free-text search on the company name, filtered client-side by company id.
    Works, but wasteful and fuzzy.
 
-`scripts/probe-kylas.mjs` settles this, along with the real picklists and the
-owner filter, in a single read-only run:
+## 8. Probing every endpoint at once
+
+`scripts/probe-kylas.mjs` exercises all nineteen calls this project needs and
+prints a pass/fail table.
 
 ```
-KYLAS_KEY=... node scripts/probe-kylas.mjs --company 1776620
+KYLAS_KEY=... node scripts/probe-kylas.mjs --company 1776620 --contact 112936
 ```
 
-It only performs GETs and searches — nothing is created, updated or deleted —
-and writes every raw response to `./kylas-probe/` so the details can be read
-afterwards.
+Reads only, by default — GETs and searches, nothing created, updated or deleted.
+Covered:
+
+| Area | Calls | Settles |
+|---|---|---|
+| Identity | `users/me`, `users/{id}` | owner ids for the picker |
+| Schema | `entities/contact/fields`, `entities/lead/fields`, `fields/{id}`, `pipelines/search` | the real picklists, and whether BD stage lives on Contact or Lead |
+| Company | `companies/{id}`, `search/company` | whether contacts come back inline, and what `Priority (BD)` holds |
+| Contact search | free text, four company-filter shapes, owner filter, sort + page | which filters the query builder actually accepts |
+| Contact | `contacts/{id}`, `call-logs/{id}` | the full record shape and existing call history |
+| Limits | eight parallel requests | whether the writer has to queue |
+
+Because no per-field search example exists in the collection, the probe **tries
+four shapes** for "contacts at this company" and reports the first that works,
+rather than assuming one.
+
+### Writes
+
+```
+KYLAS_KEY=... node scripts/probe-kylas.mjs --company 1776620 --contact 112936 --write
+```
+
+Opt-in, and best pointed at a test contact. Three writes:
+
+- **Remarks round trip** — reads the contact, saves the original to
+  `kylas-probe/contact-*-original.json`, writes the marker block, then restores
+  the original. This is the mechanism that gets overlay data into Kylas without
+  paying for new fields, so it is worth proving.
+- **Call log** — created, and **cannot be deleted through the API**; there is no
+  delete endpoint. The probe says so before writing, and the test log must be
+  removed by hand in Kylas.
+- **Webhook** — created inactive against an unreachable URL, then deleted.
+  Fully reversible, and confirms `CONTACT_UPDATED` is available.
+
+Every raw response lands in `./kylas-probe/`.
