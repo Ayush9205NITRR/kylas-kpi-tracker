@@ -190,3 +190,57 @@ different numbers for the same company. Which is authoritative?
 **OPEN — overlap.** If that overlay is being replaced, the console's company
 strip is its successor and should carry the same tiles. If both are staying,
 they need to agree on definitions.
+
+---
+
+## 7. The fetch design — company page in, contacts out
+
+The overlay opens on a company page, so the company is the **anchor**, but the
+data it needs is the **contacts**. Two calls:
+
+```
+url: /sales/companies/details/1776620
+       │
+       ├─ GET  /v1/companies/1776620          → name, owner, Priority (BD), custom fields
+       └─ POST /v1/search/contact             → that company's contacts, in full
+```
+
+Everything in the console's company strip — total POCs, connected, right POC,
+discovery, status of reachout — is computed from the contacts that come back.
+Nothing is read from the company record except its own attributes. That matches
+the data model: company numbers are rollups of contacts, never entered directly.
+
+Session mode is the same call with a different filter: contacts owned by the
+current user, due first, paginated.
+
+### The one unverified piece
+
+Every search example in the Postman collection uses `multi_field`, which is
+free-text across the record. There is **no example of a per-field rule**, so the
+operator vocabulary for `company equals 1776620` is inferred, not confirmed:
+
+```json
+{ "condition": "AND", "valid": true,
+  "rules": [ { "id": "company", "field": "company", "type": "integer",
+               "input": "select", "operator": "equal", "value": 1776620 } ] }
+```
+
+Two fallbacks if that shape is rejected:
+
+1. `GET /v1/companies/{id}` may already return its contacts inline — the Kylas
+   UI shows a Contacts table on the company page, so the detail response may
+   carry them. That would be **one call and no query syntax at all**, and is the
+   better answer if it holds.
+2. Free-text search on the company name, filtered client-side by company id.
+   Works, but wasteful and fuzzy.
+
+`scripts/probe-kylas.mjs` settles this, along with the real picklists and the
+owner filter, in a single read-only run:
+
+```
+KYLAS_KEY=... node scripts/probe-kylas.mjs --company 1776620
+```
+
+It only performs GETs and searches — nothing is created, updated or deleted —
+and writes every raw response to `./kylas-probe/` so the details can be read
+afterwards.
