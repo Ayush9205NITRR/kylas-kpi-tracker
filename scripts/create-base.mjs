@@ -69,7 +69,9 @@ const fakeResponse = (path, body) => {
 let dryTables = [];
 
 async function main() {
-  console.log(DRY ? `Dry run — nothing will be sent.\n` : `Creating "${BASE_NAME}" in ${WORKSPACE}…`);
+  console.log(DRY ? `Dry run — nothing will be sent.\n`
+    : EXISTING ? `Building into ${EXISTING}…`
+    : `Creating "${BASE_NAME}" in ${WORKSPACE}…`);
 
   /* ── 1. base and tables ─────────────────────────────────────────── */
   let base;
@@ -100,7 +102,10 @@ async function main() {
   dryTables = base.tables.map((t) => ({ ...t, fields: [...(t.fields || [])] }));
 
   /* ── 2. follow-up fields, in declared order ─────────────────────── */
+  console.log(`\n  adding ${FOLLOWUPS.length} linked, rollup and formula fields…`);
+  let n = 0;
   for (const { table, field, reverse } of FOLLOWUPS) {
+    n++;
     const payload = { name: field.name, type: field.type };
     if (field.description) payload.description = field.description;
 
@@ -131,6 +136,7 @@ async function main() {
       if (DRY) pushDry(target, { id: `fldDRYREV${fieldNamesCount++}`, name: reverse, type: "multipleRecordLinks" });
     }
     if (DRY) pushDry(tableId[table], { id: made.id, name: field.name, type: field.type });
+    if (!DRY) console.log(`  ${String(n).padStart(2)}/${FOLLOWUPS.length}  ${table}.${field.name}`);
   }
 
   console.log(DRY
