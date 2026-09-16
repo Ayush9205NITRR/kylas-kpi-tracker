@@ -144,4 +144,81 @@
   }
 
   document.getElementById("dataBtn").onclick = openData;
+
+  /* ── dashboard ───────────────────────────── */
+  /* Days that are over are read from the freeze; today is counted live and
+     labelled, so nobody mistakes a day in progress for a finished one. */
+  const RANGES = [
+    { k: "day", label: "Today", days: 1 },
+    { k: "week", label: "This week", days: 7 },
+    { k: "month", label: "This month", days: 30 },
+  ];
+  let range = "day";
+
+  const pct = (n, d) => (d ? Math.round((n / d) * 100) + "%" : "—");
+  const dayName = (iso) =>
+    new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
+  async function openDash() {
+    await Store.freezeDays();
+    const s = el("div", "scrim");
+    s.innerHTML = `<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="gh">
+      <div class="h"><h3 id="gh">Dashboard</h3><button class="gbtn" id="gx" type="button">Close</button></div>
+      <div class="b"><div class="rtabs" id="rtabs"></div><div id="gbody"></div></div></div>`;
+    document.body.appendChild(s);
+    s.onclick = (e) => { if (e.target === s) s.remove(); };
+    document.getElementById("gx").onclick = () => s.remove();
+
+    const tabs = document.getElementById("rtabs");
+    RANGES.forEach((r) => {
+      const b = el("button", "rt", r.label);
+      b.type = "button";
+      b.setAttribute("aria-pressed", range === r.k ? "true" : "false");
+      b.onclick = () => { range = r.k; paint(); };
+      tabs.appendChild(b);
+    });
+
+    async function paint() {
+      tabs.querySelectorAll(".rt").forEach((b, i) =>
+        b.setAttribute("aria-pressed", RANGES[i].k === range ? "true" : "false"));
+
+      const r = RANGES.find((x) => x.k === range);
+      const rows = await Store.series(r.days);
+      const sum = (f) => rows.reduce((n, d) => n + (d[f] || 0), 0);
+      const dials = sum("dials"), connects = sum("connects");
+      const liveDays = rows.filter((d) => d.live && d.dials).length;
+      const mm = Math.floor(sum("talkSeconds") / 60);
+
+      const tile = (n, l, sub, k) =>
+        `<div class="gt ${k}"><b>${n}</b><span>${l}</span>${sub ? `<i>${sub}</i>` : ""}</div>`;
+
+      document.getElementById("gbody").innerHTML = `
+        <div class="ggrid">
+          ${tile(dials, "dials", null, "g1")}
+          ${tile(connects, "connected", pct(connects, dials) + " connect rate", "g2")}
+          ${tile(sum("rightPOC"), "right POC", pct(sum("rightPOC"), connects) + " of connects", "g3")}
+          ${tile(sum("discovery"), "discovery", pct(sum("discovery"), connects) + " of connects", "g4")}
+          ${tile(sum("companies"), "companies touched", null, "g5")}
+          ${tile(mm + "m", "talk time", "measured dials only", "g6")}
+        </div>
+        ${rows.length > 1 ? `<div class="gdays">${rows.map((d) => {
+          const w = dials ? Math.round((d.dials / Math.max(...rows.map((x) => x.dials || 0), 1)) * 100) : 0;
+          return `<div class="gd${d.live ? " live" : ""}">
+            <span class="dn">${dayName(d.date)}</span>
+            <span class="db"><i style="width:${w}%"></i></span>
+            <span class="dv">${d.dials}</span>
+            <span class="dl">${d.live ? "live" : "frozen"}</span>
+          </div>`;
+        }).join("")}</div>` : ""}
+        <p class="dnote">${liveDays
+          ? "Today is still running, so its numbers can still move. Every earlier day is frozen — counted once when the day ended and never recounted, so a report reads the same tomorrow as it does now."
+          : "All days shown are frozen."}</p>`;
+    }
+    paint();
+  }
+
+  document.getElementById("dashBtn").onclick = openDash;
+
+  /* Catch up on any days that ended while the console was closed. */
+  Store.freezeDays();
 })();

@@ -133,6 +133,39 @@ async function main() {
         ],
       },
       {
+        name: "Daily Snapshot",
+        description: "One frozen row per day per owner. Written once after the day ends, never updated. This is what day/week/month reporting reads — not a live recount.",
+        fields: [
+          { name: "Key", type: "singleLineText", description: "date + owner, e.g. 2026-09-16 · Ayush Tiwari. Prevents a day being frozen twice." },
+          { name: "Date", type: "date", options: { dateFormat: { name: "iso" } } },
+          { name: "Owner", type: "singleLineText" },
+
+          // ── activity: these ADD UP across a week or month ──
+          { name: "Dials", type: "number", options: { precision: 0 } },
+          { name: "Connects", type: "number", options: { precision: 0 } },
+          { name: "New Right POC", type: "number", options: { precision: 0 },
+            description: "Contacts that reached this rung ON this day. A movement, not a total." },
+          { name: "New Discovery", type: "number", options: { precision: 0 } },
+          { name: "New SQL Booked", type: "number", options: { precision: 0 } },
+          { name: "New SQL Accepted", type: "number", options: { precision: 0 } },
+          { name: "Companies Touched", type: "number", options: { precision: 0 } },
+          { name: "Contacts Added", type: "number", options: { precision: 0 } },
+          { name: "Talk Seconds", type: "number", options: { precision: 0 },
+            description: "Measured dials only. Estimated durations are excluded so this stays a real number." },
+
+          // ── standing totals: these DO NOT add up; take the latest day ──
+          { name: "Companies At Right POC", type: "number", options: { precision: 0 },
+            description: "Where things STOOD at end of day. Summing these across a week double-counts — take the last day's value." },
+          { name: "Companies At Discovery", type: "number", options: { precision: 0 } },
+          { name: "Companies At SQL Booked", type: "number", options: { precision: 0 } },
+          { name: "Companies At SQL Accepted", type: "number", options: { precision: 0 } },
+          { name: "Companies Reached To Date", type: "number", options: { precision: 0 } },
+
+          { name: "Connect Rate", type: "percent", options: { precision: 0 } },
+          { name: "Frozen At", type: "dateTime", options: dateTime },
+        ],
+      },
+      {
         name: "Call Log",
         description: "Append-only. One row per save in the console, whether or not the stage moved.",
         fields: [
