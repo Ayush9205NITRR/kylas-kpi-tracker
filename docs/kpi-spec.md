@@ -293,10 +293,26 @@ through, leaving a half-built base to delete by hand. So the schema is data
 (`scripts/schema.mjs`) with two checks around it:
 
 ```
-node scripts/validate-schema.mjs     # no network: types, options, ordering, formula refs
-node scripts/test-validator.mjs      # checks the validator itself catches 10 planted faults
+node scripts/validate-schema.mjs         # no network: types, options, ordering, formula refs
+node scripts/test-validator.mjs          # checks the validator catches 10 planted faults
 node scripts/create-base.mjs --dry-run   # prints every request without sending
 ```
+
+Then build it, either into a base you already made or into a fresh one:
+
+```
+AIRTABLE_PAT=pat... AIRTABLE_BASE=appEwJu0bleHh9b8t node scripts/create-base.mjs
+AIRTABLE_PAT=pat... AIRTABLE_WORKSPACE=wsp...        node scripts/create-base.mjs
+```
+
+Into an existing base it checks the six table names are free and refuses if any
+is taken, rather than half-merging into what is there. It cannot delete the
+default `Table 1` — the Meta API has no delete-table call — so remove that by
+hand afterwards.
+
+The PAT needs `schema.bases:write` and `schema.bases:read`, and must be scoped
+to that base. Create one at airtable.com/create/tokens. Keep it out of chat and
+out of the repo — pass it as an environment variable as above.
 
 The validator replays creation in order and fails on: a primary field of a type
 Airtable will not accept, missing required options, duplicate or

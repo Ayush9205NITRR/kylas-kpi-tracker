@@ -5,20 +5,28 @@
  *   AIRTABLE_PAT=pat... AIRTABLE_WORKSPACE=wsp... \
  *     node scripts/create-base.mjs --dry-run               # print what would be sent
  *   AIRTABLE_PAT=pat... AIRTABLE_WORKSPACE=wsp... \
- *     node scripts/create-base.mjs                         # do it
+ *     node scripts/create-base.mjs                         # into a NEW base
+ *   AIRTABLE_PAT=pat... AIRTABLE_BASE=app... \
+ *     node scripts/create-base.mjs                         # into a base you already made
  *
  * PAT scopes: schema.bases:write, schema.bases:read.
- * Not idempotent — it builds a new base each run. Delete and re-run to redo.
+ * Not idempotent. Into an existing base it refuses if any table name is already
+ * taken, rather than half-merging into what is there.
  */
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const PAT = process.env.AIRTABLE_PAT;
 const WORKSPACE = process.env.AIRTABLE_WORKSPACE;
+const EXISTING = process.env.AIRTABLE_BASE;          // app... to build into
 const BASE_NAME = process.env.AIRTABLE_BASE_NAME || "Enout BD KPI";
 
-if (!DRY && (!PAT || !WORKSPACE)) {
-  console.error("Set AIRTABLE_PAT and AIRTABLE_WORKSPACE (wsp...), or pass --dry-run.");
+if (!DRY && !PAT) {
+  console.error("Set AIRTABLE_PAT, plus either AIRTABLE_BASE (app...) or AIRTABLE_WORKSPACE (wsp...). Or pass --dry-run.");
+  process.exit(1);
+}
+if (!DRY && !EXISTING && !WORKSPACE) {
+  console.error("Set AIRTABLE_BASE (app...) to build into a base you already made, or AIRTABLE_WORKSPACE (wsp...) to create a new one.");
   process.exit(1);
 }
 
@@ -46,6 +54,11 @@ async function call(method, path, body) {
 /* Enough shape for a dry run to walk the same code path as a real one. */
 let fakeId = 0;
 const fakeResponse = (path, body) => {
+  if (path.endsWith("/tables") && body) {
+    const t = TABLES.find((x) => x.name === body.name) || { fields: [] };
+    return { id: `tblDRY${String(fakeId++).padStart(11, "0")}`, name: body.name,
+             fields: t.fields.map((f) => ({ id: `fldDRY${String(fakeId++).padStart(11, "0")}`, ...f })) };
+  }
   if (path === "/bases")
     return { id: "appDRYRUN0000000", tables: TABLES.map((t) => ({
       id: `tblDRY${String(fakeId++).padStart(11, "0")}`, name: t.name,
@@ -59,10 +72,32 @@ async function main() {
   console.log(DRY ? `Dry run — nothing will be sent.\n` : `Creating "${BASE_NAME}" in ${WORKSPACE}…`);
 
   /* ── 1. base and tables ─────────────────────────────────────────── */
-  const base = await call("POST", "/bases", { workspaceId: WORKSPACE, name: BASE_NAME, tables: TABLES });
+  let base;
+  if (EXISTING) {
+    /* Building into a base that already exists. Check the names are free
+       first: a half-merge is far worse to unpick than a refusal. */
+    const current = DRY ? { tables: [] } : await call("GET", `/bases/${EXISTING}/tables`);
+    const taken = current.tables.filter((t) => TABLES.some((x) => x.name.toLowerCase() === t.name.toLowerCase()));
+    if (taken.length) {
+      throw new Error(`These tables already exist in ${EXISTING}: ${taken.map((t) => t.name).join(", ")}\n` +
+        `Rename or delete them first — this script will not merge into them.`);
+    }
+    base = { id: EXISTING, tables: [] };
+    for (const t of TABLES) {
+      const made = await call("POST", `/bases/${EXISTING}/tables`, t);
+      base.tables.push(made);
+      if (!DRY) console.log(`  + ${t.name}`);
+    }
+    if (!DRY && current.tables.length) {
+      console.log(`\n  note: ${current.tables.length} table(s) were already here (${current.tables.map((t) => t.name).join(", ")}).`);
+      console.log(`  The API cannot delete tables — remove them in Airtable if they are the default empty one.`);
+    }
+  } else {
+    base = await call("POST", "/bases", { workspaceId: WORKSPACE, name: BASE_NAME, tables: TABLES });
+    if (!DRY) console.log(`  base ${base.id}`);
+  }
   const tableId = Object.fromEntries(base.tables.map((t) => [t.name, t.id]));
-  dryTables = base.tables.map((t) => ({ ...t, fields: [...t.fields] }));
-  if (!DRY) console.log(`  base ${base.id}`);
+  dryTables = base.tables.map((t) => ({ ...t, fields: [...(t.fields || [])] }));
 
   /* ── 2. follow-up fields, in declared order ─────────────────────── */
   for (const { table, field, reverse } of FOLLOWUPS) {
