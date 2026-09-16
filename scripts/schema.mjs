@@ -35,19 +35,53 @@ export const EXIT_STAGES = [
   "DISQUALIFIED_WRONG_POC", "NOT_A_DECISION_MAKER_NDM", "POC_ORGANIZATION_CHANGED",
 ];
 
-/* Renamed to match the vocabulary already on the Kylas company overlay
-   (TOTAL POCS / CONNECTED / MQL). Ordering is proposed — see kpi-spec.md §13. */
+/* The funnel is the stage order Ayush gave, lowest rung first. Rank 24 is the
+   top. Kept as one list so call order and funnel order cannot drift apart:
+   STAGE_ORDER below is the same list read the other way. */
 export const LADDER = [
-  [0, "0 · Not reached"], [1, "1 · Reached"], [2, "2 · Connected"],
-  [3, "3 · Right POC"], [4, "4 · MQL"], [5, "5 · Discovery Booked"],
-  [6, "6 · Discovery Done"], [7, "7 · Activation"], [8, "8 · SQL"],
+  [1, "01 · LinkedIn Outreach Initiated"],
+  [2, "02 · POC Changed"], [3, "03 · NDM"], [4, "04 · Invalid"], [5, "05 · Disqualified"],
+  [6, "06 · CNC 1"], [7, "07 · CNC 2"], [8, "08 · CNC 3"],
+  [9, "09 · Connect Later"], [10, "10 · Not Interested"],
+  [11, "11 · Offsite Done (Late Reachout)"], [12, "12 · Offsite Delayed"],
+  [13, "13 · Activation"], [14, "14 · MQL"], [15, "15 · Followup - CNC"],
+  [16, "16 · Follow-up 3"], [17, "17 · Follow-up 2"], [18, "18 · Follow-up 1"],
+  [19, "19 · Discovery Call Booked"], [20, "20 · Discovery Call No-Show"],
+  [21, "21 · Reschedule Pending"], [22, "22 · Closing Loops - Low Value"],
+  [23, "23 · Discovery Call Done"], [24, "24 · SQL"],
 ];
+
+/* code -> rung. 24 is furthest along. The call-order ranking Ayush gave is this
+   list reversed, so `callOrder = 25 - rung`. */
+export const STAGE_ORDER = {
+  YET_TO_BE_MINED: 1,
+  POC_ORGANIZATION_CHANGED: 2, NOT_A_DECISION_MAKER_NDM: 3,
+  INVALID_CONTACT: 4, DISQUALIFIED_WRONG_POC: 5,
+  CNC_COULD_NOT_CONNECT: 6, CNC_COULD_NOT_CONNECT_2: 7, CNC_COULD_NOT_CONNECT_3: 8,
+  CONNECT_LATER: 9, NOT_INTERESTED: 10,
+  OFFSITE_DONE_LATE_REACHOUT: 11, OFFSITE_DELAYED: 12,
+  ACTIVATION: 13, MQL_MARKETING_QUALIFIED_LEAD: 14, FOLLOWUP_CNC: 15,
+  FOLLOW_UP_3: 16, FOLLOW_UP_2: 17, FOLLOW_UP_1: 18,
+  DISCOVERY_CALL_BOOKED: 19, GHOSTED: 20,
+  RESCHEDULE_PENDING: 21, CLOSING_LOOPS_LOW_VALUE: 22,
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS: 23, SQL_SALES_QUALIFIED_LEAD: 24,
+};
+
+/* Kylas picklist value ids, needed to WRITE a stage — the API takes the id, not
+   the code. Confirmed so far; the rest come from the next probe run. */
+export const STAGE_VALUE_ID = {
+  YET_TO_BE_MINED: 2862826,   // "LinkedIn Outreach Initiated"
+  GHOSTED: 2909382,           // "Discovery Call No-Show"
+};
 
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(
     (acc, [n, label]) => `IF({${rankField}} = ${n}, "${label}", ${acc})`,
     `"${LADDER[0][1]}"`,
   );
+
+/* 24 rungs now, so the packed score needs room for the rank above the epoch
+   seconds. 1e10 still clears it: 24 * 1e10 is far inside a double. */
 
 const SIGNALS = ["Event Type", "Budget", "Timeline", "Pax"];
 const anyFilled = SIGNALS.map((f) => `{${f}} != ""`).join(", ");

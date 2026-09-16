@@ -99,10 +99,11 @@ function pickValues(field) {
     if (!v || depth > 4) return;
     if (Array.isArray(v)) {
       if (v.length && v.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
-        /* Keep both: the code is what the API stores, the display name is what
-           people call it. They differ, and confusing them mismaps stages. */
-        found.push(v.map((x) => x.displayName && x.name && x.displayName !== x.name
-          ? `${x.name} = ${x.displayName}` : (x.name || x.displayName)));
+        /* Keep all three. The code is what the API stores, the display name is
+           what people call it, and the id is what a WRITE has to send — a stage
+           is set by id, not by code. */
+        found.push(v.map((x) => ({ id: x.id, code: x.name || x.displayName,
+                                   label: x.displayName || x.name })));
       else v.forEach((x) => walk(x, depth + 1));
       return;
     }
@@ -124,7 +125,10 @@ if (cf) {
   for (const f of fs) {
     const label = f.displayName || f.name;
     const vals = pickValues(f);
-    if (vals) { picklists[label] = vals; console.log(`     · ${label} [${fieldType(f)}]: ${vals.join(" | ")}`); }
+    if (vals) {
+      picklists[label] = vals;
+      console.log(`     · ${label} [${fieldType(f)}]: ${vals.map((v) => v.code).join(" | ")}`);
+    }
     if (/pipeline.*stage|stage.*bd/i.test(label || "")) stageField = f;
     if (/^company$/i.test(fieldKey(f) || "")) companyField = f;
     if (/^owner/i.test(fieldKey(f) || "")) ownerField = f;
@@ -135,7 +139,14 @@ if (cf) {
   if (stageField?.id) {
     const sp = await api("fields/{id} picklist", "GET", `/v1/fields/${stageField.id}`);
     const vals = sp && pickValues(sp);
-    if (vals) { picklists["Pipeline Stage - BD"] = vals; console.log(`     >> STAGES: ${vals.join(" | ")}`); }
+    if (vals) {
+      picklists["Pipeline Stage - BD"] = vals;
+      console.log(`     >> ${vals.length} stages, with the ids a write needs:`);
+      vals.forEach((v) => console.log(`        ${String(v.id).padEnd(9)} ${v.code.padEnd(44)} ${v.label !== v.code ? v.label : ""}`));
+      writeFileSync(`${OUT}/stage-ids.json`,
+        JSON.stringify(Object.fromEntries(vals.map((v) => [v.code, { id: v.id, label: v.label }])), null, 2));
+      console.log(`     >> written to ${OUT}/stage-ids.json`);
+    }
   }
 }
 await api("entities/lead/fields", "GET",
@@ -310,7 +321,8 @@ function report() {
     `User ${me?.id} · ${me?.firstName || ""} ${me?.lastName || ""}`,
     COMPANY ? `Company ${COMPANY}: ${company?.name || "?"}` : "", "",
     "## Picklists", "",
-    ...Object.entries(picklists).map(([k, v]) => `- **${k}**: ${v.join(" | ")}`),
+    ...Object.entries(picklists).map(([k, v]) =>
+      `- **${k}**: ${v.map((x) => `${x.code}${x.label !== x.code ? ` (${x.label})` : ""} = ${x.id}`).join(" · ")}`),
     "", "## Key fields", "",
     `- BD stage: ${stageField ? `\`${fieldKey(stageField)}\` (${fieldType(stageField)}) on Contact` : "not on Contact"}`,
     `- company: ${companyField ? `\`${fieldKey(companyField)}\` (${fieldType(companyField)})` : "?"}`,

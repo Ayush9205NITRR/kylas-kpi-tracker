@@ -106,15 +106,21 @@ one is accounted for with nothing left over.
 matched directly and these were the only pair left. Re-running the probe now
 prints `CODE = Display name`, which confirms them outright.
 
-### This is a work queue, not a funnel
+### This is also the funnel
 
-The order ranks **who needs attention**, not how far along they are:
+Read the other way up, the same list is the funnel: `rung = 25 - callOrder`.
+A contact further along is a contact worth calling sooner, so one ordering
+serves both. The identity is asserted in the code, so they cannot drift.
 
-- `Closing Loops - Low Value` is 3rd — near the top, because somebody is waiting.
-- `MQL` is 11th, *below* the follow-ups.
-- `Not Interested` is 15th, *above* CNC — a clear no beats never getting through.
-- `Activation` is 12th, *below* MQL, which inverts the standard pipeline order.
+Confirmed picklist value ids, which a write needs (Kylas sets a picklist by id,
+not by code):
 
-None of that describes progress toward a sale, so it drives `sessionRank` — the
+| Code | Display | Id |
+|---|---|---|
+| `YET_TO_BE_MINED` | LinkedIn Outreach Initiated | `2862826` |
+| `GHOSTED` | Discovery Call No-Show | `2909382` |
+
+The order turned out to be the funnel itself, not a separate priority list — see
+docs/kpi-spec.md §13. `callOrder = 25 - rung`, asserted in the code.
 dialling order — and **not** the KPI ladder. Using it as the funnel would make a
 contact moving from MQL to "Closing Loops - Low Value" look like an advance.

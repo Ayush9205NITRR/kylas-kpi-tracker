@@ -52,10 +52,10 @@ const LABEL={
 };
 const label=v=>LABEL[v]||v;
 
-/* Ayush's call order, 1 = call first. This is a WORK queue, not a funnel: it
-   ranks by who needs attention, which is why "Closing loops" sits near the top
-   and MQL sits below the follow-ups. Reporting uses the ladder in
-   companyStage(), which is a different question — see docs/kpi-spec.md §13. */
+/* One ordering, read two ways. STAGE_PRIORITY is the call order Ayush gave —
+   1 = call first. The funnel is the same list reversed, so a contact further
+   along is also higher priority: rung = 25 - priority. Keeping them as one list
+   means they can never drift apart. */
 const STAGE_PRIORITY={
   SQL_SALES_QUALIFIED_LEAD:1,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:2,
@@ -77,6 +77,9 @@ const STAGE_PRIORITY={
   YET_TO_BE_MINED:24,             /* "LinkedIn outreach initiated" */
 };
 const priority=a=>STAGE_PRIORITY[a.stage]??99;
+/* 24 = SQL, the top of the funnel. 0 means the stage is unknown. */
+const rung=a=>STAGE_PRIORITY[a.stage]?25-STAGE_PRIORITY[a.stage]:0;
+const rungLabel=r=>label(Object.keys(STAGE_PRIORITY).find(k=>25-STAGE_PRIORITY[k]===r))||"Not reached";
 const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
@@ -462,19 +465,12 @@ function isComplete(a){
 function connected(a){
   return !!a.stage&&!NOT_CONNECTED.includes(a.stage);
 }
-/* Highest rung any contact at this company has reached — see kpi-spec.md §13.
-   Ordering follows the Kylas stage list; confirm before it drives reporting. */
+/* The company sits at the best rung any of its contacts has reached. Highest
+   ever, not current — a contact slipping back never drags the company down. */
 function companyStage(list){
-  const at=s=>list.some(a=>a.stage===s);
-  if(at("SQL_SALES_QUALIFIED_LEAD"))return{r:8,t:"SQL",k:"sql"};
-  if(at("ACTIVATION"))return{r:7,t:"Activation",k:"sql"};
-  if(at("DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS")||list.some(isComplete))return{r:6,t:"Discovery Done",k:"disc"};
-  if(at("DISCOVERY_CALL_BOOKED"))return{r:5,t:"Discovery Booked",k:"booked"};
-  if(at("MQL_MARKETING_QUALIFIED_LEAD"))return{r:4,t:"MQL",k:"rpoc"};
-  if(list.some(hasSignal))return{r:3,t:"Right POC",k:"rpoc"};
-  if(list.some(connected))return{r:2,t:"Connected",k:"picked"};
-  if(list.some(a=>a.lastCallAt))return{r:1,t:"Reached",k:"reach"};
-  return{r:0,t:"Not reached",k:"none"};
+  const r=list.reduce((m,a)=>Math.max(m,rung(a)),0);
+  const k=r>=23?"sql":r>=19?"disc":r>=13?"booked":r>=6?"rpoc":r>0?"picked":"none";
+  return{r,t:r?rungLabel(r):"Not reached",k};
 }
 function renderCompany(){
   const w=document.getElementById("cohead");

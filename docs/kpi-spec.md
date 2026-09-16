@@ -351,31 +351,61 @@ At, Right POC Contacts and KPI Stage after a seed, the data model holds.
 
 ---
 
-## 13. The ladder, against the real stages — NEEDS CONFIRMING
+## 13. The funnel — settled
 
-The 24 real `cfPipelineStageBd` values are now known
-(`docs/kylas-picklists.md`). Mapped onto the ladder, and renamed to the
-vocabulary already on your Kylas company overlay (`TOTAL POCS / CONNECTED / MQL`):
+The funnel is the stage order Ayush gave, read bottom to top. Rung 24 is
+furthest along, rung 1 is untouched.
 
-| Rank | Rung | Reached when |
+| Rung | Stage | Rung | Stage |
+|---|---|---|---|
+| 24 | SQL | 12 | Offsite Delayed |
+| 23 | Discovery Call Done | 11 | Offsite Done (Late Reachout) |
+| 22 | Closing Loops - Low Value | 10 | Not Interested |
+| 21 | Reschedule Pending | 9 | Connect Later |
+| 20 | Discovery Call No-Show | 8 | CNC 3 |
+| 19 | Discovery Call Booked | 7 | CNC 2 |
+| 18 | Follow-up 1 | 6 | CNC 1 |
+| 17 | Follow-up 2 | 5 | Disqualified |
+| 16 | Follow-up 3 | 4 | Invalid |
+| 15 | Followup - CNC | 3 | NDM |
+| 14 | MQL | 2 | POC Changed |
+| 13 | Activation | 1 | LinkedIn Outreach Initiated |
+
+**Call order is the same list reversed**: `callOrder = 25 - rung`. That identity
+is asserted in the code, so the two orderings cannot drift apart. It also makes
+sense — a contact further along is a contact worth calling sooner.
+
+I argued earlier that these had to be two different orderings, on the grounds
+that Closing Loops sitting third looked like a priority signal rather than
+progress. That was wrong: a contact at Closing Loops has been qualified and
+talked to, and one at Discovery Call No-Show has booked a call. Both genuinely
+are further along the funnel than MQL.
+
+`KPI Rank` is still monotonic — the MAX rule in §8 stands, so a contact that
+slips backwards keeps the rung it earned.
+
+Standing alongside the rung, unchanged:
+
+- `Is Right POC` — any event signal field filled (§5)
+- `Has Complete Row` — a full event row (§6)
+
+These stay separate because they come from the overlay's own data, not from the
+stage, and answer a different question: whether real qualification detail was
+captured, regardless of where the stage sits.
+
+### Writing a stage
+
+Kylas sets a picklist **by value id**, not by code. Two confirmed:
+
+| Code | Display | Id |
 |---|---|---|
-| 0 | Not reached | `YET_TO_BE_MINED`, no call logged |
-| 1 | Reached | any call logged |
-| 2 | Connected | stage is not `YET_TO_BE_MINED` and not a CNC |
-| 3 | Right POC | any event signal field filled |
-| 4 | MQL | `MQL_MARKETING_QUALIFIED_LEAD` |
-| 5 | Discovery Booked | `DISCOVERY_CALL_BOOKED` |
-| 6 | Discovery Done | `DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS`, or a complete event row |
-| 7 | Activation | `ACTIVATION` |
-| 8 | SQL | `SQL_SALES_QUALIFIED_LEAD` |
+| `YET_TO_BE_MINED` | LinkedIn Outreach Initiated | `2862826` |
+| `GHOSTED` | Discovery Call No-Show | `2909382` |
 
-Taken from the standard `Pipeline Stage` field, whose six values run
-`YET_TO_BE_MINED → CNC → MQL → ACTIVATION → SQL`. So Activation sits **above**
-MQL and **below** SQL. Where Discovery Booked and Discovery Done belong relative
-to Activation is the guess — they may well sit above it.
+The probe now prints all 24 ids and writes `kylas-probe/stage-ids.json`, which
+drops straight into `STAGE_VALUE_ID` in `scripts/schema.mjs`.
 
-> **OPEN.** Confirm the order, and specifically whether Activation comes before
-> or after the discovery calls. Everything else in the model is settled.
+---
 
 ### Stages that are not rungs
 
