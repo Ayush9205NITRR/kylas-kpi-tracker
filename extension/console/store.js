@@ -5,7 +5,8 @@
    drafts, and an append-only call log. Swapping in the network layer means
    replacing the bodies here, not touching console.js. */
 (function (global) {
-  const KEY = { contacts: "enout.contacts", drafts: "enout.drafts", log: "enout.calllog" };
+  const KEY = { contacts: "enout.contacts", drafts: "enout.drafts", log: "enout.calllog",
+                settings: "enout.settings" };
   const hasChrome = typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
 
   const get = (k) =>
@@ -61,10 +62,18 @@
     },
     async loadLog() { return (await get(KEY.log)) || []; },
 
+    async getSetting(k) { return ((await get(KEY.settings)) || {})[k]; },
+    async setSetting(k, v) {
+      const o = (await get(KEY.settings)) || {};
+      o[k] = v;
+      return set(KEY.settings, o);
+    },
+
     async exportAll() {
       return {
         exportedAt: new Date().toISOString(),
         contacts: (await get(KEY.contacts)) || [],
+        settings: (await get(KEY.settings)) || {},
         drafts: (await get(KEY.drafts)) || {},
         callLog: (await get(KEY.log)) || [],
       };

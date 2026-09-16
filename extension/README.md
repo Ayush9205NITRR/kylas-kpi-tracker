@@ -66,6 +66,47 @@ These mirror `docs/kpi-spec.md`. The badge next to the company name is the
 ladder rung. Once the proxy exists these come from Airtable instead of being
 recomputed in the browser, and the rules stop being duplicated.
 
+## Keyboard
+
+| Key | Does |
+|---|---|
+| `1` `2` `3` `4` | Set the call outcome |
+| `E` `B` `T` `X` | Jump to event type / budget / timeline / pax on the current row |
+| `R` | Jump to the event remarks |
+| `C` | Dial the primary number |
+| `Enter` | Save and advance |
+| `J` `K` | Next / previous in the roster |
+| `F` | Flag for cleanup |
+| `/` | Search · `?` shortcuts · `Esc` close |
+
+`E`/`B`/`T`/`X`/`R` create the current event row if there is not one yet, so a
+connected call never needs the mouse. They are inert while a field has focus.
+
+## Call duration
+
+Three states, kept distinct because a fabricated number would poison the
+average-duration metric:
+
+| `durationSource` | Means |
+|---|---|
+| `dialed` | Dialled from the console — a real measured duration. |
+| `estimated` | Dialled elsewhere. Timed from the outcome keypress to the save, and shown in the call bar with a `~` so nobody mistakes it for measured. |
+| `none` | Saved with no outcome set. `duration` is `null`, never `0`. |
+
+Wire up telephony (handoff §8.5) and everything becomes `dialed`.
+
+## Data hygiene
+
+- **Duplicates.** Phone numbers are compared on their last 10 digits, so `+91`,
+  a trunk `0` and spacing cannot hide a match. A hit shows under the phone field
+  with a jump to the existing record. It warns rather than blocks — a shared
+  switchboard number is legitimate.
+- **Pasted numbers** are normalised on blur: a leading `+91`, a bare `91` or a
+  trunk `0` is stripped so it does not double against the country code beside it
+  and leave the `tel:` link dialling nothing.
+- **Owner** defaults to whoever last picked one and is remembered across
+  sessions, so a new contact does not ask again.
+
 ## Adding a new contact
 
 `+ New contact` sits in the top bar and above the roster. Inside a company scope

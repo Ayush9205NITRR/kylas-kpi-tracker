@@ -22,10 +22,10 @@
       .fab{
         position:fixed;right:18px;bottom:18px;z-index:2147483646;
         display:flex;align-items:center;gap:7px;
-        background:#0B6E6E;color:#fff;border:0;border-radius:22px;
+        background:#2B6CF6;color:#fff;border:0;border-radius:22px;
         padding:10px 16px;cursor:pointer;
         font:600 13px/1 "IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
-        box-shadow:0 3px 14px rgba(6,16,18,.28);
+        box-shadow:0 4px 14px rgba(43,108,246,.32);
       }
       .fab:hover{filter:brightness(1.08)}
       .fab kbd{
@@ -34,13 +34,13 @@
       }
       .scrim{
         position:fixed;inset:0;z-index:2147483646;
-        background:rgba(6,16,18,.42);opacity:0;pointer-events:none;
+        background:rgba(31,42,55,.38);opacity:0;pointer-events:none;
         transition:opacity .16s ease;
       }
       .wrap{
         position:fixed;z-index:2147483647;
-        background:#F2F5F4;border-radius:10px;overflow:hidden;
-        box-shadow:0 18px 60px rgba(6,16,18,.34);
+        background:#F7F9FC;border-radius:10px;overflow:hidden;
+        box-shadow:0 18px 60px rgba(31,42,55,.28);
         opacity:0;pointer-events:none;transform:translateY(6px);
         transition:opacity .16s ease,transform .16s ease;
       }
@@ -50,9 +50,9 @@
       :host(.open) .scrim{opacity:1;pointer-events:auto}
       :host(.open) .fab{display:none}
       :host(.dock) .scrim{opacity:0;pointer-events:none}
-      iframe{width:100%;height:100%;border:0;display:block;background:#F2F5F4}
+      iframe{width:100%;height:100%;border:0;display:block;background:#F7F9FC}
       @media (prefers-color-scheme:dark){
-        .wrap,iframe{background:#0A1315}
+        .wrap,iframe{background:#0F141C}
       }
     </style>
     <button class="fab" part="fab" title="Open the call console">

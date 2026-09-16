@@ -208,3 +208,30 @@
   letter-spacing:.05em;text-transform:uppercase;vertical-align:1px;
   background:var(--accentSoft);color:var(--accent);border-radius:3px;padding:1px 4px;
 }
+
+/* Current sits above Past, so key the section accents on the row kind rather
+   than document order. */
+#formR .sec[data-kind="current"]{border-top-color:var(--c-blue)}
+#formR .sec[data-kind="past"]{border-top-color:var(--c-violet)}
+#formR .sec[data-kind="vendor"]{border-top-color:var(--c-amber)}
+
+/* a field that blocked the save */
+.in.bad,select.in.bad{border-color:var(--stop);background:var(--stopSoft)}
+.in.bad:focus{border-color:var(--stop)}
+
+/* estimated rather than measured call time */
+.dial .tm.est{color:var(--c-amber);border-color:var(--flagLine);background:var(--flagSoft)}
+
+/* this number is already on another record */
+.dupe{
+  display:flex;align-items:center;gap:8px;margin-top:6px;
+  border:1px solid var(--flagLine);background:var(--flagSoft);border-radius:6px;
+  padding:5px 9px;font-size:11.5px;color:var(--flag);
+}
+.dupe span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dupe b{font-weight:700}
+.dupe button{
+  flex:none;background:transparent;border:1px solid var(--flagLine);border-radius:5px;
+  padding:2px 8px;font-size:11px;font-weight:600;color:var(--flag);
+}
+.dupe button:hover{background:var(--flag);color:var(--panel);border-color:var(--flag)}

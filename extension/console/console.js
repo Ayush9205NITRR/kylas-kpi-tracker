@@ -29,7 +29,7 @@ const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linked
   emails:[{type:"Office",value:"",primary:true}],
   phones:[{type:"Mobile",cc:"+91",value:"",primary:true}],
   stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",
-  source:"",remarks:"",offsiteTimeline:"",owner:"",
+  source:"",remarks:"",offsiteTimeline:"",owner:ME,
   past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
   done:false,flagged:false});
 
@@ -114,11 +114,14 @@ let DATA=[
 
 let cur=0, isNew=false, filter="todo", target=100;
 let scope=null;   /* {id,name} when opened from a Kylas company page */
+let ME="";        /* the associate using the console; learned, then remembered */
 let timer=null, secs=0, ringing=false;
 let lastOutcome=null;
+let tmode="idle";   /* idle | dial | est */
 let collapsed={past:false,current:false};
 const rec=()=>DATA[cur];
 const today=()=>new Date().toISOString().slice(0,10);
+const dateIn=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
 /* Associates paste "linkedin.com/in/x", "www.linkedin.com/in/x" or a full url.
    Accept all three, reject anything that is not a linkedin address. */
 function liUrl(v){
@@ -200,10 +203,11 @@ function renderCallbar(){
   const d=el("div","dial");
   const link=el("a",null,`<span>☏</span>${esc(num||"no number")}`);
   link.href=num?"tel:"+num.replace(/\s/g,""):"#";
-  link.onclick=e=>{if(!num){e.preventDefault();return;}startTimer();};
+  link.onclick=e=>{if(!num){e.preventDefault();return;}startTimer("dial");};
   d.appendChild(link);
-  const tm=el("span","tm"+(ringing?" run":""),fmtSecs(secs));
+  const tm=el("span","tm",fmtSecs(secs));
   tm.id="tm";d.appendChild(tm);
+  setTimeout(paintTimer,0);
   C.appendChild(d);
 
   const ocs=el("div","ocs");
@@ -221,19 +225,33 @@ function renderCallbar(){
   C.appendChild(nb);
 }
 const fmtSecs=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
-function startTimer(){
+function startTimer(mode){
   if(timer)clearInterval(timer);
-  secs=0;ringing=true;
-  timer=setInterval(()=>{secs++;const t=document.getElementById("tm");if(t)t.textContent=fmtSecs(secs);},1000);
-  const t=document.getElementById("tm");if(t)t.className="tm run";
+  secs=0;ringing=true;tmode=mode||"dial";
+  timer=setInterval(tick,1000);
+  paintTimer();
 }
-function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;const t=document.getElementById("tm");if(t)t.className="tm";}
+function tick(){secs++;paintTimer();}
+function paintTimer(){
+  const t=document.getElementById("tm");
+  if(!t)return;
+  t.textContent=(tmode==="est"?"~":"")+fmtSecs(secs);
+  t.className="tm"+(ringing?(tmode==="est"?" est":" run"):"");
+  t.title=tmode==="est"
+    ?"Estimated from when you logged the outcome — dial from the console for a real duration."
+    :"Call duration";
+}
+function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;paintTimer();}
 function setOutcome(o){
   const a=rec();
   lastOutcome=o;
   a.stage=o.stage;
-  if(!a.nextCallDate&&o.stage==="Could Not Connect"){a.nextCallDate=today();}
-  stopTimer();
+  /* Dialled from the console: that timer is the truth, so freeze it. Otherwise
+     start estimating from here rather than logging a zero-second call. */
+  if(tmode==="dial"&&ringing){stopTimer();}
+  else if(tmode!=="est"){startTimer("est");}
+  /* They did not pick up today; calling again today is not the plan. */
+  if(!a.nextCallDate&&o.stage==="Could Not Connect"){a.nextCallDate=dateIn(1);}
   render();
   resetScroll();
   if(o.stage!=="Could Not Connect"&&matchMedia("(max-width:900px)").matches)setTab("more");
@@ -374,13 +392,21 @@ function contactField(a,kind){
   head.innerHTML=`<label>${isPh?'Phone number <span class="req">*</span>':"Email"}</label>`;
   f.appendChild(head);
 
-  const valueInput=e=>{
+  const valueInput=(e,idx)=>{
     const i=el("input","in vl2");
+    if(idx===0)i.id=isPh?"f-ph":"f-em";
     i.type=isPh?"tel":"email";i.value=e.value;
     i.placeholder=isPh?"9876543210":"name@company.com";
     i.setAttribute("aria-label",isPh?"Phone number":"Email address");
     if(isPh)i.inputMode="tel";
     i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();};
+    /* A pasted number often carries its own country code or a trunk 0. Left as
+       is it doubles up against the code beside it and the tel: link dials
+       nothing. Tidy on blur rather than mid-keystroke. */
+    if(isPh)i.onblur=v=>{
+      const t=localPart(v.target.value,e.cc);
+      if(t!==v.target.value){v.target.value=t;e.value=t;renderCallbar();validate();persist();}
+    };
     return i;
   };
   const ccInput=e=>{
@@ -393,7 +419,7 @@ function contactField(a,kind){
     head.appendChild(mini(TYPES,e.type,v=>e.type=v));
     const row=el("div","entry");
     if(isPh)row.appendChild(ccInput(e));
-    row.appendChild(valueInput(e));
+    row.appendChild(valueInput(e,0));
     f.appendChild(row);
   }else{
     list.forEach((e,i)=>{
@@ -406,7 +432,7 @@ function contactField(a,kind){
       ty.setAttribute("aria-label","Type");ty.onchange=v=>e.type=v.target.value;
       row.appendChild(ty);
       if(isPh)row.appendChild(ccInput(e));
-      row.appendChild(valueInput(e));
+      row.appendChild(valueInput(e,i));
       const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove");
       d.onclick=()=>{list.splice(i,1);if(list.length&&!list.some(x=>x.primary))list[0].primary=true;render();};
       row.appendChild(d);
@@ -480,7 +506,12 @@ function renderBasic(){
   /* Source */
   const srcRow=el("div","g2");
   srcRow.appendChild(field("Source of data","f-src",false,select("f-src",SOURCES,a.source,v=>a.source=v)));
-  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
+  /* Picking an owner teaches the console who is sitting here, so the next new
+     contact does not ask again. */
+  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>{
+    a.owner=v;
+    if(v){ME=v;Store.setSetting("me",v);}
+  })));
   W.appendChild(group("Source",[srcRow]));
 
   /* Stage & follow-up */
@@ -494,7 +525,7 @@ function renderBasic(){
   const qc=el("div","qchips");
   [["Tomorrow",1],["+3 days",3],["Next week",7]].forEach(([l,n])=>{
     const b=el("button","qc",l);b.type="button";b.tabIndex=-1;
-    b.onclick=()=>{const dt=new Date();dt.setDate(dt.getDate()+n);a.nextCallDate=dt.toISOString().slice(0,10);render();};
+    b.onclick=()=>{a.nextCallDate=dateIn(n);render();};
     qc.appendChild(b);
   });
   ncd.appendChild(qc);
@@ -524,11 +555,12 @@ function renderRight(){
     F.appendChild(s);return;
   }
 
-  F.appendChild(eventSection("past","Past","One row per event they have already run."));
   F.appendChild(eventSection("current","Current","One row per event on the table now."));
+  F.appendChild(eventSection("past","Past","One row per event they have already run."));
 
   /* vendor & offering */
   const s4=el("section","sec");
+  s4.dataset.kind="vendor";
   s4.innerHTML=`<div class="sh"><h2>Vendor &amp; offering</h2></div>`;
   const b4=el("div","sb");
   b4.appendChild(field("Vendor info","f-vi",false,select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
@@ -546,8 +578,8 @@ function renderRight(){
     b4.appendChild(field("Mode of meeting","f-mm",false,select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
   }else{
     const lk=el("div","f");
-    lk.innerHTML=`<div class="locked"><b>hidden</b><span>Mode of meeting opens only at stages
-      ${MEETING_STAGES.map(s=>esc(s)).join(", ")}. Send your real stage list and I will swap these in.</span></div>`;
+    lk.innerHTML=`<div class="locked"><b>hidden</b><span>Mode of meeting opens once a
+      meeting is booked or held.</span></div>`;
     b4.appendChild(lk);
   }
   s4.appendChild(b4);F.appendChild(s4);
@@ -556,6 +588,7 @@ function renderRight(){
 function eventSection(key,title,sub){
   const a=rec();
   const s=el("section","sec"+(collapsed[key]?" collapsed":""));
+  s.dataset.kind=key;
   const h=el("div","sh");
   h.innerHTML=`<h2>${esc(title)}</h2><p>${esc(sub)}</p>`;
   const tg=el("button","shbtn",collapsed[key]?`▸ ${a[key].length} row${a[key].length===1?"":"s"}`:"▾ Hide");
@@ -594,39 +627,97 @@ function eventSection(key,title,sub){
   s.appendChild(b);return s;
 }
 
+/* ── duplicates ──────────────────────────── */
+/* Three associates working shared lists will re-add the same person. Compare on
+   the last 10 digits so +91/0 prefixes and spacing do not hide a match. */
+const digits=v=>String(v||"").replace(/\D/g,"").slice(-10);
+/* Strip a leading +cc, bare cc or trunk 0 so the field holds the local number
+   the country code beside it expects. */
+function localPart(v,cc){
+  let t=String(v||"").trim().replace(/[^\d+]/g,"");
+  const code=String(cc||"").replace(/\D/g,"");
+  if(t.startsWith("+"))t=t.slice(1);
+  if(code&&t.length>code.length&&t.startsWith(code))t=t.slice(code.length);
+  t=t.replace(/^0+/,"");
+  return t||String(v||"").trim();
+}
+function findDupe(a){
+  const mine=new Set(a.phones.map(p=>digits(p.value)).filter(d=>d.length===10));
+  if(!mine.size)return null;
+  for(let i=0;i<DATA.length;i++){
+    if(i===cur)continue;
+    const b=DATA[i];
+    if(b.phones.some(p=>mine.has(digits(p.value))))return{i,b};
+  }
+  return null;
+}
+function renderDupe(){
+  const host=document.getElementById("f-ph")?.closest(".f");
+  document.querySelectorAll(".dupe").forEach(n=>n.remove());
+  if(!host)return;
+  const d=findDupe(rec());
+  if(!d)return;
+  const w=el("div","dupe");
+  w.innerHTML=`<span>Already on <b>${esc(d.b.pocName||"another contact")}</b>${d.b.company?" · "+esc(d.b.company):""}</span>`;
+  const go=el("button",null,"Open");go.type="button";
+  go.onclick=()=>{cur=d.i;isNew=false;errFor=-1;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+  w.appendChild(go);
+  host.appendChild(w);
+}
+
 /* ── validate + actions ──────────────────── */
 function missing(){
   const a=rec(),m=[];
-  if(!a.pocName.trim())m.push("POC name");
-  if(!a.phones.some(p=>p.value.trim()))m.push("phone");
-  if(!a.owner)m.push("owner");
+  if(!a.pocName.trim())m.push({label:"POC name",id:"f-poc"});
+  if(!a.phones.some(p=>p.value.trim()))m.push({label:"phone",id:"f-ph"});
+  if(!a.owner)m.push({label:"owner",id:"f-ow"});
   return m;
 }
+/* Red fields only after a save has actually been blocked — marking them while
+   the name is still half-typed is just nagging. Tied to the record the save was
+   attempted on, so moving to another contact clears it with no bookkeeping. */
+let errFor=-1;
 function validate(){
   const m=missing(),msg=document.getElementById("msg"),a=rec();
   document.getElementById("flagBtn").className="flagbtn"+(a.flagged?" on":"");
-  if(m.length){msg.textContent="Needs "+m.join(", ");msg.className="msg bad";}
+
+  document.querySelectorAll(".in.bad").forEach(n=>n.classList.remove("bad"));
+  if(errFor===cur)m.forEach(x=>document.getElementById(x.id)?.classList.add("bad"));
+
+  if(m.length){msg.textContent="Needs "+m.map(x=>x.label).join(", ");msg.className="msg bad";}
   else{msg.textContent=a.done?"Logged today.":"Ready to save.";msg.className="msg";}
+  renderDupe();
 }
 function saveNext(){
   const m=missing();
-  if(m.length){toast("Missing "+m.join(", "));return;}
+  if(m.length){
+    errFor=cur;
+    validate();
+    const first=document.getElementById(m[0].id);
+    if(first){
+      if(matchMedia("(max-width:900px)").matches)setTab("basic");
+      first.focus();first.scrollIntoView({block:"center",behavior:"smooth"});
+    }
+    toast("Missing "+m.map(x=>x.label).join(", "));
+    return;
+  }
+  errFor=-1;
   const a=rec(),was=a.done;
   const wasNew=isNew||!a.kid;
-  const duration=secs, outcome=lastOutcome;
+  const duration=secs||null, durationSource=secs?(tmode==="est"?"estimated":"dialed"):"none", outcome=lastOutcome;
 
   /* No Kylas id yet, so this record has to be created there rather than
      updated. Mark it and leave it marked until a sync clears it — that flag is
      what tells the writer POST /v1/contacts instead of PUT /v1/contacts/{id}. */
   if(wasNew)a.pendingCreate=true;
-  a.done=true;stopTimer();secs=0;lastOutcome=null;
+  a.done=true;stopTimer();secs=0;tmode="idle";lastOutcome=null;
   const from=cur;
 
   /* One entry per save, whether or not the stage moved — see kpi-spec.md §2. */
   a.lastCallAt=new Date().toISOString();
   Store.appendCall({
     kid:a.kid, pocName:a.pocName, company:a.company, owner:a.owner,
-    outcome:outcome?outcome.t:null, stageSet:a.stage, duration,
+    outcome:outcome?outcome.t:null, stageSet:a.stage, duration, durationSource,
     createdHere:wasNew,
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
@@ -639,6 +730,22 @@ function saveNext(){
         ()=>{a.done=was;cur=from;render();});
 }
 
+/* Budget, timeline and pax are the only fields a connected call really needs,
+   and they sit in the other pane. Jump straight into them, creating the current
+   event row first if there is not one yet. */
+const EVENT_KEYS={e:"et",b:"bd",t:"tl",x:"px",r:"rm"};
+function focusEvent(k){
+  const a=rec();
+  if(a.stage==="Could Not Connect")return;       /* right pane is collapsed */
+  if(!a.current.length){a.current.push(emptyRow());collapsed.current=false;render();}
+  if(matchMedia("(max-width:900px)").matches)setTab("more");
+  const n=document.getElementById(`current-${EVENT_KEYS[k]}-0`);
+  if(!n)return;
+  n.focus();
+  n.scrollIntoView({block:"center"});
+  if(n.setSelectionRange&&n.value)n.setSelectionRange(n.value.length,n.value.length);
+}
+
 /* ── shortcuts sheet ─────────────────────── */
 function openKb(){
   const s=el("div","scrim");
@@ -648,6 +755,8 @@ function openKb(){
       <div class="krow"><span class="kk"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span><span>Set the call outcome</span></div>
       <div class="krow"><span class="kk"><kbd>Enter</kbd></span><span>Save and jump to the next contact</span></div>
       <div class="krow"><span class="kk"><kbd>C</kbd></span><span>Dial the primary number</span></div>
+      <div class="krow"><span class="kk"><kbd>E</kbd> <kbd>B</kbd> <kbd>T</kbd> <kbd>X</kbd></span><span>Jump to event type, budget, timeline, pax</span></div>
+      <div class="krow"><span class="kk"><kbd>R</kbd></span><span>Jump to the event remarks</span></div>
       <div class="krow"><span class="kk"><kbd>F</kbd></span><span>Flag this record for end-of-day cleanup</span></div>
       <div class="krow"><span class="kk"><kbd>J</kbd> <kbd>K</kbd></span><span>Next / previous contact in the queue</span></div>
       <div class="krow"><span class="kk"><kbd>/</kbd></span><span>Jump to search</span></div>
@@ -694,8 +803,9 @@ document.addEventListener("keydown",e=>{
   if(o){e.preventDefault();setOutcome(o);return;}
   const k=e.key.toLowerCase();
   if(k==="c"){const a=rec(),p=a.phones.find(x=>x.primary)||a.phones[0];
-    if(p&&p.value){startTimer();window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
+    if(p&&p.value){startTimer("dial");window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
   if(k==="f"){document.getElementById("flagBtn").click();return;}
+  if(EVENT_KEYS[k]){e.preventDefault();focusEvent(k);return;}
   if(k==="j"||k==="k"){
     const rows=visible();const at=rows.findIndex(r=>r.i===cur);
     const nx=k==="j"?at+1:at-1;
@@ -721,6 +831,7 @@ document.addEventListener("input",()=>{
 document.addEventListener("change",persist,true);
 
 async function boot(){
+  ME=(await Store.getSetting("me"))||"";
   const saved=await Store.loadContacts();
   if(saved&&saved.length)DATA=saved;
   const log=await Store.loadLog();
