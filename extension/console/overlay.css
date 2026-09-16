@@ -1,0 +1,29 @@
+/* Chrome that only exists when the console runs as an overlay inside Kylas.
+   console.css stays a faithful copy of the prototype; everything here is additive. */
+
+.bar .cnt{
+  font-family:var(--m);font-size:10.5px;background:var(--panel3);color:var(--text2);
+  border-radius:9px;padding:0 5px;margin-left:3px;
+}
+
+/* Hidden until overlay.js proves we are framed. */
+.ovOnly{display:none}
+body.framed .ovOnly{display:inline-block}
+#closeBtn:hover{border-color:var(--stop);color:var(--stop)}
+
+/* data sheet */
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+.dcard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.dcard b{display:block;font-family:var(--m);font-size:19px;font-weight:500;line-height:1.2}
+.dcard span{font-size:11px;color:var(--text2)}
+.dactions{display:flex;gap:6px;flex-wrap:wrap}
+.dnote{font-size:11.5px;color:var(--text2);margin:10px 0 0;line-height:1.5}
+.dlog{
+  margin-top:12px;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  font-family:var(--m);font-size:11px;max-height:190px;overflow-y:auto;
+}
+.dlog div{display:flex;gap:9px;padding:5px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.dlog div:last-child{border-bottom:0}
+.dlog .w{flex:1;overflow:hidden;text-overflow:ellipsis;font-family:var(--f)}
+.dlog .o{color:var(--text2)}
+.dlog .t{color:var(--text3)}

@@ -162,3 +162,31 @@ limit, but this is not a scale problem.
 6. Whether V/W account scores live in Kylas as custom fields or outside it.
 7. Telephony: is Exotel/Knowlarity/Ozonetel wired in? `callRecording.url` on the
    call-log body implies the integration path exists.
+
+---
+
+## 6. Observed from a live Kylas screen (2026-09-16)
+
+A screenshot of a real company page settles several guesses:
+
+- **Record URLs** are `app.kylas.io/sales/companies/details/<id>` and, by the
+  same shape, `/sales/contacts/details/<id>`. The extension matches on these.
+- **Companies and Contacts are separate related entities**, with a Contacts
+  table on the company page — as §1 assumed.
+- Company-level fields seen: `Source of Data`, `Owner`, `Number of Employees`,
+  `Website`, **`Priority (BD)`**, `Boolean Post link`. `Priority (BD)` may be
+  where the V/W account score already lives — worth checking before building
+  queue ordering.
+- An **overlay already exists** on the company page showing `TOTAL POCS`,
+  `CONNECTED`, `MQL`, a `CNC (Could Not Connect) - 1` badge, and
+  `STATUS OF REACHOUT — Stale | Last Call: 2026-04-17`, alongside enrichment
+  fields (annual revenue, employees, funding).
+
+**OPEN — vocabulary.** That overlay counts **MQL**; the ladder in `kpi-spec.md`
+has no MQL rung, and its "Right POC" and "Successful Discovery" rungs have no
+counterpart there. One vocabulary has to win, or the two surfaces will report
+different numbers for the same company. Which is authoritative?
+
+**OPEN — overlap.** If that overlay is being replaced, the console's company
+strip is its successor and should carry the same tiles. If both are staying,
+they need to agree on definitions.

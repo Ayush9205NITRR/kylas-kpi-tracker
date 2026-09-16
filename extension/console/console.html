@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Enout Call Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="console.css">
+<link rel="stylesheet" href="color.css">
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="bar">
+    <div class="id"><div class="g">EN</div><h1>Call console</h1></div>
+    <div class="pace"><span>Today</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span></div>
+    <div class="sp"></div>
+    <button class="gbtn" id="qToggle">Queue</button>
+    <button class="gbtn" id="kbBtn">Shortcuts</button>
+    <button class="gbtn" id="themeBtn">Theme</button>
+    <button class="gbtn" id="newBtn">New contact</button>
+    <button class="gbtn" id="dataBtn" title="Captured data">Data <span id="logCount" class="cnt">0</span></button>
+    <button class="gbtn ovOnly" id="dockBtn" title="Dock to the side">Dock</button>
+    <button class="gbtn ovOnly" id="closeBtn" title="Close (Esc)">Close</button>
+  </header>
+
+  <div class="cohead" id="cohead" hidden></div>
+
+  <div class="callbar"><div class="cbIn" id="callbar"></div></div>
+
+  <div class="mid" id="mid">
+    <aside class="queue">
+      <div class="qscope" id="qscope" hidden></div>
+      <div class="qtop">
+        <input id="q" type="search" placeholder="Search name, company, phone" aria-label="Search">
+        <div class="qfil" id="qfil"></div>
+      </div>
+      <ul class="qlist" id="qlist"></ul>
+    </aside>
+    <div class="right">
+      <div class="tabbar" role="tablist">
+        <button role="tab" data-tab="basic" aria-selected="true">Basic info</button>
+        <button role="tab" data-tab="more" aria-selected="false">Event &amp; vendor <span class="n" id="tabCount"></span></button>
+      </div>
+      <div class="split" id="split" data-tab="basic">
+        <section class="pane" id="paneL">
+          <div class="ph">Basic information<span class="c" id="phL"></span></div>
+          <div class="pscroll" id="scrollL"><div class="pwrap" id="formL"></div></div>
+        </section>
+        <section class="pane" id="paneR">
+          <div class="ph">Event &amp; vendor<span class="c" id="phR"></span></div>
+          <div class="pscroll" id="scrollR"><div class="pwrap" id="formR"></div></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><div class="footIn">
+    <span class="msg" id="msg"></span>
+    <button class="flagbtn" id="flagBtn" type="button">⚑ Flag for cleanup</button>
+    <button class="gbtn" id="resetBtn" type="button">Reset</button>
+    <button class="pbtn" id="saveBtn" type="button">Save &amp; next</button>
+  </div></div>
+</div>
+
+<script src="store.js"></script>
+<script src="console.js"></script>
+<script src="overlay.js"></script>
+</body>
+</html>

@@ -1,0 +1,693 @@
+/* ── picklists ───────────────────────────── */
+const SALUTATION=["","Mr.","Ms.","Mrs.","Dr."];
+const EMAIL_TYPES=["Office","Personal","Other"];
+const PHONE_TYPES=["Mobile","Work","Home","Other"];
+const STAGES=["LinkedIn Outreach Initiated","Cold Call Initiated","Could Not Connect","Contacted","Wrong POC","Qualifying","Discovery Call Booked","Discovery Call Done","SQL — Active","Holding Pad","Lost"];
+const MEETING_STAGES=["Discovery Call Booked","Discovery Call Done","SQL — Active"];
+const SOURCES=["","Lost Deals","Apollo","LinkedIn Scrape","Referral","Inbound Enquiry","Event / Conference"];
+const OFFSITE_TIMELINE=["","Q2 FY27","Q3 FY27","Q4 FY27","Q1 FY28","Q2 FY28","Not decided"];
+const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
+const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
+const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
+const MODE_OF_MEETING=["","In Person","Virtual","Calls","Text"];
+
+const OUTCOMES=[
+  {k:"1",t:"No answer",   stage:"Could Not Connect"},
+  {k:"2",t:"Wrong POC",   stage:"Wrong POC"},
+  {k:"3",t:"Right POC",   stage:"Qualifying"},
+  {k:"4",t:"Discovery",   stage:"Discovery Call Done"}
+];
+const QUICK={
+  budget:["Approx","₹L","₹Cr","Not approved","Signed off","No budget yet","Last year was"],
+  timeline:["Q2 FY27","Q3 FY27","Q4 FY27","Q1 FY28","Not decided","Month:","Tentative"],
+  pax:["Approx","+ internal","incl. contractors","Only leadership","Whole company"]
+};
+
+/* ── data ────────────────────────────────── */
+const emptyRow=()=>({eventType:"",budget:"",timeline:"",pax:"",remarks:""});
+const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linkedin:"",designation:"",
+  emails:[{type:"Office",value:"",primary:true}],
+  phones:[{type:"Mobile",cc:"+91",value:"",primary:true}],
+  stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",
+  source:"",remarks:"",offsiteTimeline:"",owner:"",
+  past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
+  done:false,flagged:false});
+
+let DATA=[
+{kid:"40912",salutation:"Mr.",pocName:"Priyank Tewari",company:"nutritap",companyId:"901",linkedin:"",designation:"",
+ emails:[{type:"Office",value:"priyank.tewari@nutritap.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9873915513",primary:true}],
+ stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",
+ source:"Lost Deals",remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",
+ past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
+
+{kid:"41155",salutation:"Mr.",pocName:"Arjun Sethi",company:"Kritsnam Analytics",companyId:"902",
+ linkedin:"linkedin.com/in/arjun-sethi-cos",designation:"Chief of Staff",
+ emails:[{type:"Office",value:"arjun@kritsnam.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9100044582",primary:true}],
+ stage:"Qualifying",nextCallDate:"2026-09-18",nextCallTime:"16:00",
+ source:"Apollo",remarks:"Call back after their board meet.",
+ offsiteTimeline:"Q4 FY27",owner:"Ayush Tiwari",past:[],
+ current:[{eventType:"Employee offsites",budget:"Approx 8L, not approved",
+  timeline:"Q4 FY27, January if budget clears",pax:"60-70 incl. contractors",
+  remarks:"First ever company offsite. Founder wants it near Hyderabad."}],
+ vendorInfo:"First Event",serviceOffering:true,modeOfMeeting:"Virtual",done:false,flagged:true},
+
+{kid:"38470",salutation:"Ms.",pocName:"Devanshi Kalro",company:"Shorehouse Retail",companyId:"903",
+ linkedin:"linkedin.com/in/devanshikalro",designation:"AVP Marketing",
+ emails:[{type:"Office",value:"d.kalro@shorehouse.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9920477103",primary:true}],
+ stage:"Discovery Call Done",nextCallDate:"2026-09-24",nextCallTime:"11:30",
+ source:"Lost Deals",remarks:"Reopened after last year's loss. Warm.",
+ offsiteTimeline:"Q3 FY27",owner:"Shreya Bodwal",
+ past:[{eventType:"Sales conference / dealer meet",budget:"Approx 40L, signed off by CFO",
+  timeline:"Q1 FY27, first week of April",pax:"300 dealers + 40 internal",
+  remarks:"Annual dealer meet in Jaipur. Ran over budget on AV."}],
+ current:[{eventType:"Product launch",budget:"15-20L, not approved",
+  timeline:"Q3 FY27, mid-November",pax:"120 press and partners",
+  remarks:"AW line launch. Needs a press-friendly venue in south Bombay."}],
+ vendorInfo:"Internal",serviceOffering:true,modeOfMeeting:"In Person",done:true,flagged:false},
+
+{kid:"39901",salutation:"Mr.",pocName:"Ishaan Grover",company:"Pralay Fintech",companyId:"904",
+ linkedin:"",designation:"Senior Manager, HR",
+ emails:[{type:"Office",value:"ishaan.g@pralay.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9811062234",primary:true}],
+ stage:"Wrong POC",nextCallDate:"",nextCallTime:"",source:"Apollo",
+ remarks:"Offsites decided by the CHRO, will share the name.",
+ offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
+ vendorInfo:"No Info",serviceOffering:false,modeOfMeeting:"",done:true,flagged:false},
+
+{kid:"42308",salutation:"Ms.",pocName:"Meera Raghunathan",company:"Anvaya Labs",companyId:"905",
+ linkedin:"linkedin.com/in/meera-raghunathan",designation:"Founder's Office",
+ emails:[{type:"Office",value:"meera@anvayalabs.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"8806019945",primary:true}],
+ stage:"Cold Call Initiated",nextCallDate:"",nextCallTime:"",source:"LinkedIn Scrape",
+ remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",past:[],current:[],
+ vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
+
+{kid:"37622",salutation:"Mr.",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",companyId:"906",
+ linkedin:"",designation:"GM Admin",
+ emails:[{type:"Office",value:"balaji.v@tatvik.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9444030871",primary:true}],
+ stage:"Could Not Connect",nextCallDate:"2026-09-17",nextCallTime:"10:00",
+ source:"Apollo",remarks:"",offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
+ vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
+
+{kid:"38512",salutation:"Mr.",pocName:"Rohit Nambiar",company:"Shorehouse Retail",companyId:"903",
+ linkedin:"",designation:"Head of Admin",
+ emails:[{type:"Office",value:"r.nambiar@shorehouse.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9833126740",primary:true}],
+ stage:"Qualifying",nextCallDate:"",nextCallTime:"",
+ source:"Referral",remarks:"Devanshi's counterpart on logistics. Handles venue contracts.",
+ offsiteTimeline:"Q3 FY27",owner:"Ayush Tiwari",past:[],
+ current:[{eventType:"Team-building activities",budget:"",timeline:"Q3 FY27",pax:"",remarks:""}],
+ vendorInfo:"Vendor Exists",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
+
+{kid:"43017",salutation:"Ms.",pocName:"Simran Kohli",company:"Meghdoot Cloud",companyId:"907",
+ linkedin:"",designation:"People Partner",
+ emails:[{type:"Office",value:"simran.k@meghdoot.example",primary:true}],
+ phones:[{type:"Mobile",cc:"+91",value:"9871855420",primary:true}],
+ stage:"LinkedIn Outreach Initiated",nextCallDate:"",nextCallTime:"",source:"Apollo",
+ remarks:"",offsiteTimeline:"",owner:"",past:[],current:[],
+ vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false}
+];
+
+let cur=0, isNew=false, filter="todo", target=100;
+let scope=null;   /* {id,name} when opened from a Kylas company page */
+let timer=null, secs=0, ringing=false;
+let lastOutcome=null;
+let collapsed={past:false,current:false};
+const rec=()=>DATA[cur];
+const today=()=>new Date().toISOString().slice(0,10);
+
+/* ── helpers ─────────────────────────────── */
+const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const opts=(l,v)=>l.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(o)}</option>`).join("");
+let undoState=null;
+function toast(m,undo){
+  document.querySelectorAll(".toast").forEach(t=>t.remove());
+  const t=el("div","toast",`<span>${esc(m)}</span>`);
+  if(undo){const b=el("button",null,"Undo");b.type="button";b.onclick=()=>{undo();t.remove();};t.appendChild(b);}
+  document.body.appendChild(t);setTimeout(()=>t.remove(),4000);
+}
+function resetScroll(){
+  document.getElementById("scrollL").scrollTo({top:0});
+  document.getElementById("scrollR").scrollTo({top:0});
+}
+function setTab(t){
+  document.getElementById("split").dataset.tab=t;
+  document.querySelectorAll(".tabbar button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===t?"true":"false"));
+}
+function field(label,id,req,ctrl){
+  const f=el("div","f");
+  f.innerHTML=`<label for="${id}">${esc(label)}${req?' <span class="req">*</span>':""}</label>`;
+  f.appendChild(ctrl);return f;
+}
+function input(id,val,ph,on,type){
+  const i=el("input","in");i.id=id;i.type=type||"text";i.value=val||"";if(ph)i.placeholder=ph;
+  i.oninput=e=>{on(e.target.value);validate();};return i;
+}
+function textarea(id,val,ph,on){
+  const t=el("textarea","in");t.id=id;t.value=val||"";if(ph)t.placeholder=ph;
+  t.oninput=e=>on(e.target.value);return t;
+}
+function select(id,list,val,on){
+  const s=el("select","in");s.id=id;s.innerHTML=opts(list,val);
+  s.onchange=e=>{on(e.target.value);validate();};return s;
+}
+/* long-text field with one-tap phrase inserts */
+function quickField(label,id,val,ph,on,chips){
+  const f=el("div","f");
+  f.innerHTML=`<label for="${id}">${esc(label)}</label>`;
+  const i=el("input","in");i.id=id;i.value=val||"";i.placeholder=ph;
+  i.oninput=e=>on(e.target.value);
+  f.appendChild(i);
+  const w=el("div","qchips");
+  chips.forEach(c=>{
+    const b=el("button","qc",esc(c));b.type="button";b.tabIndex=-1;
+    b.onclick=()=>{
+      const v=i.value.trim();
+      i.value=v?v+(/[,;]$/.test(v)?" ":", ")+c:c;
+      on(i.value);i.focus();
+      i.setSelectionRange(i.value.length,i.value.length);
+    };
+    w.appendChild(b);
+  });
+  f.appendChild(w);return f;
+}
+
+/* ── call bar ────────────────────────────── */
+function renderCallbar(){
+  const a=rec(),C=document.getElementById("callbar");C.innerHTML="";
+  const ph=a.phones.find(p=>p.primary)||a.phones[0];
+  const num=ph?(ph.cc+" "+ph.value).trim():"";
+
+  const who=el("div","who",`<b>${esc(a.pocName||"New contact")}</b><span>${esc(a.company||"—")}${a.designation?" · "+esc(a.designation):""}</span>`);
+  C.appendChild(who);
+
+  const d=el("div","dial");
+  const link=el("a",null,`<span>☏</span>${esc(num||"no number")}`);
+  link.href=num?"tel:"+num.replace(/\s/g,""):"#";
+  link.onclick=e=>{if(!num){e.preventDefault();return;}startTimer();};
+  d.appendChild(link);
+  const tm=el("span","tm"+(ringing?" run":""),fmtSecs(secs));
+  tm.id="tm";d.appendChild(tm);
+  C.appendChild(d);
+
+  const ocs=el("div","ocs");
+  OUTCOMES.forEach(o=>{
+    const b=el("button","oc",`<kbd>${o.k}</kbd>${esc(o.t)}`);
+    b.type="button";b.dataset.oc=o.k;b.setAttribute("aria-pressed",a.stage===o.stage?"true":"false");
+    b.onclick=()=>setOutcome(o);
+    ocs.appendChild(b);
+  });
+  C.appendChild(ocs);
+
+  const nb=el("div","nextbtn");
+  const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
+  btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
+  C.appendChild(nb);
+}
+const fmtSecs=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+function startTimer(){
+  if(timer)clearInterval(timer);
+  secs=0;ringing=true;
+  timer=setInterval(()=>{secs++;const t=document.getElementById("tm");if(t)t.textContent=fmtSecs(secs);},1000);
+  const t=document.getElementById("tm");if(t)t.className="tm run";
+}
+function stopTimer(){if(timer)clearInterval(timer);timer=null;ringing=false;const t=document.getElementById("tm");if(t)t.className="tm";}
+function setOutcome(o){
+  const a=rec();
+  lastOutcome=o;
+  a.stage=o.stage;
+  if(!a.nextCallDate&&o.stage==="Could Not Connect"){a.nextCallDate=today();}
+  stopTimer();
+  render();
+  resetScroll();
+  if(o.stage!=="Could Not Connect"&&matchMedia("(max-width:900px)").matches)setTab("more");
+}
+
+/* ── queue ───────────────────────────────── */
+const FILTERS=[["todo","To call"],["flag","Flagged"],["all","All"]];
+function renderFilters(){
+  const w=document.getElementById("qfil");w.innerHTML="";
+  FILTERS.forEach(([k,l])=>{
+    const b=el("button","qf",l);b.type="button";
+    b.setAttribute("aria-pressed",filter===k?"true":"false");
+    b.onclick=()=>{filter=k;renderFilters();renderQueue();};
+    w.appendChild(b);
+  });
+}
+function visible(){
+  const q=(document.getElementById("q").value||"").toLowerCase();
+  return DATA.map((a,i)=>({a,i}))
+    .filter(({a})=>!scope||String(a.companyId)===String(scope.id))
+    .filter(({a})=>!q||(a.pocName+" "+a.company+" "+a.phones.map(p=>p.value).join(" ")).toLowerCase().includes(q))
+    .filter(({a})=>filter==="all"||(filter==="flag"?a.flagged:!a.done));
+}
+function renderScope(){
+  const w=document.getElementById("qscope");
+  if(!w)return;
+  if(!scope){w.innerHTML="";w.hidden=true;return;}
+  w.hidden=false;
+  const n=DATA.filter(a=>String(a.companyId)===String(scope.id)).length;
+  w.innerHTML=`<span class="cn">${esc(scope.name)}</span>
+    <span class="cc">${n} contact${n===1?"":"s"}</span>`;
+  const x=el("button","cx","×");x.type="button";x.title="Show the whole queue";
+  x.onclick=()=>{scope=null;render();};
+  w.appendChild(x);
+}
+function renderQueue(){
+  renderScope();
+  const L=document.getElementById("qlist");L.innerHTML="";
+  const rows=visible();
+  if(!rows.length){
+    L.appendChild(el("li","qempty",scope
+      ? "No contacts held for "+esc(scope.name)+" yet.<br>Use <b>New contact</b> to add the first one."
+      : "Nothing here."));
+    return;
+  }
+  rows.forEach(({a,i})=>{
+    const li=el("li"),b=el("button","qi");
+    b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
+    b.dataset.stage=a.stage;
+    b.innerHTML=`<span class="n">${esc(a.pocName)}</span><span class="c">${esc(a.company)}</span>
+      <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(a.stage)}</span></span>`;
+    b.onclick=()=>{cur=i;isNew=false;stopTimer();secs=0;render();resetScroll();};
+    li.appendChild(b);L.appendChild(li);
+  });
+}
+function renderPace(){
+  const n=DATA.filter(a=>a.done).length;
+  document.getElementById("pcount").textContent=n;
+  document.getElementById("ptarget").textContent="/ "+target;
+  document.getElementById("pbar").style.width=Math.min(100,n/target*100)+"%";
+}
+
+/* ── form ────────────────────────────────── */
+function render(){
+  renderCompany();renderCallbar();renderQueue();renderPace();renderBasic();renderRight();validate();
+}
+
+/* Everything here is derived from the contacts we hold for this company, so it
+   moves the moment a call is saved. Mirrors the ladder in docs/kpi-spec.md. */
+const INITIATED=["LinkedIn Outreach Initiated","Cold Call Initiated"];
+function companyRoster(id){return DATA.filter(a=>String(a.companyId)===String(id));}
+function hasSignal(a){
+  return a.past.concat(a.current).some(r=>r.eventType||r.budget||r.timeline||r.pax);
+}
+function isComplete(a){
+  return a.past.concat(a.current).some(r=>r.eventType&&r.budget&&r.timeline&&r.pax);
+}
+function connected(a){
+  return a.stage!=="Could Not Connect"&&!INITIATED.includes(a.stage);
+}
+function companyStage(list){
+  if(list.some(a=>a.stage==="SQL — Active"))return{r:6,t:"SQL Accepted",k:"sql"};
+  if(list.some(a=>a.stage==="Discovery Call Booked"))return{r:5,t:"SQL Call Booked",k:"booked"};
+  if(list.some(isComplete))return{r:4,t:"Successful Discovery",k:"disc"};
+  if(list.some(hasSignal))return{r:3,t:"Right POC",k:"rpoc"};
+  if(list.some(connected))return{r:2,t:"Phone Picked",k:"picked"};
+  if(list.some(a=>a.lastCallAt))return{r:1,t:"Reached",k:"reach"};
+  return{r:0,t:"Not reached",k:"none"};
+}
+function renderCompany(){
+  const w=document.getElementById("cohead");
+  if(!w)return;
+  if(!scope){w.hidden=true;w.innerHTML="";return;}
+  const list=companyRoster(scope.id);
+  const st=companyStage(list);
+  const last=list.map(a=>a.lastCallAt).filter(Boolean).sort().pop();
+  const days=last?Math.floor((Date.now()-new Date(last))/864e5):null;
+  const fresh=days===null?"never":days<=14?"fresh":"stale";
+  const tile=(n,l,k)=>`<div class="tile ${k}"><b>${n}</b><span>${l}</span></div>`;
+  w.hidden=false;
+  w.innerHTML=`
+    <div class="coIn">
+      <div class="coName">
+        <span class="av">${esc((scope.name||"?").slice(0,2).toUpperCase())}</span>
+        <span class="nm"><b>${esc(scope.name)}</b><em>kylas ${esc(String(scope.id))}</em></span>
+        <span class="kpi ${st.k}">${esc(st.t)}</span>
+      </div>
+      <div class="tiles">
+        ${tile(list.length,"total POCs","t1")}
+        ${tile(list.filter(connected).length,"connected","t2")}
+        ${tile(list.filter(hasSignal).length,"right POC","t3")}
+        ${tile(list.filter(isComplete).length,"discovery","t4")}
+      </div>
+      <div class="reach ${fresh}">
+        <span class="lbl">Status of reachout</span>
+        <b>${fresh==="never"?"Never called":(fresh==="fresh"?"Fresh":"Stale")}${last?" · last call "+esc(last.slice(0,10)):""}</b>
+      </div>
+    </div>`;
+}
+
+function group(title,nodes){
+  const g=el("div","grp");
+  g.appendChild(el("div","grpH",`<span>${esc(title)}</span>`));
+  nodes.forEach(n=>g.appendChild(n));
+  return g;
+}
+function mini(list,val,on){
+  const s=el("select","mini");s.innerHTML=opts(list,val);
+  s.onchange=e=>on(e.target.value);return s;
+}
+/* Email / Phone: one entry shows just the value (type sits in the label row).
+   Extra entries switch to full rows with a primary radio. */
+function contactField(a,kind){
+  const isPh=kind==="phones", list=a[kind];
+  const TYPES=isPh?PHONE_TYPES:EMAIL_TYPES;
+  const f=el("div","f");
+  const head=el("div","fhead");
+  head.innerHTML=`<label>${isPh?'Phone number <span class="req">*</span>':"Email"}</label>`;
+  f.appendChild(head);
+
+  const valueInput=e=>{
+    const i=el("input","in vl2");
+    i.type=isPh?"tel":"email";i.value=e.value;
+    i.placeholder=isPh?"9876543210":"name@company.com";
+    i.setAttribute("aria-label",isPh?"Phone number":"Email address");
+    if(isPh)i.inputMode="tel";
+    i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();};
+    return i;
+  };
+  const ccInput=e=>{
+    const c=el("input","in cc");c.value=e.cc;c.setAttribute("aria-label","Country code");
+    c.oninput=v=>{e.cc=v.target.value;renderCallbar();};return c;
+  };
+
+  if(list.length===1){
+    const e=list[0];
+    head.appendChild(mini(TYPES,e.type,v=>e.type=v));
+    const row=el("div","entry");
+    if(isPh)row.appendChild(ccInput(e));
+    row.appendChild(valueInput(e));
+    f.appendChild(row);
+  }else{
+    list.forEach((e,i)=>{
+      const row=el("div","entry");
+      const rd=el("input");rd.type="radio";rd.name=kind;rd.checked=e.primary;
+      rd.setAttribute("aria-label","Primary");
+      rd.onchange=()=>{list.forEach(x=>x.primary=false);e.primary=true;renderCallbar();};
+      row.appendChild(rd);
+      const ty=el("select","in ty2");ty.innerHTML=opts(TYPES,e.type);
+      ty.setAttribute("aria-label","Type");ty.onchange=v=>e.type=v.target.value;
+      row.appendChild(ty);
+      if(isPh)row.appendChild(ccInput(e));
+      row.appendChild(valueInput(e));
+      const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove");
+      d.onclick=()=>{list.splice(i,1);if(list.length&&!list.some(x=>x.primary))list[0].primary=true;render();};
+      row.appendChild(d);
+      f.appendChild(row);
+    });
+  }
+  const add=el("button","add",isPh?"+ Add phone":"+ Add email");add.type="button";
+  add.onclick=()=>{list.push(isPh?{type:"Mobile",cc:"+91",value:"",primary:!list.length}
+                               :{type:"Office",value:"",primary:!list.length});render();};
+  f.appendChild(add);
+  return f;
+}
+
+function renderBasic(){
+  const a=rec(),W=document.getElementById("formL");W.innerHTML="";
+  document.getElementById("phL").textContent=isNew?"new contact":(a.kid?"kylas "+a.kid:"unsaved");
+
+  /* Name — salutation rides in the label row */
+  const fName=el("div","f");
+  const nh=el("div","fhead");
+  nh.innerHTML=`<label for="f-poc">Name <span class="req">*</span></label>`;
+  nh.appendChild(mini(SALUTATION,a.salutation,v=>a.salutation=v));
+  fName.appendChild(nh);
+  fName.appendChild(input("f-poc",a.pocName,"Full name",v=>{a.pocName=v;renderCallbar();renderQueue();}));
+
+  /* LinkedIn with icon */
+  const fLi=el("div","f");
+  fLi.innerHTML=`<label for="f-li">LinkedIn</label>`;
+  const liw=el("div","withIcon");
+  liw.appendChild(el("span","ic","in"));
+  liw.appendChild(input("f-li",a.linkedin,"linkedin.com/in/…",v=>a.linkedin=v));
+  fLi.appendChild(liw);
+
+  const grid=el("div","g2");
+  grid.appendChild(fName);
+  grid.appendChild(contactField(a,"emails"));
+  grid.appendChild(contactField(a,"phones"));
+  grid.appendChild(fLi);
+  grid.appendChild(field("Company","f-co",false,input("f-co",a.company,"Company name",v=>{a.company=v;renderCallbar();renderQueue();})));
+  grid.appendChild(field("Designation","f-dg",false,input("f-dg",a.designation,"Job title",v=>{a.designation=v;renderCallbar();})));
+  W.appendChild(group("POC",[grid]));
+
+  /* Source */
+  const srcRow=el("div","g2");
+  srcRow.appendChild(field("Source of data","f-src",false,select("f-src",SOURCES,a.source,v=>a.source=v)));
+  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
+  W.appendChild(group("Source",[srcRow]));
+
+  /* Stage & follow-up */
+  const ncd=el("div","f");ncd.innerHTML=`<label>Next call date (call later)</label>`;
+  const ncr=el("div","mrow");
+  const d1=el("input","in dt");d1.type="date";d1.value=a.nextCallDate;d1.setAttribute("aria-label","Next call date");
+  d1.oninput=e=>a.nextCallDate=e.target.value;ncr.appendChild(d1);
+  const t1=el("input","in dt");t1.type="time";t1.value=a.nextCallTime;t1.setAttribute("aria-label","Next call time");
+  t1.oninput=e=>a.nextCallTime=e.target.value;ncr.appendChild(t1);
+  ncd.appendChild(ncr);
+  const qc=el("div","qchips");
+  [["Tomorrow",1],["+3 days",3],["Next week",7]].forEach(([l,n])=>{
+    const b=el("button","qc",l);b.type="button";b.tabIndex=-1;
+    b.onclick=()=>{const dt=new Date();dt.setDate(dt.getDate()+n);a.nextCallDate=dt.toISOString().slice(0,10);render();};
+    qc.appendChild(b);
+  });
+  ncd.appendChild(qc);
+
+  const sRow=el("div","g2");
+  sRow.appendChild(field("Pipeline stage — BD","f-stage",false,select("f-stage",STAGES,a.stage,v=>{a.stage=v;render();})));
+  sRow.appendChild(ncd);
+
+  const rRow=el("div","g2");
+  rRow.appendChild(field("Remarks","f-rm",false,textarea("f-rm",a.remarks,"Notes on this contact",v=>a.remarks=v)));
+  rRow.appendChild(field("Offsite timeline","f-ot",false,select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
+
+  W.appendChild(group("Stage & follow-up",[sRow,rRow]));
+}
+
+function renderRight(){
+  const a=rec(),F=document.getElementById("formR");F.innerHTML="";
+  const n=a.past.length+a.current.length;
+  document.getElementById("phR").textContent=n?n+(n===1?" row":" rows"):"empty";
+  document.getElementById("tabCount").textContent=n?String(n):"";
+
+  /* no-answer short circuit */
+  if(a.stage==="Could Not Connect"){
+    const s=el("section","sec");
+    s.innerHTML=`<div class="skipnote">No answer — nothing else to capture. Set a next call date on the left, then
+      <kbd>⏎</kbd> to save and move to the next contact.</div>`;
+    F.appendChild(s);return;
+  }
+
+  F.appendChild(eventSection("past","Past","One row per event they have already run."));
+  F.appendChild(eventSection("current","Current","One row per event on the table now."));
+
+  /* vendor & offering */
+  const s4=el("section","sec");
+  s4.innerHTML=`<div class="sh"><h2>Vendor &amp; offering</h2></div>`;
+  const b4=el("div","sb");
+  b4.appendChild(field("Vendor info","f-vi",false,select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
+
+  const sf=el("div","f");
+  const lab=el("label","cb1"+(a.serviceOffering?" on":""));
+  lab.style.marginBottom="0";
+  const c=el("input");c.type="checkbox";c.checked=a.serviceOffering;
+  c.onchange=()=>{a.serviceOffering=c.checked;lab.className="cb1"+(c.checked?" on":"");};
+  lab.appendChild(c);
+  lab.appendChild(el("span",null,"Enout service offering<em>Tick if the offering was pitched on this call.</em>"));
+  sf.appendChild(lab);b4.appendChild(sf);
+
+  if(MEETING_STAGES.includes(a.stage)){
+    b4.appendChild(field("Mode of meeting","f-mm",false,select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
+  }else{
+    const lk=el("div","f");
+    lk.innerHTML=`<div class="locked"><b>hidden</b><span>Mode of meeting opens only at stages
+      ${MEETING_STAGES.map(s=>esc(s)).join(", ")}. Send your real stage list and I will swap these in.</span></div>`;
+    b4.appendChild(lk);
+  }
+  s4.appendChild(b4);F.appendChild(s4);
+}
+
+function eventSection(key,title,sub){
+  const a=rec();
+  const s=el("section","sec"+(collapsed[key]?" collapsed":""));
+  const h=el("div","sh");
+  h.innerHTML=`<h2>${esc(title)}</h2><p>${esc(sub)}</p>`;
+  const tg=el("button","shbtn",collapsed[key]?`▸ ${a[key].length} row${a[key].length===1?"":"s"}`:"▾ Hide");
+  tg.type="button";tg.onclick=()=>{collapsed[key]=!collapsed[key];render();};
+  h.appendChild(tg);s.appendChild(h);
+
+  const b=el("div","sb");
+  const rows=el("div","rows");
+  if(!a[key].length)rows.appendChild(el("div","empty","No "+title.toLowerCase()+" events."));
+  a[key].forEach((r,i)=>{
+    const c=el("div","row");
+    const rh=el("div","rowh");
+    rh.innerHTML=`<span class="n">${esc(title)} ${i+1}</span>`;
+    const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove row");
+    d.onclick=()=>{a[key].splice(i,1);render();};
+    rh.appendChild(d);c.appendChild(rh);
+
+    const g=el("div","g2");
+    g.appendChild(field("Event type",`${key}-et-${i}`,false,select(`${key}-et-${i}`,EVENT_TYPES,r.eventType,v=>{r.eventType=v;})));
+    g.appendChild(quickField("Budget",`${key}-bd-${i}`,r.budget,"Whatever they said",v=>r.budget=v,QUICK.budget));
+    c.appendChild(g);c.appendChild(el("div","f"));
+
+    const g2=el("div","g2");
+    g2.appendChild(quickField("Timeline",`${key}-tl-${i}`,r.timeline,"Quarter or month",v=>r.timeline=v,QUICK.timeline));
+    g2.appendChild(quickField("Pax",`${key}-px-${i}`,r.pax,"Headcount",v=>r.pax=v,QUICK.pax));
+    c.appendChild(g2);c.appendChild(el("div","f"));
+
+    c.appendChild(field("Remarks",`${key}-rm-${i}`,false,textarea(`${key}-rm-${i}`,r.remarks,"Detail for the next call",v=>r.remarks=v)));
+    rows.appendChild(c);
+  });
+  b.appendChild(rows);
+  const add=el("button","add","+ Add "+title.toLowerCase()+" event");add.type="button";
+  add.style.marginTop="10px";
+  add.onclick=()=>{a[key].push(emptyRow());collapsed[key]=false;render();};
+  b.appendChild(add);
+  s.appendChild(b);return s;
+}
+
+/* ── validate + actions ──────────────────── */
+function missing(){
+  const a=rec(),m=[];
+  if(!a.pocName.trim())m.push("POC name");
+  if(!a.phones.some(p=>p.value.trim()))m.push("phone");
+  if(!a.owner)m.push("owner");
+  return m;
+}
+function validate(){
+  const m=missing(),msg=document.getElementById("msg"),a=rec();
+  document.getElementById("flagBtn").className="flagbtn"+(a.flagged?" on":"");
+  if(m.length){msg.textContent="Needs "+m.join(", ");msg.className="msg bad";}
+  else{msg.textContent=a.done?"Logged today.":"Ready to save.";msg.className="msg";}
+}
+function saveNext(){
+  const m=missing();
+  if(m.length){toast("Missing "+m.join(", "));return;}
+  const a=rec(),was=a.done;
+  const duration=secs, outcome=lastOutcome;
+  a.done=true;stopTimer();secs=0;lastOutcome=null;
+  const from=cur;
+
+  /* One entry per save, whether or not the stage moved — see kpi-spec.md §2. */
+  a.lastCallAt=new Date().toISOString();
+  Store.appendCall({
+    kid:a.kid, pocName:a.pocName, company:a.company, owner:a.owner,
+    outcome:outcome?outcome.t:null, stageSet:a.stage, duration,
+  }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
+  persist();
+  if(a.kid)Store.clearDraft(a.kid);
+  const rows=visible().filter(r=>r.i!==from);
+  const nxt=rows.length?rows[0].i:cur;
+  cur=nxt;isNew=false;collapsed={past:false,current:false};
+  render();resetScroll();setTab("basic");
+  toast(`${a.pocName} saved`,()=>{a.done=was;cur=from;render();});
+}
+
+/* ── shortcuts sheet ─────────────────────── */
+function openKb(){
+  const s=el("div","scrim");
+  s.innerHTML=`<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="kh">
+    <div class="h"><h3 id="kh">Keyboard</h3><button class="gbtn" id="kx" type="button">Close</button></div>
+    <div class="b">
+      <div class="krow"><span class="kk"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span><span>Set the call outcome</span></div>
+      <div class="krow"><span class="kk"><kbd>Enter</kbd></span><span>Save and jump to the next contact</span></div>
+      <div class="krow"><span class="kk"><kbd>C</kbd></span><span>Dial the primary number</span></div>
+      <div class="krow"><span class="kk"><kbd>F</kbd></span><span>Flag this record for end-of-day cleanup</span></div>
+      <div class="krow"><span class="kk"><kbd>J</kbd> <kbd>K</kbd></span><span>Next / previous contact in the queue</span></div>
+      <div class="krow"><span class="kk"><kbd>/</kbd></span><span>Jump to search</span></div>
+      <div class="krow"><span class="kk"><kbd>Esc</kbd></span><span>Leave the field you are in</span></div>
+      <div class="krow"><span class="kk"><kbd>?</kbd></span><span>This sheet</span></div>
+    </div></div>`;
+  document.body.appendChild(s);
+  s.onclick=e=>{if(e.target===s)s.remove();};
+  document.getElementById("kx").onclick=()=>s.remove();
+}
+
+/* ── wiring ──────────────────────────────── */
+document.getElementById("q").addEventListener("input",renderQueue);
+document.getElementById("qToggle").addEventListener("click",e=>{
+  const m=document.getElementById("mid");m.classList.toggle("noq");
+  e.target.classList.toggle("on",!m.classList.contains("noq"));
+});
+document.getElementById("qToggle").classList.add("on");
+document.getElementById("kbBtn").addEventListener("click",openKb);
+document.querySelectorAll(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
+document.getElementById("newBtn").addEventListener("click",()=>{
+  const b=blank();
+  if(scope){b.company=scope.name;b.companyId=String(scope.id);}
+  DATA=[b,...DATA];cur=0;isNew=true;filter="all";renderFilters();render();
+  resetScroll();
+  setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
+});
+document.getElementById("resetBtn").addEventListener("click",()=>{render();toast("Reset");});
+document.getElementById("saveBtn").addEventListener("click",saveNext);
+document.getElementById("flagBtn").addEventListener("click",()=>{
+  const a=rec();a.flagged=!a.flagged;validate();renderQueue();
+  toast(a.flagged?"Flagged for cleanup":"Flag removed");
+});
+document.getElementById("themeBtn").addEventListener("click",()=>{
+  const r=document.documentElement;
+  const dark=r.getAttribute("data-theme")==="dark"||(!r.getAttribute("data-theme")&&matchMedia("(prefers-color-scheme: dark)").matches);
+  r.setAttribute("data-theme",dark?"light":"dark");
+});
+
+document.addEventListener("keydown",e=>{
+  const typing=e.target.matches("input,textarea,select");
+  if(e.key==="Escape"){
+    const sc=document.querySelector(".scrim");if(sc){sc.remove();return;}
+    if(typing){e.target.blur();return;}
+  }
+  if(typing&&!(e.key==="Enter"&&(e.metaKey||e.ctrlKey)))return;
+  if(e.key==="Enter"){e.preventDefault();saveNext();return;}
+  const o=OUTCOMES.find(x=>x.k===e.key);
+  if(o){e.preventDefault();setOutcome(o);return;}
+  const k=e.key.toLowerCase();
+  if(k==="c"){const a=rec(),p=a.phones.find(x=>x.primary)||a.phones[0];
+    if(p&&p.value){startTimer();window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
+  if(k==="f"){document.getElementById("flagBtn").click();return;}
+  if(k==="j"||k==="k"){
+    const rows=visible();const at=rows.findIndex(r=>r.i===cur);
+    const nx=k==="j"?at+1:at-1;
+    if(rows[nx]){cur=rows[nx].i;stopTimer();secs=0;render();resetScroll();}
+    return;}
+  if(e.key==="/"){e.preventDefault();document.getElementById("q").focus();return;}
+  if(e.key==="?"){openKb();return;}
+});
+
+/* ── persistence ──────────────────────────── */
+let persistTimer=null;
+function persist(){
+  clearTimeout(persistTimer);
+  persistTimer=setTimeout(()=>Store.saveContacts(DATA),400);
+}
+/* Capture phase, so every input is covered without each handler opting in.
+   Losing a call's notes to a refresh is unacceptable. */
+document.addEventListener("input",()=>{
+  persist();
+  const a=rec();
+  if(a&&a.kid)Store.saveDraft(a.kid,a);
+},true);
+document.addEventListener("change",persist,true);
+
+async function boot(){
+  const saved=await Store.loadContacts();
+  if(saved&&saved.length)DATA=saved;
+  const log=await Store.loadLog();
+  const c=document.getElementById("logCount");
+  if(c)c.textContent=log.length;
+  /* done means "logged today", derived from the log — not a stored field. */
+  const t=today();
+  const loggedToday=new Set(log.filter(e=>(e.at||"").slice(0,10)===t).map(e=>e.kid));
+  DATA.forEach(a=>{a.done=loggedToday.has(a.kid);});
+  renderFilters();render();
+}
+boot();

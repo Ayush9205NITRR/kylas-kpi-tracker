@@ -1,0 +1,167 @@
+/* Injects the console into a Kylas page.
+
+   The console lives in an iframe inside a shadow root. That is deliberate: the
+   iframe gives it its own document, so Kylas' stylesheets cannot reach the
+   console and the console cannot disturb Kylas. The only thing this script
+   reads from the host page is the contact id in the URL — no DOM scraping, so
+   a Kylas front-end release cannot break it. */
+(() => {
+  if (window.__enoutConsole) return;
+  window.__enoutConsole = true;
+
+  const HOST_ID = "enout-console-host";
+  const SRC = chrome.runtime.getURL("console/console.html");
+
+  const host = document.createElement("div");
+  host.id = HOST_ID;
+  const root = host.attachShadow({ mode: "open" });
+
+  root.innerHTML = `
+    <style>
+      :host{all:initial}
+      .fab{
+        position:fixed;right:18px;bottom:18px;z-index:2147483646;
+        display:flex;align-items:center;gap:7px;
+        background:#0B6E6E;color:#fff;border:0;border-radius:22px;
+        padding:10px 16px;cursor:pointer;
+        font:600 13px/1 "IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+        box-shadow:0 3px 14px rgba(6,16,18,.28);
+      }
+      .fab:hover{filter:brightness(1.08)}
+      .fab kbd{
+        font:500 10px/1 ui-monospace,Menlo,monospace;
+        background:rgba(255,255,255,.18);border-radius:3px;padding:2px 4px;
+      }
+      .scrim{
+        position:fixed;inset:0;z-index:2147483646;
+        background:rgba(6,16,18,.42);opacity:0;pointer-events:none;
+        transition:opacity .16s ease;
+      }
+      .wrap{
+        position:fixed;z-index:2147483647;
+        background:#F2F5F4;border-radius:10px;overflow:hidden;
+        box-shadow:0 18px 60px rgba(6,16,18,.34);
+        opacity:0;pointer-events:none;transform:translateY(6px);
+        transition:opacity .16s ease,transform .16s ease;
+      }
+      .wrap.full{inset:18px}
+      .wrap.dock{top:0;right:0;bottom:0;width:min(520px,46vw);border-radius:0}
+      :host(.open) .wrap{opacity:1;pointer-events:auto;transform:none}
+      :host(.open) .scrim{opacity:1;pointer-events:auto}
+      :host(.open) .fab{display:none}
+      :host(.dock) .scrim{opacity:0;pointer-events:none}
+      iframe{width:100%;height:100%;border:0;display:block;background:#F2F5F4}
+      @media (prefers-color-scheme:dark){
+        .wrap,iframe{background:#0A1315}
+      }
+    </style>
+    <button class="fab" part="fab" title="Open the call console">
+      <span class="lbl">Call console</span> <kbd>⌥⇧E</kbd>
+    </button>
+    <div class="scrim"></div>
+    <div class="wrap full"><iframe title="Enout call console" allow="clipboard-write"></iframe></div>`;
+
+  const fab = root.querySelector(".fab");
+  const fabLabel = root.querySelector(".fab .lbl");
+  const scrim = root.querySelector(".scrim");
+  const wrap = root.querySelector(".wrap");
+  const frame = root.querySelector("iframe");
+
+  let open = false, loaded = false;
+
+  /* Real Kylas record urls look like
+       app.kylas.io/sales/companies/details/1776620
+       app.kylas.io/sales/contacts/details/<id>
+     This is the only thing read from the host page. */
+  const REC = /\/sales\/(companies|contacts|leads)\/details\/(\d+)/i;
+  function currentRecord() {
+    const m = location.pathname.match(REC);
+    return m ? { kind: m[1].toLowerCase().replace(/ies$/, "y").replace(/s$/, ""), id: m[2] } : null;
+  }
+
+  /* Display label only — never data. The record id is what everything joins on,
+     so a miss here costs a nicer heading and nothing else. */
+  function recordLabel() {
+    const h = document.querySelector("h1, [class*='entity-name'], [class*='record-title']");
+    const raw = (h && h.textContent) || document.title || "";
+    return raw.replace(/\(#\d+\)/, "").replace(/\s*[|·-]\s*Kylas.*$/i, "").trim().slice(0, 60);
+  }
+
+  function send(type, payload) {
+    if (!loaded) return;
+    frame.contentWindow.postMessage({ source: "enout-host", type, ...payload }, "*");
+  }
+
+  function setOpen(next, mode) {
+    open = next;
+    host.classList.toggle("open", open);
+    if (mode) {
+      wrap.classList.toggle("full", mode === "full");
+      wrap.classList.toggle("dock", mode === "dock");
+      host.classList.toggle("dock", mode === "dock");
+    }
+    if (!open) return;
+
+    if (!loaded) {
+      frame.src = SRC;
+      frame.addEventListener("load", () => {
+        loaded = true;
+        handoff();
+      }, { once: true });
+    } else {
+      handoff();
+    }
+  }
+
+  function handoff() {
+    const rec = currentRecord();
+    if (rec) send(rec.kind, { kylasId: rec.id, label: recordLabel() });
+    send("focus");
+    frame.focus();
+  }
+
+  /* Kylas is a single-page app, so moving between records never reloads. Follow
+     the history so the console retargets instead of going stale. */
+  let lastPath = location.pathname;
+  setInterval(() => {
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
+    if (open) handoff();
+  }, 700);
+
+  fab.addEventListener("click", () => setOpen(true));
+  scrim.addEventListener("click", () => setOpen(false));
+
+  /* messages back from the console */
+  window.addEventListener("message", (e) => {
+    if (e.source !== frame.contentWindow) return;
+    const m = e.data;
+    if (!m || m.source !== "enout") return;
+    if (m.type === "close") setOpen(false);
+    if (m.type === "mode") setOpen(true, m.mode);
+  });
+
+  /* toolbar button and Alt+Shift+E, relayed by the service worker */
+  chrome.runtime.onMessage.addListener((m) => {
+    if (m && m.source === "enout-bg" && m.type === "toggle") setOpen(!open);
+  });
+
+  /* Alt+Shift+E again while the host page has focus. The same chord inside the
+     iframe is handled by the browser command, so both sides work. */
+  window.addEventListener("keydown", (e) => {
+    if (e.altKey && e.shiftKey && e.code === "KeyE") {
+      e.preventDefault();
+      setOpen(!open);
+    }
+  });
+
+  /* keep the launcher honest about what it will do */
+  setInterval(() => {
+    const rec = currentRecord();
+    fabLabel.textContent =
+      !rec ? "Call console" :
+      rec.kind === "company" ? "Work this company" : "Log a call";
+  }, 700);
+
+  (document.body || document.documentElement).appendChild(host);
+})();
