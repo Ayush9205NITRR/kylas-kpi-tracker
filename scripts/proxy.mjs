@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
+import { createAirtable, syncContact } from "./airtable.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
@@ -26,6 +27,14 @@ if (!KEY) {
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const kylas = createClient(KEY, { log });
+
+/* Airtable is optional: without a PAT the proxy still reads and writes Kylas,
+   and each save reports that the Airtable half was skipped rather than failing.
+   That way a missing token degrades the KPIs, not the dialling. */
+const AT_PAT = process.env.AIRTABLE_PAT;
+const AT_BASE = process.env.AIRTABLE_BASE;
+const airtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, { log }) : null;
+if (!airtable) log("airtable: not configured (set AIRTABLE_PAT and AIRTABLE_BASE)");
 
 /* Most records carry their own owner name in metaData.idNameStore, so this is
    a fallback for the ones that do not — and every avoided request is one fewer
@@ -164,6 +173,20 @@ const routes = {
       log(`updated contact ${c.kid} (${c.pocName})`);
     }
 
+    /* Airtable is the authoritative store, so a failure here is reported to the
+       console rather than swallowed — the associate needs to know the KPI data
+       did not land, even though Kylas did. */
+    if (airtable) {
+      try {
+        result.airtable = await syncContact(airtable, { ...c, kid: result.kid }, body.call, { log });
+      } catch (e) {
+        result.airtableError = e.message;
+        log(`! airtable for ${result.kid}: ${e.message}`);
+      }
+    } else {
+      result.airtableSkipped = true;
+    }
+
     if (body.call && result.kid) {
       try {
         await kylas.createCallLog(toKylasCallLog({ ...c, kid: result.kid }, body.call));
@@ -177,6 +200,10 @@ const routes = {
     }
     return result;
   },
+
+  /* Whether each half of the write is configured, so the console can say so
+     rather than looking like it saved everywhere. */
+  "/targets": async () => ({ kylas: true, airtable: !!airtable, base: AT_BASE || null }),
 
   "/contact": async (url) => {
     const id = url.searchParams.get("id");

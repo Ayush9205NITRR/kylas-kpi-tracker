@@ -60,7 +60,11 @@ const QUICK={
 };
 
 /* ── data ────────────────────────────────── */
-const emptyRow=()=>({eventType:"",budget:"",timeline:"",pax:"",remarks:""});
+/* Every event row carries a key from the moment it is created. It is what
+   Airtable upserts on, so without it an edited row would be written as a second
+   row and keep counting toward Right POC twice. */
+const rowKey=()=>(crypto?.randomUUID?crypto.randomUUID():"r"+Date.now()+Math.random().toString(36).slice(2,8));
+const emptyRow=()=>({rowKey:rowKey(),eventType:"",budget:"",timeline:"",pax:"",remarks:""});
 const blank=()=>({kid:"",salutation:"",pocName:"",company:"",linkedin:"",designation:"",
   emails:[{type:"OFFICE",value:"",primary:true}],
   phones:[{type:"MOBILE",cc:"+91",value:"",primary:true}],
@@ -171,7 +175,8 @@ function refreshQual(){
   n.textContent=q;n.className="qual "+(q==="MQL"?"mql":"poc");
   renderQueue();
 }
-const rec=()=>{const a=DATA[cur];if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
+const rec=()=>{const a=DATA[cur];
+  for(const r of [...(a.past||[]),...(a.current||[])]) if(!r.rowKey)r.rowKey=rowKey();if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
 const today=()=>new Date().toISOString().slice(0,10);
 const dateIn=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
 /* Associates paste "linkedin.com/in/x", "www.linkedin.com/in/x" or a full url.
@@ -1039,7 +1044,10 @@ async function syncToKylas(a,call){
   if(res.ok){
     if(res.created&&res.kid){a.kid=res.kid;a.pendingCreate=false;}
     a.syncedAt=new Date().toISOString();
-    a.syncError=res.callLogError?("call log: "+res.callLogError):null;
+    /* Airtable is where the KPIs come from, so its failure has to surface even
+       though Kylas took the write. */
+    a.syncError=res.airtableError?("airtable: "+res.airtableError)
+      :res.callLogError?("call log: "+res.callLogError):null;
   }else{
     a.syncError=res.error||"not sent";
   }

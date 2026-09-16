@@ -13,8 +13,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function createClient(key, { log = () => {} } = {}) {
   let chain = Promise.resolve();
 
-  const call = (method, path, body) =>
-    (chain = chain.then(() => sleep(GAP)).then(() => attempt(method, path, body)));
+/* A rejected promise must not stay in the chain: `chain.then(...)` off a
+   rejected chain rejects with the ORIGINAL error, so one failed request would
+   make every later one fail with the same stale message for the life of the
+   process. The chain keeps only the timing, never the outcome. */
+  const call = (method, path, body) => {
+    const run = chain.then(() => sleep(GAP)).then(() => attempt(method, path, body));
+    chain = run.then(() => {}, () => {});
+    return run;
+  };
 
   async function attempt(method, path, body, tries = 4) {
     for (let i = 0; i < tries; i++) {

@@ -177,3 +177,70 @@ property is worth the whole design on its own.
 
 Steps 1–3 are independently useful: at that point the console is capturing real
 data and the KPIs compute, with Kylas not yet touched.
+
+---
+
+## Built — the Airtable write path
+
+`scripts/airtable.mjs` holds the client and `syncContact`. The proxy calls it on
+every save, alongside the Kylas write:
+
+```
+POST /save
+  ├─ read the contact's current remarks from Kylas
+  ├─ Kylas:    POST /v1/contacts  or  PUT /v1/contacts/{id}
+  ├─ Airtable: company → contact → event rows → call log → transition
+  └─ Kylas:    POST /v1/call-logs/
+```
+
+Airtable is optional. Without `AIRTABLE_PAT` and `AIRTABLE_BASE` the proxy still
+reads and writes Kylas and each save reports `airtableSkipped`, so a missing
+token costs the KPIs, not the dialling. `/targets` says which halves are live.
+
+### What each save writes
+
+| Table | How | Matched on |
+|---|---|---|
+| Companies | upsert | `Kylas Company ID` |
+| Contacts | upsert, with `Company` linked | `Kylas Contact ID` |
+| Event Rows | upsert per row, stale rows deleted | `Row Key` |
+| Call Log | upsert, so a retry cannot double-count | `Key` = timestamp + contact |
+| Stage Transitions | only when the stage actually moved | `Key` |
+
+Every event row carries a UUID from the moment it is created in the console.
+Without it an edited row would be written as a second row and keep counting
+toward Right POC twice.
+
+### The rank still only rises
+
+`syncContact` reads the contact's existing `KPI Rank` and writes
+`MAX(existing, computed)`, stamping `KPI Rank At` only when it increases.
+`Ever Picked` is set once and never unset. Verified: a contact at Discovery
+Call Booked (rung 19) dropped to CNC keeps rank 19.
+
+### The daily freeze
+
+```
+AIRTABLE_PAT=... AIRTABLE_BASE=app... node scripts/snapshot.mjs           # yesterday
+... node scripts/snapshot.mjs --date 2026-09-15 --dry-run
+```
+
+Run once a day after the day ends — a cron at 00:30 does it. It refuses to
+freeze a day that is not over, and leaves an already-frozen day untouched.
+Activity counts come from the two append-only logs; standing totals come from
+the contacts as they are at that moment, which is why the run has to happen on
+schedule rather than being reconstructed later.
+
+### Testing without either key
+
+```
+node scripts/mock-kylas.mjs                     # 9900
+node scripts/mock-airtable.mjs                  # 9901
+KYLAS_BASE=http://127.0.0.1:9900 KYLAS_KEY=x \
+AIRTABLE_BASE_URL=http://127.0.0.1:9901 AIRTABLE_PAT=x AIRTABLE_BASE=appTEST \
+  node scripts/proxy.mjs
+node scripts/test-airtable-live.mjs
+```
+
+The mock Airtable implements upsert, filterByFormula and delete, and rate limits
+above five requests a second like the real one.
