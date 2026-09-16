@@ -155,7 +155,7 @@ non-empty, in either the past or current section.
 
 ```
 Event Rows.Has Any Signal =
-    OR( Event Type != "", Budget != "", Timeline != "", Pax != "" )
+    OR( Budget != "", Timeline != "", Pax != "" )
 
 Contact.Is Right POC      = OR(Event Rows.Has Any Signal)
 Company.KPI Stage         ≥ "Right POC" if any contact qualifies
@@ -164,11 +164,10 @@ Company.Right POC Contacts = names of every qualifying contact
 
 The company-level name list is the `ARRAYJOIN` rollup in §1.
 
-> **OPEN — exact field list.** Two slightly different lists were given: one had
-> budget / timeline / pax, the other added event type. Above includes event type.
-> `Remarks` is deliberately excluded — an associate typing "call back Monday" in
-> remarks is not qualification signal, and including it would mark nearly every
-> connected call as a right POC. Confirm both choices.
+**Settled.** Event type is excluded along with remarks: choosing "Employee
+offsites" from a dropdown says nothing about whether they have a requirement,
+and an associate typing "call back Monday" in remarks is not qualification
+signal. Only budget, timeline and pax count.
 
 ---
 
@@ -178,7 +177,7 @@ The company-level name list is the `ARRAYJOIN` rollup in §1.
 
 ```
 Event Rows.Is Complete =
-    AND( Event Type != "", Budget != "", Timeline != "", Pax != "" )
+    AND( Budget != "", Timeline != "", Pax != "" )
 
 Contact.Successful Discovery = OR(Event Rows.Is Complete)
 ```

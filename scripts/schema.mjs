@@ -23,7 +23,8 @@ export const ladderFormula = (rankField) =>
     `"${LADDER[0][1]}"`,
   );
 
-const SIGNALS = ["Event Type", "Budget", "Timeline", "Pax"];
+/* Event type is not qualification signal — see docs/kpi-spec.md §5. */
+const SIGNALS = ["Budget", "Timeline", "Pax"];
 const anyFilled = SIGNALS.map((f) => `{${f}} != ""`).join(", ");
 
 /* ── tables, created first with their own columns only ─────────────── */

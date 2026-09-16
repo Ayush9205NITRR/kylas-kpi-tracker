@@ -74,9 +74,17 @@
        app.kylas.io/sales/contacts/details/<id>
      This is the only thing read from the host page. */
   const REC = /\/sales\/(companies|contacts|leads)\/details\/(\d+)/i;
+  /* Two Kylas pages are not records but reports, and the console shows its own
+     view of them instead of the call form. */
+  const VIEWS = [
+    [/\/sales\/home\/?$/i, "dashboard"],
+    [/\/sales\/companies\/list\/?$/i, "companies"],
+  ];
   function currentRecord() {
     const m = location.pathname.match(REC);
-    return m ? { kind: m[1].toLowerCase().replace(/ies$/, "y").replace(/s$/, ""), id: m[2] } : null;
+    if (m) return { kind: m[1].toLowerCase().replace(/ies$/, "y").replace(/s$/, ""), id: m[2] };
+    for (const [re, view] of VIEWS) if (re.test(location.pathname)) return { kind: view, id: view };
+    return null;
   }
 
   /* Display label only — never data. The record id is what everything joins on,
@@ -178,6 +186,8 @@
     const rec = currentRecord();
     fabLabel.textContent =
       !rec ? "Call console" :
+      rec.kind === "dashboard" ? "KPI dashboard" :
+      rec.kind === "companies" ? "Company view" :
       rec.kind === "company" ? "Work this company" : "Log a call";
   }, 700);
 

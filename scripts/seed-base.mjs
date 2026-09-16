@@ -27,8 +27,10 @@ const callLog = dump.callLog || [];
 /* ── the ladder, same rules as kpi-spec.md §8 ──────────────────────── */
 const INITIATED = ["LinkedIn Outreach Initiated", "Cold Call Initiated"];
 const rows = (c) => [...(c.past || []), ...(c.current || [])];
-const hasSignal = (c) => rows(c).some((r) => r.eventType || r.budget || r.timeline || r.pax);
-const isComplete = (c) => rows(c).some((r) => r.eventType && r.budget && r.timeline && r.pax);
+const filled = (v) => String(v || "").trim() !== "";
+/* Event type is not signal — see docs/kpi-spec.md §5. */
+const hasSignal = (c) => rows(c).some((r) => filled(r.budget) || filled(r.timeline) || filled(r.pax));
+const isComplete = (c) => rows(c).some((r) => filled(r.budget) && filled(r.timeline) && filled(r.pax));
 const connected = (c) => c.stage && c.stage !== "Could Not Connect" && !INITIATED.includes(c.stage);
 
 function rank(c, calls) {

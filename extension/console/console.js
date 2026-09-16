@@ -295,6 +295,10 @@ function setOutcome(o){
   const a=rec();
   lastOutcome=o;
   const target=outcomeStage(o,a);
+  /* Last quality date is the most recent STAGE CHANGE, not the most recent
+     call — a second no-answer moves the call log but not the company's
+     position. Only stamp when the stage actually moves. */
+  if(a.stage!==target)a.lastStageChangeAt=new Date().toISOString();
   a.stage=target;
   if(EXIT_STAGES.includes(target))a.exitReason=target;
   /* Dialled from the console: that timer is the truth, so freeze it. Otherwise
@@ -425,11 +429,18 @@ function render(){
    moves the moment a call is saved. Mirrors the ladder in docs/kpi-spec.md. */
 const NOT_CONNECTED=[...UNTOUCHED,...CNC_LADDER];
 function companyRoster(id){return DATA.filter(a=>String(a.companyId)===String(id));}
+/* Right POC the moment ANY of budget | timeline | pax is filled on ANY row,
+   past or current. Event type alone is not signal — picking "Employee offsites"
+   from a dropdown says nothing about whether they have a requirement. */
+const filled=v=>String(v||"").trim()!=="";
 function hasSignal(a){
-  return a.past.concat(a.current).some(r=>r.eventType||r.budget||r.timeline||r.pax);
+  return [...(a.past||[]),...(a.current||[])]
+    .some(r=>filled(r.budget)||filled(r.timeline)||filled(r.pax));
 }
+/* A successful discovery call is one row carrying the whole picture. */
 function isComplete(a){
-  return a.past.concat(a.current).some(r=>r.eventType&&r.budget&&r.timeline&&r.pax);
+  return [...(a.past||[]),...(a.current||[])]
+    .some(r=>filled(r.budget)&&filled(r.timeline)&&filled(r.pax));
 }
 function connected(a){
   return !!a.stage&&!NOT_CONNECTED.includes(a.stage);

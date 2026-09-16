@@ -14,12 +14,15 @@
     /* Opened on a Kylas company page: scope the queue to that company and show
        the rolled-up view. The contacts are where the data is entered; the
        company strip is derived from them and moves as calls are saved. */
+    if (m.type === "dashboard" || m.type === "companies") { showView(m.type); return; }
     if (m.type === "company" && m.kylasId) {
+      showView(null);
       openCompany(String(m.kylasId), m.label);
       return;
     }
 
     if (m.type === "contact" && m.kylasId) {
+      showView(null);
       /* Opened from a Kylas contact page. Select that record if we hold it,
          otherwise start a new one stamped with the id so the save can join
          back on it later. */
@@ -43,6 +46,27 @@
       window.focus();
     }
   });
+
+  /* ── the report views ────────────────────── */
+  /* These cover the call console rather than replacing it, so the record the
+     associate was on is still there when they navigate back. */
+  let view = null;
+  function showView(which) {
+    const port = document.getElementById("viewport");
+    const wrap = document.getElementById("vwrap");
+    if (!port) return;
+    view = which;
+    if (!which) { port.hidden = true; wrap.innerHTML = ""; return; }
+    port.hidden = false;
+    (which === "dashboard" ? Views.dashboard : Views.companies)(wrap);
+  }
+
+  /* Clicking a company in the list should take you into it. */
+  window.openCompanyFromView = (id) => {
+    showView(null);
+    const co = DATA.find((a) => String(a.companyId) === String(id));
+    openCompany(String(id), co?.company);
+  };
 
   /* ── loading a company ───────────────────── */
   /* Show whatever is already held straight away, then fetch. An associate
