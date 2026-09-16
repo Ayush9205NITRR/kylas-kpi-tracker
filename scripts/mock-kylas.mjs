@@ -7,8 +7,9 @@
  *
  * Exists so the proxy, the mapping and the console can be tested end to end
  * without a real key and without touching the real CRM. It deliberately
- * reproduces the awkward parts: stages come back as numeric picklist ids, the
- * company is a nested object, and a burst of requests is rate limited.
+ * reproduces the awkward parts: stages come back as numeric picklist ids,
+ * company as a bare id whose name lives in metaData.idNameStore, custom fields
+ * whose values are nothing like the standard picklists, and rate limiting.
  */
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -21,6 +22,21 @@ const USERS = {
   74725: { id: 74725, firstName: "Enout", lastName: "Super Admin" },
   74726: { id: 74726, firstName: "Priya", lastName: "Deshmukh" },
 };
+const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Boolean).join(" ");
+
+/* Kylas attaches an id -> name table for every lookup on the record. Without
+   it the console has only bare ids and shows blanks. */
+const withMeta = (c) => ({
+  ...c,
+  metaData: { idNameStore: {
+    company: c.company ? { [String(c.company?.id ?? c.company)]: COMPANIES[c.company?.id ?? c.company]?.name } : {},
+    ownerId: { [String(c.ownerId)]: userName(c.ownerId) },
+    cfPipelineStageBd: c.customFieldValues?.cfPipelineStageBd
+      ? { [String(c.customFieldValues.cfPipelineStageBd)]:
+          (stages.find((s) => s.id === c.customFieldValues.cfPipelineStageBd) || {}).label }
+      : {},
+  } },
+});
 
 const COMPANIES = {
   1776620: {
@@ -43,7 +59,7 @@ const CONTACTS = [
     linkedin: "https://linkedin.com/in/hema-bharathi",
     emails: [{ type: "OFFICE", value: "hema@seats.aero", primary: true }],
     phoneNumbers: [{ type: "MOBILE", dialCode: "+91", code: "IN", value: "9876501234", primary: true }],
-    customFieldValues: { cfPipelineStageBd: id("MQL_MARKETING_QUALIFIED_LEAD"), cfSourceOfData: "LINKEDIN" },
+    customFieldValues: { cfPipelineStageBd: id("MQL_MARKETING_QUALIFIED_LEAD"), cfSourceOfData: "Round-Robin" },
     updatedAt: "2026-09-15T10:02:00.000Z" },
 
   { id: 112937, firstName: "Shipra", lastName: "Gupta", ownerId: 74726,
@@ -95,7 +111,7 @@ createServer(async (req, res) => {
   const ct = p.match(/^\/v1\/contacts\/(\d+)$/);
   if (ct) {
     const hit = CONTACTS.find((c) => String(c.id) === ct[1]);
-    return hit ? json(res, 200, hit) : json(res, 404, { message: "no such contact" });
+    return hit ? json(res, 200, withMeta(hit)) : json(res, 404, { message: "no such contact" });
   }
 
   if (p === "/v1/search/contact" && req.method === "POST") {
@@ -113,7 +129,21 @@ createServer(async (req, res) => {
         out = out.filter((c) => Number(c.company?.id ?? c.company) === Number(r.value));
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
     }
-    return json(res, 200, { content: out, totalElements: out.length });
+    return json(res, 200, { content: out.map(withMeta), totalElements: out.length });
+  }
+
+  if (p === "/v1/entities/contact/fields") {
+    return json(res, 200, { content: [
+      { name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
+        picklist: { picklistValues: [
+          { id: 9001, name: "Round-Robin", displayName: "Round-Robin" },
+          { id: 9002, name: "Apollo", displayName: "Apollo" },
+          { id: 9003, name: "Referral", displayName: "Referral" },
+        ] } },
+      { name: "cfPipelineStageBd", displayName: "Pipeline Stage - BD", type: "PICK_LIST",
+        picklist: { picklistValues: stages.map((s) => ({ id: s.id, name: s.code, displayName: s.label })) } },
+      { name: "designation", displayName: "Designation", type: "TEXT_FIELD" },
+    ] });
   }
 
   json(res, 404, { message: "not mocked", path: p });

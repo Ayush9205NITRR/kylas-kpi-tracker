@@ -90,6 +90,7 @@
 
     /* Owners come back with the contacts. Without this the dropdown keeps the
        three names it was born with and a fetched owner reads as "Choose". */
+    adoptPicklists(res.picklists);
     if (res.owners?.length) {
       addOwners(res.owners.map((o) => o.name));
       Store.setSetting("owners", OWNERS.filter(Boolean));

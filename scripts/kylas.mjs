@@ -47,9 +47,13 @@ export function createClient(key, { log = () => {} } = {}) {
   /* The search fields the console actually needs. */
   /* Search returns ONLY what is asked for, so anything missing here comes back
      blank in the console even though Kylas holds it. */
+  /* Search returns ONLY what is asked for, so anything missing here comes back
+     blank in the console even though Kylas holds it. metaData carries the
+     id -> name map for every lookup on the record, which is where company and
+     owner names come from. */
   const CONTACT_FIELDS = ["id", "firstName", "lastName", "salutation", "ownerId",
     "company", "companyName", "designation", "department", "emails", "phoneNumbers",
-    "linkedin", "remarks", "customFieldValues", "createdAt", "updatedAt"];
+    "linkedin", "remarks", "customFieldValues", "metaData", "createdAt", "updatedAt"];
 
   /* The schema calls company and ownerId LOOK_UP, but the query builder rejects
      that and wants "long". Confirmed live — see docs/kylas-picklists.md. */
@@ -88,6 +92,17 @@ const pick = (...vals) => vals.find((v) => v !== undefined && v !== null && v !=
 const idOf = (v) => (v && typeof v === "object" ? pick(v.id, v.value) : v);
 const nameOf = (v) => (v && typeof v === "object" ? pick(v.name, v.displayName, v.label) : undefined);
 
+/* Kylas ships a lookup table with every record:
+     metaData.idNameStore.company  = { "1770964": "renewbuy" }
+     metaData.idNameStore.ownerId  = { "74752": "Rubal Sansanwal" }
+   Reading it is both more accurate and cheaper than resolving ids with extra
+   requests, which matters against a tight rate limit. */
+export function lookupName(record, field, id) {
+  const store = record?.metaData?.idNameStore?.[field];
+  if (!store || id === undefined || id === null || id === "") return undefined;
+  return store[String(id)];
+}
+
 /* A stage can come back as the code, the numeric id, or an object. */
 export function stageCode(v) {
   const raw = v && typeof v === "object" ? pick(v.name, v.code, v.id, v.value) : v;
@@ -98,16 +113,18 @@ export function stageCode(v) {
 
 export function toConsoleContact(c, { ownerName, company } = {}) {
   const cf = c.customFieldValues || {};
+  const companyId = pick(idOf(c.company), company?.id, "");
+  const ownerId = pick(c.ownerId, "");
   const name = [pick(c.salutationName), pick(c.firstName), pick(c.lastName)].filter(Boolean).join(" ").trim();
   return {
     kid: String(pick(c.id, "") ?? ""),
     salutation: pick(stageCode(c.salutation), "") || "",
     pocName: name || pick(c.name, ""),
-    /* Search often returns company as a bare id with no name. The caller knows
-       the company it asked for, so fall back to that rather than showing a
-       blank next to a contact that plainly has one. */
-    company: pick(nameOf(c.company), c.companyName, company?.name, "") || "",
-    companyId: String(pick(idOf(c.company), company?.id, "") ?? ""),
+    /* Company arrives as a bare id. The name is in metaData; failing that, the
+       caller knows which company it asked for. */
+    company: pick(lookupName(c, "company", companyId), nameOf(c.company), c.companyName,
+                  company?.name, "") || "",
+    companyId: String(companyId ?? ""),
     linkedin: pick(c.linkedin, "") || "",
     designation: pick(c.designation, c.department, "") || "",
 
@@ -121,12 +138,13 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
     })),
 
     stage: stageCode(pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)),
+    stageLabel: lookupName(c, "cfPipelineStageBd", pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)) || "",
     source: stageCode(pick(cf.cfSourceOfData, c.cfSourceOfData)),
     nextCallDate: "", nextCallTime: "",
     remarks: pick(c.remarks, "") || "",
     offsiteTimeline: "",
-    owner: pick(ownerName, c.ownerName, "") || "",
-    ownerId: String(pick(c.ownerId, "") ?? ""),
+    owner: pick(lookupName(c, "ownerId", ownerId), ownerName, c.ownerName, "") || "",
+    ownerId: String(ownerId ?? ""),
 
     /* Overlay-owned, so Kylas has nothing to say about them yet. */
     past: [], current: [],

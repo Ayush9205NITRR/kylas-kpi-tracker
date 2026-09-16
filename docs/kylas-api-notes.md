@@ -338,3 +338,48 @@ to it. Consequences:
 - `GET /v1/pipelines/search` returned 400. Probably lead-only, and not needed
   now that BD stage is a Contact field.
 - Everything from `contacts/{id}` downward was lost to 429 and has not been seen.
+
+---
+
+## 10. `metaData.idNameStore` — the lookup table Kylas ships with every record
+
+A raw contact carries its own id→name map:
+
+```json
+"metaData": { "idNameStore": {
+  "company":           { "1770964": "renewbuy" },
+  "ownerId":           { "74752": "Rubal Sansanwal" },
+  "cfPipelineStageBd": { "2862826": "LinkedIn Outreach Initiated" }
+} }
+```
+
+Every lookup on the record resolves from here. That matters twice over:
+
+- **Accuracy.** `company` comes back as the bare id `1770964`; the name only
+  exists in this map. Without reading it the Company field renders blank next to
+  a contact that plainly has one.
+- **Cost.** Resolving owner ids by calling `/v1/users/{id}` spends requests
+  against a limit that 429s on the fourth call in a second. The name is already
+  in the payload.
+
+`metaData` must be named in the search `fields` list or it does not come back —
+search returns only what is asked for.
+
+## 11. Custom fields are per-account, so do not hardcode their values
+
+`cfSourceOfData` is a **custom** field, not the standard `Source` picklist. On
+this account its values are `Round-Robin`, not the
+`GOOGLE | FACEBOOK | LINKEDIN | …` the standard field offers. Anything
+hardcoded against the wrong list renders real data as "Choose".
+
+The proxy therefore reads `/v1/entities/contact/fields` once and serves the
+picklists to the console, which adopts them at runtime. Standard fields can stay
+in `docs/stages.json`; account-specific ones cannot.
+
+Two general rules fall out, both learned the hard way here:
+
+1. A `<select>` must keep a value it does not recognise rather than silently
+   dropping it. A blank field reads as "no data" when the truth is "the list is
+   wrong".
+2. Field casing matters: Kylas stores email and phone types uppercase
+   (`OFFICE`, `MOBILE`), so a title-case list never matches.

@@ -12,7 +12,7 @@
  * Read-only for now. Writes come next.
  */
 import { createServer } from "node:http";
-import { createClient, toConsoleContact, toConsoleCompany } from "./kylas.mjs";
+import { createClient, toConsoleContact, toConsoleCompany, lookupName } from "./kylas.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
@@ -24,8 +24,9 @@ if (!KEY) {
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const kylas = createClient(KEY, { log });
 
-/* Owner ids come back on every contact but names do not, and the picker needs
-   names. One lookup per owner, remembered for the life of the process. */
+/* Most records carry their own owner name in metaData.idNameStore, so this is
+   a fallback for the ones that do not — and every avoided request is one fewer
+   against a tight rate limit. */
 const owners = new Map();
 async function ownerName(id) {
   if (!id) return "";
@@ -43,7 +44,11 @@ async function ownerName(id) {
 
 async function mapContacts(raw, company) {
   const out = [];
-  for (const c of raw) out.push(toConsoleContact(c, { ownerName: await ownerName(c.ownerId), company }));
+  for (const c of raw) {
+    const known = lookupName(c, "ownerId", c.ownerId);
+    if (known && c.ownerId) owners.set(String(c.ownerId), known);
+    out.push(toConsoleContact(c, { ownerName: known || (await ownerName(c.ownerId)), company }));
+  }
   return out;
 }
 
@@ -51,7 +56,43 @@ async function mapContacts(raw, company) {
    Everyone seen so far, so a fetched owner is always selectable. */
 const ownerList = () => [...owners.entries()].map(([id, name]) => ({ id, name }));
 
+/* Picklists, read once. The console cannot know what an account's custom
+   fields offer, and a hardcoded list quietly renders real values as blank. */
+let metaCache = null;
+async function meta() {
+  if (metaCache) return metaCache;
+  const r = await kylas.raw("GET",
+    "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
+  const fields = Array.isArray(r) ? r : r?.content || r?.data || [];
+  const picklists = {};
+  for (const f of fields) {
+    const key = f.name || f.displayName;
+    const values = findOptions(f);
+    if (key && values) picklists[key] = values;
+  }
+  metaCache = { picklists, fields: fields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })) };
+  log(`picklists: ${Object.keys(picklists).join(", ") || "none"}`);
+  return metaCache;
+}
+
+/* Option arrays are nested differently per field type, so look for the shape
+   rather than guessing at key names. */
+function findOptions(field, depth = 0) {
+  if (!field || depth > 4) return null;
+  if (Array.isArray(field)) {
+    if (field.length && field.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
+      return field.map((x) => ({ id: x.id, code: x.name || x.displayName, label: x.displayName || x.name }));
+    for (const x of field) { const hit = findOptions(x, depth + 1); if (hit) return hit; }
+    return null;
+  }
+  if (typeof field === "object")
+    for (const k of Object.keys(field)) { const hit = findOptions(field[k], depth + 1); if (hit) return hit; }
+  return null;
+}
+
 const routes = {
+  "/meta": async () => meta(),
+
   "/health": async () => {
     const me = await kylas.me();
     return { ok: true, user: { id: me?.id, name: [me?.firstName, me?.lastName].filter(Boolean).join(" ") } };
@@ -66,7 +107,7 @@ const routes = {
     const company = toConsoleCompany(co);
     const contacts = await mapContacts(raw, company);
     log(`company ${id} — ${contacts.length} contact(s)`);
-    return { company, contacts, owners: ownerList() };
+    return { company, contacts, owners: ownerList(), picklists: (await meta()).picklists };
   },
 
   /* Session mode: everything this owner holds, ordered in the browser. */

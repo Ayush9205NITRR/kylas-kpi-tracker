@@ -5,9 +5,30 @@ const SALUTATION=["","MR","MRS","MISS"];
 const EMAIL_TYPES=["OFFICE","PERSONAL","OTHER"];
 const PHONE_TYPES=["MOBILE","WORK","HOME","OTHER"];
 /* Stage tables live in stages.js, generated from docs/stages.json. */
-const SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
+/* Seeded from the picklist dump, then replaced by whatever this account
+   actually defines — see adoptPicklists. cfSourceOfData is a custom field, so
+   its values differ per account ("Round-Robin" on Ayush's). */
+let SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
 /* MULTI_PICKLIST in Kylas — more than one quarter can be selected. */
-const OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
+let OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
+
+/* Kylas is the authority on what its own fields offer. */
+function adoptPicklists(picklists){
+  if(!picklists)return;
+  const take=(...names)=>{
+    for(const n of names){
+      const v=picklists[n];
+      if(v&&v.length)return ["",...v.map(o=>o.code)];
+    }
+    return null;
+  };
+  const src=take("cfSourceOfData","sourceOfData","source");
+  if(src)SOURCES=src;
+  const off=take("cfOffsiteTimeline","offsiteTimeline");
+  if(off)OFFSITE_TIMELINE=off;
+  for(const list of Object.values(picklists))
+    for(const o of list) if(o.code&&o.label&&!LABEL[o.code])LABEL[o.code]=o.label;
+}
 
 const label=v=>LABEL[v]||v;
 
