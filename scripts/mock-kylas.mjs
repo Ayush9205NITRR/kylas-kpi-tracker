@@ -83,6 +83,9 @@ const CONTACTS = [
     updatedAt: "2026-09-01T00:00:00.000Z" },
 ];
 
+let nextId = 900001;
+const WRITES = [];
+const CALL_LOGS = [];
 let recent = [];
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -109,7 +112,9 @@ createServer(async (req, res) => {
   if (co) return COMPANIES[co[1]] ? json(res, 200, COMPANIES[co[1]]) : json(res, 404, { message: "no such company" });
 
   const ct = p.match(/^\/v1\/contacts\/(\d+)$/);
-  if (ct) {
+  /* Method matters: without this check the GET branch also swallows PUTs and
+     an update silently does nothing while returning 200. */
+  if (ct && req.method === "GET") {
     const hit = CONTACTS.find((c) => String(c.id) === ct[1]);
     return hit ? json(res, 200, withMeta(hit)) : json(res, 404, { message: "no such contact" });
   }
@@ -146,7 +151,38 @@ createServer(async (req, res) => {
     ] });
   }
 
-  json(res, 404, { message: "not mocked", path: p });
+  /* ── writes ──────────────────────────────────────────────────────── */
+  if (p === "/v1/contacts" && req.method === "POST") {
+    const body = JSON.parse(await text(req));
+    const made = { id: nextId++, ...body, createdAt: new Date().toISOString() };
+    CONTACTS.push(made);
+    WRITES.push({ kind: "create", id: made.id, body });
+    return json(res, 200, made);
+  }
+
+  const put = p.match(/^\/v1\/contacts\/(\d+)$/);
+  if (put && req.method === "PUT") {
+    const body = JSON.parse(await text(req));
+    const at = CONTACTS.findIndex((c) => String(c.id) === put[1]);
+    if (at < 0) return json(res, 404, { message: "no such contact" });
+    CONTACTS[at] = { ...CONTACTS[at], ...body, updatedAt: new Date().toISOString() };
+    WRITES.push({ kind: "update", id: Number(put[1]), body });
+    return json(res, 200, CONTACTS[at]);
+  }
+
+  if (p === "/v1/call-logs/" && req.method === "POST") {
+    const body = JSON.parse(await text(req));
+    const made = { id: nextId++, ...body };
+    CALL_LOGS.push(made);
+    WRITES.push({ kind: "calllog", id: made.id, body });
+    return json(res, 200, made);
+  }
+
+  /* Test hook: what has actually been written, so a test can assert on it. */
+  if (p === "/__writes") return json(res, 200, { writes: WRITES, callLogs: CALL_LOGS });
+  if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }
+
+  json(res, 404, { message: "not mocked", path: p, method: req.method });
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`mock kylas on http://127.0.0.1:${PORT}`);
   console.log(`  companies ${Object.keys(COMPANIES).join(", ")} · ${CONTACTS.length} contacts · 429s above 4 req/s`);

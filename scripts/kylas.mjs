@@ -80,6 +80,93 @@ export function createClient(key, { log = () => {} } = {}) {
     },
 
     contact: (id) => call("GET", `/v1/contacts/${id}`),
+
+    createContact: (body) => call("POST", "/v1/contacts", body),
+    updateContact: (id, body) => call("PUT", `/v1/contacts/${id}`, body),
+    createCallLog: (body) => call("POST", "/v1/call-logs/", body),
+  };
+}
+
+/* ── writing ───────────────────────────────────────────────────────── */
+
+export const MARK_A = "--- BD CONSOLE (auto, do not edit below) ---";
+export const MARK_B = "--- END ---";
+
+/* Rewrite only between the markers. Anything a human typed above them is
+   theirs and must survive, so the block is replaced rather than the field. */
+export function mergeRemarks(existing, block) {
+  const before = String(existing || "").split(MARK_A)[0].replace(/\s+$/, "");
+  if (!block) return before;
+  return `${before}${before ? "\n\n" : ""}${MARK_A}\n${block}\n${MARK_B}`;
+}
+
+const line = (label, value) => (value ? `${label.padEnd(10)} ${value}` : null);
+const row = (r) => [r.eventType, r.budget, r.timeline, r.pax].filter(Boolean).join(" | ");
+
+/* What a Kylas user sees on the record. Readable, not parsed back — the numbers
+   come from Airtable, this is context for whoever opens the contact. */
+export function renderRemarks(c, { stageLabel } = {}) {
+  const rows = (list, label) => (list || []).map((r) => row(r)).filter(Boolean)
+    .map((t, i) => line(i ? "" : label, t)).filter(Boolean);
+  const out = [
+    line("Stage", stageLabel || c.stage),
+    line("Owner", c.owner),
+    line("Next call", [c.nextCallDate, c.nextCallTime].filter(Boolean).join(" ")),
+    ...rows(c.past, "Past"),
+    ...rows(c.current, "Current"),
+    line("Vendor", c.vendorInfo),
+    line("Mode", c.modeOfMeeting),
+    line("Offering", c.serviceOffering ? "pitched on this call" : ""),
+    line("Notes", (c.current || []).map((r) => r.remarks).filter(Boolean).join(" · ")),
+  ].filter(Boolean);
+  return out.join("\n");
+}
+
+/* The console's shape back into Kylas'. Only fields Kylas owns — the overlay's
+   own data lives in Airtable and in the remarks block. */
+export function toKylasContact(c, { remarks } = {}) {
+  const parts = String(c.pocName || "").trim().split(/\s+/);
+  const body = {
+    firstName: parts.length > 1 ? parts.slice(0, -1).join(" ") : undefined,
+    lastName: parts.length > 1 ? parts.at(-1) : (parts[0] || "Unknown"),
+    designation: c.designation || undefined,
+    linkedin: c.linkedin || undefined,
+    emails: (c.emails || []).filter((e) => e.value?.trim())
+      .map((e) => ({ type: e.type || "OFFICE", value: e.value.trim(), primary: !!e.primary })),
+    phoneNumbers: (c.phones || []).filter((p) => p.value?.trim())
+      .map((p) => ({ type: p.type || "MOBILE", dialCode: p.cc || "+91",
+                     value: p.value.trim(), primary: !!p.primary })),
+    customFieldValues: {},
+  };
+  if (c.companyId) body.company = Number(c.companyId);
+  if (c.ownerId) body.ownerId = Number(c.ownerId);
+  if (remarks !== undefined) body.remarks = remarks;
+
+  /* A picklist is set by value id, never by code. */
+  const stageId = STAGE_ID[c.stage];
+  if (stageId) body.customFieldValues.cfPipelineStageBd = stageId;
+  if (c.source) body.customFieldValues.cfSourceOfData = c.source;
+  if (!Object.keys(body.customFieldValues).length) delete body.customFieldValues;
+
+  for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
+  return body;
+}
+
+/* Kylas' own call-log vocabulary, which is not the console's. */
+const OUTCOME = { "No answer": "no_answer", "Wrong POC": "connected",
+                  "Right POC": "connected", "Discovery": "connected" };
+
+export function toKylasCallLog(c, call) {
+  const phone = (c.phones || []).find((p) => p.primary) || (c.phones || [])[0];
+  const number = phone ? String(phone.value || "").trim() : "";
+  return {
+    outcome: OUTCOME[call.outcome] || "connected",
+    callType: "outgoing",
+    startTime: call.at || new Date().toISOString(),
+    duration: String(call.duration || 0),
+    phoneNumber: number,
+    notes: call.note ? [{ description: call.note }] : undefined,
+    relatedTo: { entity: "contact", id: Number(c.kid), phoneNumber: number },
   };
 }
 

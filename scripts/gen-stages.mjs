@@ -87,6 +87,11 @@ export const STAGE_RUNG = {
 ${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${s.rung},`).join("\n")}
 };
 
+/* What a person reading the record calls it. */
+export const STAGE_LABEL = {
+${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${q(s.label)},`).join("\n")}
+};
+
 /* [rung, label] lowest first, for the Airtable ladder formula. */
 export const LADDER = [
 ${byRung.map((s) => `  [${s.rung}, ${q(String(s.rung).padStart(2, "0") + " · " + s.label)}],`).join("\n")}

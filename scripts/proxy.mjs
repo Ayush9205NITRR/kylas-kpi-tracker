@@ -9,10 +9,13 @@
  * browser. The same handlers deploy to a Cloudflare Worker unchanged — only the
  * server shell below is node-specific.
  *
- * Read-only for now. Writes come next.
+ * Reads and writes. A write is: create or update the contact, rewrite the
+ * marker block inside its remarks, and append a native Kylas call log.
  */
 import { createServer } from "node:http";
-import { createClient, toConsoleContact, toConsoleCompany, lookupName } from "./kylas.mjs";
+import { createClient, toConsoleContact, toConsoleCompany, lookupName,
+         toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
+import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
@@ -90,6 +93,15 @@ function findOptions(field, depth = 0) {
   return null;
 }
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let b = "";
+    req.on("data", (c) => (b += c));
+    req.on("end", () => resolve(b || "{}"));
+    req.on("error", reject);
+  });
+}
+
 const routes = {
   "/meta": async () => meta(),
 
@@ -119,6 +131,53 @@ const routes = {
     return { owner: String(owner), contacts, owners: ownerList() };
   },
 
+  /* One save from the console becomes up to three Kylas calls. Ordered so that
+     a failure part-way leaves the contact correct rather than half-written:
+     the record first, then its call log. */
+  "/save": async (url, req) => {
+    const body = JSON.parse(await readBody(req));
+    const c = body.contact;
+    if (!c) throw Object.assign(new Error("contact is required"), { status: 400 });
+
+    /* The block is for a human reading the record, so use the name they know. */
+    const stageLabel = STAGE_LABEL[c.stage] || c.stage || "";
+    const result = { kid: c.kid || null, created: false, wrote: [] };
+
+    /* Remarks: read what is there first so a human's own text survives. */
+    let existing = "";
+    if (c.kid) {
+      try { existing = (await kylas.contact(c.kid))?.remarks || ""; }
+      catch { /* a failed read should not block the write */ }
+    }
+    const remarks = mergeRemarks(existing, renderRemarks(c, { stageLabel }));
+    const payload = toKylasContact(c, { remarks });
+
+    if (!c.kid) {
+      const made = await kylas.createContact(payload);
+      result.kid = String(made?.id ?? "");
+      result.created = true;
+      result.wrote.push("created contact");
+      log(`created contact ${result.kid} (${c.pocName})`);
+    } else {
+      await kylas.updateContact(c.kid, payload);
+      result.wrote.push("updated contact");
+      log(`updated contact ${c.kid} (${c.pocName})`);
+    }
+
+    if (body.call && result.kid) {
+      try {
+        await kylas.createCallLog(toKylasCallLog({ ...c, kid: result.kid }, body.call));
+        result.wrote.push("logged call");
+      } catch (e) {
+        /* The contact is already saved; losing the call log is recoverable and
+           must not make the associate think the save failed. */
+        result.callLogError = e.message;
+        log(`! call log for ${result.kid}: ${e.message}`);
+      }
+    }
+    return result;
+  },
+
   "/contact": async (url) => {
     const id = url.searchParams.get("id");
     if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
@@ -133,6 +192,7 @@ createServer(async (req, res) => {
      origin is a generated id, so echoing is simpler than allow-listing. */
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
 
@@ -143,7 +203,7 @@ createServer(async (req, res) => {
   }
 
   try {
-    const body = await handler(url);
+    const body = await handler(url, req);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   } catch (e) {

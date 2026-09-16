@@ -246,3 +246,48 @@ node scripts/test-fetch-live.mjs                              # drives the exten
 The mock returns the shapes the live probe actually saw, including the awkward
 ones: stages as numeric picklist ids, company as a nested object, a contact with
 no phone or stage at all, and 429s above four requests a second.
+
+## Writing back to Kylas
+
+`Save & next` now reaches Kylas. One save becomes up to three calls, ordered so
+a failure part-way leaves the contact correct rather than half-written:
+
+1. read the contact's current `remarks`
+2. `POST /v1/contacts` if it has no id yet, otherwise `PUT /v1/contacts/{id}`
+3. `POST /v1/call-logs/`
+
+The stage is written as its **picklist value id** — `2862828`, not
+`MQL_MARKETING_QUALIFIED_LEAD` — because that is what Kylas accepts.
+
+### The remarks block
+
+Only the text between the markers is rewritten. Anything a person typed above
+them survives, and a second save replaces the block rather than stacking
+another one:
+
+```
+Spoke to her assistant, asked for a Monday callback.
+
+--- BD CONSOLE (auto, do not edit below) ---
+Stage      MQL (Marketing Qualified Lead)
+Owner      Rubal Sansanwal
+Past       Offsite | 40L | Q1 | 300
+Current    Employee offsites | approx 9L, not approved | Q4 FY27 | 80
+Vendor     First Event
+--- END ---
+```
+
+This is for a human opening the record in Kylas. **Nothing reads it back** — the
+numbers come from Airtable.
+
+### When the proxy is down
+
+The save is kept in an outbox in the browser and retried on the next save. The
+queue row shows `queued`, and the associate carries on dialling. Nothing is
+lost to an outage.
+
+### Ordering: Past above Current
+
+Past renders first, as the context for what is on the table now. Both feed the
+KPI rules identically — a complete row in **either** counts as a discovery, and
+a single filled field in either makes the contact a Right POC.

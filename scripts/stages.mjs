@@ -83,6 +83,34 @@ export const STAGE_RUNG = {
   YET_TO_BE_MINED:                               1,
 };
 
+/* What a person reading the record calls it. */
+export const STAGE_LABEL = {
+  SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
+  CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",
+  RESCHEDULE_PENDING:                            "Reschedule Pending",
+  GHOSTED:                                       "Discovery Call No-Show",
+  DISCOVERY_CALL_BOOKED:                         "Discovery Call Booked",
+  FOLLOW_UP_1:                                   "Follow-up (1)",
+  FOLLOW_UP_2:                                   "Follow-up (2)",
+  FOLLOW_UP_3:                                   "Follow-up (3)",
+  FOLLOWUP_CNC:                                  "Followup - CNC",
+  MQL_MARKETING_QUALIFIED_LEAD:                  "MQL (Marketing Qualified Lead)",
+  ACTIVATION:                                    "Activation",
+  OFFSITE_DELAYED:                               "Offsite Delayed",
+  OFFSITE_DONE_LATE_REACHOUT:                    "Offsite Done (Late Reachout)",
+  NOT_INTERESTED:                                "Not Interested",
+  CONNECT_LATER:                                 "Connect Later",
+  CNC_COULD_NOT_CONNECT_3:                       "CNC (Could Not Connect) - 3",
+  CNC_COULD_NOT_CONNECT_2:                       "CNC (Could Not Connect) - 2",
+  CNC_COULD_NOT_CONNECT:                         "CNC (Could Not Connect) - 1",
+  DISQUALIFIED_WRONG_POC:                        "Disqualified - Wrong POC",
+  INVALID_CONTACT:                               "Invalid Contact",
+  NOT_A_DECISION_MAKER_NDM:                      "Not a Decision Maker (NDM)",
+  POC_ORGANIZATION_CHANGED:                      "POC - Organization - Changed",
+  YET_TO_BE_MINED:                               "LinkedIn Outreach Initiated",
+};
+
 /* [rung, label] lowest first, for the Airtable ladder formula. */
 export const LADDER = [
   [1, "01 · LinkedIn Outreach Initiated"],

@@ -93,6 +93,10 @@
   }
 
   function setOpen(next, mode) {
+    if (!next && open) {
+      const rec = currentRecord();
+      dismissedFor = rec ? `${rec.kind}:${rec.id}` : null;
+    }
     open = next;
     host.classList.toggle("open", open);
     if (mode) {
@@ -154,6 +158,20 @@
       setOpen(!open);
     }
   });
+
+  /* Open by itself on a record page. Somebody who has just clicked a company
+     in Kylas wants the console, not another click — but if they close it, that
+     is a decision, so it stays closed until they move to another record. */
+  let autoOpenedFor = null, dismissedFor = null;
+  setInterval(() => {
+    const rec = currentRecord();
+    const key = rec ? `${rec.kind}:${rec.id}` : null;
+    if (!key) return;
+    if (open) { autoOpenedFor = key; return; }
+    if (key === dismissedFor || key === autoOpenedFor) return;
+    autoOpenedFor = key;
+    setOpen(true);
+  }, 700);
 
   /* keep the launcher honest about what it will do */
   setInterval(() => {

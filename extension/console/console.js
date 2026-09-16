@@ -399,7 +399,9 @@ function renderQueue(){
     const li=el("li"),b=el("button","qi");
     b.type="button";b.setAttribute("aria-current",i===cur?"true":"false");
     b.dataset.stage=a.stage;
-    b.innerHTML=`<span class="n">${esc(a.pocName)}${a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
+    b.innerHTML=`<span class="n">${esc(a.pocName)}${a.syncing?' <i class="pend sync" title="Saving to Kylas…">…</i>'
+        :a.syncError?' <i class="pend err" title="'+esc(a.syncError)+'">queued</i>'
+        :a.pendingCreate?' <i class="pend" title="Not in Kylas yet">new</i>':""}</span><span class="c">${esc(a.company)}</span>
       <span class="s"><i class="dotd${a.done?" done":a.flagged?" flag":""}"></i><span class="st">${esc(label(a.stage))}</span>${
         mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>'
         :mode==="session"?`<span class="pri">#${priority(a)}</span>`:""}</span>`;
@@ -563,6 +565,50 @@ function contactField(a,kind){
   return f;
 }
 
+/* Every company the console has seen, so the picker is never empty. */
+function knownCompanies(){
+  const m=new Map();
+  for(const c of DATA) if(c.companyId&&c.company) m.set(String(c.companyId),c.company);
+  if(scope&&scope.name) m.set(String(scope.id),scope.name);
+  return m;
+}
+/* A contact belongs to a company in Kylas, and typing a name here never made
+   that link — it only produced a second spelling of an existing account. So the
+   name is chosen, not typed, and inside a company scope it is fixed. */
+function companyField(a){
+  const f=el("div","f");
+  const head=el("div","fhead");
+  head.innerHTML=`<label for="f-co">Company</label>`;
+  f.appendChild(head);
+
+  const locked=!!scope&&String(a.companyId)===String(scope.id);
+  if(locked){
+    const w=el("div","fixed");
+    w.innerHTML=`<b id="f-co" data-value="${esc(a.companyId)}">${esc(a.company||scope.name)}</b>
+      <em>kylas ${esc(String(a.companyId))}</em>`;
+    f.appendChild(w);
+    return f;
+  }
+
+  const m=knownCompanies();
+  const ids=[...m.keys()];
+  const sel=el("select","in");sel.id="f-co";
+  sel.innerHTML=[`<option value="">Choose a company</option>`,
+    ...ids.map(id=>`<option value="${esc(id)}"${String(a.companyId)===id?" selected":""}>${esc(m.get(id))}</option>`)].join("");
+  sel.onchange=e=>{
+    a.companyId=e.target.value;
+    a.company=m.get(e.target.value)||"";
+    renderCallbar();renderQueue();validate();
+  };
+  f.appendChild(sel);
+  if(!ids.length){
+    const n=el("div","rmnote");
+    n.innerHTML="<span>Open a company in Kylas first — the console lists the ones it has seen.</span>";
+    f.appendChild(n);
+  }
+  return f;
+}
+
 function renderBasic(){
   const a=rec(),W=document.getElementById("formL");W.innerHTML="";
   document.getElementById("phL").textContent=isNew?"new contact":(a.kid?"kylas "+a.kid:"unsaved");
@@ -616,7 +662,7 @@ function renderBasic(){
   grid.appendChild(contactField(a,"emails"));
   grid.appendChild(contactField(a,"phones"));
   grid.appendChild(fLi);
-  grid.appendChild(field("Company","f-co",false,input("f-co",a.company,"Company name",v=>{a.company=v;renderCallbar();renderQueue();})));
+  grid.appendChild(companyField(a));
   grid.appendChild(field("Designation","f-dg",false,input("f-dg",a.designation,"Job title",v=>{a.designation=v;renderCallbar();})));
   W.appendChild(group("POC",[grid]));
 
@@ -680,8 +726,10 @@ function renderRight(){
     F.appendChild(s);return;
   }
 
-  F.appendChild(eventSection("current","Current","One row per event on the table now."));
+  /* Past first: what they have already run is the context for what is on the
+     table now. Both feed the KPI rules the same way — see companyStage(). */
   F.appendChild(eventSection("past","Past","One row per event they have already run."));
+  F.appendChild(eventSection("current","Current","One row per event on the table now."));
 
   /* vendor & offering */
   const s4=el("section","sec");
@@ -847,6 +895,11 @@ function saveNext(){
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
+
+  /* Push to Kylas. The UI has already moved on — an associate should not wait
+     on a network round trip between calls. */
+  syncToKylas(a,{outcome:outcome?outcome.t:null,duration,at:new Date().toISOString(),
+                 note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});
   const rows=visible().filter(r=>r.i!==from);
   const nxt=rows.length?rows[0].i:cur;
   cur=nxt;isNew=false;collapsed={past:false,current:false};
@@ -869,6 +922,24 @@ function focusEvent(k){
   n.focus();
   n.scrollIntoView({block:"center"});
   if(n.setSelectionRange&&n.value)n.setSelectionRange(n.value.length,n.value.length);
+}
+
+/* ── sync ────────────────────────────────── */
+async function syncToKylas(a,call){
+  a.syncing=true;renderQueue();
+  const res=await API.queueSave(a,call);
+  a.syncing=false;
+  if(res.ok){
+    if(res.created&&res.kid){a.kid=res.kid;a.pendingCreate=false;}
+    a.syncedAt=new Date().toISOString();
+    a.syncError=null;
+    if(res.callLogError)a.syncError="call log: "+res.callLogError;
+  }else{
+    a.syncError=res.error||"not sent";
+  }
+  persist();renderQueue();
+  if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
+  else if(res.created)toast(`${a.pocName} created in Kylas`);
 }
 
 /* ── shortcuts sheet ─────────────────────── */

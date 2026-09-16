@@ -11,15 +11,21 @@
 
   const announce = () => listeners.forEach((fn) => fn(state));
 
-  async function req(path, { timeout = 12000 } = {}) {
+  async function req(path, { timeout = 12000, method = "GET", body } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     try {
-      const res = await fetch(base + path, { signal: ctl.signal });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error || `proxy returned ${res.status}`);
+      const res = await fetch(base + path, {
+        signal: ctl.signal, method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      /* Deliberately not named `body` — that is the request payload above, and
+         shadowing it here throws before the fetch ever runs. */
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || `proxy returned ${res.status}`);
       if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
-      return body;
+      return payload;
     } catch (e) {
       const reason = e.name === "AbortError" ? "proxy timed out" : e.message;
       if (state.online || state.reason !== reason) { state = { ...state, online: false, reason }; announce(); }
@@ -56,6 +62,55 @@
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),
+    save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
+  };
+
+  /* ── outbox ──────────────────────────────────────────────────────────
+     A save must never be lost to a proxy that happens to be down. Failed
+     writes queue here and drain on the next save or when the link returns, so
+     an associate can keep dialling through an outage. */
+  let draining = false;
+
+  API.queueSave = async function (contact, call) {
+    const job = { id: `${Date.now()}-${contact.kid || contact.pocName}`, contact, call,
+                  at: new Date().toISOString(), tries: 0 };
+    try {
+      const res = await API.save(contact, call);
+      return { ok: true, ...res };
+    } catch (e) {
+      const box = await Store.getSetting("outbox") || [];
+      box.push(job);
+      await Store.setSetting("outbox", box);
+      return { ok: false, queued: true, error: e.message };
+    }
+  };
+
+  API.outboxSize = async () => ((await Store.getSetting("outbox")) || []).length;
+
+  API.drain = async function (onEach) {
+    if (draining) return 0;
+    draining = true;
+    let sent = 0;
+    try {
+      let box = (await Store.getSetting("outbox")) || [];
+      while (box.length) {
+        const job = box[0];
+        try {
+          const res = await API.save(job.contact, job.call);
+          box.shift();
+          sent++;
+          onEach?.(job, res);
+        } catch {
+          job.tries = (job.tries || 0) + 1;
+          break;              /* still down — stop, keep the rest queued */
+        }
+        await Store.setSetting("outbox", box);
+      }
+      await Store.setSetting("outbox", box);
+    } finally {
+      draining = false;
+    }
+    return sent;
   };
 
   /* Fields the overlay owns. Kylas has no opinion on them, so a refetch must

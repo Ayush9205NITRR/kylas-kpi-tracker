@@ -288,3 +288,69 @@
 .entry{flex-wrap:wrap}
 .entry .vl2{flex:1 1 120px;min-width:120px}
 .entry .ty2{flex:0 0 92px}
+
+/* ── readability ─────────────────────────────────────────────────────
+   The prototype was tuned to fit a 1400px split, and it did that by making
+   everything small. At a desk for six hours that is the wrong trade, so
+   type goes up across the board and the panes are allowed to scroll more. */
+body{font-size:15px;line-height:1.5}
+
+label{font-size:13px;color:var(--text2);margin-bottom:6px}
+.in,select.in,textarea.in{font-size:15px;padding:9px 11px}
+textarea.in{min-height:66px}
+select.mini{font-size:12px;padding:3px 21px 3px 8px}
+
+.bar h1{font-size:15.5px}
+.gbtn{font-size:13.5px;padding:6px 11px}
+.pbtn{font-size:14px;padding:8px 16px}
+.pace{font-size:13px}
+.pace b{font-size:14px}
+
+.who b{font-size:16px}
+.who span{font-size:13px}
+.dial a{font-size:14px;padding:8px 13px}
+.dial .tm{font-size:14px;padding:8px 10px;min-width:64px}
+.oc{font-size:13.5px;padding:8px 12px}
+.oc kbd{font-size:11px}
+
+.qi .n{font-size:13.5px}
+.qi .c{font-size:12.5px}
+.qi .st{font-size:11px}
+.qtop input{font-size:13.5px;padding:8px 10px}
+.qf{font-size:11.5px;padding:4px 5px}
+.qm{font-size:12.5px;padding:6px 5px}
+.qnew{font-size:13.5px;padding:8px}
+
+.sh h2{font-size:16px}
+.sh p{font-size:13px}
+.grpH{font-size:11px;letter-spacing:.08em}
+.ph{font-size:11px}
+.qc{font-size:12px;padding:3px 9px}
+.cb1{font-size:14.5px}
+.cb1 em{font-size:12.5px}
+.footIn .msg{font-size:13px}
+.flagbtn{font-size:13.5px}
+.rmnote{font-size:11.5px}
+.tile b{font-size:19px}
+.tile span{font-size:10.5px}
+.coName .nm b{font-size:16px}
+.reach b{font-size:13.5px}
+.kpi{font-size:12px;padding:4px 10px}
+
+/* more room now that the type is bigger */
+.pwrap{max-width:720px;padding:16px 18px 34px}
+.g2{gap:14px}
+.f{margin-bottom:14px}
+.sb{padding:16px 17px}
+
+/* company, fixed to the one whose page is open */
+.fixed{
+  display:flex;align-items:baseline;gap:8px;border:1px solid var(--line);
+  background:var(--panel2);border-radius:6px;padding:9px 11px;
+}
+.fixed b{font-size:15px;font-weight:600}
+.fixed em{font-style:normal;font-family:var(--m);font-size:10.5px;color:var(--text3)}
+
+/* sync state in the queue */
+.qi .pend.sync{background:var(--accentSoft);color:var(--accent)}
+.qi .pend.err{background:var(--flagSoft);color:var(--flag)}
