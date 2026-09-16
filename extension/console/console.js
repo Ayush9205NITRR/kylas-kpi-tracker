@@ -1,7 +1,9 @@
 /* ── picklists ───────────────────────────── */
 const SALUTATION=["","MR","MRS","MISS"];
-const EMAIL_TYPES=["Office","Personal","Other"];
-const PHONE_TYPES=["Mobile","Work","Home","Other"];
+/* Kylas stores these uppercase. A title-case list never matches a fetched
+   record, so the dropdown grew a duplicate rather than selecting one. */
+const EMAIL_TYPES=["OFFICE","PERSONAL","OTHER"];
+const PHONE_TYPES=["MOBILE","WORK","HOME","OTHER"];
 /* Stage tables live in stages.js, generated from docs/stages.json. */
 const SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
 /* MULTI_PICKLIST in Kylas — more than one quarter can be selected. */
@@ -13,7 +15,12 @@ const priority=a=>STAGE_PRIORITY[a.stage]??99;
 /* 24 = SQL, the top of the funnel. 0 means the stage is unknown. */
 const rung=a=>STAGE_RUNG[a.stage]||0;
 const rungLabel=r=>label(STAGES.find(c=>STAGE_RUNG[c]===r))||"Not reached";
-const OWNERS=["","Shreya Bodwal","Ayush Tiwari"];
+/* Seeded empty and filled from whoever Kylas reports — see API.owners. */
+let OWNERS=[""];
+function addOwners(names){
+  for(const n of names){ if(n&&!OWNERS.includes(n))OWNERS.push(n); }
+  OWNERS=[OWNERS[0],...OWNERS.slice(1).sort((a,b)=>a.localeCompare(b))];
+}
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
 const MODE_OF_MEETING=["","In Person","Virtual","Calls","Text"];
@@ -37,8 +44,8 @@ const QUICK={
 /* ── data ────────────────────────────────── */
 const emptyRow=()=>({eventType:"",budget:"",timeline:"",pax:"",remarks:""});
 const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linkedin:"",designation:"",
-  emails:[{type:"Office",value:"",primary:true}],
-  phones:[{type:"Mobile",cc:"+91",value:"",primary:true}],
+  emails:[{type:"OFFICE",value:"",primary:true}],
+  phones:[{type:"MOBILE",cc:"+91",value:"",primary:true}],
   stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
   source:"",remarks:"",offsiteTimeline:"",owner:ME,
   past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
@@ -46,16 +53,16 @@ const blank=()=>({kid:"",salutation:"",pocName:"",company:"",companyId:"",linked
 
 let DATA=[
 {kid:"40912",salutation:"MR",pocName:"Priyank Tewari",company:"nutritap",companyId:"901",linkedin:"",designation:"",
- emails:[{type:"Office",value:"priyank.tewari@nutritap.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9873915513",primary:true}],
+ emails:[{type:"OFFICE",value:"priyank.tewari@nutritap.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9873915513",primary:true}],
  stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
  source:"COLD_CALLING",remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",
  past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
 {kid:"41155",salutation:"MR",pocName:"Arjun Sethi",company:"Kritsnam Analytics",companyId:"902",
  linkedin:"linkedin.com/in/arjun-sethi-cos",designation:"Chief of Staff",
- emails:[{type:"Office",value:"arjun@kritsnam.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9100044582",primary:true}],
+ emails:[{type:"OFFICE",value:"arjun@kritsnam.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9100044582",primary:true}],
  stage:"MQL_MARKETING_QUALIFIED_LEAD",nextCallDate:"2026-09-18",nextCallTime:"16:00",
  source:"LINKEDIN",remarks:"Call back after their board meet.",
  offsiteTimeline:"OCT_DEC",owner:"Ayush Tiwari",past:[],
@@ -66,8 +73,8 @@ let DATA=[
 
 {kid:"38470",salutation:"MISS",pocName:"Devanshi Kalro",company:"Shorehouse Retail",companyId:"903",
  linkedin:"linkedin.com/in/devanshikalro",designation:"AVP Marketing",
- emails:[{type:"Office",value:"d.kalro@shorehouse.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9920477103",primary:true}],
+ emails:[{type:"OFFICE",value:"d.kalro@shorehouse.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9920477103",primary:true}],
  stage:"DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",nextCallDate:"2026-09-24",nextCallTime:"11:30",
  source:"COLD_CALLING",remarks:"Reopened after last year's loss. Warm.",
  offsiteTimeline:"JUL_SEP",owner:"Shreya Bodwal",
@@ -81,8 +88,8 @@ let DATA=[
 
 {kid:"39901",salutation:"MR",pocName:"Ishaan Grover",company:"Pralay Fintech",companyId:"904",
  linkedin:"",designation:"Senior Manager, HR",
- emails:[{type:"Office",value:"ishaan.g@pralay.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9811062234",primary:true}],
+ emails:[{type:"OFFICE",value:"ishaan.g@pralay.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9811062234",primary:true}],
  stage:"DISQUALIFIED_WRONG_POC",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"Offsites decided by the CHRO, will share the name.",
  offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
@@ -90,24 +97,24 @@ let DATA=[
 
 {kid:"42308",salutation:"MISS",pocName:"Meera Raghunathan",company:"Anvaya Labs",companyId:"905",
  linkedin:"linkedin.com/in/meera-raghunathan",designation:"Founder's Office",
- emails:[{type:"Office",value:"meera@anvayalabs.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"8806019945",primary:true}],
+ emails:[{type:"OFFICE",value:"meera@anvayalabs.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"8806019945",primary:true}],
  stage:"FOLLOW_UP_1",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"",offsiteTimeline:"",owner:"Shreya Bodwal",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
 {kid:"37622",salutation:"MR",pocName:"Balaji Venkatesh",company:"Tatvik Logistics",companyId:"906",
  linkedin:"",designation:"GM Admin",
- emails:[{type:"Office",value:"balaji.v@tatvik.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9444030871",primary:true}],
+ emails:[{type:"OFFICE",value:"balaji.v@tatvik.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9444030871",primary:true}],
  stage:"CNC_COULD_NOT_CONNECT",nextCallDate:"2026-09-17",nextCallTime:"10:00",
  source:"LINKEDIN",remarks:"",offsiteTimeline:"",owner:"Ayush Tiwari",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false},
 
 {kid:"38512",salutation:"MR",pocName:"Rohit Nambiar",company:"Shorehouse Retail",companyId:"903",
  linkedin:"",designation:"Head of Admin",
- emails:[{type:"Office",value:"r.nambiar@shorehouse.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9833126740",primary:true}],
+ emails:[{type:"OFFICE",value:"r.nambiar@shorehouse.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9833126740",primary:true}],
  stage:"MQL_MARKETING_QUALIFIED_LEAD",nextCallDate:"",nextCallTime:"",
  source:"EXHIBITION",remarks:"Devanshi's counterpart on logistics. Handles venue contracts.",
  offsiteTimeline:"JUL_SEP",owner:"Ayush Tiwari",past:[],
@@ -116,8 +123,8 @@ let DATA=[
 
 {kid:"43017",salutation:"MISS",pocName:"Simran Kohli",company:"Meghdoot Cloud",companyId:"907",
  linkedin:"",designation:"People Partner",
- emails:[{type:"Office",value:"simran.k@meghdoot.example",primary:true}],
- phones:[{type:"Mobile",cc:"+91",value:"9871855420",primary:true}],
+ emails:[{type:"OFFICE",value:"simran.k@meghdoot.example",primary:true}],
+ phones:[{type:"MOBILE",cc:"+91",value:"9871855420",primary:true}],
  stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",source:"LINKEDIN",
  remarks:"",offsiteTimeline:"",owner:"",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false}
@@ -149,7 +156,13 @@ function liUrl(v){
 /* ── helpers ─────────────────────────────── */
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const opts=(l,v)=>l.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(label(o))}</option>`).join("");
+/* If the stored value is not one of the options, Kylas knows something this
+   list does not — show it rather than silently rendering "Choose" over real
+   data. This is what was blanking Owner and Source of data on fetched records. */
+const opts=(l,v)=>{
+  const list=(v!==undefined&&v!==null&&v!==""&&!l.includes(v))?[...l,v]:l;
+  return list.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(label(o))}</option>`).join("");
+};
 let undoState=null;
 function toast(m,undo){
   document.querySelectorAll(".toast").forEach(t=>t.remove());
@@ -463,7 +476,7 @@ function contactField(a,kind){
     i.placeholder=isPh?"9876543210":"name@company.com";
     i.setAttribute("aria-label",isPh?"Phone number":"Email address");
     if(isPh)i.inputMode="tel";
-    i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();};
+    i.oninput=v=>{e.value=v.target.value;renderCallbar();validate();dialBtn.disabled=!e.value.trim();};
     /* A pasted number often carries its own country code or a trunk 0. Left as
        is it doubles up against the code beside it and the tel: link dials
        nothing. Tidy on blur rather than mid-keystroke. */
@@ -472,6 +485,21 @@ function contactField(a,kind){
       if(t!==v.target.value){v.target.value=t;e.value=t;renderCallbar();validate();persist();}
     };
     return i;
+  };
+  /* Every number gets its own dial button, so a second or third number is one
+     click away instead of needing to be made primary first. */
+  const dialButton=e=>{
+    const b=el("button","dialbtn","\u260E");
+    b.type="button";b.tabIndex=-1;
+    b.title="Call this number";
+    b.disabled=!String(e.value||"").trim();
+    b.onclick=()=>{
+      const num=((e.cc||"")+String(e.value||"")).replace(/\s/g,"");
+      if(!num)return;
+      startTimer("dial");
+      window.open("tel:"+num,"_self");
+    };
+    return b;
   };
   const ccInput=e=>{
     const c=el("input","in cc");c.value=e.cc;c.setAttribute("aria-label","Country code");
@@ -483,7 +511,9 @@ function contactField(a,kind){
     head.appendChild(mini(TYPES,e.type,v=>e.type=v));
     const row=el("div","entry");
     if(isPh)row.appendChild(ccInput(e));
+    var dialBtn=isPh?dialButton(e):null;
     row.appendChild(valueInput(e,0));
+    if(dialBtn)row.appendChild(dialBtn);
     f.appendChild(row);
   }else{
     list.forEach((e,i)=>{
@@ -496,7 +526,9 @@ function contactField(a,kind){
       ty.setAttribute("aria-label","Type");ty.onchange=v=>e.type=v.target.value;
       row.appendChild(ty);
       if(isPh)row.appendChild(ccInput(e));
+      var dialBtn=isPh?dialButton(e):null;
       row.appendChild(valueInput(e,i));
+      if(dialBtn)row.appendChild(dialBtn);
       const d=el("button","del","×");d.type="button";d.setAttribute("aria-label","Remove");
       d.onclick=()=>{list.splice(i,1);if(list.length&&!list.some(x=>x.primary))list[0].primary=true;render();};
       row.appendChild(d);
@@ -504,8 +536,8 @@ function contactField(a,kind){
     });
   }
   const add=el("button","add",isPh?"+ Add phone":"+ Add email");add.type="button";
-  add.onclick=()=>{list.push(isPh?{type:"Mobile",cc:"+91",value:"",primary:!list.length}
-                               :{type:"Office",value:"",primary:!list.length});render();};
+  add.onclick=()=>{list.push(isPh?{type:"MOBILE",cc:"+91",value:"",primary:!list.length}
+                               :{type:"OFFICE",value:"",primary:!list.length});render();};
   f.appendChild(add);
   return f;
 }
@@ -599,7 +631,15 @@ function renderBasic(){
   sRow.appendChild(ncd);
 
   const rRow=el("div","g2");
-  rRow.appendChild(field("Remarks","f-rm",false,textarea("f-rm",a.remarks,"Notes on this contact",v=>a.remarks=v)));
+  const fRm=field("Remarks","f-rm",false,textarea("f-rm",a.remarks,"Notes on this contact",v=>a.remarks=v));
+  /* This field is what Kylas already holds, and where the overlay's summary will
+     be written. Say so, so nobody is surprised when a block appears in it. */
+  const rmNote=el("div","rmnote");
+  rmNote.innerHTML=a.kid
+    ? `<span>From Kylas · editable here${a.remarks?"":" · currently empty"}</span>`
+    : `<span>Saved to Kylas once this contact is created</span>`;
+  fRm.appendChild(rmNote);
+  rRow.appendChild(fRm);
   rRow.appendChild(field("Offsite timeline","f-ot",false,select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
 
   W.appendChild(group("Stage & follow-up",[sRow,rRow]));
@@ -896,6 +936,7 @@ document.addEventListener("change",persist,true);
 
 async function boot(){
   ME=(await Store.getSetting("me"))||"";
+  addOwners((await Store.getSetting("owners"))||[]);
   const saved=await Store.loadContacts();
   if(saved&&saved.length)DATA=saved;
   const log=await Store.loadLog();
@@ -905,6 +946,7 @@ async function boot(){
   const t=today();
   const loggedToday=new Set(log.filter(e=>(e.at||"").slice(0,10)===t).map(e=>e.kid));
   DATA.forEach(a=>{a.done=loggedToday.has(a.kid);});
+  addOwners(DATA.map(a=>a.owner));
   renderFilters();render();
 }
 boot();

@@ -61,6 +61,8 @@ const LABEL = {
   GOOGLE: "Google", FACEBOOK: "Facebook", LINKEDIN: "LinkedIn",
   EXHIBITION: "Exhibition", COLD_CALLING: "Cold calling",
   JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec",
+  OFFICE: "Office", PERSONAL: "Personal", OTHER: "Other",
+  MOBILE: "Mobile", WORK: "Work", HOME: "Home",
 ${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${q(s.label)},`).join("\n")}
 };
 

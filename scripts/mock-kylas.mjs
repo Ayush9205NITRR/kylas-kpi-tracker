@@ -19,7 +19,7 @@ const id = (code) => stages.find((s) => s.code === code).id;
 
 const USERS = {
   74725: { id: 74725, firstName: "Enout", lastName: "Super Admin" },
-  74726: { id: 74726, firstName: "Shreya", lastName: "Bodwal" },
+  74726: { id: 74726, firstName: "Priya", lastName: "Deshmukh" },
 };
 
 const COMPANIES = {
@@ -37,7 +37,9 @@ const COMPANIES = {
 /* Stages arrive as ids, not codes — the mapping layer has to cope. */
 const CONTACTS = [
   { id: 112936, firstName: "Hema", lastName: "Bharathi", ownerId: 74725,
-    company: { id: 1776620, name: "seats" }, designation: "Founder's Office",
+    /* Search returns company as a bare id with no name — this is what blanked
+       the Company field against the live account. */
+    company: 1776620, designation: "Founder's Office",
     linkedin: "https://linkedin.com/in/hema-bharathi",
     emails: [{ type: "OFFICE", value: "hema@seats.aero", primary: true }],
     phoneNumbers: [{ type: "MOBILE", dialCode: "+91", code: "IN", value: "9876501234", primary: true }],
@@ -45,7 +47,7 @@ const CONTACTS = [
     updatedAt: "2026-09-15T10:02:00.000Z" },
 
   { id: 112937, firstName: "Shipra", lastName: "Gupta", ownerId: 74726,
-    company: { id: 1776620, name: "seats" }, designation: "Head of People",
+    company: 1776620, designation: "Head of People",
     emails: [{ type: "OFFICE", value: "shipra@seats.aero", primary: true }],
     phoneNumbers: [{ type: "MOBILE", dialCode: "+91", value: "9811122233", primary: true }],
     /* the code rather than the id, since both turn up in the wild */
@@ -106,7 +108,9 @@ createServer(async (req, res) => {
 
     let out = CONTACTS;
     for (const r of rules) {
-      if (r.field === "company") out = out.filter((c) => c.company?.id === Number(r.value));
+      /* company arrives either as a bare id or as an object, so match both. */
+      if (r.field === "company")
+        out = out.filter((c) => Number(c.company?.id ?? c.company) === Number(r.value));
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
     }
     return json(res, 200, { content: out, totalElements: out.length });

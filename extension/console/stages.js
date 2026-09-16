@@ -94,6 +94,8 @@ const LABEL = {
   GOOGLE: "Google", FACEBOOK: "Facebook", LINKEDIN: "LinkedIn",
   EXHIBITION: "Exhibition", COLD_CALLING: "Cold calling",
   JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec",
+  OFFICE: "Office", PERSONAL: "Personal", OTHER: "Other",
+  MOBILE: "Mobile", WORK: "Work", HOME: "Home",
   SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
   CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",

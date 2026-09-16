@@ -41,11 +41,15 @@ async function ownerName(id) {
   return owners.get(k);
 }
 
-async function mapContacts(raw) {
+async function mapContacts(raw, company) {
   const out = [];
-  for (const c of raw) out.push(toConsoleContact(c, { ownerName: await ownerName(c.ownerId) }));
+  for (const c of raw) out.push(toConsoleContact(c, { ownerName: await ownerName(c.ownerId), company }));
   return out;
 }
+
+/* The owner dropdown needs names, not ids, and the console cannot invent them.
+   Everyone seen so far, so a fetched owner is always selectable. */
+const ownerList = () => [...owners.entries()].map(([id, name]) => ({ id, name }));
 
 const routes = {
   "/health": async () => {
@@ -59,9 +63,10 @@ const routes = {
     const id = url.searchParams.get("id");
     if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
     const [co, raw] = [await kylas.company(id), await kylas.contactsForCompany(id)];
-    const contacts = await mapContacts(raw);
+    const company = toConsoleCompany(co);
+    const contacts = await mapContacts(raw, company);
     log(`company ${id} — ${contacts.length} contact(s)`);
-    return { company: toConsoleCompany(co), contacts };
+    return { company, contacts, owners: ownerList() };
   },
 
   /* Session mode: everything this owner holds, ordered in the browser. */
@@ -70,7 +75,7 @@ const routes = {
     const owner = url.searchParams.get("owner") || me?.id;
     const contacts = await mapContacts(await kylas.contactsForOwner(owner));
     log(`queue for owner ${owner} — ${contacts.length} contact(s)`);
-    return { owner: String(owner), contacts };
+    return { owner: String(owner), contacts, owners: ownerList() };
   },
 
   "/contact": async (url) => {

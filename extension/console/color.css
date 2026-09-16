@@ -266,3 +266,25 @@
 .link.on{background:var(--w-green);border-color:var(--c-green);color:var(--c-green)}
 .link.off{background:var(--w-amber);border-color:var(--flagLine);color:var(--flag);cursor:pointer}
 .link.busy{background:var(--accentSoft);border-color:var(--accentLine);color:var(--accent)}
+
+/* dial a number straight from its row */
+.dialbtn{
+  flex:none;width:28px;height:30px;border:1px solid var(--line2);border-radius:6px;
+  background:var(--w-green);color:var(--c-green);font-size:13px;line-height:1;
+  display:grid;place-items:center;padding:0;
+}
+.dialbtn:hover:not([disabled]){background:var(--c-green);color:var(--panel);border-color:var(--c-green)}
+.dialbtn[disabled]{opacity:.35;cursor:default;background:transparent;color:var(--text3)}
+
+.rmnote{
+  margin-top:5px;font-size:10.5px;color:var(--text3);
+  display:flex;align-items:center;gap:5px;
+}
+.rmnote::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accentLine);flex:none}
+
+/* A phone row holds radio, type, code, number, dial and delete. In the left
+   pane that is too much for one line, so let it wrap rather than squeezing the
+   number down to two visible digits. */
+.entry{flex-wrap:wrap}
+.entry .vl2{flex:1 1 120px;min-width:120px}
+.entry .ty2{flex:0 0 92px}

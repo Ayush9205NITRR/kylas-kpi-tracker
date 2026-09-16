@@ -45,9 +45,11 @@ export function createClient(key, { log = () => {} } = {}) {
   const rows = (o) => (Array.isArray(o) ? o : o?.content || o?.data || []);
 
   /* The search fields the console actually needs. */
-  const CONTACT_FIELDS = ["id", "firstName", "lastName", "ownerId", "company", "designation",
-    "department", "emails", "phoneNumbers", "linkedin", "customFieldValues",
-    "createdAt", "updatedAt"];
+  /* Search returns ONLY what is asked for, so anything missing here comes back
+     blank in the console even though Kylas holds it. */
+  const CONTACT_FIELDS = ["id", "firstName", "lastName", "salutation", "ownerId",
+    "company", "companyName", "designation", "department", "emails", "phoneNumbers",
+    "linkedin", "remarks", "customFieldValues", "createdAt", "updatedAt"];
 
   /* The schema calls company and ownerId LOOK_UP, but the query builder rejects
      that and wants "long". Confirmed live — see docs/kylas-picklists.md. */
@@ -94,15 +96,18 @@ export function stageCode(v) {
   return CODE_BY_ID[s] || s;
 }
 
-export function toConsoleContact(c, { ownerName } = {}) {
+export function toConsoleContact(c, { ownerName, company } = {}) {
   const cf = c.customFieldValues || {};
   const name = [pick(c.salutationName), pick(c.firstName), pick(c.lastName)].filter(Boolean).join(" ").trim();
   return {
     kid: String(pick(c.id, "") ?? ""),
     salutation: pick(stageCode(c.salutation), "") || "",
     pocName: name || pick(c.name, ""),
-    company: pick(nameOf(c.company), c.companyName, "") || "",
-    companyId: String(pick(idOf(c.company), "") ?? ""),
+    /* Search often returns company as a bare id with no name. The caller knows
+       the company it asked for, so fall back to that rather than showing a
+       blank next to a contact that plainly has one. */
+    company: pick(nameOf(c.company), c.companyName, company?.name, "") || "",
+    companyId: String(pick(idOf(c.company), company?.id, "") ?? ""),
     linkedin: pick(c.linkedin, "") || "",
     designation: pick(c.designation, c.department, "") || "",
 

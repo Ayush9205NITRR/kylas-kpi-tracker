@@ -88,6 +88,14 @@
       else DATA[at] = API.merge(DATA[at], fetched);
     }
 
+    /* Owners come back with the contacts. Without this the dropdown keeps the
+       three names it was born with and a fetched owner reads as "Choose". */
+    if (res.owners?.length) {
+      addOwners(res.owners.map((o) => o.name));
+      Store.setSetting("owners", OWNERS.filter(Boolean));
+      if (!ME && API.state.user?.name) { ME = API.state.user.name; addOwners([ME]); }
+    }
+
     if (res.company?.name) scope.name = res.company.name;
     scope.kylas = res.company || null;
 
