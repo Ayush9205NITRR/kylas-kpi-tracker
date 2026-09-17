@@ -441,7 +441,9 @@ function renderAccount(){
   if(!W)return;
   /* Cumulative: each metric counts everyone at or above it. */
   const counts=METRICS.map((m,i)=>peers.filter(x=>METRICS.slice(i).some(n=>n.test(x))).length);
-  W.innerHTML=`<span class="scope">${esc(a.company||"No company")}</span>
+  /* scope.name is the fetched company; a.company can still be a pre-fetch
+     placeholder, so the scope wins when there is one. */
+  W.innerHTML=`<span class="scope">${esc(scope?.name||a.company||"No company")}</span>
     <span class="tiles">${METRICS.map((m,i)=>
       `<span class="kpi${counts[i]?" hit":""}"><b>${counts[i]}</b>${esc(m.label)}</span>`).join("")}</span>
     <span class="of">${peers.length} contact${peers.length===1?"":"s"}</span>`;
@@ -778,13 +780,14 @@ function renderRight(){
   lab.appendChild(el("span",null,"I pitched what Enout does<em>Tick it if you got the pitch in.</em>"));
   g3.appendChild(lab);
 
-  if(MEETING_STAGES.includes(a.stage)){
-    g3.appendChild(field("How are you meeting them?","f-mm",isReq(a,"f-mm"),
-      select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
-  }else{
-    g3.appendChild(el("div","locked",
-      `<b>later</b><span>Once a meeting is booked we'll ask how you're meeting them.</span>`));
-  }
+  /* Always present. It used to appear only at a meeting stage, with a "later"
+     placeholder otherwise — but a complete event row now makes it REQUIRED,
+     and a stage below booked left it required and invisible at the same time.
+     "Still needed: Mode of meeting" pointing at a field that was not on screen
+     is a save nobody can complete. Per Ayush: it should appear always, and
+     become mandatory once one row is complete. */
+  g3.appendChild(field("How are you meeting them?","f-mm",isReq(a,"f-mm"),
+    select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
   F.appendChild(g3c);
 }
 

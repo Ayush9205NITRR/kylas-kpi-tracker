@@ -99,7 +99,12 @@
       cur = DATA.indexOf(roster.find((a) => !a.done) || roster[0]);
       isNew = false;
     } else {
-      DATA = [Object.assign(blank(), { company: scope.name, companyId: scope.id }), ...DATA];
+      /* companyId only — NOT scope.name. Before the fetch returns that name can
+         be "Company <id>", and airtable.mjs writes `Name: c.company` on the
+         company row, so a placeholder here would be saved into Airtable as the
+         company's actual name. The id is what everything joins on; the name is
+         filled in once Kylas answers. */
+      DATA = [Object.assign(blank(), { companyId: scope.id }), ...DATA];
       cur = 0; isNew = true;
     }
     filter = "all"; renderFilters();
@@ -160,7 +165,18 @@
       if (!ME && API.state.user?.name) { ME = API.state.user.name; addOwners([ME]); }
     }
 
-    if (res.company?.name) scope.name = res.company.name;
+    if (res.company?.name) {
+      scope.name = res.company.name;
+      /* And on every record at this company. showCompany() has to name the
+         scope before the fetch returns, and with no label from the page that
+         name is "Company <id>" — which it then stamps onto the placeholder
+         contact. Updating only scope.name left the record itself reading
+         "Company 1810449" in the queue and on the card, which is what Ayush
+         kept seeing. Anything a person actually typed is left alone. */
+      for (const a of DATA)
+        if (String(a.companyId) === String(id) &&
+            (!a.company || /^Company \d+$/.test(a.company))) a.company = res.company.name;
+    }
     scope.kylas = res.company || null;
 
     /* A placeholder made because nothing was held is pointless once real
