@@ -37,13 +37,18 @@ const FAULTS = [
    (s) => s.replace('sel("Past", "Current")', 'sel("Past", "Current", "Past")')],
 ];
 
-const src = readFileSync("schema.mjs", "utf8");
+/* Resolve against this file, not the shell's cwd: run from the repo root and a
+   cwd-relative read dies on ENOENT before a single fault is checked. */
+const HERE = import.meta.dirname;
+const mine = (f) => join(HERE, f);
+
+const src = readFileSync(mine("schema.mjs"), "utf8");
 const dir = mkdtempSync(join(tmpdir(), "schema-"));
-copyFileSync("validate-schema.mjs", join(dir, "validate-schema.mjs"));
+copyFileSync(mine("validate-schema.mjs"), join(dir, "validate-schema.mjs"));
 /* schema.mjs imports the generated stage tables, so they have to travel with
    it. Without this every run dies on a missing module and each fault looks
    "caught" when nothing was actually validated. */
-copyFileSync("stages.mjs", join(dir, "stages.mjs"));
+copyFileSync(mine("stages.mjs"), join(dir, "stages.mjs"));
 
 let pass = 0;
 for (const [name, mutate] of FAULTS) {
@@ -64,7 +69,7 @@ for (const [name, mutate] of FAULTS) {
 
 /* and the real schema must still pass */
 let clean = true;
-try { execFileSync("node", ["validate-schema.mjs"], { encoding: "utf8" }); } catch { clean = false; }
+try { execFileSync("node", [mine("validate-schema.mjs")], { encoding: "utf8" }); } catch { clean = false; }
 console.log(`\n  ${clean ? "ok     " : "FAILED "} the real schema validates`);
 console.log(`\n${pass}/${FAULTS.length} faults caught`);
 process.exit(pass === FAULTS.length && clean ? 0 : 1);
