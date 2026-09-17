@@ -297,6 +297,18 @@ node scripts/test-validator.mjs          # checks the validator catches 10 plant
 node scripts/create-base.mjs --dry-run   # prints every request without sending
 ```
 
+Afterwards, and whenever the schema gains a field:
+
+```
+AIRTABLE_PAT=... AIRTABLE_BASE=app... node scripts/verify-base.mjs   # what is missing
+AIRTABLE_PAT=... AIRTABLE_BASE=app... node scripts/repair-base.mjs   # add only that
+```
+
+`create-base.mjs` refuses a base whose tables already exist, deliberately — a
+half-merge is worse to unpick than a refusal. `repair-base.mjs` is the other
+half: it changes nothing already there, adds only what is absent, and handles
+the link-reverse rename the same way.
+
 Then build it, either into a base you already made or into a fresh one:
 
 ```
