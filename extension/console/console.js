@@ -191,6 +191,15 @@ function liUrl(v){
 /* ── helpers ─────────────────────────────── */
 const fmtD=d=>d?new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short"}):"";
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
+/* Fallback when the host page has no dialler for this number: one paste beats
+   retyping it, and the toast says which happened so a dead click is never
+   silent again. */
+function copyNumber(num){
+  const plain=String(num).replace(/\s/g,"");
+  navigator.clipboard?.writeText(plain)
+    .then(()=>toast(plain+" copied — no dialler on the page, paste it in"))
+    .catch(()=>toast("Could not reach a dialler for "+plain));
+}
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 /* If the stored value is not one of the options, Kylas knows something this
    list does not — show it rather than rendering "Choose" over real data. */
@@ -279,29 +288,33 @@ function renderCallbar(){
   link.setAttribute("aria-label",num?"Call "+a.pocName+" on "+num:"No number on file");
   link.onclick=e=>{
     if(!num){e.preventDefault();toast("No number on file for "+a.pocName);return;}
-    /* INTERIM. `tel:` hands off to whatever the OS has registered, which on a
-       Mac with no softphone is nothing at all — the click appears to do
-       nothing, which is what Ayush reported. Kylas' own dialler is in the host
-       page and is not reachable from a tel: link; wiring it needs the selector
-       or URL it responds to, which is not known yet. Until then, put the number
-       on the clipboard so it is one paste away rather than retyped 200 times a
-       day, and say plainly that that is what happened. */
+    /* Never follow the tel: href. From inside the iframe that goes to the OS,
+       and on a Mac with no softphone registered nothing happens at all — which
+       is exactly the dead click Ayush reported. Kylas' dialler is a control in
+       the HOST page, so ask the content script to find and click it. It replies
+       with "dialled"; only if it finds nothing do we fall back to the
+       clipboard. */
+    e.preventDefault();
     link.classList.add("calling");
-    const plain=num.replace(/\s/g,"");
-    navigator.clipboard?.writeText(plain)
-      .then(()=>toast(plain+" copied — paste into the Kylas dialler"))
-      .catch(()=>toast("Dialling "+num));
     setTimeout(()=>link.classList.remove("calling"),2600);
+    if(typeof requestDial==="function")requestDial(num);
+    else copyNumber(num);
   };
   d.appendChild(link);C.appendChild(d);
 
   renderAccount();
+
+  /* Email, callback and record id were one flat grey row in the middle of the
+     bar — three unlabelled values competing with the dial button for the same
+     attention. They are reference, not action: they go after the button, each
+     labelled, and the id (developer information) is last and quietest. */
   const em=(a.emails.find(x=>x.primary)||a.emails[0]||{}).value;
   const meta=el("div","cbmeta");
   const bits=[];
-  if(em)bits.push(`<span class="mail">${esc(em)}</span>`);
-  if(a.nextCallDate)bits.push(`<span class="due">Call back ${esc(fmtD(a.nextCallDate))}${a.nextCallTime?" · "+esc(a.nextCallTime):""}</span>`);
-  bits.push(`<span class="kid">${esc(a.kid||"unsaved")}</span>`);
+  if(em)bits.push(`<span class="mi mail"><em>Email</em><a href="mailto:${esc(em)}">${esc(em)}</a></span>`);
+  if(a.nextCallDate)bits.push(`<span class="mi due"><em>Call back</em>${esc(fmtD(a.nextCallDate))}${
+    a.nextCallTime?" · "+esc(a.nextCallTime):""}</span>`);
+  bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em>${esc(a.kid||"unsaved")}</span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
   const nb=el("div","nextbtn");

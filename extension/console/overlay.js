@@ -6,6 +6,14 @@
 
   const post = (type, payload) => framed && parent.postMessage({ source: "enout", type, ...payload }, "*");
 
+  /* Kept so the clipboard fallback knows which number failed. */
+  let lastDialled = "";
+  window.requestDial = (number) => {
+    lastDialled = number;
+    if (!framed) { copyNumber(number); return; }   /* open in a tab, no host page */
+    post("dial", { number });
+  };
+
   /* ── host page → console ─────────────────── */
   window.addEventListener("message", (e) => {
     const m = e.data;
@@ -14,6 +22,13 @@
     /* Opened on a Kylas company page: scope the queue to that company and show
        the rolled-up view. The contacts are where the data is entered; the
        company strip is derived from them and moves as calls are saved. */
+    /* The host page reports what it did with a dial request. */
+    if (m.type === "dialled") {
+      if (m.ok) toast("Dialling through Kylas — " + (m.why || "dialler clicked"));
+      else { toast("No Kylas dialler on this page — copying the number instead"); copyNumber(lastDialled); }
+      return;
+    }
+
     if (m.type === "dashboard" || m.type === "companies") { showView(m.type); return; }
     if (m.type === "company" && m.kylasId) {
       showView(null);

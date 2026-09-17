@@ -88,8 +88,11 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 
 /* ── call bar ──────────────────────────────── */
 .callbar{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 22px}
-.cbIn{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
-.who{display:flex;flex-direction:column;min-width:0;flex:0 1 auto;max-width:340px}
+/* Three zones, in the order they are used: who you are calling, the thing you
+   press, then reference. Save sits hard right, away from the dial button so
+   the two are never adjacent. */
+.cbIn{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.who{display:flex;flex-direction:column;min-width:0;flex:0 1 300px;max-width:340px}
 .who b{font-size:var(--t-name);font-weight:800;letter-spacing:-.032em;line-height:1.18;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who .sub{display:flex;align-items:center;gap:10px;margin-top:4px;min-width:0}
@@ -126,7 +129,7 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .cbmeta .kid{font-size:14px;letter-spacing:.02em}
 @media(max-width:1240px){.cbmeta .kid{display:none}}
 @media(max-width:1080px){.cbmeta{border-left:0;padding-left:0;flex-basis:100%}}
-.nextbtn{flex:none}
+.nextbtn{flex:none;margin-left:auto}
 @media(max-width:860px){.who{flex:1 1 100%}.ocs{order:5}.nextbtn{flex:1 1 100%}.nextbtn button{width:100%}}
 
 /* ── queue — state reads from one stripe and one badge ── */

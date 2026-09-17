@@ -156,7 +156,68 @@
     if (!m || m.source !== "enout") return;
     if (m.type === "close") setOpen(false);
     if (m.type === "mode") setOpen(true, m.mode);
+    if (m.type === "dial") dial(String(m.number || ""));
   });
+
+  /* ── hand a number to Kylas' own dialler ───────────────────────────────
+     A tel: link from inside the iframe goes to the OS, which on a Mac with no
+     softphone registered does nothing at all — the click looks dead. Kylas'
+     dialler is a control in THIS page, so the only way to reach it is to find
+     it here and click it.
+
+     No selector for it is documented, so match on the number rather than on
+     Kylas' markup: their own UI renders the number somewhere, and clicking
+     that is clicking their dialler. Compared on the last 10 digits, because
+     the page may write it as +91 64645 74899, 064645-74899 or 6464574899.
+
+     This only ever CLICKS something already on the page. It reads no data out
+     of Kylas — the console still gets everything through the API. */
+  const digits = (s) => String(s || "").replace(/\D/g, "");
+  const tail = (s) => digits(s).slice(-10);
+
+  function dialCandidates(want) {
+    const out = [];
+    /* Kylas' own tel: anchors first — the most explicit statement of intent
+       the page can make about a number. */
+    for (const a of document.querySelectorAll('a[href^="tel:"]'))
+      if (tail(a.getAttribute("href")) === want) out.push({ el: a, why: "tel: link" });
+
+    /* Then anything whose visible text or label is that number, and which is
+       actually clickable. Walking every node would be slow on a CRM page, so
+       stay with the elements a UI puts a number in. */
+    const sel = 'button,[role="button"],a,[class*="dial"],[class*="call"],[class*="phone"],[aria-label]';
+    for (const el of document.querySelectorAll(sel)) {
+      if (out.some((c) => c.el === el)) continue;
+      const hay = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${
+        (el.textContent || "").slice(0, 60)}`;
+      if (tail(hay) === want) out.push({ el, why: "labelled with the number" });
+    }
+
+    /* Last resort: a dial control sitting next to the number rather than on
+       it — the icon beside a phone field, which is how Kylas renders it. */
+    for (const el of document.querySelectorAll(sel)) {
+      if (out.some((c) => c.el === el)) continue;
+      const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""}`.toLowerCase();
+      if (!/dial|call/.test(cls)) continue;
+      const near = el.closest("tr,li,div,section");
+      if (near && tail(near.textContent || "").endsWith(want)) out.push({ el, why: "dial control beside the number" });
+    }
+    return out;
+  }
+
+  function dial(number) {
+    const want = tail(number);
+    if (!want) return send("dialled", { ok: false, reason: "no number" });
+    const hits = dialCandidates(want);
+    if (!hits.length) return send("dialled", { ok: false, reason: "no dial control for that number on this page" });
+    const { el, why } = hits[0];
+    /* A real click, not el.click(), so a framework listening for pointer
+       events reacts the way it would to a person. */
+    el.scrollIntoView?.({ block: "center" });
+    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"])
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+    send("dialled", { ok: true, why });
+  }
 
   /* toolbar button and Alt+Shift+E, relayed by the service worker */
   chrome.runtime.onMessage.addListener((m) => {
