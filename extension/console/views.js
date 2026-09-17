@@ -64,14 +64,18 @@
   function rollup(data, base) {
     const by = new Map();
     const row = (id, seed) => {
+      /* name starts EMPTY, not "Company <id>". A placeholder here is truthy, so
+         the `!co[k]` guard below would never let the real name replace it — and
+         every row rendered as its own id even when Kylas had sent the name.
+         The fallback is applied once, after seeding. */
       if (!by.has(id)) by.set(id, {
-        id, name: "Company " + id, contacts: [],
-        source: "", owner: "", ownerId: "", batch: "", health: "",
+        id, name: "", contacts: [],
+        source: "", owner: "", ownerId: "", batch: "", health: "", lastCalledAt: null,
         rung: 0, stage: "", lastQualityAt: null, modes: {},
         pocs: { right: [], discovery: [], sql: [] },
       });
       const co = by.get(id);
-      if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch", "health"])
+      if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch", "health", "lastCalledAt"])
         if (!co[k] && seed[k]) co[k] = seed[k];
       return co;
     };
@@ -82,7 +86,8 @@
     for (const co of base || []) {
       if (!co?.id) continue;
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
-                           ownerId: co.ownerId, batch: co.batch, health: co.accountHealth });
+                           ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
+                           lastCalledAt: co.lastCalledAt });
     }
 
     for (const c of data) {
@@ -106,6 +111,12 @@
            does not. */
         const at = c.lastStageChangeAt || null;
         if (at && (!co.lastQualityAt || at > co.lastQualityAt)) co.lastQualityAt = at;
+
+        /* Last called: the console's own record of a call beats the company's
+           cfLastCalledAtDate, which nothing is known to maintain. Whichever is
+           more recent wins, so the column is never older than the truth. */
+        const called = c.lastCallAt || c.lastStageChangeAt || null;
+        if (called && (!co.lastCalledAt || called > co.lastCalledAt)) co.lastCalledAt = called;
 
         /* How the meeting was held, counted per company per mode. This is what
            the team chart stacks; the segments come from the data rather than a
@@ -133,6 +144,8 @@
       co.done = co.rung >= MILESTONE.sqlMeetingDone.floor;
       co.sql = co.rung >= MILESTONE.sql.floor;
       cumulative(co);
+      /* Only now, once every source has had its say. */
+      if (!co.name) co.name = "Company " + co.id;
     }
     return [...by.values()];
   }
@@ -191,7 +204,17 @@
   function funnelHTML(cos) {
     const rows = funnelRows(cos);
     const grew = rows.filter((r) => r.widened);
-    return `<div class="vfun">${rows.map((r) => `
+    /* Header at the TOP, and with no bar cell — at the bottom it read as a
+       seventh, empty rung, which is what made "n / of prev / of reached"
+       unreadable. The words say what they measure rather than abbreviating it. */
+    return `<div class="vfun">
+      <div class="vfr vfh">
+        <span class="fl">Rung</span>
+        <span class="fn">Companies</span>
+        <span class="fp">vs rung above</span>
+        <span class="fo">vs reached</span>
+      </div>
+      ${rows.map((r) => `
       <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${r.n} compan${r.n === 1 ? "y" : "ies"}${
         r.fromPrev ? `, ${r.fromPrev} of the rung above` : ""}">
         <span class="fl">${esc(r.label)}<em>${esc(r.sub)}</em></span>
@@ -201,10 +224,6 @@
           r.widened ? ` <em title="More companies here than at the rung above — the data the rung above is counted from was not captured.">&#9650;</em>` : ""}</span>
         <span class="fo tnum">${r.ofTop ? esc(r.ofTop) : ""}</span>
       </div>`).join("")}
-      <div class="vfr vfh">
-        <span class="fl"></span><span class="fb"></span>
-        <span class="fn">n</span><span class="fp">of prev</span><span class="fo">of reached</span>
-      </div>
     </div>
     ${grew.length ? `<p class="vnote">${grew.map((g) => esc(g.label)).join(" and ")} ${
       grew.length === 1 ? "counts" : "count"} more companies than the rung above.
@@ -375,8 +394,8 @@
         <div class="vr vh">
           <span class="c1">Company</span><span class="c2">Stage</span>
           <span class="c3">POCs</span><span class="c4">Right POC</span>
-          <span class="c5">Discovery</span><span class="c6">Last quality</span>
-          <span class="c7">Allotted to</span>
+          <span class="c5">Discovery</span><span class="c6">Last called</span>
+          <span class="c8">Last quality</span><span class="c7">Allotted to</span>
         </div>
         ${rows.length ? rows.map((c) => `
           <div class="vr" data-id="${esc(c.id)}">
@@ -385,7 +404,8 @@
             <span class="c3">${c.contacts.length}</span>
             <span class="c4">${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
             <span class="c5">${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
-            <span class="c6">${day(c.lastQualityAt)}</span>
+            <span class="c6">${day(c.lastCalledAt)}</span>
+            <span class="c8">${day(c.lastQualityAt)}</span>
             <span class="c7">${esc(c.owner || "—")}${c.batch ? `<em>${esc(c.batch)}</em>` : ""}</span>
           </div>`).join("")
         : `<div class="vempty">Nothing matches those filters.</div>`}

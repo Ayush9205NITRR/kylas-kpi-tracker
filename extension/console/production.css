@@ -169,7 +169,7 @@ body.framed .ovOnly{display:inline-block}
 }
 .vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh)}
 .vr{
-  display:grid;grid-template-columns:1.6fr 1.3fr .5fr 1.4fr 1.4fr .9fr 1fr;
+  display:grid;grid-template-columns:1.6fr 1.2fr .5fr 1.3fr 1.3fr .85fr .85fr 1fr;
   gap:12px;padding:14px 17px;border-bottom:1px solid var(--line);align-items:center;
   font-size:var(--t-label);cursor:pointer;
 }
@@ -180,11 +180,11 @@ body.framed .ovOnly{display:inline-block}
 .vr .c1 em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
 .vr .c4{color:var(--slate)}
 .vr .c5{color:var(--blue)}
-.vr .c6{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text2)}
+.vr .c6,.vr .c8{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text2)}
 .vempty{padding:36px;text-align:center;color:var(--text3);font-size:var(--t-label)}
 @media(max-width:860px){
   .vr{grid-template-columns:1.6fr 1fr .6fr}
-  .vr .c4,.vr .c5,.vr .c6,.vr .c7{display:none}
+  .vr .c4,.vr .c5,.vr .c6,.vr .c7,.vr .c8{display:none}
 }
 
 /* ── toast ───────────────────────────────────────────────────────────── */
@@ -233,11 +233,14 @@ body.framed .ovOnly{display:inline-block}
 .vfr .fb i{display:block;height:100%;border-radius:4px;background:var(--s1);transition:width .3s}
 .vfr .fn{font-size:21px;font-weight:800;text-align:right}
 .vfr .fp,.vfr .fo{font-size:var(--t-meta);color:var(--text2);text-align:right}
-/* The header sits at the BOTTOM: the numbers are what you read first, and a
-   column head above six bars competes with the first row's label. */
-.vfr.vfh{border-top:1px solid var(--line);border-bottom:0;padding:7px 0 3px}
-.vfr.vfh span{font-size:var(--t-meta);color:var(--text3);font-weight:700;
-  letter-spacing:.03em;text-transform:uppercase;text-align:right}
+/* The header has no bar cell of its own, so it spans three columns and cannot
+   read as an empty seventh rung. */
+.vfr.vfh{grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
+  padding:6px 0 8px;border-bottom:1px solid var(--line2)}
+.vfr.vfh .fl{grid-column:1 / span 2;font-size:var(--t-meta);color:var(--text3);
+  font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+.vfr.vfh .fn,.vfr.vfh .fp,.vfr.vfh .fo{font-size:var(--t-meta);color:var(--text3);
+  font-weight:700;letter-spacing:.02em;text-align:right;line-height:1.25}
 @media(max-width:760px){
   .vfr{grid-template-columns:minmax(0,1.4fr) 54px 68px}
   .vfr .fb,.vfr .fo{display:none}
@@ -271,3 +274,8 @@ body.framed .ovOnly{display:inline-block}
    it is marked but never coloured as success. */
 .vfr.grew .fb i{background:var(--amber)}
 .vfr .fp em{font-style:normal;color:var(--amber);font-size:11px}
+
+/* Filters were at --t-meta (14px), the smallest size in the scale, on controls
+   that are read before every use of the page. Up to --t-label. */
+.vfilters label{font-size:var(--t-label);color:var(--text2);font-weight:600}
+.vfilters select,.vfilters input{font-size:var(--t-label);padding:9px 11px}

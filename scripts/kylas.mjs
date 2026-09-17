@@ -169,6 +169,9 @@ export function createClient(key, { log = () => {} } = {}) {
       return searchCompany(size, null);
     },
 
+    /* Which shape won, for the /companies?keys=1 diagnostic. */
+    companyShapeName: () => companyShape?.name || "not yet determined",
+
     contact: (id) => call("GET", `/v1/contacts/${id}`),
 
     createContact: (body) => call("POST", "/v1/contacts", body),
@@ -334,9 +337,17 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
 
 export function toConsoleCompany(co) {
   const cf = co?.customFieldValues || {};
+  /* `name` is the key on both GET /v1/companies/{id} and the search endpoint.
+     companyName is kept only because contacts use it, and one mapper reading
+     both shapes is cheaper than two. When 38 companies rendered as their own
+     ids the cause was not the response at all — views.rollup() seeded rows with
+     a truthy "Company <id>" placeholder that its own !empty guard then refused
+     to overwrite. Check the mapping before blaming the API. */
+  const id = pick(co?.id, "") ?? "";
+  const name = pick(co?.name, co?.companyName, "") || "";
   return {
-    id: String(pick(co?.id, "") ?? ""),
-    name: pick(co?.name, "") || "",
+    id: String(id),
+    name,
     stage: stageCode(cf.cfPipelineStageBd),
     lastCalledAt: pick(cf.cfLastCalledAtDate, null),
     accountHealth: pick(cf.cfAccountHealthBd, null),

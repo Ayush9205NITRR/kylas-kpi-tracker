@@ -182,6 +182,24 @@ const routes = {
     const owner = all ? null : (want || me?.id);
 
     const raw = all ? await kylas.companies() : await kylas.companiesForOwner(owner);
+
+    /* ?keys=1 reports the shape this account's company search actually returns,
+       WITHOUT the values — enough to find where a missing field lives, safe to
+       paste. Guessing at key names is how the name came back blank for 38
+       companies in the first place. */
+    if (url.searchParams.get("keys")) {
+      const first = raw[0] || {};
+      return {
+        count: raw.length,
+        shape: kylas.companyShapeName?.() || "unknown",
+        topLevelKeys: Object.keys(first).sort(),
+        customFieldKeys: Object.keys(first.customFieldValues || {}).sort(),
+        idNameStoreKeys: Object.keys(first.metaData?.idNameStore || {}).sort(),
+        nameLikeValues: Object.fromEntries(Object.entries(first)
+          .filter(([k, v]) => /name|title|company/i.test(k) && typeof v !== "object")
+          .map(([k, v]) => [k, typeof v])),
+      };
+    }
     const companies = [];
     for (const co of raw) {
       const known = lookupName(co, "ownerId", co.ownerId);
