@@ -34,7 +34,10 @@ const kylas = createClient(KEY, { log });
 const AT_PAT = process.env.AIRTABLE_PAT;
 const AT_BASE = process.env.AIRTABLE_BASE;
 const airtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, { log }) : null;
-if (!airtable) log("airtable: not configured (set AIRTABLE_PAT and AIRTABLE_BASE)");
+/* Say so either way. On a fresh install the absence of a warning is not a
+   signal anyone can act on — it reads the same as a line that never printed. */
+if (airtable) log(`airtable: ${AT_BASE}`);
+else log("airtable: not configured (set AIRTABLE_PAT and AIRTABLE_BASE) — KPIs will not be written");
 
 /* Most records carry their own owner name in metaData.idNameStore, so this is
    a fallback for the ones that do not — and every avoided request is one fewer

@@ -1,8 +1,24 @@
 # Installing the call console
 
-About five minutes. You need **Google Chrome** and **Node 18 or newer**
+About ten minutes. You need **Google Chrome** and **Node 18 or newer**
 (`node --version` to check). There is nothing to build and no `npm install` —
 the extension has no dependencies.
+
+Two halves, and you need both:
+
+| | Holds | Runs |
+|---|---|---|
+| **The extension** | the UI | in Chrome |
+| **The proxy** | your API keys | in a terminal on your machine |
+
+The keys never enter the browser. That is the whole reason the proxy exists —
+an extension's code is readable by anyone who installs it.
+
+---
+
+## Already have 0.1.0 installed?
+
+Skip to **[Updating](#updating)** at the bottom. It is three commands.
 
 ---
 
@@ -14,9 +30,7 @@ git clone -b claude/adoring-feynman-chhiyt \
 cd kylas-kpi-tracker
 ```
 
-Already cloned? Just `git pull`.
-
-Note the full path — you will need it in the next step:
+Note the full path — you need it in the next step:
 
 ```bash
 pwd          # e.g. /Users/ayushtiwari/kylas-kpi-tracker
@@ -30,86 +44,146 @@ pwd          # e.g. /Users/ayushtiwari/kylas-kpi-tracker
 4. Select the **`extension`** folder inside the repo —
    `kylas-kpi-tracker/extension`, **not** the repo root
 
-You should see **Enout BD Call Console 0.1.0**. If it shows an error, see
-Troubleshooting below.
+The card should read **Enout BD Call Console 0.2.0**. If it says 0.1.0 you have
+an older copy still loaded — remove it, or you will be testing the wrong code.
 
-## 3 · Open it
+## 3 · Check the UI loads
 
-Go to any page on **app.kylas.io**. A blue **Call console** button appears at
-the bottom right.
+Go to any page on **app.kylas.io**. A **Call console** button appears bottom
+right.
 
 | | |
 |---|---|
 | Click the button | opens the console |
 | `Option`+`Shift`+`E` | opens or closes it (`Alt`+`Shift`+`E` on Windows) |
-| The toolbar icon | same thing |
 | `Esc` | closes it |
 
-Open it on a **company** page — `app.kylas.io/sales/companies/details/…` — and
-it scopes to that company. That is what it is designed around.
+It also opens **by itself** on a company or contact page, once per record — if
+you dismiss it, it stays dismissed for that record.
 
-At this point it works, but on sample data. It is not yet talking to Kylas.
+Three pages behave differently, by design:
+
+| URL | What you get |
+|---|---|
+| `/sales/companies/details/…` | the console, scoped to that company |
+| `/sales/home` | the dashboard — day, week, month |
+| `/sales/companies/list` | the filterable companies list |
+
+At this point it works on **sample data**. It is not talking to Kylas yet.
 
 ---
 
-## 4 · Connect it to Kylas
+## 4 · Get your keys
 
-The console never holds your API key. A small program on your machine holds it
-and does the talking.
+**Kylas API key** —
+[app.kylas.io/setup/integrations/api-keys/list](https://app.kylas.io/setup/integrations/api-keys/list)
 
-**Get a key** at
-[app.kylas.io/setup/integrations/api-keys/list](https://app.kylas.io/setup/integrations/api-keys/list).
+**Airtable PAT** — [airtable.com/create/tokens](https://airtable.com/create/tokens).
+It needs these scopes, on the base `appEwJu0bleHh9b8t`:
 
-**Start the proxy**, from the repo folder:
+- `data.records:read`
+- `data.records:write`
+- `schema.bases:read`
+- `schema.bases:write` — only needed for `repair-base.mjs`
 
-```bash
-KYLAS_KEY=paste_your_key_here node scripts/proxy.mjs
-```
-
-Leave that terminal window open — closing it stops the connection. You should
-see:
-
-```
-proxy on http://127.0.0.1:8787
-routes: /health  /company  /queue  /contact
-```
-
-Now reload the Kylas tab and open the console. The badge in the top bar should
-read **Kylas**. Open a company page and its real contacts load.
-
-### Starting it again later
-
-The proxy does not start by itself. Each time you want the live connection:
+Put them in the file the repo already ignores, so they stay out of your shell
+history and out of git:
 
 ```bash
-cd kylas-kpi-tracker
-KYLAS_KEY=... node scripts/proxy.mjs
+cat > .env.local <<'EOF'
+export KYLAS_KEY=paste_your_kylas_key
+export AIRTABLE_PAT=paste_your_airtable_pat
+export AIRTABLE_BASE=appEwJu0bleHh9b8t
+EOF
 ```
 
-To avoid retyping the key, put it in a file the repo already ignores:
+> Never paste a key into a chat, a commit, or a screenshot. If one does get
+> out, revoke it at the link above and issue a new one — rotating takes a
+> minute, and a leaked PAT with `schema.bases:write` can rewrite the base.
+
+## 5 · Bring the Airtable base up to date
+
+The schema gains fields as the KPIs get defined. Check yours matches:
 
 ```bash
-echo 'export KYLAS_KEY=paste_your_key_here' > .env.local
-# then each time:
+source .env.local
+node scripts/verify-base.mjs
+```
+
+If it lists anything missing:
+
+```bash
+node scripts/repair-base.mjs --dry-run     # read the list first
+node scripts/repair-base.mjs               # then apply
+node scripts/verify-base.mjs               # confirm
+```
+
+Expect `✓ Companies 19/19` and `✓ Contacts 36/36`.
+
+`repair-base.mjs` only **adds** absent fields, in dependency order. It changes
+nothing already there. Read the dry run before applying anyway — a rollup
+created before the formula it reads points at nothing, silently.
+
+## 6 · Start the proxy
+
+```bash
 source .env.local && node scripts/proxy.mjs
 ```
 
+Leave the terminal open — closing it stops the connection. You should see:
+
+```
+06:47:27 airtable: appEwJu0bleHh9b8t
+06:47:27 proxy on http://127.0.0.1:8787
+06:47:27 routes: /meta  /health  /company  /queue  /save  /targets  /contact
+```
+
+**Read the first line.** If it says `airtable: not configured … KPIs will not be
+written`, your env vars did not reach the process. Kylas will still work and
+saves will still appear to succeed — but nothing reaches Airtable, so no KPI is
+computed. This is the most common setup failure and the least visible.
+
+Confirm both halves:
+
+```bash
+curl -s http://127.0.0.1:8787/targets
+# {"kylas":true,"airtable":true,"base":"appEwJu0bleHh9b8t"}
+```
+
+Both must be `true`.
+
+Now reload the Kylas tab. The badge in the console's top bar should read
+**Kylas**, and a company page loads its real contacts.
+
+## 7 · One real save
+
+Open a company, pick a contact, set a stage, hit **Save**. Then look at the
+Airtable **Companies** row.
+
+The proof is not that the contact appeared. It is that **`Last Call At`,
+`Right POC Contacts`, `Discovery Contacts` and `KPI Stage` populated by
+themselves** — those are rollups over the contact, with nothing typed at company
+level. That is the thing this whole design is for.
+
+> A Kylas **call log cannot be deleted through the API**. Use a contact you do
+> not mind leaving a stray log on.
+
 ---
 
-## 5 · Check it is working
+## Updating
 
-Open the console and look at the top bar:
+```bash
+cd kylas-kpi-tracker
+git pull
+source .env.local && node scripts/verify-base.mjs     # schema may have moved
+```
 
-| Badge | Meaning |
-|---|---|
-| **Kylas** (green) | connected — hover to see which account |
-| **offline** (amber) | the proxy is not running, or not reachable. Click it to change the address. |
+Then in Chrome: `chrome://extensions` → the **refresh arrow** on the card →
+reload the Kylas tab.
 
-Offline is not broken — the console still works on whatever it already holds.
-Nothing is lost; it just will not fetch or, later, write.
-
-**Data** in the top bar shows everything captured so far and exports it as JSON.
-**Dashboard** shows calls by day, week and month.
+Both steps matter. Chrome caches the old code until you hit refresh, and a new
+version may expect fields the base does not have yet. If `verify-base` lists
+anything missing, run `repair-base.mjs` as in step 5.
 
 ---
 
@@ -118,51 +192,86 @@ Nothing is lost; it just will not fetch or, later, write.
 **"Manifest file is missing or unreadable"**
 You selected the repo root. Select the `extension` folder inside it.
 
+**Card still says 0.1.0**
+Chrome is showing a stale copy. Hit the refresh arrow; if it persists, **Remove**
+and **Load unpacked** again.
+
 **No button on the Kylas page**
-The extension only runs on `app.kylas.io`. Check the address, then reload the
-tab — a newly installed extension does not appear in tabs that were already
-open.
+The extension only runs on `app.kylas.io`. A newly installed extension does not
+appear in tabs that were already open — reload the tab.
 
 **Badge says offline**
-Is the proxy terminal still open? Test it directly:
+Not broken: the console keeps working on what it already holds, it just cannot
+fetch or write. Check the proxy terminal is still open, then:
 
 ```bash
-curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/health      # expect {"ok":true,...} with your name
 ```
 
-Expect `{"ok":true,...}` with your name. If it says the port is in use,
-something else is on 8787 — run `PORT=8788 KYLAS_KEY=... node scripts/proxy.mjs`
-and click the offline badge to point the console at `http://127.0.0.1:8788`.
+Port already in use? Run it elsewhere and click the offline badge to point the
+console at the new address:
+
+```bash
+source .env.local && PORT=8788 node scripts/proxy.mjs
+```
 
 **Proxy exits with "Set KYLAS_KEY"**
-The key did not reach it. Put `KYLAS_KEY=...` on the same line as the `node`
-command, before it.
+The key did not reach it. Did you `source .env.local` in *this* terminal? Each
+new terminal needs it again.
 
-**Changed the code?**
-Press the refresh arrow on the extension card at `chrome://extensions`, then
-reload the Kylas tab.
+**Saves succeed but Airtable stays empty**
+Check the proxy's first line and `/targets`, as in step 6. If both say Airtable
+is configured, look at the save's response — a failed Airtable write is
+reported as `airtableError` rather than hidden, so the message will say why.
 
 ---
 
-## Trying it without Kylas
+## Trying it without touching production
 
-To see the whole thing working against a fake CRM — no key, and the real one
-untouched:
+The full write path against fake APIs — no real keys, your real data untouched:
 
 ```bash
-node scripts/mock-kylas.mjs                                    # terminal 1
-KYLAS_BASE=http://127.0.0.1:9900 KYLAS_KEY=x node scripts/proxy.mjs   # terminal 2
+node scripts/mock-kylas.mjs        # terminal 1, :9900
+node scripts/mock-airtable.mjs     # terminal 2, :9901
+
+# terminal 3
+KYLAS_KEY=test KYLAS_BASE=http://127.0.0.1:9900 KYLAS_GAP=50 \
+AIRTABLE_PAT=pattest AIRTABLE_BASE=appTEST \
+AIRTABLE_BASE_URL=http://127.0.0.1:9901 AIRTABLE_GAP=50 \
+node scripts/proxy.mjs
 ```
 
-The console then fetches from the mock exactly as it would from Kylas.
+The mocks reproduce the awkward parts of the real APIs on purpose — stage as
+both id and code, company as a bare id, `idNameStore`, rate limits above 5
+requests a second. Passing here is not passing because the mock is lenient.
+
+Inspect what was written:
+
+```bash
+curl -s http://127.0.0.1:9900/__writes -H 'api-key: x'             # Kylas side
+curl -s http://127.0.0.1:9901/__writes -H 'Authorization: Bearer x' # Airtable side
+```
+
+No-credential checks, any time:
+
+```bash
+node scripts/validate-schema.mjs     # 6 tables, 101 fields, consistent
+node scripts/test-validator.mjs      # 10/10 faults caught
+```
 
 ---
 
-## What it does and does not do yet
+## What it does now
 
-**Does:** loads companies and contacts from Kylas, captures calls and event
-detail, computes the company rollup live, keeps everything through a refresh,
-and exports it.
+**Does:** loads companies and contacts from Kylas · captures calls, duration and
+event detail · **writes back to Kylas**, into the remarks field between markers,
+creating no custom field · **writes the granular data to Airtable**, where the
+company KPIs are computed by rollup · dashboard by day, week and month ·
+filterable companies list · queues saves when offline and drains them when the
+connection returns.
 
-**Does not yet:** write anything back. Nothing you do in the console changes
-Kylas or Airtable. Capture is safe to use for real today; the writer is next.
+**Does not yet:** click-to-call. The phone number is a `tel:` link, so call
+duration is entered by hand unless the dialler supplies it.
+
+`scripts/test-*-live.mjs` are Playwright harnesses written for a Linux
+container. They hardcode paths and will not run on macOS as they stand.
