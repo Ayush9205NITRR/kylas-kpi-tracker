@@ -189,6 +189,9 @@
         CACHE.companies = r.companies || [];
         CACHE.owners = r.owners || [];
         CACHE.error = "";
+        /* So the Source filter can offer the account's whole list, not just
+           the values that happen to be on screen. */
+        if (r.picklists) adoptPicklists(r.picklists);
       })
       .catch((e) => {
         /* Offline: fall back to contact-derived companies and say so, rather
@@ -451,8 +454,17 @@
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
     const all = rollup(DATA, companiesNow(who));
-    const sources = [...new Set(all.map((c) => c.source).filter(Boolean))].sort();
-    const stages = [...new Set(all.map((c) => c.stage).filter(Boolean))]
+    /* Options are what the ACCOUNT defines, not what the loaded rows happen to
+       contain. Deriving them from the rows meant one company on screen gave a
+       Source filter with one option — you could not filter TO something you
+       could not already see, which is the opposite of what a filter is for.
+       Row values are unioned in so a value Kylas no longer offers is still
+       filterable while records carry it. */
+    const union = (defined, present) =>
+      [...new Set([...defined.filter(Boolean), ...present.filter(Boolean)])];
+
+    const sources = union(SOURCES, all.map((c) => c.source)).sort();
+    const stages = union(STAGES, all.map((c) => c.stage))
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
 
     const rows = all.filter((c) =>

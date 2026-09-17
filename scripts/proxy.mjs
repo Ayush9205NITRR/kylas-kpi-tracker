@@ -214,7 +214,12 @@ const routes = {
       });
     }
     log(`companies for ${all ? "all owners" : owner} — ${companies.length}`);
-    return { owner: all ? "all" : String(owner), companies, owners: ownerList() };
+    /* The picklists too. The companies LIST page never calls /company, so
+       without them the console's SOURCES stayed empty there and the Source
+       filter could only offer values it happened to see in the loaded rows.
+       meta() is cached, so this is free after the first call. */
+    return { owner: all ? "all" : String(owner), companies, owners: ownerList(),
+             picklists: (await meta()).picklists };
   },
 
   /* Session mode: everything this owner holds, ordered in the browser. */
