@@ -17,7 +17,13 @@ const METRICS=[
   {label:"SQL",       test:a=>a.stage==="SQL_SALES_QUALIFIED_LEAD"},
 ];
 /* Replaced at runtime by whatever this Kylas account actually defines. */
-let SOURCES=["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"];
+/* EMPTY until Kylas says otherwise. This used to ship
+   GOOGLE|FACEBOOK|LINKEDIN|EXHIBITION|COLD_CALLING — which is the STANDARD
+   Source picklist, not this account's cfSourceOfData. docs/kylas-api-notes.md
+   §11 says not to hardcode a custom field's values, and a list that looks
+   plausible is worse than an empty one: an associate picks "Google" from it and
+   writes a value the account does not use. */
+let SOURCES=[""];
 let OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
 let OWNERS=[""];
 function addOwners(names){
@@ -30,7 +36,10 @@ function adoptPicklists(picklists){
     for(const n of names){const v=picklists[n];if(v&&v.length)return ["",...v.map(o=>o.code)];}
     return null;
   };
-  const src=take("cfSourceOfData","sourceOfData","source"); if(src)SOURCES=src;
+  /* cfSourceOfData only. Falling through to "source" is how the standard
+     picklist got back in — that field is a different question with different
+     values. */
+  const src=take("cfSourceOfData","sourceOfData"); if(src)SOURCES=src;
   const off=take("cfOffsiteTimeline","offsiteTimeline");    if(off)OFFSITE_TIMELINE=off;
   for(const list of Object.values(picklists))
     for(const o of list) if(o.code&&o.label&&!LABEL[o.code])LABEL[o.code]=o.label;
@@ -719,7 +728,12 @@ function renderBasic(){
 
   /* Source */
   const srcRow=el("div","g2");
-  srcRow.appendChild(field("Came from","f-src",false,select("f-src",SOURCES,a.source,v=>a.source=v)));
+  /* Say so when the account's list has not arrived, rather than showing one
+     bare "Choose" that reads as "this account has no sources". */
+  srcRow.appendChild(field("Came from","f-src",false,
+    SOURCES.filter(Boolean).length||a.source
+      ? select("f-src",SOURCES,a.source,v=>a.source=v)
+      : el("div","locked",`<b>waiting</b><span>Source of Data comes from Kylas — connect the proxy to load it.</span>`)));
   srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
   W.appendChild(group("Where they came from",[srcRow]));
 

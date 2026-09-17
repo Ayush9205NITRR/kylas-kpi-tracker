@@ -376,6 +376,14 @@ The proxy therefore reads `/v1/entities/contact/fields` once and serves the
 picklists to the console, which adopts them at runtime. Standard fields can stay
 in `docs/stages.json`; account-specific ones cannot.
 
+Broken again on 2026-09-17: console.js still shipped
+`["","GOOGLE","FACEBOOK","LINKEDIN","EXHIBITION","COLD_CALLING"]` as the
+starting value for SOURCES, and `adoptPicklists` fell through to the standard
+`source` field when `cfSourceOfData` was absent. An associate picked "Google"
+from that list and wrote a value the account does not use. A plausible-looking
+default is worse than an empty one — it cannot be told apart from real data.
+SOURCES now starts as `[""]` and only `cfSourceOfData` replaces it.
+
 Two general rules fall out, both learned the hard way here:
 
 1. A `<select>` must keep a value it does not recognise rather than silently

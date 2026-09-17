@@ -218,29 +218,36 @@ body.framed .ovOnly{display:inline-block}
      dark  #191A1E  CVD dE 9.4, normal dE 26.5, all >= 3:1
    Dark is stepped for the dark surface, not an automatic flip. */
 .vfun{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
-  background:var(--panel);border:1px solid var(--line);border-radius:12px;
-  padding:8px 16px;box-shadow:var(--sh);margin-bottom:16px}
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:6px 22px 14px;box-shadow:none;margin-bottom:18px}
 #vmode{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .vfun,
   :root:not([data-theme="light"]) #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}}
 :root[data-theme="dark"] .vfun,:root[data-theme="dark"] #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}
 
+/* Minimal: one label, one mark, three numbers. The per-row definition moved to
+   the row's title — six explanatory sublines under six bars is the thing that
+   made this read as dense rather than informative. */
 .vfr{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
-  gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+  gap:14px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}
 .vfr:last-child{border-bottom:0}
-.vfr .fl{display:flex;flex-direction:column;min-width:0;font-size:var(--t-label);font-weight:700}
-.vfr .fl em{font-style:normal;font-size:var(--t-meta);color:var(--text3);font-weight:500}
-/* Thin mark, 4px rounded end, anchored to the baseline at the left. */
-.vfr .fb{height:12px;border-radius:4px;background:var(--panel3);overflow:hidden}
-.vfr .fb i{display:block;height:100%;border-radius:4px;background:var(--s1);transition:width .3s}
-.vfr .fn{font-size:21px;font-weight:800;text-align:right}
-.vfr .fp,.vfr .fo{font-size:var(--t-meta);color:var(--text2);text-align:right}
+.vfr .fl{min-width:0;font-size:var(--t-label);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* No track behind the bar. An empty rung should read as empty, not as a grey
+   bar that looks like a value of its own. 8px, 4px rounded end. */
+.vfr .fb{height:8px}
+.vfr .fb i{display:block;height:100%;border-radius:4px;background:var(--s1);
+  min-width:0;transition:width .3s}
+.vfr .fn{font-size:22px;font-weight:700;text-align:right;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.vfr .fp,.vfr .fo{font-size:var(--t-meta);color:var(--text3);text-align:right;
+  font-variant-numeric:tabular-nums}
 /* The header has no bar cell of its own, so it spans three columns and cannot
    read as an empty seventh rung. */
 .vfr.vfh{grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
-  padding:6px 0 8px;border-bottom:1px solid var(--line2)}
+  padding:14px 0 10px;border-bottom:1px solid var(--line)}
 .vfr.vfh .fl{grid-column:1 / span 2;font-size:var(--t-meta);color:var(--text3);
-  font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+  font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .vfr.vfh .fn,.vfr.vfh .fp,.vfr.vfh .fo{font-size:var(--t-meta);color:var(--text3);
   font-weight:700;letter-spacing:.02em;text-align:right;line-height:1.25}
 @media(max-width:760px){
@@ -331,3 +338,12 @@ body.framed .ovOnly{display:inline-block}
   background:transparent;border:0;color:var(--blue);font-size:var(--t-meta);
   font-weight:600;padding:0;cursor:pointer;text-decoration:underline;
 }
+
+/* Dashboard, quieter. Cards carried a shadow AND a border AND a tint; one of
+   the three is enough to say "this is a surface". */
+.vbars{box-shadow:none;border-radius:14px;padding:6px 22px 10px}
+.vt{box-shadow:none}
+.vhead h2{font-weight:700;letter-spacing:-.022em}
+.vhead.sm h2{font-size:var(--t-sec)}
+.vhead{margin-bottom:12px}
+.vnote{font-size:var(--t-meta);color:var(--text3);line-height:1.6;max-width:68ch}

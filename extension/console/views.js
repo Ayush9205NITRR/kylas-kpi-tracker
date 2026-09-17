@@ -28,7 +28,7 @@
   const FUNNEL = [
     { key: "reached",   label: "Companies reached",    sub: "at least one call logged" },
     { key: "right",     label: "Right POC connected",  sub: "any of budget, timeline or pax" },
-    { key: "discovery", label: "Successful AR call",   sub: "one complete row" },
+    { key: "discovery", label: "Successful discovery call", sub: "one complete row" },
     { key: "booked",    label: "SQL meeting booked",   sub: "booked, regardless of outcome" },
     { key: "done",      label: "SQL meeting done",     sub: "the call was held" },
     { key: "sql",       label: "SQL",                  sub: "qualified" },
@@ -215,9 +215,9 @@
         <span class="fo">vs reached</span>
       </div>
       ${rows.map((r) => `
-      <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${r.n} compan${r.n === 1 ? "y" : "ies"}${
+      <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${esc(r.sub)}. ${r.n} compan${r.n === 1 ? "y" : "ies"}${
         r.fromPrev ? `, ${r.fromPrev} of the rung above` : ""}">
-        <span class="fl">${esc(r.label)}<em>${esc(r.sub)}</em></span>
+        <span class="fl">${esc(r.label)}</span>
         <span class="fb"><i style="width:${r.width}%"></i></span>
         <span class="fn tnum">${r.n}</span>
         <span class="fp tnum">${r.fromPrev ? esc(r.fromPrev) : "—"}${
