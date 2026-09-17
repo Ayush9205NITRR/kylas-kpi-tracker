@@ -260,10 +260,17 @@ function renderCallbar(){
   const num=ph?(ph.cc+" "+ph.value).trim():"";
 
   const q=qualOf(a);
+  /* Company ABOVE the person, on its own line. An associate 80 calls into a
+     day needs to know which account they are on before they know who they are
+     speaking to — and it was previously a fragment of the small grey subline,
+     after the qualification chip. */
+  const coName=scope?.name||a.company||"";
   const who=el("div","who",
-    `<b>${esc(a.pocName||"New contact")}</b>
+    `${coName?`<span class="atco">${esc(coName)}${
+       scope?.id?`<em>#${esc(scope.id)}</em>`:""}</span>`:""}
+     <b>${esc(a.pocName||"New contact")}</b>
      <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
-     <span>${esc(a.company||"—")}${a.designation?" · "+esc(a.designation):""}</span></span>`);
+     ${a.designation?`<span>${esc(a.designation)}</span>`:""}</span>`);
   C.appendChild(who);
 
   const d=el("div","dial");
@@ -272,10 +279,18 @@ function renderCallbar(){
   link.setAttribute("aria-label",num?"Call "+a.pocName+" on "+num:"No number on file");
   link.onclick=e=>{
     if(!num){e.preventDefault();toast("No number on file for "+a.pocName);return;}
-    /* the tel: href is what actually hands off to the dialler — this just makes
-       it obvious that the request left the app */
+    /* INTERIM. `tel:` hands off to whatever the OS has registered, which on a
+       Mac with no softphone is nothing at all — the click appears to do
+       nothing, which is what Ayush reported. Kylas' own dialler is in the host
+       page and is not reachable from a tel: link; wiring it needs the selector
+       or URL it responds to, which is not known yet. Until then, put the number
+       on the clipboard so it is one paste away rather than retyped 200 times a
+       day, and say plainly that that is what happened. */
     link.classList.add("calling");
-    toast("Dialling "+num+" — request sent to the dialler");
+    const plain=num.replace(/\s/g,"");
+    navigator.clipboard?.writeText(plain)
+      .then(()=>toast(plain+" copied — paste into the Kylas dialler"))
+      .catch(()=>toast("Dialling "+num));
     setTimeout(()=>link.classList.remove("calling"),2600);
   };
   d.appendChild(link);C.appendChild(d);

@@ -180,7 +180,9 @@ body.framed .ovOnly{display:inline-block}
 .vr .c1 em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
 .vr .c4{color:var(--slate)}
 .vr .c5{color:var(--blue)}
-.vr .c6,.vr .c8{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text2)}
+/* Dates wear the same family as every other cell; tabular figures keep
+   them aligned without switching typeface mid-row. */
+.vr .c6,.vr .c8{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
 .vempty{padding:36px;text-align:center;color:var(--text3);font-size:var(--t-label)}
 @media(max-width:860px){
   .vr{grid-template-columns:1.6fr 1fr .6fr}
@@ -279,3 +281,53 @@ body.framed .ovOnly{display:inline-block}
    that are read before every use of the page. Up to --t-label. */
 .vfilters label{font-size:var(--t-label);color:var(--text2);font-weight:600}
 .vfilters select,.vfilters input{font-size:var(--t-label);padding:9px 11px}
+
+/* The account, above the person, in the call bar. */
+.who .atco{display:flex;align-items:baseline;gap:8px;font-size:var(--t-label);
+  font-weight:800;letter-spacing:-.01em;color:var(--blue);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1px}
+.who .atco em{font-style:normal;font-weight:600;font-size:var(--t-meta);
+  color:var(--text3);flex:none;font-variant-numeric:tabular-nums}
+
+/* ── multi-select filter popover ───────────────────────────────────────
+   Airtable-shaped: a set of values plus include/exclude. A <details> rather
+   than a library — keyboard-reachable for free, and it cannot drift out of
+   sync with a hidden state machine. */
+.mf{position:relative}
+.mf > summary{
+  list-style:none;cursor:pointer;border:1.5px solid var(--line2);background:var(--panel);
+  border-radius:var(--r);padding:9px 11px;font-size:var(--t-label);min-width:150px;
+  display:flex;align-items:center;gap:8px;
+}
+.mf > summary::-webkit-details-marker{display:none}
+.mf > summary::after{content:"⌄";margin-left:auto;color:var(--text3);font-size:15px;line-height:1}
+.mf[open] > summary{border-color:var(--blue)}
+.mf > summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mfbody{
+  position:absolute;z-index:20;top:calc(100% + 5px);left:0;min-width:246px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.14);padding:10px;
+}
+.mfmode{display:flex;gap:4px;margin-bottom:8px}
+.mfmode button{
+  flex:1;border:1px solid var(--line2);background:transparent;border-radius:8px;
+  padding:7px 6px;font-size:var(--t-meta);font-weight:600;color:var(--text2);cursor:pointer;
+}
+.mfmode button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.mflist{max-height:242px;overflow-y:auto;display:flex;flex-direction:column;gap:1px}
+.mflist label{
+  display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;
+  font-size:var(--t-label);font-weight:500;cursor:pointer;
+}
+.mflist label:hover{background:var(--panel2)}
+.mflist input{width:16px;height:16px;accent-color:var(--blue);flex:none;margin:0}
+.mfnone{font-size:var(--t-meta);color:var(--text3);margin:6px 8px}
+.mffoot{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:8px;padding-top:8px;border-top:1px solid var(--line);
+  font-size:var(--t-meta);color:var(--text3);
+}
+.mffoot button{
+  background:transparent;border:0;color:var(--blue);font-size:var(--t-meta);
+  font-weight:600;padding:0;cursor:pointer;text-decoration:underline;
+}

@@ -345,7 +345,79 @@
   }
 
   /* ── companies list ────────────────────────────────────────────────── */
-  const FILTERS = { source: "", stage: "", since: "", kpi: "", owner: "" };
+  /* Airtable-shaped: each dimension is a SET plus whether that set includes or
+     excludes. One value was never enough — "Round-Robin and Apollo but not
+     Referral" is an ordinary question and a single select cannot ask it. An
+     empty set means no constraint, so "is none of" with nothing ticked is not
+     a filter that hides everything. */
+  const FILTERS = {
+    owner: "", since: "",
+    source: { mode: "any", values: [] },
+    stage: { mode: "any", values: [] },
+    kpi: { mode: "any", values: [] },
+  };
+
+  /* KPI is a set of booleans on the row, not one value, so "is any of" asks
+     whether the company sits at ANY of the ticked rungs. */
+  const matchesSet = (state, have) => {
+    if (!state.values.length) return true;
+    const hit = state.values.some((v) => have.includes(v));
+    return state.mode === "none" ? !hit : hit;
+  };
+
+  /* A <details> popover: no library, keyboard-reachable, and it closes on the
+     next click anywhere via the handler wired after render. */
+  function multiFilter(id, title, options, state, labelOf = (v) => v) {
+    const n = state.values.length;
+    const summary = !n ? "All"
+      : n === 1 ? `${state.mode === "none" ? "not " : ""}${labelOf(state.values[0])}`
+      : `${state.mode === "none" ? "none of " : "any of "}${n}`;
+    return `<details class="mf" id="${id}">
+      <summary title="${esc(title)}"><span>${esc(summary)}</span></summary>
+      <div class="mfbody">
+        <div class="mfmode">
+          <button type="button" data-mode="any" aria-pressed="${state.mode === "any"}">is any of</button>
+          <button type="button" data-mode="none" aria-pressed="${state.mode === "none"}">is none of</button>
+        </div>
+        <div class="mflist">${options.length ? options.map((v) => `
+          <label><input type="checkbox" value="${esc(v)}"${
+            state.values.includes(v) ? " checked" : ""}> ${esc(labelOf(v))}</label>`).join("")
+          : `<p class="mfnone">Nothing to filter on yet.</p>`}</div>
+        <div class="mffoot"><button type="button" data-clear="1">Clear</button>
+          <span>${n} selected</span></div>
+      </div>
+    </details>`;
+  }
+
+  /* Wires one popover. Re-rendering the whole view on every tick would close
+     the popover mid-use, so the state is mutated and only the row list and the
+     summary are refreshed. */
+  function wireMulti(id, state, onChange) {
+    const root = document.getElementById(id);
+    if (!root) return;
+    root.querySelectorAll(".mfmode button").forEach((b) => {
+      b.onclick = () => {
+        state.mode = b.dataset.mode;
+        root.querySelectorAll(".mfmode button").forEach((x) =>
+          x.setAttribute("aria-pressed", String(x.dataset.mode === state.mode)));
+        onChange();
+      };
+    });
+    root.querySelectorAll(".mflist input").forEach((cb) => {
+      cb.onchange = () => {
+        const v = cb.value;
+        if (cb.checked) { if (!state.values.includes(v)) state.values.push(v); }
+        else state.values = state.values.filter((x) => x !== v);
+        onChange();
+      };
+    });
+    const clear = root.querySelector("[data-clear]");
+    if (clear) clear.onclick = () => {
+      state.values = [];
+      root.querySelectorAll(".mflist input").forEach((c) => (c.checked = false));
+      onChange();
+    };
+  }
 
   async function companies(host) {
     /* Same allotted list the dashboard uses, so the two cannot disagree about
@@ -358,15 +430,25 @@
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
 
     const rows = all.filter((c) =>
-      (!FILTERS.source || c.source === FILTERS.source) &&
-      (!FILTERS.stage || c.stage === FILTERS.stage) &&
-      (!FILTERS.since || (c.lastQualityAt || "") >= FILTERS.since) &&
-      (!FILTERS.kpi || c[FILTERS.kpi]))
+      matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
+      matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
+      matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
+      (!FILTERS.since || (c.lastQualityAt || "") >= FILTERS.since))
       .sort((a, b) => (b.rung - a.rung) || String(b.lastQualityAt || "").localeCompare(String(a.lastQualityAt || "")));
 
-    const opt = (list, cur) =>
-      [`<option value="">All</option>`,
-       ...list.map((v) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label(v))}</option>`)].join("");
+
+    /* One definition, used by the first paint and by every filter tick. */
+    const rowHTML = (c) => `
+          <div class="vr" data-id="${esc(c.id)}">
+            <span class="c1"><b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
+            <span class="c2">${esc(label(c.stage) || "—")}</span>
+            <span class="c3">${c.contacts.length}</span>
+            <span class="c4">${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
+            <span class="c5">${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
+            <span class="c6">${day(c.lastCalledAt)}</span>
+            <span class="c8">${day(c.lastQualityAt)}</span>
+            <span class="c7">${esc(c.owner || "—")}${c.batch ? `<em>${esc(c.batch)}</em>` : ""}</span>
+          </div>`;
 
     host.innerHTML = `
       <div class="vhead">
@@ -380,13 +462,10 @@
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
         </select></label>
-        <label>Source<select id="fSource">${opt(sources, FILTERS.source)}</select></label>
-        <label>Stage<select id="fStage">${opt(stages, FILTERS.stage)}</select></label>
-        <label>KPI<select id="fKpi">
-          <option value="">All</option>
-          ${FUNNEL.map((f) => `<option value="${f.key}"${
-            FILTERS.kpi === f.key ? " selected" : ""}>${esc(f.label)}</option>`).join("")}
-        </select></label>
+        <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label)}</label>
+        <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label)}</label>
+        <label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
+          (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k)}</label>
         <label>Quality since<input type="date" id="fSince" value="${esc(FILTERS.since)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>
       </div>
@@ -397,17 +476,7 @@
           <span class="c5">Discovery</span><span class="c6">Last called</span>
           <span class="c8">Last quality</span><span class="c7">Allotted to</span>
         </div>
-        ${rows.length ? rows.map((c) => `
-          <div class="vr" data-id="${esc(c.id)}">
-            <span class="c1"><b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
-            <span class="c2">${esc(label(c.stage) || "—")}</span>
-            <span class="c3">${c.contacts.length}</span>
-            <span class="c4">${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
-            <span class="c5">${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
-            <span class="c6">${day(c.lastCalledAt)}</span>
-            <span class="c8">${day(c.lastQualityAt)}</span>
-            <span class="c7">${esc(c.owner || "—")}${c.batch ? `<em>${esc(c.batch)}</em>` : ""}</span>
-          </div>`).join("")
+        ${rows.length ? rows.map(rowHTML).join("")
         : `<div class="vempty">Nothing matches those filters.</div>`}
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
@@ -418,15 +487,51 @@
 
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
-    on("fSource", "change", (e) => { FILTERS.source = e.target.value; companies(host); });
-    on("fStage", "change", (e) => { FILTERS.stage = e.target.value; companies(host); });
-    on("fKpi", "change", (e) => { FILTERS.kpi = e.target.value; companies(host); });
     on("fSince", "change", (e) => { FILTERS.since = e.target.value; companies(host); });
-    on("fClear", "click", () => { Object.keys(FILTERS).forEach((k) => (FILTERS[k] = "")); companies(host); });
+    on("fClear", "click", () => {
+      FILTERS.owner = ""; FILTERS.since = "";
+      for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
+      companies(host);
+    });
+    /* Ticking a box must not re-render the whole view — that would close the
+       popover on every click. Only the rows and the summary are refreshed. */
+    for (const [id, st] of [["fSource", FILTERS.source], ["fStage", FILTERS.stage], ["fKpi", FILTERS.kpi]])
+      wireMulti(id, st, () => repaintRows());
 
     /* A row is a way into the company, not a dead end. */
-    host.querySelectorAll(".vr[data-id]").forEach((r) =>
+    const bindRows = () => host.querySelectorAll(".vr[data-id]").forEach((r) =>
       r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
+    bindRows();
+
+    /* Redraw the table and each popover's own summary in place. */
+    function repaintRows() {
+      const next = all.filter((c) =>
+        matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
+        matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
+        matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
+        (!FILTERS.since || (c.lastQualityAt || "") >= FILTERS.since))
+        .sort((a, b) => (b.rung - a.rung) || String(b.lastQualityAt || "").localeCompare(String(a.lastQualityAt || "")));
+      const body = host.querySelector(".vtable");
+      const head = body?.querySelector(".vr.vh");
+      if (body && head) {
+        body.innerHTML = head.outerHTML + (next.length ? next.map(rowHTML).join("")
+          : `<div class="vempty">Nothing matches those filters.</div>`);
+        bindRows();
+      }
+      const sub = host.querySelector(".vhead .vsub");
+      if (sub) sub.textContent = `${next.length} of ${all.length}`;
+      for (const [id, st, lab] of [["fSource", FILTERS.source, label],
+                                   ["fStage", FILTERS.stage, label],
+                                   ["fKpi", FILTERS.kpi, (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k]]) {
+        const n = st.values.length;
+        const span = document.querySelector(`#${id} > summary > span`);
+        if (span) span.textContent = !n ? "All"
+          : n === 1 ? `${st.mode === "none" ? "not " : ""}${lab(st.values[0])}`
+          : `${st.mode === "none" ? "none of " : "any of "}${n}`;
+        const count = document.querySelector(`#${id} .mffoot span`);
+        if (count) count.textContent = `${n} selected`;
+      }
+    }
   }
 
   global.Views = { rollup, dashboard, companies, FILTERS };
