@@ -58,7 +58,12 @@
     view = which;
     if (!which) { port.hidden = true; wrap.innerHTML = ""; return; }
     port.hidden = false;
-    (which === "dashboard" ? Views.dashboard : Views.companies)(wrap);
+    /* Both views fetch the allotted-companies list, so both are async now. A
+       rejection here must show as a message rather than an empty panel and an
+       unhandled rejection in the console. */
+    wrap.innerHTML = `<p class="vnote">Loading…</p>`;
+    (which === "dashboard" ? Views.dashboard : Views.companies)(wrap)
+      .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
   }
 
   /* Clicking a company in the list should take you into it. */

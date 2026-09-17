@@ -62,6 +62,12 @@ export function createClient(key, { log = () => {} } = {}) {
     "company", "companyName", "designation", "department", "emails", "phoneNumbers",
     "linkedin", "remarks", "customFieldValues", "metaData", "createdAt", "updatedAt"];
 
+  /* Same rule as contacts: search returns only what it is asked for, and
+     metaData carries the owner id -> name map so the list can show an owner
+     without a request per company. */
+  const COMPANY_FIELDS = ["id", "name", "ownerId", "website", "phoneNumbers", "emails",
+    "customFieldValues", "metaData", "createdAt", "updatedAt"];
+
   /* The schema calls company and ownerId LOOK_UP, but the query builder rejects
      that and wants "long". Confirmed live — see docs/kylas-picklists.md. */
   const rule = (field, value, type = "long", operator = "equal") =>
@@ -83,6 +89,22 @@ export function createClient(key, { log = () => {} } = {}) {
     async contactsForOwner(ownerId, size = 100) {
       const r = await call("POST", `/v1/search/contact?sort=updatedAt,desc&page=0&size=${size}`,
         { fields: CONTACT_FIELDS, jsonRule: rule("ownerId", Number(ownerId)) });
+      return rows(r);
+    },
+
+    /* "Companies allotted to me" is the company's OWN owner field, not "a
+       company where I own a contact" — confirmed by Ayush 2026-09-17. The two
+       give different lists, and only this one shows a company that has been
+       assigned but never worked. */
+    async companiesForOwner(ownerId, size = 200) {
+      const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,
+        { fields: COMPANY_FIELDS, jsonRule: rule("ownerId", Number(ownerId)) });
+      return rows(r);
+    },
+
+    async companies(size = 200) {
+      const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,
+        { fields: COMPANY_FIELDS });
       return rows(r);
     },
 

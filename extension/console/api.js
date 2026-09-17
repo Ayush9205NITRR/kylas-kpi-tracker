@@ -61,6 +61,11 @@
 
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),
+    /* The authoritative list of companies allotted to someone — their OWN owner
+       field in Kylas. Pass "all" for the team view. Slower than the others
+       because it can be 200 rows, so the views cache it. */
+    companies: (owner) => req(`/companies${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`,
+      { timeout: 30000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
   };

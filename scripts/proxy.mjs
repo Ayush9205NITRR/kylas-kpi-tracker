@@ -169,6 +169,36 @@ const routes = {
     return { company, contacts, owners: ownerList(), picklists: (await meta()).picklists };
   },
 
+  /* The companies list and the dashboards. Companies allotted to an owner are
+     the ones whose OWN owner field is that person — not the ones where they
+     happen to own a contact. Deriving the list from contacts, as the console
+     used to, silently hides every company that has been assigned but not yet
+     worked, which is exactly the list an associate needs at the start of a day.
+     ?owner= for one person, ?owner=all for the team view. */
+  "/companies": async (url) => {
+    const want = url.searchParams.get("owner");
+    const me = await kylas.me();
+    const all = want === "all";
+    const owner = all ? null : (want || me?.id);
+
+    const raw = all ? await kylas.companies() : await kylas.companiesForOwner(owner);
+    const companies = [];
+    for (const co of raw) {
+      const known = lookupName(co, "ownerId", co.ownerId);
+      if (known && co.ownerId) owners.set(String(co.ownerId), known);
+      /* Seed the name cache too — the contact mapper then never has to fetch
+         a company whose name already came back on this list. */
+      if (co?.id && co?.name) companyNames.set(String(co.id), co.name);
+      companies.push({
+        ...toConsoleCompany(co),
+        owner: known || (await ownerName(co.ownerId)) || "",
+        ownerId: String(co.ownerId ?? ""),
+      });
+    }
+    log(`companies for ${all ? "all owners" : owner} — ${companies.length}`);
+    return { owner: all ? "all" : String(owner), companies, owners: ownerList() };
+  },
+
   /* Session mode: everything this owner holds, ordered in the browser. */
   "/queue": async (url) => {
     const me = await kylas.me();

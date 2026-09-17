@@ -169,7 +169,7 @@ body.framed .ovOnly{display:inline-block}
 }
 .vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh)}
 .vr{
-  display:grid;grid-template-columns:1.6fr 1.3fr .5fr 1.4fr 1.4fr .9fr;
+  display:grid;grid-template-columns:1.6fr 1.3fr .5fr 1.4fr 1.4fr .9fr 1fr;
   gap:12px;padding:14px 17px;border-bottom:1px solid var(--line);align-items:center;
   font-size:var(--t-label);cursor:pointer;
 }
@@ -184,7 +184,7 @@ body.framed .ovOnly{display:inline-block}
 .vempty{padding:36px;text-align:center;color:var(--text3);font-size:var(--t-label)}
 @media(max-width:860px){
   .vr{grid-template-columns:1.6fr 1fr .6fr}
-  .vr .c4,.vr .c5,.vr .c6{display:none}
+  .vr .c4,.vr .c5,.vr .c6,.vr .c7{display:none}
 }
 
 /* ── toast ───────────────────────────────────────────────────────────── */
@@ -205,3 +205,69 @@ body.framed .ovOnly{display:inline-block}
 .withIcon .go:hover:not([disabled]){background:var(--blueSoft)}
 .withIcon .go[disabled]{color:var(--text3);cursor:default;background:transparent}
 .withIcon .in{padding-right:44px}
+
+
+/* ── funnel, mode chart ─────────────────────────────────────────────────
+   Chart colour lives here and only here. Categorical slots 1-3 of the
+   reference palette, in fixed order, validated with the skill's script
+   against this console's own surfaces:
+     light #FFFFFF  CVD dE 9.2, normal dE 27.6 — aqua warns at 2.82:1,
+                    discharged by the legend and the table view below
+     dark  #191A1E  CVD dE 9.4, normal dE 26.5, all >= 3:1
+   Dark is stepped for the dark surface, not an automatic flip. */
+.vfun{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:8px 16px;box-shadow:var(--sh);margin-bottom:16px}
+#vmode{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .vfun,
+  :root:not([data-theme="light"]) #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}}
+:root[data-theme="dark"] .vfun,:root[data-theme="dark"] #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}
+
+.vfr{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
+  gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+.vfr:last-child{border-bottom:0}
+.vfr .fl{display:flex;flex-direction:column;min-width:0;font-size:var(--t-label);font-weight:700}
+.vfr .fl em{font-style:normal;font-size:var(--t-meta);color:var(--text3);font-weight:500}
+/* Thin mark, 4px rounded end, anchored to the baseline at the left. */
+.vfr .fb{height:12px;border-radius:4px;background:var(--panel3);overflow:hidden}
+.vfr .fb i{display:block;height:100%;border-radius:4px;background:var(--s1);transition:width .3s}
+.vfr .fn{font-size:21px;font-weight:800;text-align:right}
+.vfr .fp,.vfr .fo{font-size:var(--t-meta);color:var(--text2);text-align:right}
+/* The header sits at the BOTTOM: the numbers are what you read first, and a
+   column head above six bars competes with the first row's label. */
+.vfr.vfh{border-top:1px solid var(--line);border-bottom:0;padding:7px 0 3px}
+.vfr.vfh span{font-size:var(--t-meta);color:var(--text3);font-weight:700;
+  letter-spacing:.03em;text-transform:uppercase;text-align:right}
+@media(max-width:760px){
+  .vfr{grid-template-columns:minmax(0,1.4fr) 54px 68px}
+  .vfr .fb,.vfr .fo{display:none}
+}
+
+.vlg{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 12px}
+.vlg .lg{display:inline-flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text2);font-weight:600}
+.vlg .lg i{width:11px;height:11px;border-radius:3px;flex:none}
+
+.vbars{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:6px 16px;box-shadow:var(--sh)}
+.vbar{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,3fr) 52px;
+  gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.vbar:last-child{border-bottom:0}
+.vbar .bk{font-size:var(--t-label);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 2px surface gap between stacked segments, so adjacent fills never touch. */
+.vbar .bt{display:flex;height:14px;gap:2px}
+.vbar .bt i{display:block;height:100%;border-radius:4px;min-width:3px}
+.vbar .bn{font-size:19px;font-weight:800;text-align:right}
+
+.vtbl{margin-top:12px;font-size:var(--t-meta)}
+.vtbl summary{cursor:pointer;color:var(--text2);font-weight:600;padding:4px 0}
+.vtbl table{border-collapse:collapse;width:100%;margin-top:8px}
+.vtbl th,.vtbl td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left}
+.vtbl th{color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.vtbl td.tnum,.vtbl th:not(:first-child){text-align:right}
+
+.vwarn{background:var(--amberSoft);color:var(--amber);border-radius:9px;
+  padding:11px 14px;font-size:var(--t-label);font-weight:600;margin:0 0 14px}
+/* A rung wider than the one above it — a gap in capture, not a good number, so
+   it is marked but never coloured as success. */
+.vfr.grew .fb i{background:var(--amber)}
+.vfr .fp em{font-style:normal;color:var(--amber);font-size:11px}

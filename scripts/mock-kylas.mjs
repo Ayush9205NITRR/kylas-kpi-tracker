@@ -55,6 +55,13 @@ const COMPANIES = {
     },
   },
   903: { id: 903, name: "Shorehouse Retail", ownerId: 74726, customFieldValues: {} },
+  /* Allotted, never worked: no contacts point at it. A companies list derived
+     from contacts cannot show this row, which is the whole reason /companies
+     searches companies directly. */
+  1778327: {
+    id: 1778327, name: "bbb", ownerId: 74725,
+    customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL", cfBatch: "B-12" },
+  },
 };
 
 /* Stages arrive as ids, not codes — the mapping layer has to cope. */
@@ -142,6 +149,22 @@ createServer(async (req, res) => {
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
     }
     return json(res, 200, { content: out.map(withMeta), totalElements: out.length });
+  }
+
+  if (p === "/v1/search/company" && req.method === "POST") {
+    const body = JSON.parse(await text(req));
+    const rules = body?.jsonRule?.rules || [];
+    const bad = rules.find((r) => r.field === "ownerId" && r.type !== "long");
+    if (bad) return json(res, 400, { message: "Invalid Type" });
+
+    let out = Object.values(COMPANIES);
+    for (const r of rules)
+      if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
+    /* A company carries its owner's name in its own idNameStore, same as a
+       contact does. Company 903 deliberately has no custom fields at all. */
+    const withOwner = (c) => ({ ...c, metaData: { idNameStore: {
+      ownerId: { [String(c.ownerId)]: userName(c.ownerId) } } } });
+    return json(res, 200, { content: out.map(withOwner), totalElements: out.length });
   }
 
   if (p === "/v1/entities/contact/fields") {
