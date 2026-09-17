@@ -44,8 +44,8 @@ pwd          # e.g. /Users/ayushtiwari/kylas-kpi-tracker
 4. Select the **`extension`** folder inside the repo —
    `kylas-kpi-tracker/extension`, **not** the repo root
 
-The card should read **Enout BD Call Console 0.2.0**. If it says 0.1.0 you have
-an older copy still loaded — remove it, or you will be testing the wrong code.
+The card should read **Enout BD Call Console 0.3.0**. An older number means a
+stale copy is still loaded — remove it, or you will be testing the wrong code.
 
 ## 3 · Check the UI loads
 
@@ -178,12 +178,17 @@ git pull
 source .env.local && node scripts/verify-base.mjs     # schema may have moved
 ```
 
+**Restart the proxy too** — `Ctrl-C` in its terminal, then start it again. It
+does not reload its own code, so a new route (like `/companies`) does not exist
+in a process started before it was written.
+
 Then in Chrome: `chrome://extensions` → the **refresh arrow** on the card →
 reload the Kylas tab.
 
-Both steps matter. Chrome caches the old code until you hit refresh, and a new
-version may expect fields the base does not have yet. If `verify-base` lists
-anything missing, run `repair-base.mjs` as in step 5.
+All three matter. Chrome caches the old code until you hit refresh, the proxy
+keeps running whatever it started with, and a new version may expect Airtable
+fields the base does not have yet. If `verify-base` lists anything missing, run
+`repair-base.mjs` as in step 5.
 
 ---
 
@@ -192,7 +197,7 @@ anything missing, run `repair-base.mjs` as in step 5.
 **"Manifest file is missing or unreadable"**
 You selected the repo root. Select the `extension` folder inside it.
 
-**Card still says 0.1.0**
+**Card shows an older version**
 Chrome is showing a stale copy. Hit the refresh arrow; if it persists, **Remove**
 and **Load unpacked** again.
 
