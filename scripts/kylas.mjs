@@ -183,7 +183,7 @@ export function toKylasCallLog(c, call) {
    wrong guess here shows up as a blank field, not a crash. */
 
 const pick = (...vals) => vals.find((v) => v !== undefined && v !== null && v !== "");
-const idOf = (v) => (v && typeof v === "object" ? pick(v.id, v.value) : v);
+export const idOf = (v) => (v && typeof v === "object" ? pick(v.id, v.value) : v);
 const nameOf = (v) => (v && typeof v === "object" ? pick(v.name, v.displayName, v.label) : undefined);
 
 /* Kylas ships a lookup table with every record:

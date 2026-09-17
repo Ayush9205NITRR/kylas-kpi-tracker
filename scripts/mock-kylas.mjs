@@ -26,10 +26,17 @@ const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Bool
 
 /* Kylas attaches an id -> name table for every lookup on the record. Without
    it the console has only bare ids and shows blanks. */
+/* Whether the SEARCH endpoint fills idNameStore for `company` was never
+   confirmed against the real API — the probe lost those responses to 429. With
+   MOCK_NO_COMPANY_NAMES=1 it does not, which is the case that made the
+   companies list read "Company 1776620" instead of a name. The proxy must
+   resolve the name by id rather than depend on this. */
+const NO_CO_NAMES = process.env.MOCK_NO_COMPANY_NAMES === "1";
+
 const withMeta = (c) => ({
   ...c,
   metaData: { idNameStore: {
-    company: c.company ? { [String(c.company?.id ?? c.company)]: COMPANIES[c.company?.id ?? c.company]?.name } : {},
+    company: c.company && !NO_CO_NAMES ? { [String(c.company?.id ?? c.company)]: COMPANIES[c.company?.id ?? c.company]?.name } : {},
     ownerId: { [String(c.ownerId)]: userName(c.ownerId) },
     cfPipelineStageBd: c.customFieldValues?.cfPipelineStageBd
       ? { [String(c.customFieldValues.cfPipelineStageBd)]:

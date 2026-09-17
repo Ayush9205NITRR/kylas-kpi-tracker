@@ -13,7 +13,7 @@
  * marker block inside its remarks, and append a native Kylas call log.
  */
 import { createServer } from "node:http";
-import { createClient, toConsoleContact, toConsoleCompany, lookupName,
+import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { createAirtable, syncContact } from "./airtable.mjs";
@@ -57,12 +57,47 @@ async function ownerName(id) {
   return owners.get(k);
 }
 
+/* Same story for companies, and it matters more. A contact's company arrives as
+   a bare id; the name is only in metaData.idNameStore — and whether the SEARCH
+   endpoint populates that for `company` was never confirmed (the probe lost
+   those responses to 429). When it does not, every contact from /queue has a
+   blank company, and the companies list falls back to "Company 1776620".
+   Resolving by id removes the dependency either way. Cached, so a queue of 100
+   contacts across 30 companies costs 30 requests once, not 100 every fetch. */
+const companyNames = new Map();
+async function companyName(id) {
+  if (!id) return "";
+  const k = String(id);
+  if (!companyNames.has(k)) {
+    try {
+      const co = await kylas.company(k);
+      companyNames.set(k, co?.name || "");
+    } catch {
+      companyNames.set(k, "");   // a failed lookup must not fail the whole fetch
+    }
+  }
+  return companyNames.get(k);
+}
+
 async function mapContacts(raw, company) {
+  /* Seed the cache with the company we were asked about, and with every name
+     the payloads did carry, so the resolve loop below has less to do. */
+  if (company?.id && company.name) companyNames.set(String(company.id), company.name);
+  for (const c of raw) {
+    const id = idOf(c.company);
+    const known = lookupName(c, "company", id);
+    if (id && known) companyNames.set(String(id), known);
+  }
+
   const out = [];
   for (const c of raw) {
     const known = lookupName(c, "ownerId", c.ownerId);
     if (known && c.ownerId) owners.set(String(c.ownerId), known);
-    out.push(toConsoleContact(c, { ownerName: known || (await ownerName(c.ownerId)), company }));
+    const mapped = toConsoleContact(c, { ownerName: known || (await ownerName(c.ownerId)), company });
+    /* The name may still be missing — fetch it rather than let the console
+       render an id where a human expects a company. */
+    if (mapped.companyId && !mapped.company) mapped.company = await companyName(mapped.companyId);
+    out.push(mapped);
   }
   return out;
 }
