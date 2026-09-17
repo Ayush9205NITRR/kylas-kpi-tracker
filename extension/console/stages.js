@@ -7,7 +7,6 @@ const STAGES = [
   "SQL_SALES_QUALIFIED_LEAD",
   "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
   "CLOSING_LOOPS_LOW_VALUE",
-  "RESCHEDULE_PENDING",
   "GHOSTED",
   "DISCOVERY_CALL_BOOKED",
   "FOLLOW_UP_1",
@@ -35,7 +34,6 @@ const STAGE_ID = {
   SQL_SALES_QUALIFIED_LEAD:                      2862830,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    2910918,
   CLOSING_LOOPS_LOW_VALUE:                       2909381,
-  RESCHEDULE_PENDING:                            2909380,
   GHOSTED:                                       2909382,
   DISCOVERY_CALL_BOOKED:                         2909379,
   FOLLOW_UP_1:                                   2873316,
@@ -60,10 +58,9 @@ const STAGE_ID = {
 
 /* 24 is furthest along. callOrder = 25 - rung, so one list serves both. */
 const STAGE_RUNG = {
-  SQL_SALES_QUALIFIED_LEAD:                      24,
-  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    23,
-  CLOSING_LOOPS_LOW_VALUE:                       22,
-  RESCHEDULE_PENDING:                            21,
+  SQL_SALES_QUALIFIED_LEAD:                      23,
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    22,
+  CLOSING_LOOPS_LOW_VALUE:                       21,
   GHOSTED:                                       20,
   DISCOVERY_CALL_BOOKED:                         19,
   FOLLOW_UP_1:                                   18,
@@ -87,7 +84,7 @@ const STAGE_RUNG = {
 };
 
 const STAGE_PRIORITY = Object.fromEntries(
-  Object.entries(STAGE_RUNG).map(([code, rung]) => [code, 25 - rung]));
+  Object.entries(STAGE_RUNG).map(([code, rung]) => [code, 24 - rung]));
 
 const LABEL = {
   MR: "Mr.", MRS: "Mrs.", MISS: "Miss",
@@ -99,7 +96,6 @@ const LABEL = {
   SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
   CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",
-  RESCHEDULE_PENDING:                            "Reschedule Pending",
   GHOSTED:                                       "Discovery Call No-Show",
   DISCOVERY_CALL_BOOKED:                         "Discovery Call Booked",
   FOLLOW_UP_1:                                   "Follow-up (1)",
@@ -124,5 +120,13 @@ const LABEL = {
 
 const CNC_LADDER = ["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
 const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","RESCHEDULE_PENDING","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
 const UNTOUCHED = ["YET_TO_BE_MINED"];
+
+/* Funnel milestones, as a floor rung each. Rank only rises, so "ever reached"
+   and "is at or past" are one question. */
+const MILESTONE = {
+  sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },
+  sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
+  sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
+};

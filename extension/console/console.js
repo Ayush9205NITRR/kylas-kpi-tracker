@@ -886,18 +886,39 @@ function renderRight_counts(){
    stage, the more the record has to carry before it can be saved. */
 function missing(){
   const a=rec(),m=[];
-  if(!a.pocName.trim())m.push(["Name","f-poc"]);
-  if(!a.phones.some(p=>p.value.trim()))m.push(["Phone number","f-poc"]);
-  if(!a.owner)m.push(["Owner","f-ow"]);
-  if(a.stage==="Could Not Connect"&&!a.nextCallDate)m.push(["A day to call back","f-next"]);
-  if(/Qualifying|Discovery|SQL/.test(a.stage)){
-    if(!blocks(a).length)m.push(["At least one event","s-events"]);
-    else if(!hasSignal(a))m.push(["Budget, timeline or pax","s-events"]);
+  /* Dedupe by label: two rules can want the same field — mode of meeting is
+     required both at a meeting stage and once a row is complete — and listing
+     it twice reads as a bug to the person trying to save. */
+  const need=(cond,lbl,anc)=>{ if(cond&&!m.some(([l])=>l===lbl))m.push([lbl,anc]); };
+
+  need(!a.pocName.trim(),"Name","f-poc");
+  need(!a.phones.some(p=>p.value.trim()),"Phone number","f-poc");
+  need(!a.owner,"Owner","f-ow");
+
+  /* a.stage is a CODE (DISCOVERY_CALL_BOOKED), not a label. Three rules here
+     used to match labels against it with regexes and a string equality, so
+     none of them ever fired and nothing was actually being enforced. */
+  need(CNC_LADDER.includes(a.stage)&&!a.nextCallDate,"A day to call back","f-next");
+
+  /* Claiming a booked meeting or better means claiming you learned something. */
+  if(rung(a)>=MILESTONE.sqlMeetingBooked.floor){
+    need(!blocks(a).length,"At least one event","s-events");
+    need(blocks(a).length&&!hasSignal(a),"Budget, timeline or pax","s-events");
   }
-  if(/Discovery Call Done|SQL/.test(a.stage)&&!a.vendorInfo)m.push(["Who handles their events","f-vi"]);
+
+  /* A complete row IS the Successful Discovery claim, so the moment one appears
+     the three things that qualify it stop being optional. Gating at save is
+     deliberately not the same as folding them into isComplete(): blocking the
+     save collects the data, whereas adding them to the test would silently
+     withhold the credit from someone who filled budget, timeline and pax. */
+  if(isComplete(a)){
+    need(!a.vendorInfo,"Who handles this for them today","f-vi");
+    need(!a.modeOfMeeting,"Mode of meeting","f-mm");
+  }
+
   if(MEETING_STAGES.includes(a.stage)){
-    if(!a.nextCallDate)m.push(["Meeting date","f-next"]);
-    if(!a.modeOfMeeting)m.push(["Mode of meeting","f-mm"]);
+    need(!a.nextCallDate,"Meeting date","f-next");
+    need(!a.modeOfMeeting,"Mode of meeting","f-mm");
   }
   return m;
 }

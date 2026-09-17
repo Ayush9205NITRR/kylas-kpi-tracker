@@ -26,6 +26,23 @@ for (const list of ["cncLadder", "exitStages", "meetingStages", "untouched"])
   for (const code of src[list])
     if (!S.some((s) => s.code === code)) throw new Error(`${list} names an unknown stage: ${code}`);
 
+/* A milestone is a floor, so it must name a real stage. Emitting a rung of
+   `undefined` would make every comparison false and read as "nobody ever got
+   there" rather than as a broken table. */
+const RUNG_OF = Object.fromEntries(S.map((s) => [s.code, s.rung]));
+for (const [key, m] of Object.entries(src.milestones || {})) {
+  if (!m || !m.floor) throw new Error(`milestone ${key} has no floor stage`);
+  if (RUNG_OF[m.floor] === undefined) throw new Error(`milestone ${key} floors on an unknown stage: ${m.floor}`);
+  if (!m.label) throw new Error(`milestone ${key} has no label`);
+}
+
+/* One renderer for both outputs, so the two can never disagree. */
+function milestoneLines() {
+  return Object.entries(src.milestones || {}).map(([key, m]) =>
+    `  ${pad(key + ":", 20)} { floor: ${RUNG_OF[m.floor]}, stage: ${q(m.floor)}, label: ${q(m.label)} },`
+  ).join("\n");
+}
+
 const byRung = [...S].sort((a, b) => a.rung - b.rung);        // 1 first
 const byCall = [...S].sort((a, b) => b.rung - a.rung);        // call order
 const q = (s) => JSON.stringify(s);
@@ -70,6 +87,12 @@ const CNC_LADDER = ${q(src.cncLadder)};
 const EXIT_STAGES = ${q(src.exitStages)};
 const MEETING_STAGES = ${q(src.meetingStages)};
 const UNTOUCHED = ${q(src.untouched)};
+
+/* Funnel milestones, as a floor rung each. Rank only rises, so "ever reached"
+   and "is at or past" are one question. */
+const MILESTONE = {
+${milestoneLines()}
+};
 `);
 
 /* ── node ────────────────────────────────────────────────────────── */
@@ -101,8 +124,15 @@ export const CNC_LADDER = ${q(src.cncLadder)};
 export const EXIT_STAGES = ${q(src.exitStages)};
 export const MEETING_STAGES = ${q(src.meetingStages)};
 export const UNTOUCHED = ${q(src.untouched)};
+
+/* Funnel milestones, as a floor rung each. See docs/stages.json. */
+export const MILESTONE = {
+${milestoneLines()}
+};
 `);
 
 console.log(`${S.length} stages → extension/console/stages.js and scripts/stages.mjs`);
 console.log(`  top rung  ${byRung.at(-1).rung}  ${byRung.at(-1).label}`);
 console.log(`  bottom    ${byRung[0].rung}  ${byRung[0].label}`);
+for (const [key, m] of Object.entries(src.milestones || {}))
+  console.log(`  milestone ${pad(key, 18)} rung >= ${RUNG_OF[m.floor]}  (${m.label})`);

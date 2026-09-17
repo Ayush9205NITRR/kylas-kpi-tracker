@@ -15,7 +15,7 @@ export const check = { icon: "check", color: "greenBright" };
 
 /* Stage tables are generated from docs/stages.json — see gen-stages.mjs. */
 export { STAGES, STAGE_ID, STAGE_RUNG, LADDER, EXIT_STAGES } from "./stages.mjs";
-import { STAGES, LADDER, EXIT_STAGES } from "./stages.mjs";
+import { STAGES, LADDER, EXIT_STAGES, MILESTONE } from "./stages.mjs";
 
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(
@@ -218,6 +218,19 @@ export const FOLLOWUPS = [
   formula("Companies", "Successful Discovery", `IF({Discovery Contacts}, 1, 0)`,
     "One row with budget AND timeline AND pax. Implies Right POC."),
   formula("Companies", "KPI Rank", `IF({KPI Score}, FLOOR({KPI Score} / 10000000000), 0)`),
+
+  /* The three stage-driven milestones. Each is a floor on the ladder, and
+     because KPI Rank only ever rises, "ever reached it" needs no history — the
+     rank IS the high-water mark. So Booked counts a company whose call was
+     booked and then no-showed, which is what "regardless of outcome" means.
+     Stage-driven, unlike Right POC and Successful Discovery above, which come
+     from the event data. A company can sit at SQL with no complete row. */
+  formula("Companies", "SQL Meeting Booked", `IF({KPI Rank} >= ${MILESTONE.sqlMeetingBooked.floor}, 1, 0)`,
+    `Rank >= ${MILESTONE.sqlMeetingBooked.floor} (${MILESTONE.sqlMeetingBooked.stage} and above). Includes no-shows and reschedules.`),
+  formula("Companies", "SQL Meeting Done", `IF({KPI Rank} >= ${MILESTONE.sqlMeetingDone.floor}, 1, 0)`,
+    `Rank >= ${MILESTONE.sqlMeetingDone.floor} (${MILESTONE.sqlMeetingDone.stage} and above). The call was actually held.`),
+  formula("Companies", "SQL", `IF({KPI Rank} >= ${MILESTONE.sql.floor}, 1, 0)`,
+    `Rank >= ${MILESTONE.sql.floor}. Qualified.`),
   formula("Companies", "KPI Stage", ladderFormula("KPI Rank")),
   formula("Companies", "KPI Stage At",
     `IF({KPI Score}, DATEADD(${EPOCH}, MOD({KPI Score}, 10000000000), 'seconds'))`,

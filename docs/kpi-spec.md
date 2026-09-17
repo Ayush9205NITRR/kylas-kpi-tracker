@@ -205,19 +205,66 @@ Segmented by `Mode of Meeting`, giving the in-person / virtual / text split.
 
 ---
 
-## 7. The SQL stages
+## 7. The SQL milestones — settled 2026-09-17
 
-| KPI stage | Source | Status |
+Three stage-driven milestones, each a **floor** on the ladder. Because `KPI Rank`
+only ever rises, "ever reached X" and "is at or past X" are the same question, so
+a floor needs no member list and no history lookup — the rank *is* the
+high-water mark.
+
+| Milestone | Floor | Counts these stages |
 |---|---|---|
-| Active Requirement Call | — | **OPEN — undefined.** Pipeline stage, or an event-data condition? |
-| SQL Call Booked | derived from contact pipeline stage | **OPEN** — which stage value(s) |
-| SQL Call Held | — | deferred, you said you'd come back to this |
-| SQL Accepted | derived from contact pipeline stage | **OPEN** — which stage value(s) |
+| **SQL Meeting Booked** | rung 19 · Discovery Call Booked | Booked, No-Show, Closing Loops - Low Value, Done - Awaiting Client Inputs, SQL |
+| **SQL Meeting Done** | rung 21 · Closing Loops - Low Value | Closing Loops - Low Value, Done - Awaiting Client Inputs, SQL |
+| **SQL** | rung 23 · SQL | SQL |
 
-The prototype's `STAGES` list is a guess. Real values come from
-`GET /v1/entities/contact/fields?custom-only=false`, as ids plus labels. Once I
-have a key I can pull the real list and you map stages to KPI stages against it
-rather than from memory.
+"Booked" is deliberately *regardless of outcome* — a call that was booked and
+then no-showed still counts as booked. "Done" means the call was actually held,
+which is why Closing Loops - Low Value is in it: you held the call and concluded
+the account was not worth pursuing.
+
+Defined once in `docs/stages.json` under `milestones`, as a floor stage code per
+milestone. `gen-stages.mjs` emits `MILESTONE` for both the browser and node, and
+refuses to emit if a floor names a stage that does not exist — a missing floor
+would compile to `undefined`, make every comparison false, and read as "nobody
+ever got there" rather than as a broken table.
+
+**Reschedule Pending was retired from the pipeline on 2026-09-17.** Before that
+it sat at rung 21, inside the Booked range but absent from Ayush's stage set —
+the one place his three sets were not a clean threshold. With it gone each floor
+matches his sets exactly. The ladder is now 1..23.
+
+### Stage-driven is not the same as data-driven
+
+These three come from the **stage**. Right POC (§5) and Successful Discovery (§6)
+come from the **event data**. They can disagree: a contact can sit at SQL with no
+complete row, and a contact with a complete row can still be at Follow-up. The
+company funnel is therefore made cumulative explicitly — each rung implies the
+one below — or the rates come out above 100%.
+
+### Required at the point of the claim
+
+A complete row *is* the Successful Discovery claim, so the moment one appears the
+console requires the three things that qualify it before it will save:
+
+1. **Who handles this for them today?** — `Vendor Info`
+2. **What did I pitch?** — `Service Offering`
+3. **Mode of meeting** — `Mode of Meeting`
+
+Gating at save is deliberately **not** the same as folding these into
+`Is Complete`. Blocking the save collects the data; adding them to the test would
+silently withhold the credit from someone who did fill budget, timeline and pax.
+
+> **OPEN — "What did I pitch?"** `Service Offering` is a checkbox today ("I
+> pitched what Enout does"), so it cannot be *missing* — unchecked is a valid
+> answer, and requiring it to be ticked manufactures a true. Ayush's wording is
+> "the service or solution pitched", which wants a value. Needs a field-type
+> decision before it can be enforced.
+>
+> **OPEN — Mode of Meeting values.** The schema has
+> `In Person | Virtual | Calls | Text`; the dashboard spec asks for
+> `Video | Audio | In-Person`. These are not the same list and the stacked chart
+> depends on which one is real.
 
 ---
 
@@ -380,9 +427,8 @@ furthest along, rung 1 is untouched.
 | Rung | Stage | Rung | Stage |
 |---|---|---|---|
 | 24 | SQL | 12 | Offsite Delayed |
-| 23 | Discovery Call Done | 11 | Offsite Done (Late Reachout) |
-| 22 | Closing Loops - Low Value | 10 | Not Interested |
-| 21 | Reschedule Pending | 9 | Connect Later |
+| 22 | Discovery Call Done | 11 | Offsite Done (Late Reachout) |
+| 21 | Closing Loops - Low Value | 10 | Not Interested |
 | 20 | Discovery Call No-Show | 8 | CNC 3 |
 | 19 | Discovery Call Booked | 7 | CNC 2 |
 | 18 | Follow-up 1 | 6 | CNC 1 |
@@ -435,9 +481,9 @@ disqualified in April would erase the MQL it earned in March, and the funnel
 would leak backwards. This is the monotonic rule from §8, applied to the real
 list.
 
-Six more are holding states — `CONNECT_LATER`, `RESCHEDULE_PENDING`,
-`FOLLOW_UP_1/2/3`, `OFFSITE_DELAYED`, `OFFSITE_DONE_LATE_REACHOUT`. They keep
-whatever rank was already earned.
+Five more are holding states — `CONNECT_LATER`, `FOLLOW_UP_1/2/3`,
+`OFFSITE_DELAYED`, `OFFSITE_DONE_LATE_REACHOUT`. They keep whatever rank was
+already earned. (`RESCHEDULE_PENDING` was retired from the pipeline 2026-09-17.)
 
 ### Outcome buttons, remapped
 

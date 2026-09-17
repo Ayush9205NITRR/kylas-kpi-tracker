@@ -6,7 +6,6 @@ export const STAGES = [
   "SQL_SALES_QUALIFIED_LEAD",
   "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
   "CLOSING_LOOPS_LOW_VALUE",
-  "RESCHEDULE_PENDING",
   "GHOSTED",
   "DISCOVERY_CALL_BOOKED",
   "FOLLOW_UP_1",
@@ -33,7 +32,6 @@ export const STAGE_ID = {
   SQL_SALES_QUALIFIED_LEAD:                      2862830,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    2910918,
   CLOSING_LOOPS_LOW_VALUE:                       2909381,
-  RESCHEDULE_PENDING:                            2909380,
   GHOSTED:                                       2909382,
   DISCOVERY_CALL_BOOKED:                         2909379,
   FOLLOW_UP_1:                                   2873316,
@@ -57,10 +55,9 @@ export const STAGE_ID = {
 };
 
 export const STAGE_RUNG = {
-  SQL_SALES_QUALIFIED_LEAD:                      24,
-  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    23,
-  CLOSING_LOOPS_LOW_VALUE:                       22,
-  RESCHEDULE_PENDING:                            21,
+  SQL_SALES_QUALIFIED_LEAD:                      23,
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    22,
+  CLOSING_LOOPS_LOW_VALUE:                       21,
   GHOSTED:                                       20,
   DISCOVERY_CALL_BOOKED:                         19,
   FOLLOW_UP_1:                                   18,
@@ -88,7 +85,6 @@ export const STAGE_LABEL = {
   SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
   CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",
-  RESCHEDULE_PENDING:                            "Reschedule Pending",
   GHOSTED:                                       "Discovery Call No-Show",
   DISCOVERY_CALL_BOOKED:                         "Discovery Call Booked",
   FOLLOW_UP_1:                                   "Follow-up (1)",
@@ -133,13 +129,19 @@ export const LADDER = [
   [18, "18 · Follow-up (1)"],
   [19, "19 · Discovery Call Booked"],
   [20, "20 · Discovery Call No-Show"],
-  [21, "21 · Reschedule Pending"],
-  [22, "22 · Closing Loops - Low Value"],
-  [23, "23 · Discovery Call Done - Awaiting Client Inputs"],
-  [24, "24 · SQL (Sales Qualified Lead)"],
+  [21, "21 · Closing Loops - Low Value"],
+  [22, "22 · Discovery Call Done - Awaiting Client Inputs"],
+  [23, "23 · SQL (Sales Qualified Lead)"],
 ];
 
 export const CNC_LADDER = ["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
 export const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","RESCHEDULE_PENDING","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
 export const UNTOUCHED = ["YET_TO_BE_MINED"];
+
+/* Funnel milestones, as a floor rung each. See docs/stages.json. */
+export const MILESTONE = {
+  sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },
+  sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
+  sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
+};

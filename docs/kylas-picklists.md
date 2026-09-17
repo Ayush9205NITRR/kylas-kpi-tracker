@@ -15,7 +15,7 @@ the API stores and what everything joins on** — labels are display only.
 | `CNC_COULD_NOT_CONNECT_3` | CNC 3 | no answer |
 | `FOLLOWUP_CNC` | Follow-up CNC | no answer |
 | `CONNECT_LATER` | Connect later | parked |
-| `RESCHEDULE_PENDING` | Reschedule pending | parked |
+| ~~`RESCHEDULE_PENDING`~~ | Reschedule pending | **retired 2026-09-17** |
 | `FOLLOW_UP_1` | Follow-up 1 | working |
 | `FOLLOW_UP_2` | Follow-up 2 | working |
 | `FOLLOW_UP_3` | Follow-up 3 | working |
@@ -87,7 +87,7 @@ one is accounted for with nothing left over.
 | 1 | SQL | `SQL_SALES_QUALIFIED_LEAD` |
 | 2 | Discovery Call Done - Awaiting Client Inputs | `DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS` |
 | 3 | Closing Loops - Low Value | `CLOSING_LOOPS_LOW_VALUE` |
-| 4 | Reschedule Pending | `RESCHEDULE_PENDING` |
+| — | ~~Reschedule Pending~~ | ~~`RESCHEDULE_PENDING`~~ — retired 2026-09-17 |
 | 5 | Discovery Call No-Show | `GHOSTED` ⚠️ |
 | 6 | Discovery Call Booked | `DISCOVERY_CALL_BOOKED` |
 | 7–9 | Follow-up 1 / 2 / 3 | `FOLLOW_UP_1/2/3` |
