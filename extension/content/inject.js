@@ -175,19 +175,22 @@
   const digits = (s) => String(s || "").replace(/\D/g, "");
   const tail = (s) => digits(s).slice(-10);
 
+  /* A bare tel: anchor is NOT a dialler — following it is the same OS handoff
+     that already does nothing, except from the top-level page Chrome answers it
+     with "This content is blocked". Clicking one can only reproduce the
+     original failure more loudly, so such anchors are excluded outright. Only a
+     real in-page control counts. */
+  const isTelAnchor = (el) =>
+    el.tagName === "A" && /^tel:/i.test(el.getAttribute("href") || "");
+
   function dialCandidates(want) {
     const out = [];
-    /* Kylas' own tel: anchors first — the most explicit statement of intent
-       the page can make about a number. */
-    for (const a of document.querySelectorAll('a[href^="tel:"]'))
-      if (tail(a.getAttribute("href")) === want) out.push({ el: a, why: "tel: link" });
-
-    /* Then anything whose visible text or label is that number, and which is
+    /* Anything whose visible text or label is that number, and which is
        actually clickable. Walking every node would be slow on a CRM page, so
        stay with the elements a UI puts a number in. */
     const sel = 'button,[role="button"],a,[class*="dial"],[class*="call"],[class*="phone"],[aria-label]';
     for (const el of document.querySelectorAll(sel)) {
-      if (out.some((c) => c.el === el)) continue;
+      if (out.some((c) => c.el === el) || isTelAnchor(el)) continue;
       const hay = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${
         (el.textContent || "").slice(0, 60)}`;
       if (tail(hay) === want) out.push({ el, why: "labelled with the number" });
@@ -196,7 +199,7 @@
     /* Last resort: a dial control sitting next to the number rather than on
        it — the icon beside a phone field, which is how Kylas renders it. */
     for (const el of document.querySelectorAll(sel)) {
-      if (out.some((c) => c.el === el)) continue;
+      if (out.some((c) => c.el === el) || isTelAnchor(el)) continue;
       const cls = `${el.className || ""} ${el.getAttribute("aria-label") || ""}`.toLowerCase();
       if (!/dial|call/.test(cls)) continue;
       const near = el.closest("tr,li,div,section");

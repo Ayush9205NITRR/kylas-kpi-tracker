@@ -158,21 +158,45 @@
      once and reused by both views rather than on every repaint. */
   const CACHE = { owner: null, companies: [], owners: [], error: "" };
 
-  async function loadCompanies(owner) {
+  /* NEVER block the first paint on this. /companies is a search over up to 200
+     companies plus an owner-name lookup for each owner not already known, and
+     awaiting it before rendering meant the filter bar itself waited on the
+     network — which is the "source, stage and KPI load very slowly" Ayush saw.
+     The controls are local; only the rows need the data.
+
+     So: return what is cached immediately, start a fetch if needed, and
+     re-render when it lands. */
+  let inflight = null;
+
+  const companiesNow = (owner) =>
+    (CACHE.owner === (owner || "") ? CACHE.companies : []);
+
+  /* true while a fetch is outstanding, so the view can say "loading" instead of
+     rendering an empty list that reads as "you have nothing". */
+  function ensureCompanies(owner, onReady) {
     const want = owner || "";
-    if (CACHE.owner === want && !CACHE.error) return CACHE.companies;
-    try {
-      const r = await API.companies(want);
-      CACHE.owner = want;
-      CACHE.companies = r.companies || [];
-      CACHE.owners = r.owners || [];
-      CACHE.error = "";
-    } catch (e) {
-      /* Offline: fall back to contact-derived companies and say so, rather than
-         render an empty funnel that reads as "you have done nothing". */
-      CACHE.owner = want; CACHE.companies = []; CACHE.error = e.message;
-    }
-    return CACHE.companies;
+    /* Owner match alone, NOT "&& !CACHE.error". CACHE.owner is set on failure
+       too, so including the error here would make the re-render that reports
+       the failure start another fetch, which fails, which re-renders — an
+       unbounded retry loop against a rate-limited API. One attempt per owner;
+       the error is surfaced in the view instead. */
+    if (CACHE.owner === want) return false;
+    if (inflight === want) return true;          /* already on its way */
+    inflight = want;
+    API.companies(want)
+      .then((r) => {
+        CACHE.owner = want;
+        CACHE.companies = r.companies || [];
+        CACHE.owners = r.owners || [];
+        CACHE.error = "";
+      })
+      .catch((e) => {
+        /* Offline: fall back to contact-derived companies and say so, rather
+           than render an empty funnel that reads as "you have done nothing". */
+        CACHE.owner = want; CACHE.companies = []; CACHE.error = e.message;
+      })
+      .finally(() => { inflight = null; onReady(); });
+    return true;
   }
 
   /* ── the funnel ────────────────────────────────────────────────────── */
@@ -294,8 +318,8 @@
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
 
   async function dashboard(host) {
-    const base = await loadCompanies(DASH_OWNER);
-    const cos = rollup(DATA, base);
+    const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
+    const cos = rollup(DATA, companiesNow(DASH_OWNER));
     const team = DASH_OWNER === "all";
     const names = [...new Set(CACHE.owners.map((o) => o.name).filter(Boolean))].sort();
 
@@ -311,8 +335,8 @@
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(DASH_OWNER) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
         </select></label>
-        <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"}${
-          CACHE.error ? " · from this browser only" : " allotted"}</span>
+        <span class="vsub">${loading ? "loading…" : `${cos.length} compan${
+          cos.length === 1 ? "y" : "ies"}${CACHE.error ? " · from this browser only" : " allotted"}`}</span>
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
@@ -422,9 +446,11 @@
   async function companies(host) {
     /* Same allotted list the dashboard uses, so the two cannot disagree about
        which companies exist. The owner filter here is the company's own owner
-       in Kylas, which is what "allotted to me" means. */
-    const base = await loadCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner);
-    const all = rollup(DATA, base);
+       in Kylas, which is what "allotted to me" means. Rendered from cache
+       first — the filters are local and must not wait on a search. */
+    const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
+    const loading = ensureCompanies(who, () => companies(host));
+    const all = rollup(DATA, companiesNow(who));
     const sources = [...new Set(all.map((c) => c.source).filter(Boolean))].sort();
     const stages = [...new Set(all.map((c) => c.stage).filter(Boolean))]
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
@@ -453,7 +479,7 @@
     host.innerHTML = `
       <div class="vhead">
         <h2>Companies</h2>
-        <span class="vsub">${rows.length} of ${all.length}</span>
+        <span class="vsub">${loading ? "loading…" : `${rows.length} of ${all.length}`}</span>
       </div>
       <div class="vfilters">
         <label>Allotted to<select id="fOwner">
@@ -488,7 +514,10 @@
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
     on("fSince", "change", (e) => { FILTERS.since = e.target.value; companies(host); });
+    /* Clear is also the retry: it drops the cache so a failed fetch is tried
+       again, which is otherwise a reload. */
     on("fClear", "click", () => {
+      if (CACHE.error) { CACHE.owner = null; CACHE.error = ""; }
       FILTERS.owner = ""; FILTERS.since = "";
       for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
       companies(host);

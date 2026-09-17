@@ -102,17 +102,17 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
   border-radius:7px;padding:5px 12px;flex:none;font-style:normal;border:2px solid transparent}
 .qual.mql{background:transparent;color:var(--text3);border-color:var(--line2)}
 .qual.poc{background:var(--blue);color:var(--onBlue)}
-.dial a{display:inline-flex;align-items:center;gap:11px;text-decoration:none;background:var(--blue);
+.dial button{display:inline-flex;align-items:center;gap:11px;border:0;text-decoration:none;background:var(--blue);
   color:var(--onBlue);border-radius:var(--r);padding:14px 24px;font-size:20px;
   font-weight:800;letter-spacing:.01em;font-variant-numeric:tabular-nums;flex:none;
   transition:background .12s,transform .08s}
-.dial a:hover{background:var(--blueDeep)}
-.dial a:active{transform:scale(.97)}
-.dial a .ico{font-size:17px;font-weight:400}
-.dial a.calling{background:var(--blueDeep)}
-.dial a.calling .ico{animation:ring .9s ease-in-out infinite}
+.dial button:hover{background:var(--blueDeep)}
+.dial button:active{transform:scale(.97)}
+.dial button .ico{font-size:17px;font-weight:400}
+.dial button.calling{background:var(--blueDeep)}
+.dial button.calling .ico{animation:ring .9s ease-in-out infinite}
 @keyframes ring{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg)}}
-@media(prefers-reduced-motion:reduce){.dial a.calling .ico{animation:none}}
+@media(prefers-reduced-motion:reduce){.dial button.calling .ico{animation:none}}
 .ocs{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 auto;align-items:center}
 .ocq{font-size:var(--t-label);color:var(--text2);margin-right:3px}
 .oc{border:1.5px solid var(--line2);background:var(--panel);border-radius:var(--r);padding:10px 16px;

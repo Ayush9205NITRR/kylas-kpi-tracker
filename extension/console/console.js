@@ -292,18 +292,21 @@ function renderCallbar(){
   C.appendChild(who);
 
   const d=el("div","dial");
-  const link=el("a",null,`<span class="ico">☎</span><span>${esc(num||"no number")}</span>`);
-  link.href=num?"tel:"+num.replace(/\s/g,""):"#";
+  /* A BUTTON, not a link. While this carried href="tel:..." a stray default —
+     middle-click, cmd-click, or any path that skipped preventDefault — sent the
+     frame to a tel: URL, and Chrome answers that with a full "This content is
+     blocked" page. With no href there is nothing to navigate to. */
+  const link=el("button",null,`<span class="ico">☎</span><span>${esc(num||"no number")}</span>`);
+  link.type="button";
   link.setAttribute("aria-label",num?"Call "+a.pocName+" on "+num:"No number on file");
   link.onclick=e=>{
-    if(!num){e.preventDefault();toast("No number on file for "+a.pocName);return;}
+    if(!num){toast("No number on file for "+a.pocName);return;}
     /* Never follow the tel: href. From inside the iframe that goes to the OS,
        and on a Mac with no softphone registered nothing happens at all — which
        is exactly the dead click Ayush reported. Kylas' dialler is a control in
        the HOST page, so ask the content script to find and click it. It replies
        with "dialled"; only if it finds nothing do we fall back to the
        clipboard. */
-    e.preventDefault();
     link.classList.add("calling");
     setTimeout(()=>link.classList.remove("calling"),2600);
     if(typeof requestDial==="function")requestDial(num);
