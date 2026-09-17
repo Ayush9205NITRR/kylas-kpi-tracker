@@ -1,8 +1,12 @@
 :root{
   /* ONE accent. Slate carries "past". Rose only for required. Amber only for flags. */
-  --ground:#EEF2F8; --panel:#FFFFFF; --panel2:#F6F8FC; --panel3:#E9EEF6;
-  --line:#DFE5EF; --line2:#C7D0DF;
-  --text:#16202E; --text2:#55637A; --text3:#8B98AB;
+  /* Neutrals are neutral. These carried a blue cast (hue ~214, and --ground was
+     the most saturated thing on screen), which read as a second accent
+     competing with the real one and made the form column look tinted. Same
+     lightness, saturation dropped to a trace. */
+  --ground:#F0F1F3; --panel:#FFFFFF; --panel2:#F7F8F9; --panel3:#EAEBEE;
+  --line:#E2E4E8; --line2:#CBCED4;
+  --text:#1A1D23; --text2:#5A6068; --text3:#8D929B;
   --blue:#2563EB; --blueSoft:#E8EFFE; --blueLine:#A6C1F7; --onBlue:#FFFFFF; --blueDeep:#1D4FD0;
   --slate:#7C3AED; --slateSoft:#F2ECFE; --slateLine:#C3A9FA; --onSlate:#FFFFFF;
   --rose:#DC2647; --roseSoft:#FCE8EC;
@@ -13,9 +17,9 @@
   --sh:0 1px 2px rgba(22,40,70,.05),0 1px 3px rgba(22,40,70,.04);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --ground:#080D16; --panel:#121A27; --panel2:#182231; --panel3:#1F2B3C;
-  --line:#26324400; --line:#263244; --line2:#39475E;
-  --text:#E9EEF7; --text2:#9DAAC0; --text3:#73819A;
+  --ground:#101114; --panel:#191A1E; --panel2:#212328; --panel3:#2A2C33;
+  --line:#2E3037; --line2:#42454D;
+  --text:#EDEEF1; --text2:#A6A9B2; --text3:#7B7F89;
   --blue:#5E95FF; --blueSoft:#14263F; --blueLine:#2D5185; --onBlue:#06101E; --blueDeep:#7FACFF;
   --slate:#AC8CFF; --slateSoft:#241B3D; --slateLine:#4C3C7E; --onSlate:#0C0818;
   --rose:#F07185; --roseSoft:#341A21;
@@ -23,9 +27,9 @@
   --sh:0 1px 2px rgba(0,0,0,.3);
 }}
 :root[data-theme="dark"]{
-  --ground:#080D16; --panel:#121A27; --panel2:#182231; --panel3:#1F2B3C;
-  --line:#263244; --line2:#39475E;
-  --text:#E9EEF7; --text2:#9DAAC0; --text3:#73819A;
+  --ground:#101114; --panel:#191A1E; --panel2:#212328; --panel3:#2A2C33;
+  --line:#2E3037; --line2:#42454D;
+  --text:#EDEEF1; --text2:#A6A9B2; --text3:#7B7F89;
   --blue:#5E95FF; --blueSoft:#14263F; --blueLine:#2D5185; --onBlue:#06101E; --blueDeep:#7FACFF;
   --slate:#AC8CFF; --slateSoft:#241B3D; --slateLine:#4C3C7E; --onSlate:#0C0818;
   --rose:#F07185; --roseSoft:#341A21;

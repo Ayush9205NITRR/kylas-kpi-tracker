@@ -91,8 +91,13 @@
      so a miss here costs a nicer heading and nothing else. */
   function recordLabel() {
     const h = document.querySelector("h1, [class*='entity-name'], [class*='record-title']");
-    const raw = (h && h.textContent) || document.title || "";
-    return raw.replace(/\(#\d+\)/, "").replace(/\s*[|·-]\s*Kylas.*$/i, "").trim().slice(0, 60);
+    /* document.title is "Kylas" on its own while the SPA is still rendering, so
+       using it as a fallback labelled every company "Kylas" — a plausible-looking
+       wrong name, which is worse than none. An empty label lets the console show
+       the id it actually knows. */
+    const raw = (h && h.textContent) || "";
+    const out = raw.replace(/\(#\d+\)/, "").replace(/\s*[|·–-]\s*Kylas.*$/i, "").trim().slice(0, 60);
+    return /^kylas$/i.test(out) ? "" : out;
   }
 
   function send(type, payload) {

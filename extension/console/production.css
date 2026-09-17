@@ -37,13 +37,22 @@ body.framed .ovOnly{display:inline-block}
 .qm[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 .qm[disabled]{opacity:.4;cursor:default}
 
+/* Neutral, not slate. Slate carries "past" (CLAUDE.md), so tinting the company
+   band with it spent the one non-blue hue on a heading — and read as a second
+   accent. Structure separates this band, not colour. */
 .qscope{
-  display:flex;align-items:center;gap:9px;padding:10px 12px;
-  background:var(--slateSoft);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:9px;padding:10px 12px;flex-wrap:wrap;
+  background:var(--panel2);border-bottom:1px solid var(--line);
 }
-.qscope .cn{font-size:var(--t-label);font-weight:700;color:var(--slate);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qscope .cc{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text2);flex:none}
-.qscope .cx{background:transparent;border:0;color:var(--slate);font-size:19px;line-height:1;padding:0 4px;cursor:pointer}
+.qscope .cn{font-size:var(--t-label);font-weight:700;color:var(--text);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qscope .cid,.qscope .cc{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);flex:none}
+.qscope .cc{color:var(--text2)}
+/* Amber marks flags and warnings only — this is the one place the queue says
+   "what you are looking at did not come from Kylas". */
+.qscope .cwarn{flex:0 0 100%;font-size:var(--t-meta);font-weight:700;color:var(--amber);
+  background:var(--amberSoft);border-radius:6px;padding:4px 8px}
+.qscope .cx{background:transparent;border:0;color:var(--text3);font-size:19px;line-height:1;padding:0 4px;cursor:pointer}
+.qscope .cx:hover{color:var(--text)}
 
 .qnew{
   display:block;width:calc(100% - 24px);margin:10px 12px 0;cursor:pointer;

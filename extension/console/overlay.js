@@ -98,9 +98,28 @@
     } catch (e) {
       /* Offline is survivable: the console keeps whatever it already holds. */
       setLink("off", `Kylas unreachable — ${e.message}`);
-      if (!had) toast("Could not reach Kylas — showing local data only");
+      /* But the placeholder showCompany made must not survive. It is named after
+         the company, so an empty roster renders as a contact that looks real,
+         and it carries pendingCreate — on the next drain it would be CREATED in
+         Kylas, duplicating a POC that was there all along. We do not know what
+         this company holds until the fetch succeeds, so claim nothing. */
+      if (!had) {
+        const ph = DATA[cur];
+        if (ph && !ph.kid && !ph.pocName.trim() && String(ph.companyId) === String(id)) {
+          DATA.splice(cur, 1);
+          cur = Math.max(0, Math.min(cur, DATA.length - 1));
+          isNew = false;
+          persist();
+        }
+      }
+      /* A toast fades; this has to stay on screen, or an empty roster reads as
+         "this company has no contacts" when it means "we never asked". */
+      scope.offline = true;
+      render();
+      if (!had) toast("Could not reach Kylas — start the proxy to load contacts");
       return;
     }
+    scope.offline = false;
 
     /* Kylas owns the contact fields; the overlay keeps its own. Merging by id
        rather than replacing is what stops a refetch wiping notes typed a moment

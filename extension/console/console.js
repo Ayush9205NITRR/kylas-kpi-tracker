@@ -355,13 +355,20 @@ function bySession(x,y){
   }
   return 0;
 }
+/* "Today" is a record of work done, not a queue of work outstanding: the calls
+   actually made today, most recent first. */
+const calledToday=a=>String(a.lastCallAt||"").slice(0,10)===today();
+const byRecentCall=(x,y)=>String(y.a.lastCallAt||"").localeCompare(String(x.a.lastCallAt||""));
+
 function visible(){
   const q=(document.getElementById("q").value||"").toLowerCase();
   const rows=DATA.map((a,i)=>({a,i}))
-    .filter(({a})=>mode==="session"||!scope||String(a.companyId)===String(scope.id))
+    .filter(({a})=>mode==="session"?calledToday(a):(!scope||String(a.companyId)===String(scope.id)))
     .filter(({a})=>!q||(a.pocName+" "+a.company+" "+a.phones.map(p=>p.value).join(" ")).toLowerCase().includes(q))
-    .filter(({a})=>filter==="all"||(filter==="flag"?a.flagged:!a.done));
-  return mode==="session"?rows.sort(bySession):rows;
+    /* Done/flagged narrowing is about what is left to do, so it has no meaning
+       over a list of calls already made. */
+    .filter(({a})=>mode==="session"||filter==="all"||(filter==="flag"?a.flagged:!a.done));
+  return mode==="session"?rows.sort(byRecentCall):rows;
 }
 function renderQueue(){
   renderMode();renderScope();
@@ -439,14 +446,14 @@ function renderMode(){
   w.innerHTML="";
   const due=DATA.filter(a=>!a.done&&a.nextCallDate&&a.nextCallDate<=today()).length;
   [["company","Company",scope?companyRoster(scope.id).length:0],
-   ["session","Session",DATA.filter(a=>!a.done).length]].forEach(([k,lab,n])=>{
+   ["session","Today",DATA.filter(calledToday).length]].forEach(([k,lab,n])=>{
     const b=el("button","qm",`${lab}${n?` <i>${n}</i>`:""}`);
     b.type="button";
     b.setAttribute("aria-pressed",mode===k?"true":"false");
     b.disabled=(k==="company"&&!scope);
     b.title=k==="company"
       ?(scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
-      :"Every contact due, in call order"+(due?` · ${due} due now`:"");
+      :"The calls you have made today"+(due?` · ${due} due now`:"");
     b.onclick=()=>{mode=k;const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();};
     w.appendChild(b);
   });
@@ -457,8 +464,12 @@ function renderScope(){
   if(!scope||mode!=="company"){w.innerHTML="";w.hidden=true;return;}
   w.hidden=false;
   const n=companyRoster(scope.id).length;
-  w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cc">${n} contact${n===1?"":"s"}</span>`;
-  const x=el("button","cx","×");x.type="button";x.title="Show the whole queue";
+  /* The id, always. It is what every join is on, and "which company is this"
+     must be answerable even when the name could not be resolved. */
+  w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
+    +`<span class="cc">${n} contact${n===1?"":"s"}</span>`
+    +(scope.offline?`<span class="cwarn" title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`:"");
+  const x=el("button","cx","×");x.type="button";x.title="Leave this company and show today's calls";
   x.onclick=()=>{scope=null;mode="session";render();};
   w.appendChild(x);
 }
