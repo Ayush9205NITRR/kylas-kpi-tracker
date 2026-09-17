@@ -188,6 +188,9 @@ export const FOLLOWUPS = [
   formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0)`),
   formula("Contacts", "Right POC Name", `IF({Has Signal} = 1, {Name}, "")`,
     "Name when this contact qualifies, blank otherwise. Rolled up into Companies."),
+  formula("Contacts", "Is Discovery", `IF({Has Complete Row} = 1, 1, 0)`),
+  formula("Contacts", "Discovery Name", `IF({Has Complete Row} = 1, {Name}, "")`,
+    "Name when one event row has budget AND timeline AND pax. Rolled up into Companies, exactly as Right POC Name is."),
   formula("Contacts", "KPI Stage", ladderFormula("KPI Rank")),
   formula("Contacts", "KPI Score",
     `IF({KPI Rank At}, {KPI Rank} * 10000000000 + DATETIME_DIFF({KPI Rank At}, ${EPOCH}, 'seconds'), {KPI Rank} * 10000000000)`,
@@ -201,10 +204,19 @@ export const FOLLOWUPS = [
   rollup("Companies", "Ever Picked", "Contacts", "Ever Picked", "MAX(values)"),
   rollup("Companies", "KPI Score", "Contacts", "KPI Score", "MAX(values)"),
   rollup("Companies", "Right POC Contacts", "Contacts", "Right POC Name", "ARRAYJOIN(ARRAYCOMPACT(values), ', ')"),
+  rollup("Companies", "Discovery Contacts", "Contacts", "Discovery Name", "ARRAYJOIN(ARRAYCOMPACT(values), ', ')",
+    "Which POCs gave a complete row. Successful Discovery is the count of companies where this is not blank."),
   rollup("Companies", "Contact Count", "Contacts", "Name", "COUNTA(values)"),
 
   formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`),
   formula("Companies", "Phone Picked", `IF({Ever Picked} = 1, 1, 0)`),
+  formula("Companies", "Right POC", `IF({Right POC Contacts}, 1, 0)`,
+    "Any of budget | timeline | pax on any row, Past or Current, on any contact."),
+  /* Cumulative by construction: a complete row has all three filled, so it also
+     has any one of them. Discovery is always a subset of Right POC — no OR
+     needed to keep the funnel reading straight down. */
+  formula("Companies", "Successful Discovery", `IF({Discovery Contacts}, 1, 0)`,
+    "One row with budget AND timeline AND pax. Implies Right POC."),
   formula("Companies", "KPI Rank", `IF({KPI Score}, FLOOR({KPI Score} / 10000000000), 0)`),
   formula("Companies", "KPI Stage", ladderFormula("KPI Rank")),
   formula("Companies", "KPI Stage At",

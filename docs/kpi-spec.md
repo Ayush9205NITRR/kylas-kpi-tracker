@@ -38,6 +38,9 @@ Five tables. Two are append-only logs; three are current-state.
 | `Reached` | formula `Last Call At` is not blank | |
 | `Phone Picked` | rollup `OR(values)` of `Contacts.Picked` | §4 |
 | `Right POC Contacts` | rollup `ARRAYJOIN(values)` over contacts where right-POC | §5 |
+| `Right POC` | formula `Right POC Contacts` is not blank | §5 |
+| `Discovery Contacts` | rollup `ARRAYJOIN(values)` over contacts with a complete row | §6 |
+| `Successful Discovery` | formula `Discovery Contacts` is not blank | §6 |
 | `Company KPI Stage` | rollup `MAX(values)` of `Contacts.KPI Rank`, mapped to label | §8 |
 
 ### `Event Rows`
@@ -180,7 +183,14 @@ Event Rows.Is Complete =
     AND( Budget != "", Timeline != "", Pax != "" )
 
 Contact.Successful Discovery = OR(Event Rows.Is Complete)
+
+Company.Discovery Contacts    = names of every contact with a complete row
+Company.Successful Discovery  = Discovery Contacts is not blank
 ```
+
+Cumulative by construction: a complete row has all three fields filled, so it
+also satisfies §5's "any one of them". Discovery is therefore always a subset of
+Right POC and the funnel reads straight down without an explicit `OR`.
 
 Segmented by `Mode of Meeting`, giving the in-person / virtual / text split.
 
