@@ -178,7 +178,8 @@ git pull
 source .env.local && node scripts/verify-base.mjs     # schema may have moved
 ```
 
-**Restart the proxy too** — `Ctrl-C` in its terminal, then start it again. It
+**Restart the proxy too.** Press `Ctrl-C` in the terminal it is running in,
+then start it again. It
 does not reload its own code, so a new route (like `/companies`) does not exist
 in a process started before it was written.
 
@@ -213,8 +214,22 @@ fetch or write. Check the proxy terminal is still open, then:
 curl http://127.0.0.1:8787/health      # expect {"ok":true,...} with your name
 ```
 
-Port already in use? Run it elsewhere and click the offline badge to point the
-console at the new address:
+**"Port 8787 is already taken"**
+An older proxy is still running. It keeps answering the extension with the code
+and key it started with, so the console can look broken in ways that have
+nothing to do with your setup — a stale process is why a valid key once read as
+"Invalid API key". Stop it, then start again:
+
+```bash
+kill $(lsof -t -iTCP:8787 -sTCP:LISTEN)
+```
+
+```bash
+source .env.local && node scripts/proxy.mjs
+```
+
+Or run the new one elsewhere and click the offline badge to point the console
+at it:
 
 ```bash
 source .env.local && PORT=8788 node scripts/proxy.mjs

@@ -281,7 +281,7 @@ const routes = {
   },
 };
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   /* A localhost dev proxy with no secrets in its responses; the extension's
      origin is a generated id, so echoing is simpler than allow-listing. */
@@ -307,7 +307,28 @@ createServer(async (req, res) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: e.message }));
   }
-}).listen(PORT, "127.0.0.1", () => {
+});
+
+/* A port clash is the most common thing that happens when restarting this, and
+   an unhandled 'error' event dumps a Node stack trace that names neither the
+   cause nor the fix. Worse: the OLD process keeps serving, so the console still
+   works — on stale code, with whatever key that process started with. That is
+   how an expired key looked like a broken key for half an hour. */
+server.on("error", (e) => {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.error(`\nPort ${PORT} is already taken — an older proxy is still running.`);
+  console.error(`It will keep answering the extension with the code and key it started with,`);
+  console.error(`so the console may look broken in ways that have nothing to do with your setup.\n`);
+  console.error(`Stop it and start again:`);
+  console.error(`  kill $(lsof -t -iTCP:${PORT} -sTCP:LISTEN)`);
+  console.error(`  source .env.local && node scripts/proxy.mjs\n`);
+  console.error(`Or run this one somewhere else:`);
+  console.error(`  PORT=${PORT + 1} node scripts/proxy.mjs`);
+  console.error(`then click the offline badge in the console and point it at that address.\n`);
+  process.exit(1);
+});
+
+server.listen(PORT, "127.0.0.1", () => {
   log(`proxy on http://127.0.0.1:${PORT}`);
   log(`routes: ${Object.keys(routes).join("  ")}`);
 });
