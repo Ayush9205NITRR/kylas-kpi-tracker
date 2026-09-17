@@ -154,6 +154,22 @@ createServer(async (req, res) => {
   if (p === "/v1/search/company" && req.method === "POST") {
     const body = JSON.parse(await text(req));
     const rules = body?.jsonRule?.rules || [];
+
+    /* Real Kylas 500s with a bare NullPointerException on this endpoint for
+       field lists that are fine on /search/contact. Reproduce it so the
+       client's shape-fallback is exercised rather than assumed.
+         MOCK_COMPANY_500=fields   reject anything past the lean list
+         MOCK_COMPANY_500=owner    reject any server-side ownerId filter
+         MOCK_COMPANY_500=all      reject everything but free-text */
+    const mode = process.env.MOCK_COMPANY_500 || "";
+    const lean = ["id", "name", "ownerId", "customFieldValues", "metaData"];
+    const extra = (body.fields || []).filter((f) => !lean.includes(f));
+    const npe = () => json(res, 500, { status: 500, error: "Internal Server Error",
+      exception: "java.lang.NullPointerException", message: "No message available",
+      path: "/v1/search/company" });
+    if ((mode === "fields" || mode === "all") && extra.length) return npe();
+    if ((mode === "owner" || mode === "all") && rules.some((r) => r.field === "ownerId")) return npe();
+
     const bad = rules.find((r) => r.field === "ownerId" && r.type !== "long");
     if (bad) return json(res, 400, { message: "Invalid Type" });
 

@@ -67,12 +67,69 @@ export function createClient(key, { log = () => {} } = {}) {
      without a request per company. */
   const COMPANY_FIELDS = ["id", "name", "ownerId", "website", "phoneNumbers", "emails",
     "customFieldValues", "metaData", "createdAt", "updatedAt"];
+  /* Exactly what the probe proved this endpoint returns, plus metaData for the
+     owner name. Anything beyond this is what the 500 is suspected to be about. */
+  const COMPANY_LEAN = ["id", "name", "ownerId", "customFieldValues", "metaData"];
 
   /* The schema calls company and ownerId LOOK_UP, but the query builder rejects
      that and wants "long". Confirmed live — see docs/kylas-picklists.md. */
   const rule = (field, value, type = "long", operator = "equal") =>
     ({ condition: "AND", valid: true,
        rules: [{ id: field, field, type, input: "select", operator, value }] });
+
+  /* The shape /v1/search/company will accept, discovered at runtime.
+     Ordered cheapest-and-most-useful first: a server-side owner filter with
+     the full field list, then progressively less, ending at "ask for the bare
+     minimum and filter in memory". Each entry says whether the server did the
+     filtering, because if it did not we must do it ourselves or every associate
+     sees the whole account. */
+  const freeText = (v = "") => ({ condition: "AND", valid: true, rules: [
+    { id: "multi_field", field: "multi_field", type: "multi_field",
+      input: "multi_field", operator: "multi_field", value: v }] });
+
+  const COMPANY_SHAPES = [
+    { name: "ownerId/long + full fields",
+      body: (o) => ({ fields: COMPANY_FIELDS, jsonRule: rule("ownerId", o) }), filtered: true },
+    { name: "ownerId/long + lean fields",
+      body: (o) => ({ fields: COMPANY_LEAN, jsonRule: rule("ownerId", o) }), filtered: true },
+    { name: "ownerId/integer + lean fields",
+      body: (o) => ({ fields: COMPANY_LEAN, jsonRule: rule("ownerId", o, "integer") }), filtered: true },
+    /* Proven by the probe on 2026-09-16, so it is the reliable floor. It cannot
+       filter, hence filtered:false. */
+    { name: "free-text + lean fields, filtered here",
+      body: () => ({ fields: COMPANY_LEAN, jsonRule: freeText("") }), filtered: false },
+    { name: "lean fields, no rule",
+      body: () => ({ fields: COMPANY_LEAN }), filtered: false },
+  ];
+  let companyShape = null;          // remembered once one works
+
+  async function searchCompany(size, ownerId) {
+    const path = `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`;
+    const mine = (list) => (ownerId == null ? list
+      : list.filter((c) => Number(c.ownerId ?? c.owner?.id) === Number(ownerId)));
+
+    const tries = companyShape ? [companyShape] : COMPANY_SHAPES;
+    let last;
+    for (const shape of tries) {
+      /* A shape that cannot filter is useless for a specific owner ONLY if we
+         could not filter afterwards — we can, so it stays in play. */
+      try {
+        const r = await call("POST", path, shape.body(ownerId));
+        if (!companyShape) log(`company search: "${shape.name}" works`);
+        companyShape = shape;
+        const list = rows(r);
+        return shape.filtered && ownerId != null ? list : mine(list);
+      } catch (e) {
+        last = e;
+        /* Only a rejected REQUEST is worth trying another shape for. A 401, a
+           429 or a network failure says nothing about the body, and retrying
+           four variants would just spend the rate limit. */
+        if (![400, 404, 500].includes(e.status)) throw e;
+        log(`company search: "${shape.name}" -> ${e.status}, trying the next shape`);
+      }
+    }
+    throw new Error(`/v1/search/company rejected every known shape. Last: ${last?.message}`);
+  }
 
   return {
     raw: call,
@@ -95,17 +152,21 @@ export function createClient(key, { log = () => {} } = {}) {
     /* "Companies allotted to me" is the company's OWN owner field, not "a
        company where I own a contact" — confirmed by Ayush 2026-09-17. The two
        give different lists, and only this one shows a company that has been
-       assigned but never worked. */
+       assigned but never worked.
+
+       /v1/search/company is undocumented and brittle: asking for the same
+       field list that works on contacts returns
+       500 java.lang.NullPointerException. Rather than guess at the one true
+       shape, try candidates in order and keep the first that answers — the
+       same tactic the probe used to settle the contact-company filter. The
+       winner is remembered, so this costs one extra request per process at
+       most, and the log names it so it can be pinned later. */
     async companiesForOwner(ownerId, size = 200) {
-      const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,
-        { fields: COMPANY_FIELDS, jsonRule: rule("ownerId", Number(ownerId)) });
-      return rows(r);
+      return searchCompany(size, Number(ownerId));
     },
 
     async companies(size = 200) {
-      const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,
-        { fields: COMPANY_FIELDS });
-      return rows(r);
+      return searchCompany(size, null);
     },
 
     contact: (id) => call("GET", `/v1/contacts/${id}`),
