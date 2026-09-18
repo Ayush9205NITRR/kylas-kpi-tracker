@@ -84,6 +84,9 @@
       (owner ? `&owner=${encodeURIComponent(owner)}` : "") +
       (from ? `&from=${encodeURIComponent(from)}` : "") +
       (to ? `&to=${encodeURIComponent(to)}` : ""), { timeout: 30000 }),
+    /* Why the company join found nothing. Only asked for when it did, because
+       it reads every Companies row in the base. */
+    kpiDebug: () => req("/kpi-debug", { timeout: 30000 }),
     /* Frozen daily rows from Airtable, for the trend chart. */
     snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),

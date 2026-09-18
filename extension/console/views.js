@@ -285,6 +285,20 @@
   let inflight = false;
   let restored = false;
 
+  /* The proxy already works out why the join is empty — /kpi-debug compares
+     both sides and returns a verdict in one sentence. Fetched once, only when
+     nothing matched, because it reads every Companies row in the base. */
+  const WHY = { text: "", loading: false, asked: false };
+
+  function ensureWhy(onReady) {
+    if (WHY.asked) return;
+    WHY.asked = true; WHY.loading = true;
+    API.kpiDebug()
+      .then((d) => { WHY.text = d?.verdict || d?.error || ""; })
+      .catch((e) => { WHY.text = `could not check why — ${e.message}`; })
+      .finally(() => { WHY.loading = false; onReady(); });
+  }
+
   /* WHERE THE NUMBERS CAME FROM, on screen. Airtable's formulas are the
      definition of the funnel; the browser's copy is a fallback for a company
      the store has not seen. Which one produced what you are reading is not a
@@ -298,11 +312,18 @@
         n} compan${n === 1 ? "y" : "ies"} worked · from Airtable</span>`;
     if (CACHE.kpiSource === "airtable" && n === cos.length && cos.length)
       return `<span class="vsrc ok" title="Right POC, discovery and the three milestones are Airtable formulas — see scripts/schema.mjs">KPIs from Airtable</span>`;
-    if (CACHE.kpiSource === "airtable" && n === 0 && cos.length)
+    if (CACHE.kpiSource === "airtable" && n === 0 && cos.length) {
       /* NONE matched. "10000 not saved yet" is true and useless — it reads as
          "you have not worked these yet" when it can equally mean the join is
-         broken. Say which, and say what answers it. */
-      return `<span class="vsrc off" title="Run: curl -s http://127.0.0.1:8787/kpi-debug | python3 -m json.tool">no company matched Airtable — check /kpi-debug</span>`;
+         broken. Say which. "check /kpi-debug" said neither: it asked the
+         reader to leave the screen, open a terminal and run curl to find out
+         what the proxy will answer in one call. Ask it here instead. */
+      ensureWhy(() => dashboard(document.getElementById("vwrap")));
+      return `<span class="vsrc off" title="Companies join to Airtable on the Kylas company id — see /kpi-debug for both sides in full">${
+        WHY.loading ? "no company matched Airtable — finding out why…"
+        : WHY.text ? esc(WHY.text)
+        : "no company matched Airtable"}</span>`;
+    }
     if (CACHE.kpiSource === "airtable")
       return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">${
         n} with KPIs · ${cos.length - n} not saved yet</span>`;

@@ -38,27 +38,8 @@
 
     if (m.type === "contact" && m.kylasId) {
       showView(null);
-      /* Opened from a Kylas contact page. Select that record if we hold it,
-         otherwise start a new one stamped with the id so the save can join
-         back on it later. */
-      const i = DATA.findIndex((a) => String(a.kid) === String(m.kylasId));
-      if (i >= 0) {
-        cur = i; isNew = false;
-        const a = DATA[i];
-        /* ONE CONTACT, not their whole company. Opening a contact page used to
-           flip the queue into company mode, so clicking one person put their
-           four colleagues on screen and the record you asked for was merely
-           the selected row. The company is still remembered — the call bar
-           shows it, and the Company tab is one click away — but the console
-           opens on the contact you clicked. */
-        scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
-        mode = "session";
-        renderFilters();
-      } else {
-        DATA = [Object.assign(blank(), { kid: String(m.kylasId) }), ...DATA];
-        cur = 0; isNew = true; filter = "all"; renderFilters();
-      }
-      stopTimer(); secs = 0; render(); resetScroll();
+      openContact(String(m.kylasId));
+      return;
     }
 
     if (m.type === "focus") {
@@ -204,6 +185,113 @@
     render(); resetScroll();
   }
 
+  /* ── loading one contact ─────────────────── */
+  /* The same two steps as a company: show what is already held, then ask
+     Kylas. Selecting the row and stopping there is the bug this fixes — a
+     contact the console had never fetched carried nothing but its id, so the
+     name, phone, company and stage visible on the Kylas page behind the
+     console were all blank inside it. API.contact() existed and the proxy
+     served /contact; nothing called either.
+
+     Guarded by the id being asked for, because Kylas is a single-page app:
+     clicking through three contacts fires three fetches, and the first to
+     come back must not land on top of the third. */
+  let wanted = "";
+
+  function showContact(id) {
+    const i = DATA.findIndex((a) => String(a.kid) === String(id));
+    if (i >= 0) {
+      cur = i; isNew = false;
+      const a = DATA[i];
+      /* ONE CONTACT, not their whole company. Opening a contact page used to
+         flip the queue into company mode, so clicking one person put their
+         four colleagues on screen and the record you asked for was merely
+         the selected row. The company is still remembered — the call bar
+         shows it, and the Company tab is one click away — but the console
+         opens on the contact you clicked. */
+      scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
+    } else {
+      /* The id and nothing else. Not the page heading: recordLabel() reads an
+         h1 that may still say something else while the SPA renders, and a
+         name invented here is a name the first save writes into Kylas. The
+         id is what the fetch joins on; the rest arrives with it.
+
+         isNew stays FALSE. This record exists in Kylas — we are standing on
+         its page. Calling it new set pendingCreate on the first save, which
+         shows a "new" badge on a contact that is not new and logs the call
+         with createdHere: true, putting a contact nobody created into the
+         KPI counts. */
+      DATA = [Object.assign(blank(), { kid: String(id) }), ...DATA];
+      cur = 0; isNew = false; filter = "all"; scope = null;
+    }
+    mode = "session";
+    renderFilters();
+    stopTimer(); secs = 0; render(); resetScroll();
+    return i >= 0;
+  }
+
+  async function openContact(id) {
+    wanted = String(id);
+    const had = showContact(id);
+    const before = DATA[cur];
+    setLink("busy", "Loading from Kylas…");
+
+    let res;
+    try {
+      res = await API.contact(id);
+    } catch (e) {
+      if (wanted !== String(id)) return;
+      setLink("off", `Kylas unreachable — ${e.message}`);
+      /* A card holding nothing but an id is worse than no card: it reads as a
+         contact with no name and no number, and a save from it would write
+         those blanks over the real record. If it was invented for a fetch
+         that failed, take it back. */
+      if (!had && before && !before.pocName.trim() && String(before.kid) === String(id)) {
+        const at = DATA.indexOf(before);
+        if (at > -1) {
+          DATA.splice(at, 1);
+          cur = Math.max(0, Math.min(cur, DATA.length - 1));
+          isNew = false;
+          persist();
+        }
+      }
+      render();
+      if (!had) toast("Could not reach Kylas — start the proxy to load this contact");
+      return;
+    }
+
+    if (wanted !== String(id)) return;      /* moved on; this answer is stale */
+
+    const fetched = res?.contact;
+    if (!fetched?.kid) {
+      setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
+      return;
+    }
+
+    /* Kylas owns the contact fields, the overlay keeps its own — the same
+       merge the company fetch uses, so a refetch never wipes a note typed a
+       moment ago and not yet synced. */
+    const at = DATA.findIndex((a) => String(a.kid) === String(fetched.kid));
+    if (at > -1) DATA[at] = API.merge(DATA[at], fetched);
+    else DATA.unshift(fetched);
+    cur = at > -1 ? at : 0;
+    isNew = false;
+
+    /* The company is remembered, not opened: the call bar and the Company tab
+       need it, the queue stays on this one person. scope.name may fall back to
+       "Company <id>" — that string is never written onto the record itself,
+       because airtable.mjs saves the record's own company as the name. */
+    const a = DATA[cur];
+    scope = a.companyId
+      ? { id: String(a.companyId), name: a.company || ("Company " + a.companyId) }
+      : null;
+    mode = "session";
+
+    persist();
+    setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
+    renderFilters(); render(); resetScroll();
+  }
+
   /* ── proxy link indicator ────────────────── */
   const linkEl = document.getElementById("linkState");
   function setLink(kind, title) {
@@ -235,11 +323,17 @@
   /* ── console → host page ─────────────────── */
   document.getElementById("closeBtn").onclick = () => post("close");
 
-  let mode = "full";
+  /* `pane`, NOT `mode`. console.js has a script-scope `mode` — "company" or
+     "session", which queue the associate is looking at — and a `let mode` in
+     this IIFE shadows it for the whole file. Every `mode = "company"` and
+     `mode = "session"` above was therefore setting the dock state and leaving
+     the queue exactly as it was: opening one contact still listed everybody
+     at their company, with the contact merely selected. */
+  let pane = "full";
   document.getElementById("dockBtn").onclick = (e) => {
-    mode = mode === "full" ? "dock" : "full";
-    e.target.textContent = mode === "full" ? "Dock" : "Expand";
-    post("mode", { mode });
+    pane = pane === "full" ? "dock" : "full";
+    e.target.textContent = pane === "full" ? "Dock" : "Expand";
+    post("mode", { mode: pane });
   };
 
   /* Esc closes the overlay, but only when it would otherwise do nothing —
