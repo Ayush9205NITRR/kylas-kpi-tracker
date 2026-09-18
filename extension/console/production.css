@@ -19,7 +19,7 @@ body.framed .ovOnly{display:inline-block}
 #closeBtn:hover{border-color:var(--rose);color:var(--rose)}
 
 .link{
-  font-size:var(--t-meta);font-weight:600;letter-spacing:.03em;
+  font-size:var(--t-meta);font-weight:var(--w-med);letter-spacing:.03em;
   border:1px solid var(--line2);border-radius:11px;padding:4px 10px;
   color:var(--text3);white-space:nowrap;cursor:default;
 }
@@ -28,10 +28,10 @@ body.framed .ovOnly{display:inline-block}
 .link.busy{background:var(--panel3);color:var(--text2)}
 
 /* ── company / session switch ────────────────────────────────────────── */
-.qmode{display:flex;gap:5px;padding:12px 12px 0}
+.qmode{display:flex;gap:4px;padding:8px 8px 0}
 .qm{
-  flex:1;border:1px solid var(--line2);background:transparent;border-radius:var(--r);
-  padding:9px 6px;font-size:var(--t-label);font-weight:600;color:var(--text2);cursor:pointer;
+  flex:1;border:1px solid var(--line2);background:transparent;border-radius:6px;
+  padding:5px 6px;font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);cursor:pointer;
 }
 .qm i{font-style:normal;font-family:var(--m,ui-monospace);font-size:var(--t-meta);opacity:.8}
 .qm[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
@@ -41,47 +41,49 @@ body.framed .ovOnly{display:inline-block}
    band with it spent the one non-blue hue on a heading — and read as a second
    accent. Structure separates this band, not colour. */
 .qscope{
-  display:flex;align-items:center;gap:9px;padding:10px 12px;flex-wrap:wrap;
-  background:var(--panel2);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;padding:7px 10px;flex-wrap:wrap;
+  background:transparent;border-bottom:1px solid var(--line);
 }
-.qscope .cn{font-size:var(--t-label);font-weight:700;color:var(--text);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qscope .cn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qscope .cid,.qscope .cc{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);flex:none}
 .qscope .cc{color:var(--text2)}
 /* Amber marks flags and warnings only — this is the one place the queue says
    "what you are looking at did not come from Kylas". */
-.qscope .cwarn{flex:0 0 100%;font-size:var(--t-meta);font-weight:700;color:var(--amber);
+.qscope .cwarn{flex:0 0 100%;font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--amber);
   background:var(--amberSoft);border-radius:6px;padding:4px 8px}
-.qscope .cx{background:transparent;border:0;color:var(--text3);font-size:19px;line-height:1;padding:0 4px;cursor:pointer}
+.qscope .cx{background:transparent;border:0;color:var(--text3);font-size:var(--t-sec);line-height:1;padding:0 4px;cursor:pointer}
 .qscope .cx:hover{color:var(--text)}
 
+/* A dashed blue slab for a button pressed a few times a day. A link. */
 .qnew{
-  display:block;width:calc(100% - 24px);margin:10px 12px 0;cursor:pointer;
-  border:1px dashed var(--blueLine);border-radius:var(--r);background:var(--blueSoft);
-  color:var(--blue);font-size:var(--t-label);font-weight:600;padding:10px;
+  display:block;width:calc(100% - 16px);margin:6px 8px 0;cursor:pointer;
+  border:1px solid transparent;border-radius:6px;background:transparent;
+  color:var(--blue);font-size:var(--t-label);font-weight:var(--w-med);padding:6px 10px;
+  text-align:left;
 }
-.qnew:hover{border-style:solid}
+.qnew:hover{background:var(--blueSoft)}
 
 /* ── state in the queue ──────────────────────────────────────────────── */
 .qi .pend{
-  font-style:normal;font-family:var(--m,ui-monospace);font-size:11px;font-weight:600;
+  font-style:normal;font-family:var(--m,ui-monospace);font-size:var(--t-meta);font-weight:var(--w-med);
   letter-spacing:.04em;text-transform:uppercase;vertical-align:2px;
   background:var(--blueSoft);color:var(--blue);border-radius:4px;padding:2px 5px;margin-left:5px;
 }
 .qi .pend.sync{background:var(--panel3);color:var(--text2)}
 .qi .pend.err{background:var(--amberSoft);color:var(--amber)}
 .qi .due{
-  font-family:var(--m,ui-monospace);font-size:11px;font-weight:600;letter-spacing:.04em;
+  font-family:var(--m,ui-monospace);font-size:var(--t-meta);font-weight:var(--w-med);letter-spacing:.04em;
   text-transform:uppercase;background:var(--roseSoft);color:var(--rose);
   border-radius:4px;padding:2px 5px;margin-left:auto;
 }
-.qi .pri{font-family:var(--m,ui-monospace);font-size:11px;color:var(--text3);margin-left:auto}
+.qi .pri{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);margin-left:auto}
 
 /* ── company, fixed to the account whose page is open ────────────────── */
 .fixed{
   display:flex;align-items:baseline;gap:10px;border:1px solid var(--line);
   background:var(--panel2);border-radius:var(--r);padding:15px 17px;min-height:57px;
 }
-.fixed b{font-size:var(--t-body);font-weight:700}
+.fixed b{font-size:var(--t-body);font-weight:var(--w-strong)}
 .fixed em{font-style:normal;font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3)}
 
 /* ── this number is already on another record ────────────────────────── */
@@ -93,14 +95,14 @@ body.framed .ovOnly{display:inline-block}
 .dupe span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dupe button{
   flex:none;background:transparent;border:1px solid var(--amber);border-radius:7px;
-  padding:4px 10px;font-size:var(--t-meta);font-weight:600;color:var(--amber);cursor:pointer;
+  padding:4px 10px;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);cursor:pointer;
 }
 .dupe button:hover{background:var(--amber);color:var(--panel)}
 
 /* ── dial a number straight from its row ─────────────────────────────── */
 .dialbtn{
   flex:none;width:44px;min-height:57px;border:1px solid var(--line2);border-radius:var(--r);
-  background:var(--blueSoft);color:var(--blue);font-size:17px;line-height:1;
+  background:var(--blueSoft);color:var(--blue);font-size:var(--t-sec);line-height:1;
   display:grid;place-items:center;padding:0;cursor:pointer;
 }
 .dialbtn:hover:not([disabled]){background:var(--blue);color:var(--onBlue);border-color:var(--blue)}
@@ -114,19 +116,19 @@ body.framed .ovOnly{display:inline-block}
 .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(520px,100%);max-height:86vh;overflow:auto;box-shadow:var(--sh)}
 .sheet.wide{width:min(680px,100%)}
 .sheet .h{padding:18px 20px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
-.sheet .h h3{margin:0;font-size:var(--t-sec);font-weight:800;letter-spacing:-.028em;flex:1}
+.sheet .h h3{margin:0;font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.028em;flex:1}
 .sheet .b{padding:16px 20px 20px}
 .dgrid,.ggrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 .ggrid{grid-template-columns:repeat(3,1fr)}
 .dcard,.gt{border:1px solid var(--line);border-radius:10px;padding:13px 15px;background:var(--panel2)}
-.dcard b,.gt b{display:block;font-size:var(--t-name);font-weight:800;letter-spacing:-.028em;line-height:1.1}
+.dcard b,.gt b{display:block;font-size:var(--t-name);font-weight:var(--w-strong);letter-spacing:-.028em;line-height:1.1}
 .dcard span,.gt span{font-size:var(--t-meta);color:var(--text2)}
 .gt i{display:block;font-style:normal;font-size:var(--t-meta);color:var(--text3);margin-top:3px}
 .gt.g2 b{color:var(--blue)} .gt.g3 b{color:var(--slate)} .gt.g4 b{color:var(--blue)}
 .dactions{display:flex;gap:8px;flex-wrap:wrap}
 .dnote{font-size:var(--t-meta);color:var(--text2);margin:12px 0 0;line-height:1.55}
 .rtabs{display:flex;gap:5px;margin:12px 0 16px}
-.rt{flex:1;border:1px solid var(--line2);background:transparent;border-radius:var(--r);padding:8px;font-size:var(--t-label);font-weight:600;color:var(--text2);cursor:pointer}
+.rt{flex:1;border:1px solid var(--line2);background:transparent;border-radius:var(--r);padding:8px;font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);cursor:pointer}
 .rt[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 .dlog{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:var(--t-meta);max-height:210px;overflow-y:auto}
 .dlog div{display:flex;gap:10px;padding:7px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -141,7 +143,7 @@ body.framed .ovOnly{display:inline-block}
 .gd .db i,.vd .db i{display:block;height:100%;background:var(--blue);border-radius:4px}
 .gd .dv,.vd .dv{flex:0 0 34px;text-align:right;font-family:var(--m,ui-monospace)}
 .vd .dc{flex:0 0 84px;color:var(--text2)}
-.gd .dl,.vd .dl{flex:0 0 52px;font-family:var(--m,ui-monospace);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3)}
+.gd .dl,.vd .dl{flex:0 0 52px;font-family:var(--m,ui-monospace);font-size:var(--t-meta);text-transform:uppercase;letter-spacing:.04em;color:var(--text3)}
 .gd.live .db i,.vd.live .db i{background:var(--amber)}
 .gd.live .dl,.vd.live .dl{color:var(--amber)}
 
@@ -153,16 +155,16 @@ body.framed .ovOnly{display:inline-block}
    whole point of a benchmark table, so the digits are fixed-width for the
    entire view rather than per cell — which is also how the per-cell rules below
    stopped being enough. */
-.vwrap{max-width:1120px;margin:0 auto;padding:26px 22px 44px;
+.vwrap{max-width:1180px;margin:0 auto;padding:22px 20px 40px;
   font-variant-numeric:tabular-nums}
 .vhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 18px;flex-wrap:wrap}
 .vhead.sm{margin-top:34px}
-.vhead h2{font-size:var(--t-name);font-weight:800;letter-spacing:-.028em}
+.vhead h2{font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.012em}
 .vsub{font-size:var(--t-label);color:var(--text2)}
 .vgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 @media(max-width:860px){.vgrid{grid-template-columns:repeat(2,1fr)}}
 .vt{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:var(--sh)}
-.vt b{display:block;font-size:38px;font-weight:800;letter-spacing:-.032em;line-height:1.05}
+.vt b{display:block;font-size:var(--t-name);font-weight:var(--w-strong);letter-spacing:-.032em;line-height:1.05}
 .vt span{display:block;font-size:var(--t-label);color:var(--text2);margin-top:6px}
 .vt i{display:block;font-style:normal;font-size:var(--t-meta);color:var(--text3);margin-top:3px}
 .vt.v2 b{color:var(--blue)} .vt.v3 b{color:var(--slate)} .vt.v4 b{color:var(--blue)}
@@ -172,21 +174,21 @@ body.framed .ovOnly{display:inline-block}
 .vfilters label{display:flex;flex-direction:column;gap:6px;font-size:var(--t-meta);color:var(--text2);margin:0}
 .vfilters select,.vfilters input{
   border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
-  padding:10px 11px;font-size:var(--t-label);font-weight:500;min-width:170px;
+  padding:10px 11px;font-size:var(--t-label);font-weight:var(--w-med);min-width:170px;
 }
 /* overflow:clip, NOT hidden. `hidden` makes this element the nearest
    scrollport, and a sticky header inside a scrollport that cannot scroll never
    moves — it would sit at the top of the table and scroll away with it. `clip`
    still rounds the corners but creates no scrollport, so the header sticks to
    #viewport instead. */
-.vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-  overflow:clip;box-shadow:var(--sh)}
+.vtable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  overflow:clip}
 .vr{
   /* Widths follow what the cells actually hold: a company name and an
      associate's full name need room, a POC count and a batch tag do not. An
      even split truncated "Enout Super Admin" while Right POC sat empty. */
   display:grid;grid-template-columns:1.9fr 1.15fr .42fr 1.1fr 1.1fr .8fr 1.3fr .55fr;
-  gap:14px;padding:11px 17px;border-bottom:1px solid var(--line);align-items:center;
+  gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);align-items:center;
   font-size:var(--t-label);cursor:pointer;
 }
 .vr:last-child{border-bottom:0}
@@ -194,10 +196,10 @@ body.framed .ovOnly{display:inline-block}
 /* STICKY. At 250 rows the column you are reading is off screen by the time you
    have scrolled to the row you care about, and every cell becomes a guess. */
 .vr.vh{position:sticky;top:0;z-index:3;
-  background:var(--panel2);cursor:default;font-size:var(--t-meta);color:var(--text3);font-weight:700;
-  text-transform:uppercase;letter-spacing:.04em;
+  background:var(--panel2);cursor:default;font-size:var(--t-meta);color:var(--text3);font-weight:var(--w-med);
+  letter-spacing:0;
   box-shadow:0 1px 0 var(--line2)}
-.vr .c1 b{display:block;font-size:var(--t-body);font-weight:700}
+.vr .c1 b{display:block;font-size:var(--t-body);font-weight:var(--w-strong)}
 .vr .c1 em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
 /* Colour marks a VALUE, never its absence. The em-dash placeholder was being
    painted violet and blue along with the names, so an empty Right POC cell
@@ -224,7 +226,7 @@ body.framed .ovOnly{display:inline-block}
 .vr.vh .srt{cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none;
   border-radius:5px;padding:2px 4px;margin:-2px -4px}
 .vr.vh .srt:hover{color:var(--text);background:var(--panel3)}
-.vr.vh .srt i{font-style:normal;font-size:12px;line-height:1;opacity:.85}
+.vr.vh .srt i{font-style:normal;font-size:var(--t-meta);line-height:1;opacity:.85}
 .vr.vh .srt.on{color:var(--blue)}
 .vr.vh .srt:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
 
@@ -235,8 +237,8 @@ body.framed .ovOnly{display:inline-block}
   padding:9px 2px 11px;background:var(--ground)}
 .vchip{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
   border:1px solid var(--blueLine);background:var(--blueSoft);color:var(--blue);
-  border-radius:20px;padding:5px 12px;font-size:var(--t-meta);font-weight:600}
-.vchip i{font-style:normal;font-size:15px;line-height:1;opacity:.7}
+  border-radius:20px;padding:5px 12px;font-size:var(--t-meta);font-weight:var(--w-med)}
+.vchip i{font-style:normal;font-size:var(--t-label);line-height:1;opacity:.7}
 .vchip:hover{background:var(--blue);color:var(--onBlue);border-color:var(--blue)}
 .vchip:hover i{opacity:1}
 /* Clear all is not one of the filters, so it does not wear their colour. */
@@ -257,7 +259,7 @@ body.framed .ovOnly{display:inline-block}
 .vtable.dense .vr .c1 em{display:none}
 
 /* ── where the numbers came from ─────────────────────────────────────── */
-.vsrc{font-size:var(--t-meta);font-weight:600;border-radius:11px;padding:4px 10px;
+.vsrc{font-size:var(--t-meta);font-weight:var(--w-med);border-radius:11px;padding:4px 10px;
   border:1px solid var(--line2);color:var(--text3);white-space:nowrap;align-self:center;cursor:help}
 .vsrc.ok{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
 .vsrc.part{border-color:var(--line2);background:var(--panel2);color:var(--text2)}
@@ -271,7 +273,7 @@ body.framed .ovOnly{display:inline-block}
 /* ── toast ───────────────────────────────────────────────────────────── */
 .toast{
   position:fixed;left:50%;transform:translateX(-50%);bottom:84px;
-  background:var(--text);color:var(--panel);font-size:var(--t-label);font-weight:600;
+  background:var(--text);color:var(--panel);font-size:var(--t-label);font-weight:var(--w-med);
   padding:11px 20px;border-radius:24px;z-index:70;display:flex;gap:12px;align-items:center;
 }
 .toast button{background:transparent;border:0;color:var(--panel);text-decoration:underline;font-size:var(--t-meta);padding:0;cursor:pointer}
@@ -281,7 +283,7 @@ body.framed .ovOnly{display:inline-block}
 .withIcon .go{
   position:absolute;right:8px;top:50%;transform:translateY(-50%);
   width:32px;height:32px;border-radius:8px;border:0;background:transparent;
-  color:var(--blue);font-size:15px;line-height:1;display:grid;place-items:center;cursor:pointer;
+  color:var(--blue);font-size:var(--t-label);line-height:1;display:grid;place-items:center;cursor:pointer;
 }
 .withIcon .go:hover:not([disabled]){background:var(--blueSoft)}
 .withIcon .go[disabled]{color:var(--text3);cursor:default;background:transparent}
@@ -327,14 +329,14 @@ body.framed .ovOnly{display:inline-block}
 .vfr{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
   gap:14px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}
 .vfr:last-child{border-bottom:0}
-.vfr .fl{min-width:0;font-size:var(--t-label);font-weight:600;
+.vfr .fl{min-width:0;font-size:var(--t-label);font-weight:var(--w-med);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* No track behind the bar. An empty rung should read as empty, not as a grey
    bar that looks like a value of its own. 8px, 4px rounded end. */
 .vfr .fb{height:8px}
 .vfr .fb i{display:block;height:100%;border-radius:4px;background:var(--s1);
   min-width:0;transition:width .3s}
-.vfr .fn{font-size:22px;font-weight:700;text-align:right;letter-spacing:-.02em;
+.vfr .fn{font-size:var(--t-name);font-weight:var(--w-strong);text-align:right;letter-spacing:-.02em;
   font-variant-numeric:tabular-nums}
 .vfr .fp,.vfr .fo{font-size:var(--t-meta);color:var(--text3);text-align:right;
   font-variant-numeric:tabular-nums}
@@ -343,16 +345,16 @@ body.framed .ovOnly{display:inline-block}
 .vfr.vfh{grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
   padding:14px 0 10px;border-bottom:1px solid var(--line)}
 .vfr.vfh .fl{grid-column:1 / span 2;font-size:var(--t-meta);color:var(--text3);
-  font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  font-weight:var(--w-med);letter-spacing:0}
 .vfr.vfh .fn,.vfr.vfh .fp,.vfr.vfh .fo{font-size:var(--t-meta);color:var(--text3);
-  font-weight:700;letter-spacing:.02em;text-align:right;line-height:1.25}
+  font-weight:var(--w-strong);letter-spacing:.02em;text-align:right;line-height:1.25}
 @media(max-width:760px){
   .vfr{grid-template-columns:minmax(0,1.4fr) 54px 68px}
   .vfr .fb,.vfr .fo{display:none}
 }
 
 .vlg{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 12px}
-.vlg .lg{display:inline-flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text2);font-weight:600}
+.vlg .lg{display:inline-flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-med)}
 .vlg .lg i{width:11px;height:11px;border-radius:3px;flex:none}
 
 .vbars{background:var(--panel);border:1px solid var(--line);border-radius:12px;
@@ -360,36 +362,36 @@ body.framed .ovOnly{display:inline-block}
 .vbar{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,3fr) 52px;
   gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
 .vbar:last-child{border-bottom:0}
-.vbar .bk{font-size:var(--t-label);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vbar .bk{font-size:var(--t-label);font-weight:var(--w-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 2px surface gap between stacked segments, so adjacent fills never touch. */
 .vbar .bt{display:flex;height:14px;gap:2px}
 .vbar .bt i{display:block;height:100%;border-radius:4px;min-width:3px}
-.vbar .bn{font-size:19px;font-weight:800;text-align:right}
+.vbar .bn{font-size:var(--t-sec);font-weight:var(--w-strong);text-align:right}
 
 .vtbl{margin-top:12px;font-size:var(--t-meta)}
-.vtbl summary{cursor:pointer;color:var(--text2);font-weight:600;padding:4px 0}
+.vtbl summary{cursor:pointer;color:var(--text2);font-weight:var(--w-med);padding:4px 0}
 .vtbl table{border-collapse:collapse;width:100%;margin-top:8px}
 .vtbl th,.vtbl td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left}
-.vtbl th{color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.vtbl th{color:var(--text3);font-weight:var(--w-med);letter-spacing:0}
 .vtbl td.tnum,.vtbl th:not(:first-child){text-align:right}
 
 .vwarn{background:var(--amberSoft);color:var(--amber);border-radius:9px;
-  padding:11px 14px;font-size:var(--t-label);font-weight:600;margin:0 0 14px}
+  padding:11px 14px;font-size:var(--t-label);font-weight:var(--w-med);margin:0 0 14px}
 /* A rung wider than the one above it — a gap in capture, not a good number, so
    it is marked but never coloured as success. */
 .vfr.grew .fb i{background:var(--amber)}
-.vfr .fp em{font-style:normal;color:var(--amber);font-size:11px}
+.vfr .fp em{font-style:normal;color:var(--amber);font-size:var(--t-meta)}
 
 /* Filters were at --t-meta (14px), the smallest size in the scale, on controls
    that are read before every use of the page. Up to --t-label. */
-.vfilters label{font-size:var(--t-label);color:var(--text2);font-weight:600}
+.vfilters label{font-size:var(--t-label);color:var(--text2);font-weight:var(--w-med)}
 .vfilters select,.vfilters input{font-size:var(--t-label);padding:9px 11px}
 
 /* The account, above the person, in the call bar. */
 .who .atco{display:flex;align-items:baseline;gap:8px;font-size:var(--t-label);
-  font-weight:800;letter-spacing:-.01em;color:var(--blue);
+  font-weight:var(--w-strong);letter-spacing:-.01em;color:var(--blue);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1px}
-.who .atco em{font-style:normal;font-weight:600;font-size:var(--t-meta);
+.who .atco em{font-style:normal;font-weight:var(--w-med);font-size:var(--t-meta);
   color:var(--text3);flex:none;font-variant-numeric:tabular-nums}
 
 /* ── multi-select filter popover ───────────────────────────────────────
@@ -403,7 +405,7 @@ body.framed .ovOnly{display:inline-block}
   display:flex;align-items:center;gap:8px;
 }
 .mf > summary::-webkit-details-marker{display:none}
-.mf > summary::after{content:"⌄";margin-left:auto;color:var(--text3);font-size:15px;line-height:1}
+.mf > summary::after{content:"⌄";margin-left:auto;color:var(--text3);font-size:var(--t-label);line-height:1}
 .mf[open] > summary{border-color:var(--blue)}
 .mf > summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mfbody{
@@ -414,13 +416,13 @@ body.framed .ovOnly{display:inline-block}
 .mfmode{display:flex;gap:4px;margin-bottom:8px}
 .mfmode button{
   flex:1;border:1px solid var(--line2);background:transparent;border-radius:8px;
-  padding:7px 6px;font-size:var(--t-meta);font-weight:600;color:var(--text2);cursor:pointer;
+  padding:7px 6px;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);cursor:pointer;
 }
 .mfmode button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 .mflist{max-height:242px;overflow-y:auto;display:flex;flex-direction:column;gap:1px}
 .mflist label{
   display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;
-  font-size:var(--t-label);font-weight:500;cursor:pointer;
+  font-size:var(--t-label);font-weight:var(--w-med);cursor:pointer;
 }
 .mflist label:hover{background:var(--panel2)}
 .mflist input{width:16px;height:16px;accent-color:var(--blue);flex:none;margin:0}
@@ -432,14 +434,14 @@ body.framed .ovOnly{display:inline-block}
 }
 .mffoot button{
   background:transparent;border:0;color:var(--blue);font-size:var(--t-meta);
-  font-weight:600;padding:0;cursor:pointer;text-decoration:underline;
+  font-weight:var(--w-med);padding:0;cursor:pointer;text-decoration:underline;
 }
 
 /* Dashboard, quieter. Cards carried a shadow AND a border AND a tint; one of
    the three is enough to say "this is a surface". */
 .vbars{box-shadow:none;border-radius:14px;padding:6px 22px 10px}
 .vt{box-shadow:none}
-.vhead h2{font-weight:700;letter-spacing:-.022em}
+.vhead h2{font-weight:var(--w-strong);letter-spacing:-.022em}
 .vhead.sm h2{font-size:var(--t-sec)}
 .vhead{margin-bottom:12px}
 .vnote{font-size:var(--t-meta);color:var(--text3);line-height:1.6;max-width:68ch}
@@ -449,37 +451,37 @@ body.framed .ovOnly{display:inline-block}
 
 /* The window sentinel: also the "there is more" affordance. */
 .vmore{padding:16px 18px;text-align:center;font-size:var(--t-meta);
-  color:var(--text3);font-weight:600;border-top:1px solid var(--line)}
+  color:var(--text3);font-weight:var(--w-med);border-top:1px solid var(--line)}
 
 /* ── dashboard sections ────────────────────────────────────────────────── */
 .vsec{margin-top:26px}
 .vsec:empty{display:none}
 
 /* Step conversion — the benchmark table. */
-.vsteps{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:clip}
+.vsteps{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:clip}
 /* Same reason as the companies table: the header has to survive the scroll. */
 .vsteps thead th,.vtbl thead th{position:sticky;top:0;z-index:2;background:var(--panel2);
   box-shadow:0 1px 0 var(--line2)}
 .vsteps table{border-collapse:collapse;width:100%;font-size:var(--t-label)}
-.vsteps th,.vsteps td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line)}
-.vsteps thead th{font-size:var(--t-meta);font-weight:600;color:var(--text3);
-  text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.vsteps th,.vsteps td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}
+.vsteps thead th{font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text3);
+  letter-spacing:0;white-space:nowrap}
 .vsteps tbody tr:last-child td{border-bottom:0}
 .vsteps td.tnum,.vsteps th.tnum{text-align:right;font-variant-numeric:tabular-nums}
 .vsteps thead th:not(:first-child):not(.tnum){text-align:right}
 .vsteps tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
 /* The team row leads; per-associate rows are the comparison. */
-.vsteps tr.all td{font-weight:700;background:var(--panel2)}
+.vsteps tr.all td{font-weight:var(--w-strong);background:var(--panel2)}
 
 /* Trend — one line per conversion. */
-.vline{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.vline{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
 .vline svg{width:100%;height:200px;display:block;overflow:visible}
 .vline .gl{stroke:var(--line);stroke-width:1}
-.vline .gt2{fill:var(--text3);font-size:10px;text-anchor:end;
+.vline .gt2{fill:var(--text3);font-size:var(--t-meta);text-anchor:end;
   font-family:var(--f);font-variant-numeric:tabular-nums}
 /* A step rate over 100% is a capture gap, not a good number — marked the same
    way the funnel marks a widening rung. */
-.vsteps td.over{color:var(--amber);font-weight:700}
+.vsteps td.over{color:var(--amber);font-weight:var(--w-strong)}
 
 /* Data age and an explicit refresh. The answer to "this is stale" is a
    control the reader can see, not a shorter timer they cannot. */
@@ -511,34 +513,38 @@ body.framed .ovOnly{display:inline-block}
 /* ── the period report ───────────────────────────────────────────────── */
 .vperiod{display:inline-flex;gap:4px;margin-left:auto;align-self:center}
 .vperiod button{border:1px solid var(--line2);background:var(--panel);border-radius:8px;
-  padding:5px 13px;font-size:var(--t-meta);font-weight:600;color:var(--text2);cursor:pointer}
+  padding:5px 13px;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);cursor:pointer}
 .vperiod button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 
 /* This period, big, with what it was last period beside it. The comparison is
    the point — a bare count tells nobody whether to be pleased. */
-.rnow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  padding:16px 18px;box-shadow:var(--sh)}
-.rlabel{font-size:var(--t-sec);font-weight:800;letter-spacing:-.024em;flex:none;line-height:1.15}
-.rlabel em{display:block;font-style:normal;font-size:var(--t-meta);font-weight:500;color:var(--text3);
+.rnow{display:flex;gap:20px;align-items:center;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px}
+.rlabel{font-size:var(--t-body);font-weight:var(--w-strong);letter-spacing:-.008em;flex:none;line-height:1.2;min-width:104px}
+.rlabel em{display:block;font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text3);
   letter-spacing:0;margin-top:3px}
 .rtiles{display:flex;gap:10px;flex-wrap:wrap;flex:1;min-width:0}
-.rtile{flex:1 1 92px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
-  background:var(--panel2);min-width:92px}
-.rtile b{display:block;font-size:var(--t-name);font-weight:800;letter-spacing:-.03em;line-height:1.1;
-  font-variant-numeric:tabular-nums}
+.rtile{flex:1 1 86px;border:0;border-left:1px solid var(--line);border-radius:0;padding:2px 0 2px 14px;
+  background:transparent;min-width:86px}
+.rtile:first-child{border-left:0;padding-left:0}
+.rtile b{display:block;font-size:var(--t-name);font-weight:var(--w-strong);letter-spacing:-.015em;line-height:1.1;
+  /* PROPORTIONAL, deliberately. tabular-nums gives every digit the width of a
+     zero, which at display size makes a number like 121 look loose. Tabular is
+     for columns that must align — the table below, not this. */
+  font-variant-numeric:proportional-nums}
 .rtile span{display:block;font-size:var(--t-meta);color:var(--text2);margin-top:2px}
 
 /* Up is the accent, down is amber — NOT rose. Rose marks a required field, and
    a quiet week is not an error. */
-.d{font-style:normal;font-size:var(--t-meta);font-weight:700;font-variant-numeric:tabular-nums}
+.d{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-strong);font-variant-numeric:tabular-nums}
 .d.up{color:var(--blue)}
 .d.down{color:var(--amber)}
-.d.flat{color:var(--text3);font-weight:500}
+.d.flat{color:var(--text3);font-weight:var(--w-med)}
 .rtile .d{display:inline-block;margin-top:4px}
 
 .rgood{margin:12px 0 0;font-size:var(--t-label);color:var(--text2)}
-.rgood b{color:var(--blue);font-weight:800}
+.rgood b{color:var(--blue);font-weight:var(--w-strong)}
 .rtable{margin-top:14px}
-.rtable tbody tr.now td{background:var(--blueSoft);font-weight:700}
+.rtable tbody tr.now td{background:var(--blueSoft);font-weight:var(--w-strong)}
 .rtable td .d{margin-left:6px}

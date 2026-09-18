@@ -31,19 +31,22 @@ All of it lives in `:root`. Change a token, never a call site.
   /* "past" — a real hue, not grey */
   --slate:#7C3AED; --slateSoft:#F2ECFE; --slateLine:#C3A9FA; --onSlate:#FFFFFF;
 
-  --rose:#DC2647;  --roseSoft:#FCE8EC;    /* required + error ONLY */
-  --amber:#B4690E; --amberSoft:#FCF1DF;   /* flag-for-cleanup ONLY */
+  --rose:#D01F3E;  --roseSoft:#FCE8EC;    /* required + error ONLY */
+  --amber:#A85F0C; --amberSoft:#FCF1DF;   /* flag-for-cleanup ONLY */
 
-  /* type scale — five sizes, nothing else */
-  --t-meta:14px;   /* record ids, counts, chip captions */
-  --t-label:17px;  /* field labels, buttons, queue secondary */
-  --t-body:18px;   /* inputs, values, chips, sentences */
-  --t-sec:23px;    /* card headings, event titles */
-  --t-name:27px;   /* the person you are calling */
+  /* type scale — five sizes, nothing else. RETUNED 2026-09-18, see below. */
+  --t-meta:12px;   /* record ids, counts, chip captions, field labels */
+  --t-label:13px;  /* buttons, queue secondary, table cells */
+  --t-body:14px;   /* inputs, values, the person's name in a row */
+  --t-sec:17px;    /* card headings, the person you are calling */
+  --t-name:21px;   /* dashboard figures — the only display size */
+
+  /* weight — three, and the heaviest is for a number read first */
+  --w-body:400; --w-med:500; --w-strong:600; --w-max:700;
 
   --f:"Plus Jakarta Sans","Helvetica Neue",Arial,sans-serif;
-  --r:10px;        /* inputs, buttons, chips. Cards use 12–14px. */
-  --sh:0 1px 2px rgba(22,40,70,.05),0 1px 3px rgba(22,40,70,.04);
+  --r:8px;         /* inputs, buttons, chips, cards — one radius */
+  --sh:0 1px 2px rgba(22,40,70,.04);
 }
 ```
 
@@ -120,7 +123,7 @@ Header band is `--panel2` with a `--line` bottom border, heading at `--t-sec`/80
   <input class="in" id="x">
 </div>
 ```
-Inputs: 57px min-height, 14/17 padding, `--t-body`, weight 500, `--line2` border, focus is
+Inputs: 34px min-height, 7/10 padding, `--t-body`, weight 400, `--line2` border, focus is
 `--blue` border + 3px `--blueSoft` ring. The asterisk is rendered **dynamically** from
 `isReq(a,id)` — a field is only starred while it is actually required at the current stage.
 
@@ -230,3 +233,57 @@ empty.
 - [ ] No-answer call still costs two keystrokes
 - [ ] Works at 400px and at 1600px
 - [ ] Both light and dark checked in a browser
+
+
+---
+
+## The 2026-09-18 calm-down
+
+Ayush: *"the UI still looks very cluttered, which looks like a console, a proper
+mechanical console… not very motivating, not very clean."* He named Lusha and
+Airtable.
+
+He was right, and the cause was measurable rather than a matter of taste.
+
+**Body text was 18px and labels 17px** — about a third larger than any modern
+SaaS grid, and at that size nothing can recede. Every label competed with every
+value. **Almost everything was weight 700 or 800**; when everything is bold,
+bold stops meaning anything. Every card had a border *and* a shadow, so the page
+read as stacked panels rather than one surface. Micro-labels were uppercase and
+letterspaced, which is the single most "instrument panel" tic there is.
+
+What changed — tokens, not call sites, per CLAUDE.md:
+
+| | before | after |
+|---|---|---|
+| scale | 14 / 17 / 18 / 23 / 27 | **12 / 13 / 14 / 17 / 21** |
+| weights in use | 700, 800 everywhere | **400 · 500 · 600** |
+| card | border + shadow, r14 | one hairline, r8 |
+| input | 57px tall, 14/17 padding | 34px tall, 7/10 |
+| queue row | card, r12, 6px bar, shadow | list row, r6, 3px bar |
+| dial button | 21px in a 60px slab | 14px in a 32px button |
+| micro-labels | UPPERCASE + .04em | sentence case |
+
+Measured on the call console afterwards: **400×78, 500×40, 600×27** — not one
+700 or 800 on screen — and **5 cards visible without scrolling where 2 fitted
+before**.
+
+### The contrast this exposed
+
+Shrinking the scale is exactly what turns a borderline grey into an unreadable
+one, so every ink token was re-checked against all three surfaces in both
+themes. Three failed AA at the new size and were darkened:
+
+| token | was | now | why |
+|---|---|---|---|
+| `--text3` | #8D929B, 3.1:1 | **#696E76**, 4.8:1 | muted ink is now 12px |
+| `--amber` | #B4690E, 4.2:1 | **#A85F0C**, 4.6:1 | under AA already |
+| `--rose` | #DC2647, 4.48:1 | **#D01F3E**, 5.0:1 | marks required fields |
+
+All seven ink tokens now clear 4.5:1 on white, `--panel2` and `--ground` in
+light, and on `--panel`, `--panel2` and `--ground` in dark.
+
+**Not changed:** one accent, violet for past, rose for required, amber for
+flags; five type sizes; split screen; structure separates sections, not colour.
+Every non-negotiable in CLAUDE.md survives — this was a retune of the scale
+those rules are expressed in, not a new design.

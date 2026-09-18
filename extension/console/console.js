@@ -12,8 +12,10 @@ const PHONE_TYPES=["MOBILE","WORK","HOME","OTHER"];
    Right POC and Discovery come from the event data, not the stage: see
    docs/kpi-spec.md §5. SQL is the only one the stage decides. */
 const METRICS=[
-  {label:"RIGHT POC", test:a=>hasSignal(a)},
-  {label:"DISCOVERY", test:a=>isComplete(a)},
+  /* Sentence case. SHOUTING LABELS were a large part of why this read as an
+     instrument panel rather than a page. */
+  {label:"Right POC", test:a=>hasSignal(a)},
+  {label:"Discovery", test:a=>isComplete(a)},
   {label:"SQL",       test:a=>a.stage==="SQL_SALES_QUALIFIED_LEAD"},
 ];
 /* Replaced at runtime by whatever this Kylas account actually defines. */
