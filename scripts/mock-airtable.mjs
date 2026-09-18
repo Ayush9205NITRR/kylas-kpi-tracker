@@ -81,6 +81,23 @@ createServer(async (req, res) => {
      client here needs only the host swapped. */
   let parts = url.pathname.split("/").filter(Boolean);     // [v0,] baseId, tableName
   if (parts[0] === "v0") parts = parts.slice(1);
+
+  /* The metadata API — enough of it for a caller that asks the base what it
+     holds before naming fields in a projection. NAMES ONLY: this stand-in has
+     no schema of its own, so it reports the shape of the rows it was seeded
+     with and calls every type singleLineText. Enough to choose fields by, not
+     a substitute for verify-base.mjs against the real base. */
+  if (parts[0] === "meta" && parts[1] === "bases" && parts[3] === "tables") {
+    return json(res, 200, {
+      tables: Object.entries(TABLES).map(([tname, trows]) => ({
+        id: "tbl" + tname.replace(/\W/g, ""),
+        name: tname,
+        fields: [...new Set(trows.flatMap((r) => Object.keys(r.fields)))]
+          .map((f) => ({ id: "fld" + f.replace(/\W/g, ""), name: f, type: "singleLineText" })),
+      })),
+    });
+  }
+
   if (parts.length < 2) {
     if (!/^\/__/.test(url.pathname)) console.log(`404 ${req.method} ${url.pathname} parts=${JSON.stringify(parts)}`);
     if (url.pathname === "/__writes") return json(res, 200, { writes: WRITES, tables: TABLES });
@@ -123,6 +140,19 @@ createServer(async (req, res) => {
        caller that forgets to ask for a field it uses fails here rather than in
        production. */
     const want = url.searchParams.getAll("fields[]");
+    /* An unknown name in a projection fails the WHOLE request with a 422 on
+       the real API — it is not an empty column. Reproduced here because a
+       stand-in that accepts any name lets a script ship asking a live base for
+       a field it has never had, which is exactly how audit-stages.mjs went out
+       asking Contacts for a "Company Name" that lives on Companies.
+       Only checked where there are rows: a table this mock created on first
+       touch has no fields to know about yet. */
+    if (rows.length) {
+      const known = new Set(rows.flatMap((r) => Object.keys(r.fields)));
+      const bad = want.find((f) => !known.has(f));
+      if (bad) return json(res, 422,
+        { error: { type: "UNKNOWN_FIELD_NAME", message: `Unknown field name: "${bad}"` } });
+    }
     const trim = (r) => (want.length
       ? { id: r.id, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => want.includes(k))) }
       : r);

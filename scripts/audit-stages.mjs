@@ -63,16 +63,64 @@ const since = new Date(Date.now() - DAYS * 864e5).toISOString();
 const label = (s) => STAGE_LABEL[s] || s || "(new)";
 const mmss = (s) => `${Math.floor((s || 0) / 60)}m${String((s || 0) % 60).padStart(2, "0")}s`;
 
-const [trans, calls, contacts] = await Promise.all([
-  at.listAll("Stage Transitions",
-    { fields: ["Key", "From Stage", "To Stage", "Changed At", "Owner", "Source", "Contact"] }),
-  at.listAll("Call Log",
-    { fields: ["Key", "Called At", "Outcome", "Duration", "Duration Source", "Owner", "Stage Set"] }),
-  at.listAll("Contacts", { fields: ["Name", "Kylas Contact ID", "Company Name"] }),
-]);
+/* WHICH FIELDS THIS BASE ACTUALLY HAS. Naming one that is not there fails the
+   whole request with a 422 — and a live base drifts from schema.mjs, which is
+   the entire reason verify-base.mjs exists. So ask first, then ask only for
+   what is there. Without the schema scope on the PAT this returns null and
+   every read falls back to no projection, which fetches all fields and works
+   regardless. */
+const API = process.env.AIRTABLE_BASE_URL || "https://api.airtable.com/v0";
+async function liveFields() {
+  try {
+    const res = await fetch(`${API}/meta/bases/${BASE}/tables`,
+      { headers: { Authorization: `Bearer ${PAT}` } });
+    if (!res.ok) return null;
+    const out = new Map();
+    for (const t of (await res.json()).tables || [])
+      out.set(t.name, new Set((t.fields || []).map((f) => f.name)));
+    return out;
+  } catch { return null; }
+}
+const schema = await liveFields();
+/* [] means "no projection" — listAll then returns every field. */
+const pick = (table, wanted) => {
+  const have = schema?.get(table);
+  return have ? wanted.filter((f) => have.has(f)) : [];
+};
+for (const t of ["Stage Transitions", "Call Log", "Contacts"]) {
+  if (schema && !schema.has(t)) {
+    console.error(`This base has no "${t}" table, so there is nothing to audit.`);
+    console.error("Run: node scripts/verify-base.mjs");
+    process.exit(1);
+  }
+}
 
+let trans, calls, contacts, companies;
+try {
+  [trans, calls, contacts, companies] = await Promise.all([
+    at.listAll("Stage Transitions",
+      { fields: pick("Stage Transitions",
+          ["Key", "From Stage", "To Stage", "Changed At", "Owner", "Source", "Contact"]) }),
+    at.listAll("Call Log",
+      { fields: pick("Call Log",
+          ["Key", "Called At", "Outcome", "Duration", "Duration Source", "Owner", "Stage Set"]) }),
+    at.listAll("Contacts", { fields: pick("Contacts", ["Name", "Kylas Contact ID", "Company"]) }),
+    at.listAll("Companies", { fields: pick("Companies", ["Name"]) }).catch(() => []),
+  ]);
+} catch (e) {
+  console.error(`\nAirtable said no: ${e.message}\n`);
+  if (e.status === 401 || e.status === 403)
+    console.error("That is the token. It needs data.records:read on this base.");
+  else if (e.status === 422)
+    console.error("A field this script asks for is not in the base. Run: node scripts/verify-base.mjs");
+  process.exit(1);
+}
+
+/* The company name lives on the Companies row, reached through the Contacts
+   link field — Contacts carries no name of its own. */
+const coName = new Map(companies.map((c) => [c.id, c.fields.Name || ""]));
 const nameOf = new Map(contacts.map((c) => [c.id, c.fields.Name || c.fields["Kylas Contact ID"] || c.id]));
-const coOf = new Map(contacts.map((c) => [c.id, c.fields["Company Name"] || ""]));
+const coOf = new Map(contacts.map((c) => [c.id, coName.get((c.fields.Company || [])[0]) || ""]));
 
 /* syncContact writes the two keys as mirrors of each other — the transition is
    `<contact>-<when>` and the call is `<when>-<contact>` — so one save joins
