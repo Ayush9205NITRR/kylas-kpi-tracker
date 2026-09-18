@@ -95,6 +95,39 @@
      belongs to, which is why "Allotted to: Arshdeep Singh" listed a company
      owned by Devansh Shukla. Contacts still enrich rows that exist; they no
      longer create them. */
+  /* ── the dashboard's rows, from Airtable ───────────────────────────
+     DRAWN FROM THE KPI STORE, not from Kylas.
+     The funnel used to be built by crawling every company in Kylas — 10,000 of
+     them on Ayush's account — and joining each one back to an Airtable row. A
+     company nobody has worked is a zero in every column, so 9,998 of those rows
+     were noise, and when the join missed, the whole dashboard read zero while
+     the Progress section (which needs no join) showed real numbers.
+
+     Airtable holds exactly the companies somebody has actually worked, with
+     their owner and every KPI already computed. That is the dashboard's
+     population. Kylas' crawl still answers "how many are allotted to me",
+     which is a different question and stays where it was. */
+  function fromKpis(companies, owner) {
+    const want = String(owner || "");
+    return (companies || [])
+      .filter((c) => c.kpi)
+      .map((c) => {
+        const k = c.kpi;
+        return { id: c.id, name: k.name || c.name || ("Company " + c.id),
+                 owner: k.owner || c.owner || "", ownerId: c.ownerId || "",
+                 source: c.source || "", batch: c.batch || "",
+                 stage: c.stage || "", kpiStage: k.stage || "",
+                 rung: k.rank || 0, lastCalledAt: k.lastCalledAt || c.lastCalledAt || null,
+                 contacts: new Array(k.contacts || 0),
+                 pocs: { right: k.rightNames, discovery: k.discoveryNames, sql: [] },
+                 modes: {}, from: "airtable",
+                 reached: k.reached, picked: k.picked, right: k.right,
+                 discovery: k.discovery, booked: k.booked, done: k.done, sql: k.sql };
+      })
+      .filter((c) => !want || want === "all" || String(c.ownerId) === want || c.owner === want)
+      .map(cumulative);
+  }
+
   function rollup(data, base, onlyBase) {
     const by = new Map();
     const row = (id, seed) => {
@@ -256,8 +289,13 @@
      definition of the funnel; the browser's copy is a fallback for a company
      the store has not seen. Which one produced what you are reading is not a
      detail — it is the difference between an auditable number and a guess. */
-  function kpiNote(cos) {
+  function kpiNote(cos, opts) {
     const n = cos.filter((c) => c.from === "airtable").length;
+    /* The dashboard counts what has been WORKED, which is what Airtable holds.
+       Saying "9998 not saved yet" about companies nobody has opened is noise. */
+    if (opts?.storeIsPopulation && n)
+      return `<span class="vsrc ok" title="These are the companies somebody has saved from the console. Kylas' allotted list answers a different question — see the Companies view.">${
+        n} compan${n === 1 ? "y" : "ies"} worked · from Airtable</span>`;
     if (CACHE.kpiSource === "airtable" && n === cos.length && cos.length)
       return `<span class="vsrc ok" title="Right POC, discovery and the three milestones are Airtable formulas — see scripts/schema.mjs">KPIs from Airtable</span>`;
     if (CACHE.kpiSource === "airtable" && n === 0 && cos.length)
@@ -686,7 +724,11 @@
     await restore();
     const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
     const dbase = companiesNow(DASH_OWNER);
-    const cos = rollup(DATA, dbase, dbase.length > 0);
+    /* Airtable's own rows are the population when it has any. Falling back to
+       the Kylas crawl keeps the view alive before the first save and when the
+       store is unreachable — and the badge says which is on screen. */
+    const fromStore = fromKpis(dbase, DASH_OWNER === "all" ? "" : DASH_OWNER);
+    const cos = fromStore.length ? fromStore : rollup(DATA, dbase, dbase.length > 0);
     const team = DASH_OWNER === "all";
     const names = [...new Set(CACHE.owners.map((o) => o.name).filter(Boolean))].sort();
 
@@ -706,7 +748,7 @@
         ${API.isAdmin ? "" : `<span class="vrole" title="Set ADMIN_EMAILS in .env.local to see the team">your numbers</span>`}
         <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
-        ${kpiNote(cos)}
+        ${kpiNote(cos, { storeIsPopulation: fromStore.length > 0 })}
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
       </div>

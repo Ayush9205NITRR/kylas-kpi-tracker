@@ -99,7 +99,13 @@ async function ownerName(id) {
    stops one associate's bad week being everybody's business. Real access
    control needs the proxy deployed once, centrally, with a login in front of
    it — see docs/architecture.md. */
-const ADMINS = String(process.env.ADMIN_EMAILS || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+/* The two people who may see the whole team, named by Ayush on 2026-09-18.
+   ADMIN_EMAILS in .env.local replaces this list rather than adding to it, so a
+   change of who is in charge is one line and not a code edit. */
+const DEFAULT_ADMINS = ["crmadmin@enout.in", "ayush@enout.in"];
+const ADMINS = (process.env.ADMIN_EMAILS
+  ? String(process.env.ADMIN_EMAILS).split(",")
+  : DEFAULT_ADMINS).map((x) => x.trim().toLowerCase()).filter(Boolean);
 const ADMIN_IDS = String(process.env.ADMIN_IDS || "").split(",").map((x) => x.trim()).filter(Boolean);
 const userName = (u) => [u?.firstName, u?.lastName].filter(Boolean).join(" ").trim();
 let warnedNoEmail = false;
@@ -358,6 +364,38 @@ const routes = {
         + (all ? "" : ` of ${companies.length}`)
         + (kpiSource === "airtable" ? `, ${matched} with Airtable KPIs` : ""));
     return { ...body, companies: out, owner: all ? "all" : String(owner) };
+  },
+
+  /* Every Kylas user this account has, with their status and their role here.
+     No list endpoint is documented, so the client tries the likely shapes and
+     falls back to resolving the owner ids already seen on companies — see
+     kylas.mjs users(). */
+  "/users": async (url) => {
+    /* Seed the floor with every owner id we have met. Opening the dashboard
+       once fills this; without it the fallback has nobody to look up. */
+    const known = [...owners.keys()];
+    const hit = companyCache.get("all");
+    for (const c of hit?.body?.companies || []) if (c.ownerId) known.push(String(c.ownerId));
+
+    const { source, users } = await kylas.users(known);
+    const withRole = users.map((u) => ({
+      ...u,
+      role: (u.email && ADMINS.includes(u.email)) || ADMIN_IDS.includes(String(u.id))
+        ? "admin" : "associate",
+    }));
+    /* Active first, then name. An inactive user is kept and labelled rather
+       than dropped: they still own companies and still appear in history, and
+       a name vanishing from a report is worse than a name marked inactive. */
+    withRole.sort((a, b) => (b.active === true) - (a.active === true) ||
+                            String(a.name).localeCompare(String(b.name)));
+    const active = withRole.filter((u) => u.active === true).length;
+    const unknown = withRole.filter((u) => u.active === null).length;
+    log(`users: ${withRole.length} (${active} active${unknown ? `, ${unknown} status unknown` : ""}) via ${source}`);
+
+    if (url.searchParams.get("active")) return { source, users: withRole.filter((u) => u.active !== false) };
+    return { source, users: withRole, admins: ADMINS,
+             counts: { total: withRole.length, active, unknown,
+                       admins: withRole.filter((u) => u.role === "admin").length } };
   },
 
   /* WHY DO THE COMPANY KPIs NOT MATCH?

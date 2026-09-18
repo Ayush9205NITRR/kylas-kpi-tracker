@@ -141,6 +141,10 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     companyRec = await at.upsert("Companies", "Kylas Company ID", {
       "Kylas Company ID": String(c.companyId),
       Name: c.company || `Company ${c.companyId}`,
+      /* Carried so the dashboard can attribute this company without going back
+         to Kylas for it. Only written when known — an upsert with a blank owner
+         would wipe one that an earlier save got right. */
+      ...(c.owner ? { Owner: c.owner } : {}),
     });
     wrote.push("company");
   }
@@ -260,7 +264,7 @@ export const KPI_FIELDS = [
      KPI fell back to the browser, and the console showed the amber
      "Airtable unavailable" badge. test-kpi-fields.mjs now checks this list
      against the schema, so a name that does not exist cannot ship again. */
-  "Kylas Company ID", "Name",
+  "Kylas Company ID", "Name", "Owner",
   /* the ladder */
   "KPI Rank", "KPI Stage", "KPI Stage At",
   /* the funnel, one flag each — every one an Airtable formula */
@@ -304,6 +308,7 @@ export async function readCompanyKpis(at, { log = () => {} } = {}) {
     if (!id) { skipped++; continue; }
     byKylasId.set(id, {
       name: f.Name || "",
+      owner: f.Owner || "",
       rank: Number(f["KPI Rank"] || 0),
       stage: f["KPI Stage"] || "",
       stageAt: f["KPI Stage At"] || "",

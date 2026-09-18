@@ -235,3 +235,76 @@ nothing saying which side was empty.
 many carry a Kylas id, samples from both sides, and the overlap. The dashboard
 badge now says *"no company matched Airtable — check /kpi-debug"* rather than
 counting thousands of companies as "not saved yet", which is true and useless.
+
+---
+
+## 7. When the Airtable write happens — 2026-09-18
+
+**On every `Save & next`, immediately.** Not batched, not nightly, not on a
+timer. The order, from `console.js saveNext()`:
+
+```
+1  missing()              the gate — nothing leaves until it passes
+2  Store.appendCall()     IndexedDB, one row per save
+3  persist()              IndexedDB, the whole record
+4  the next contact is on screen     ← you are already working again
+5  POST /save  (async, off the critical path)
+     ├─ Kylas   PUT/POST /v1/contacts, then POST /v1/call-logs
+     └─ Airtable  syncContact() — up to SIX writes, in this order:
+          Companies          upsert on Kylas Company ID (incl. Owner)
+          Contacts (read)    the existing KPI Rank, so it can only rise
+          Contacts           upsert on Kylas Contact ID
+          Event Rows         upsert on Row Key, one per event row
+          Call Log           upsert on Key — append-only
+          Stage Transitions  ONLY when the stage actually moved
+```
+
+Steps 2–4 are local and instant. Step 5 is the network, and you are already on
+the next contact before it finishes — the browser is a **buffer**, Airtable is
+the **store**. If the proxy is down the write goes to an outbox and drains on
+the next save; a 4xx is never queued, because a rejected value is a verdict on
+the data and retrying it forever hides the one thing that could be fixed.
+
+Everything is an **upsert on a natural key**, so a retry updates the same six
+rows rather than creating twelve.
+
+---
+
+## 8. The dashboard is drawn from Airtable — 2026-09-18
+
+It used to crawl every company in Kylas — 10,000 on this account — and join each
+one back to an Airtable row. A company nobody has worked is a zero in every
+column, so 9,998 of those rows were noise; and when the join missed, the whole
+dashboard read zero while Progress (which needs no join) showed real numbers.
+
+**Airtable holds exactly the companies somebody has worked, with every KPI
+already computed.** That is the dashboard's population now. The one thing it was
+missing was *whose* company a row is, so `Companies.Owner` was added to the
+schema and `syncContact` writes it on every save. Airtable can now answer the
+whole dashboard by itself.
+
+Kylas' crawl still answers **"how many companies are allotted to me"** — a
+different question, and it stays in the Companies view where it belongs.
+
+The badge says which is on screen: `N companies worked · from Airtable`, or the
+browser fallback when the store has nothing yet or is unreachable.
+
+---
+
+## 9. The user directory — 2026-09-18
+
+Kylas documents `/v1/users/me`, `/v1/users/{id}`, `activate` and `deactivate` —
+but **no list endpoint**. So `/users` uses the same runtime fallback the company
+search needed: try `GET /v1/users`, then `POST /v1/search/user`, and fall back to
+resolving the owner ids already seen on companies via the documented per-id
+lookup, which is certain to work.
+
+`active` is not reported consistently — `active`, `status`, or nothing — so every
+form is read and **unknown is preserved rather than guessed as false**. Marking a
+real associate inactive would quietly drop them from the team view. An inactive
+user is kept and labelled, never dropped: they still own companies and still
+appear in history, and a name vanishing from a report is worse than a name
+marked inactive.
+
+Admins default to **crmadmin@enout.in** and **ayush@enout.in**; everyone else is
+an associate. `ADMIN_EMAILS` in `.env.local` replaces that list.

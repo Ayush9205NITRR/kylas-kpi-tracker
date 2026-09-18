@@ -19,8 +19,12 @@ const stages = JSON.parse(readFileSync(new URL("../docs/stages.json", import.met
 const id = (code) => stages.find((s) => s.code === code).id;
 
 const USERS = {
-  74725: { id: 74725, firstName: "Enout", lastName: "Super Admin" },
-  74726: { id: 74726, firstName: "Priya", lastName: "Deshmukh" },
+  74725: { id: 74725, firstName: "Enout", lastName: "Super Admin",
+           email: "crmadmin@enout.in", active: true },
+  74726: { id: 74726, firstName: "Priya", lastName: "Deshmukh",
+           email: "priya@enout.in", active: true },
+  74727: { id: 74727, firstName: "Gone", lastName: "Away",
+           email: "gone@enout.in", active: false },
 };
 const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Boolean).join(" ");
 
@@ -136,6 +140,12 @@ createServer(async (req, res) => {
 
   const p = url.pathname;
   if (p === "/v1/users/me") return json(res, 200, USERS[74725]);
+  /* The documented per-id lookup — the floor the client falls back to. */
+  const oneUser = p.match(/^\/v1\/users\/(\d+)$/);
+  if (oneUser) {
+    const u = USERS[Number(oneUser[1])];
+    return u ? json(res, 200, u) : json(res, 404, { message: "no such user" });
+  }
 
   const user = p.match(/^\/v1\/users\/(\d+)$/);
   if (user) return USERS[user[1]] ? json(res, 200, USERS[user[1]]) : json(res, 404, { message: "no such user" });
@@ -222,6 +232,14 @@ createServer(async (req, res) => {
       { name: "designation", displayName: "Designation", type: "TEXT_FIELD" },
     ] });
   }
+
+  /* No list endpoint exists on the real API, which is the whole reason the
+     client has a fallback chain. MOCK_USER_LIST=1 pretends one does, so both
+     branches are exercisable. */
+  if (p === "/v1/users" && process.env.MOCK_USER_LIST === "1")
+    return json(res, 200, { content: Object.values(USERS) });
+  if (p === "/v1/users") return json(res, 404, { message: "Not Found" });
+  if (p === "/v1/search/user") return json(res, 500, { exception: "java.lang.NullPointerException" });
 
   /* ── writes ──────────────────────────────────────────────────────── */
   /* Kylas validates phone numbers and says almost nothing about why:

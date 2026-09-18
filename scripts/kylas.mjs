@@ -233,6 +233,45 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
     },
 
     /* Which shape won, for the /companies?keys=1 diagnostic. */
+    /* ── the user directory ──────────────────────────────────────────
+       Kylas documents /v1/users/me, /v1/users/{id}, activate and deactivate —
+       but NO list endpoint. So the same runtime fallback the company search
+       needed: try the likely list shapes, and fall back to resolving the ids we
+       already hold one at a time, which is documented and therefore certain.
+
+       `ids` are owner ids already seen on companies and contacts, so the floor
+       never has to guess who exists. */
+    async users(ids = []) {
+      const shapes = [
+        { name: "GET /v1/users?page&size", go: () => call("GET", "/v1/users?page=0&size=200") },
+        { name: "GET /v1/users", go: () => call("GET", "/v1/users") },
+        { name: "POST /v1/search/user", go: () => call("POST", "/v1/search/user?page=0&size=200",
+            { fields: ["id", "firstName", "lastName", "email", "active", "status"],
+              jsonRule: { condition: "AND", valid: true, rules: [] } }) },
+      ];
+      for (const s of shapes) {
+        try {
+          const list = rows(await s.go());
+          if (Array.isArray(list) && list.length) {
+            log(`users: "${s.name}" works — ${list.length}`);
+            return { source: s.name, users: list.map(toUser) };
+          }
+        } catch (e) {
+          if (![400, 403, 404, 405, 500].includes(e.status)) throw e;
+          log(`users: "${s.name}" -> ${e.status}, trying the next shape`);
+        }
+      }
+      /* The floor. One request each, which is why it is last. */
+      const want = [...new Set(ids.map(String).filter(Boolean))];
+      log(`users: no list endpoint — resolving ${want.length} known id(s) one by one`);
+      const out = [];
+      for (const id of want) {
+        try { out.push(toUser(await call("GET", `/v1/users/${id}`))); }
+        catch (e) { log(`users: ${id} -> ${e.status || e.message}`); }
+      }
+      return { source: "GET /v1/users/{id} per known owner", users: out };
+    },
+
     companyShapeName: () => companyShape?.name || "not yet determined",
     lastCompanySearch: () => ({ ...lastSearch }),
 
@@ -410,6 +449,23 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
     done: false, flagged: false,
 
     _kylas: { updatedAt: c.updatedAt, createdAt: c.createdAt },
+  };
+}
+
+/* A Kylas user, in the one shape the rest of the code wants. Active is not
+   reported consistently — `active`, `status`, or nothing at all — so every form
+   is read and "unknown" is preserved rather than guessed as false. Marking a
+   real associate inactive would quietly drop them from the team view. */
+export function toUser(u) {
+  const active = u?.active !== undefined ? !!u.active
+    : u?.status !== undefined ? /^(active|enabled|true)$/i.test(String(u.status))
+    : null;
+  return {
+    id: String(pick(u?.id, "") ?? ""),
+    name: [pick(u?.firstName), pick(u?.lastName)].filter(Boolean).join(" ").trim()
+      || pick(u?.name, u?.email, "") || "",
+    email: String(pick(u?.email, "") || "").toLowerCase(),
+    active,
   };
 }
 

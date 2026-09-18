@@ -35,6 +35,13 @@ export const TABLES = [
     fields: [
       { name: "Name", type: "singleLineText" },
       { name: "Kylas Company ID", type: "singleLineText" },
+      /* Added 2026-09-18. Without it the KPI store cannot say WHOSE company a
+         row is, so the dashboard had to join every Airtable row back to a
+         10,000-row Kylas crawl just to attribute it — and when that join missed,
+         every company-level number read zero with nothing saying why. With the
+         owner here, Airtable can answer the dashboard on its own. */
+      { name: "Owner", type: "singleLineText",
+        description: "The Kylas owner's name, copied on every save so this table can attribute a company without calling Kylas." },
     ],
   },
   {
