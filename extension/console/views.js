@@ -61,7 +61,13 @@
      the owner in Kylas. Seeding from it is what makes an allotted-but-never-
      worked company appear at all; deriving purely from contacts, as this used
      to, could only ever show companies somebody had already opened. */
-  function rollup(data, base) {
+  /* `onlyBase` — when an owner filter is on, the allotted list IS the answer.
+     Contact-derived rows would otherwise walk straight past it: any company
+     the browser happens to hold a contact for got a row regardless of who it
+     belongs to, which is why "Allotted to: Arshdeep Singh" listed a company
+     owned by Devansh Shukla. Contacts still enrich rows that exist; they no
+     longer create them. */
+  function rollup(data, base, onlyBase) {
     const by = new Map();
     const row = (id, seed) => {
       /* name starts EMPTY, not "Company <id>". A placeholder here is truthy, so
@@ -93,6 +99,7 @@
     for (const c of data) {
       const id = String(c.companyId || "");
       if (!id) continue;
+      if (onlyBase && !by.has(id)) continue;      /* not allotted to this owner */
       const co = row(id, { name: c.company });
       co.contacts.push(c);
     }
@@ -322,7 +329,8 @@
 
   async function dashboard(host) {
     const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
-    const cos = rollup(DATA, companiesNow(DASH_OWNER));
+    const dbase = companiesNow(DASH_OWNER);
+    const cos = rollup(DATA, dbase, dbase.length > 0);
     const team = DASH_OWNER === "all";
     const names = [...new Set(CACHE.owners.map((o) => o.name).filter(Boolean))].sort();
 
@@ -378,7 +386,7 @@
      empty set means no constraint, so "is none of" with nothing ticked is not
      a filter that hides everything. */
   const FILTERS = {
-    owner: "", since: "",
+    owner: "", calledSince: "",
     source: { mode: "any", values: [] },
     stage: { mode: "any", values: [] },
     kpi: { mode: "any", values: [] },
@@ -453,7 +461,11 @@
        first — the filters are local and must not wait on a search. */
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
-    const all = rollup(DATA, companiesNow(who));
+    /* An owner is selected unless the filter is cleared, and "all" is still a
+       server-side answer — so in both cases the fetched list is authoritative.
+       Only with no list at all (offline) do contact rows stand in. */
+    const base = companiesNow(who);
+    const all = rollup(DATA, base, base.length > 0);
     /* Options are what the ACCOUNT defines, not what the loaded rows happen to
        contain. Deriving them from the rows meant one company on screen gave a
        Source filter with one option — you could not filter TO something you
@@ -471,8 +483,8 @@
       matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
       matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
       matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
-      (!FILTERS.since || (c.lastQualityAt || "") >= FILTERS.since))
-      .sort((a, b) => (b.rung - a.rung) || String(b.lastQualityAt || "").localeCompare(String(a.lastQualityAt || "")));
+      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince))
+      .sort((a, b) => (b.rung - a.rung) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")));
 
 
     /* One definition, used by the first paint and by every filter tick. */
@@ -484,8 +496,8 @@
             <span class="c4">${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
             <span class="c5">${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
             <span class="c6">${day(c.lastCalledAt)}</span>
-            <span class="c8">${day(c.lastQualityAt)}</span>
-            <span class="c7">${esc(c.owner || "—")}${c.batch ? `<em>${esc(c.batch)}</em>` : ""}</span>
+            <span class="c7">${esc(c.owner || "—")}</span>
+            <span class="c9">${esc(c.batch || "—")}</span>
           </div>`;
 
     host.innerHTML = `
@@ -504,7 +516,7 @@
         <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label)}</label>
         <label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
           (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k)}</label>
-        <label>Quality since<input type="date" id="fSince" value="${esc(FILTERS.since)}"></label>
+        <label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>
       </div>
       <div class="vtable">
@@ -512,25 +524,26 @@
           <span class="c1">Company</span><span class="c2">Stage</span>
           <span class="c3">POCs</span><span class="c4">Right POC</span>
           <span class="c5">Discovery</span><span class="c6">Last called</span>
-          <span class="c8">Last quality</span><span class="c7">Allotted to</span>
+          <span class="c7">Allotted to</span><span class="c9">Batch</span>
         </div>
-        ${rows.length ? rows.map(rowHTML).join("")
-        : `<div class="vempty">Nothing matches those filters.</div>`}
+        <!-- rows painted by paint(), so the window applies to the first
+             render as well as to every filter change -->
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         This is only what the browser holds, not everything allotted to you.</p>` : ""}
       <p class="vnote">Named POCs answer the question a manager actually asks — not how many right
         POCs, but which person. Stage is the highest any POC at that company has reached. A company
-        with no POCs yet is one allotted to you that nobody has opened.</p>`;
+        with no POCs yet is one allotted to you that nobody has opened.
+        <b>Batch</b> is Kylas' own <code>Batch</code> field on the company, shown as it is stored.</p>`;
 
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
-    on("fSince", "change", (e) => { FILTERS.since = e.target.value; companies(host); });
+    on("fSince", "change", (e) => { FILTERS.calledSince = e.target.value; companies(host); });
     /* Clear is also the retry: it drops the cache so a failed fetch is tried
        again, which is otherwise a reload. */
     on("fClear", "click", () => {
       if (CACHE.error) { CACHE.owner = null; CACHE.error = ""; }
-      FILTERS.owner = ""; FILTERS.since = "";
+      FILTERS.owner = ""; FILTERS.calledSince = "";
       for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
       companies(host);
     });
@@ -542,25 +555,65 @@
     /* A row is a way into the company, not a dead end. */
     const bindRows = () => host.querySelectorAll(".vr[data-id]").forEach((r) =>
       r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
-    bindRows();
 
     /* Redraw the table and each popover's own summary in place. */
-    function repaintRows() {
-      const next = all.filter((c) =>
-        matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
-        matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
-        matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
-        (!FILTERS.since || (c.lastQualityAt || "") >= FILTERS.since))
-        .sort((a, b) => (b.rung - a.rung) || String(b.lastQualityAt || "").localeCompare(String(a.lastQualityAt || "")));
+    /* Rows are rendered in a WINDOW, not all at once. At 250+ companies
+       rebuilding every row's HTML on each checkbox tick is what made the list
+       feel heavy — the work is proportional to the whole account, not to what
+       is on screen. 60 rows fill any viewport; the rest arrive as you reach
+       them, which is how a grid like Airtable's stays responsive.
+
+       Repaints are also coalesced to one animation frame: ticking three boxes
+       quickly used to do three full rebuilds. */
+    const WINDOW = 60;
+    let shown = WINDOW;
+    let frame = null;
+    let io = null;
+
+    const matching = () => all.filter((c) =>
+      matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
+      matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
+      matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
+      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince))
+      .sort((a, b) => (b.rung - a.rung) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")));
+
+    function paint() {
+      const next = matching();
       const body = host.querySelector(".vtable");
       const head = body?.querySelector(".vr.vh");
       if (body && head) {
-        body.innerHTML = head.outerHTML + (next.length ? next.map(rowHTML).join("")
+        const slice = next.slice(0, shown);
+        body.innerHTML = head.outerHTML + (next.length
+          ? slice.map(rowHTML).join("") +
+            (next.length > shown
+              ? `<div class="vmore" id="vmore">${next.length - shown} more…</div>` : "")
           : `<div class="vempty">Nothing matches those filters.</div>`);
         bindRows();
+
+        /* Grow when the sentinel comes into view. Observer rebuilt each paint
+           because the node it watches is replaced. */
+        io?.disconnect();
+        const sentinel = body.querySelector("#vmore");
+        if (sentinel) {
+          io = new IntersectionObserver((e) => {
+            if (e.some((x) => x.isIntersecting)) { shown += WINDOW; paint(); }
+          }, { root: host.closest("#viewport") || null, rootMargin: "200px" });
+          io.observe(sentinel);
+        }
       }
       const sub = host.querySelector(".vhead .vsub");
-      if (sub) sub.textContent = `${next.length} of ${all.length}`;
+      if (sub) sub.textContent = loading ? "loading…"
+        : `${next.length} of ${all.length}${next.length > shown ? ` · showing ${shown}` : ""}`;
+      syncSummaries();
+    }
+
+    function repaintRows() {
+      shown = WINDOW;                       /* a new filter starts at the top */
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { frame = null; paint(); });
+    }
+
+    function syncSummaries() {
       for (const [id, st, lab] of [["fSource", FILTERS.source, label],
                                    ["fStage", FILTERS.stage, label],
                                    ["fKpi", FILTERS.kpi, (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k]]) {
@@ -573,6 +626,13 @@
         if (count) count.textContent = `${n} selected`;
       }
     }
+
+    /* LAST, after every const it leans on. `function paint` is hoisted but
+       `matching` and `bindRows` are const arrows — calling paint() above their
+       declarations threw "Cannot access 'matching' before initialization", and
+       because the shell template had already written the subtitle, the view
+       looked like it had rendered 133 rows while showing none. */
+    paint();
   }
 
   global.Views = { rollup, dashboard, companies, FILTERS };

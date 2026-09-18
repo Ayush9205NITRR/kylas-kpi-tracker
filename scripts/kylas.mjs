@@ -103,33 +103,58 @@ export function createClient(key, { log = () => {} } = {}) {
   ];
   let companyShape = null;          // remembered once one works
 
+  /* PAGINATED. One page of 200 was not "the companies allotted to you", it was
+     "the 200 most recently updated companies in the account" — and when the
+     winning shape cannot filter server-side, the owner filter then ran over
+     just those 200. On an account with 250+ companies that showed 19 of
+     Arshdeep's and silently dropped the rest. Keep asking until a short page
+     comes back. */
+  const PAGE = 200;
+  const MAX_PAGES = 25;            /* 5,000 companies — a stop, not a target */
+
   async function searchCompany(size, ownerId) {
-    const path = `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`;
     const mine = (list) => (ownerId == null ? list
       : list.filter((c) => Number(c.ownerId ?? c.owner?.id) === Number(ownerId)));
 
+    /* Settle the shape on page 0, then reuse it for the rest. */
     const tries = companyShape ? [companyShape] : COMPANY_SHAPES;
-    let last;
-    for (const shape of tries) {
-      /* A shape that cannot filter is useless for a specific owner ONLY if we
-         could not filter afterwards — we can, so it stays in play. */
+    let shape = null, first = null, last;
+    for (const s of tries) {
       try {
-        const r = await call("POST", path, shape.body(ownerId));
-        if (!companyShape) log(`company search: "${shape.name}" works`);
-        companyShape = shape;
-        const list = rows(r);
-        return shape.filtered && ownerId != null ? list : mine(list);
+        first = rows(await call("POST", page(0), s.body(ownerId)));
+        if (!companyShape) log(`company search: "${s.name}" works`);
+        companyShape = shape = s;
+        break;
       } catch (e) {
         last = e;
         /* Only a rejected REQUEST is worth trying another shape for. A 401, a
            429 or a network failure says nothing about the body, and retrying
            four variants would just spend the rate limit. */
         if (![400, 404, 500].includes(e.status)) throw e;
-        log(`company search: "${shape.name}" -> ${e.status}, trying the next shape`);
+        log(`company search: "${s.name}" -> ${e.status}, trying the next shape`);
       }
     }
-    throw new Error(`/v1/search/company rejected every known shape. Last: ${last?.message}`);
+    if (!shape) throw new Error(`/v1/search/company rejected every known shape. Last: ${last?.message}`);
+
+    const all = [...first];
+    /* A page shorter than we asked for is the last one. */
+    for (let p = 1; first.length === PAGE && p < MAX_PAGES; p++) {
+      const next = rows(await call("POST", page(p), shape.body(ownerId)));
+      all.push(...next);
+      if (next.length < PAGE) break;
+      first = next;
+    }
+    if (all.length >= PAGE) log(`company search: ${all.length} across ${Math.ceil(all.length / PAGE)} page(s)`);
+
+    /* Server-side filtering is only trustworthy when the shape claims it. */
+    const out = shape.filtered && ownerId != null ? all : mine(all);
+    /* De-dupe: pages are sorted by updatedAt, and a record updated mid-scan can
+       land on two of them. */
+    const seen = new Set();
+    return out.filter((c) => { const k = String(c.id); if (seen.has(k)) return false; seen.add(k); return true; });
   }
+
+  const page = (n) => `/v1/search/company?sort=updatedAt,desc&page=${n}&size=${PAGE}`;
 
   return {
     raw: call,

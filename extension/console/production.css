@@ -169,7 +169,7 @@ body.framed .ovOnly{display:inline-block}
 }
 .vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh)}
 .vr{
-  display:grid;grid-template-columns:1.6fr 1.2fr .5fr 1.3fr 1.3fr .85fr .85fr 1fr;
+  display:grid;grid-template-columns:1.7fr 1.2fr .5fr 1.3fr 1.3fr .9fr 1fr .7fr;
   gap:12px;padding:14px 17px;border-bottom:1px solid var(--line);align-items:center;
   font-size:var(--t-label);cursor:pointer;
 }
@@ -182,11 +182,12 @@ body.framed .ovOnly{display:inline-block}
 .vr .c5{color:var(--blue)}
 /* Dates wear the same family as every other cell; tabular figures keep
    them aligned without switching typeface mid-row. */
-.vr .c6,.vr .c8{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
+.vr .c6{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
+.vr .c9{font-size:var(--t-meta);color:var(--text3)}
 .vempty{padding:36px;text-align:center;color:var(--text3);font-size:var(--t-label)}
 @media(max-width:860px){
   .vr{grid-template-columns:1.6fr 1fr .6fr}
-  .vr .c4,.vr .c5,.vr .c6,.vr .c7,.vr .c8{display:none}
+  .vr .c4,.vr .c5,.vr .c6,.vr .c7,.vr .c9{display:none}
 }
 
 /* ── toast ───────────────────────────────────────────────────────────── */
@@ -350,3 +351,7 @@ body.framed .ovOnly{display:inline-block}
 
 /* Selectable but not a link: it goes nowhere on purpose. */
 .cbmeta .mail .sel{user-select:all;cursor:text}
+
+/* The window sentinel: also the "there is more" affordance. */
+.vmore{padding:16px 18px;text-align:center;font-size:var(--t-meta);
+  color:var(--text3);font-weight:600;border-top:1px solid var(--line)}

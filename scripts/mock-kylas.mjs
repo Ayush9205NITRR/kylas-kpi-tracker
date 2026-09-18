@@ -65,6 +65,19 @@ const COMPANIES = {
   },
 };
 
+/* Bulk, so pagination and the owner filter are exercised: 260 companies split
+   between two owners means page 0 cannot hold them and a client-side owner
+   filter over one page would silently drop most of them. */
+if (process.env.MOCK_MANY === "1") {
+  for (let i = 0; i < 260; i++) {
+    const id = 200000 + i;
+    COMPANIES[id] = { id, name: `bulk-${String(i).padStart(3, "0")}`,
+      ownerId: i % 2 ? 74726 : 74725,
+      customFieldValues: { cfSourceOfData: i % 3 ? "Round-Robin" : "Apollo",
+                           cfBatch: `Batch${(i % 2) + 1}` } };
+  }
+}
+
 /* Stages arrive as ids, not codes — the mapping layer has to cope. */
 const CONTACTS = [
   { id: 112936, firstName: "Hema", lastName: "Bharathi", ownerId: 74725,
@@ -181,7 +194,15 @@ createServer(async (req, res) => {
        contact does. Company 903 deliberately has no custom fields at all. */
     const withOwner = (c) => ({ ...c, metaData: { idNameStore: {
       ownerId: { [String(c.ownerId)]: userName(c.ownerId) } } } });
-    return json(res, 200, { content: out.map(withOwner), totalElements: out.length });
+
+    /* HONOUR page/size. Returning everything at once made the client's
+       pagination loop untested — and the real API caps at `size`, which is
+       exactly the behaviour that lost 230 of Ayush's companies. */
+    const size = Math.max(1, Number(url.searchParams.get("size") || 200));
+    const pg = Math.max(0, Number(url.searchParams.get("page") || 0));
+    const slice = out.slice(pg * size, pg * size + size);
+    return json(res, 200, { content: slice.map(withOwner),
+                            totalElements: out.length, page: pg, size });
   }
 
   if (p === "/v1/entities/contact/fields") {
