@@ -997,14 +997,15 @@ function missing(){
     const r=Fields.checkEmail(e.value);
     if(!r.ok)need(true,`Email ${String(e.value).trim()} — ${r.why}`,"f-em");
   });
-  if(a.pocName.trim()){
-    const r=Fields.checkName(a.pocName);
-    if(!r.ok)need(true,`Name — ${r.why}`,"f-poc");
-  }
-  if(String(a.linkedin||"").trim()){
-    const r=Fields.checkUrl(a.linkedin,{host:"linkedin.com"});
-    if(!r.ok)need(true,`LinkedIn — ${r.why}`,"f-li");
-  }
+  /* NAME AND LINKEDIN ARE NOT BLOCKING. They were, and that was overreach:
+     Kylas accepts a contact called "temp" and a LinkedIn field holding a
+     website, so neither can cause the 400 this gate exists to prevent. Blocking
+     on them meant a record ALREADY IN KYLAS, with a placeholder name somebody
+     else typed, could not be saved at all — the associate could not record the
+     call they had just made until they renamed a stranger's contact.
+
+     The rule: block only what the API would reject. Everything else is advice,
+     and advice belongs next to the field, not across the Save button. */
 
   /* a.stage is a CODE (DISCOVERY_CALL_BOOKED), not a label. Three rules here
      used to match labels against it with regexes and a string equality, so
@@ -1033,6 +1034,21 @@ function missing(){
   }
   return m;
 }
+/* ADVICE, not a gate. Things worth fixing that Kylas would accept anyway, so
+   the save is never held for them — they sit under the footer message in grey
+   and can be clicked to jump to the field, same as a blocker. */
+function advisories(){
+  const a=rec(),out=[];
+  if(a.pocName.trim()){
+    const r=Fields.checkName(a.pocName);
+    if(r.warn)out.push([`Name — ${r.warn}`,"f-poc"]);
+  }
+  if(String(a.linkedin||"").trim()){
+    const r=Fields.checkUrl(a.linkedin,{host:"linkedin.com"});
+    if(r.warn)out.push([`LinkedIn — ${r.warn}`,"f-li"]);
+  }
+  return out;
+}
 const blocks=a=>[...a.past,...a.current].filter(r=>r.eventType);
 const isReq=(a,id)=>missing().some(([,anc])=>anc===id);
 function validate(){
@@ -1051,6 +1067,20 @@ function validate(){
   }
   else if(a.done){msg.textContent="Logged \u2014 nice one.";msg.className="msg";}
   else{msg.textContent="Everything needed is in. Save & next when you're ready.";msg.className="msg";}
+
+  /* Advisories go BELOW, in their own quiet line, and never touch sv.disabled. */
+  document.querySelectorAll(".advice").forEach(n=>n.remove());
+  const adv=advisories();
+  if(adv.length){
+    const w=el("div","advice");
+    w.append("Worth fixing: ");
+    adv.forEach(([lbl,anc],i)=>{
+      if(i)w.append(", ");
+      const b=el("button",null,esc(lbl));b.type="button";b.onclick=()=>jump(anc);
+      w.appendChild(b);
+    });
+    msg.parentNode.insertBefore(w,msg.nextSibling);
+  }
 }
 function jump(anc){
   const t=document.getElementById(anc);if(!t)return;

@@ -565,8 +565,116 @@
       .finally(() => { SNAP.loading = false; onReady(); });
   }
 
+  /* ── the period report ─────────────────────────────────────────────── */
+  /* Month, week, day — the same numbers, cut three ways, because "how are we
+     doing" is a different question at each scale and a single 14-day window
+     answers none of them well.
+
+     Fetched once per (period, owner) and cached, so flipping between Month and
+     Week is instant rather than a round trip each time. */
+  const REP = { data: null, period: "week", owner: "", loading: false, error: "", key: "" };
+
+  function ensureReport(period, owner, onReady) {
+    const key = `${period}|${owner}`;
+    if (REP.key === key && (REP.data || REP.error)) return false;
+    if (REP.loading) return true;
+    REP.loading = true; REP.key = key; REP.period = period; REP.owner = owner;
+    API.report(period, owner)
+      .then((r) => { REP.data = r; REP.error = r?.error || ""; })
+      .catch((e) => { REP.data = null; REP.error = e.message; })
+      .finally(() => { REP.loading = false; onReady(); });
+    return true;
+  }
+
+  const REPORT_METRICS = [
+    { key: "calls", label: "Calls" },
+    { key: "connects", label: "Connected" },
+    { key: "right", label: "Right POC" },
+    { key: "discovery", label: "Discovery" },
+    { key: "booked", label: "SQL booked" },
+    { key: "done", label: "SQL done" },
+    { key: "sql", label: "SQL" },
+  ];
+
+  /* A number on its own motivates nobody. Every figure here carries what it was
+     last period, so the reader is told whether it went up — which is the only
+     part anybody acts on. */
+  const deltaHTML = (n) => {
+    if (n === null || n === undefined) return `<i class="d flat">—</i>`;
+    if (n === 0) return `<i class="d flat">±0</i>`;
+    return `<i class="d ${n > 0 ? "up" : "down"}">${n > 0 ? "▲" : "▼"}${Math.abs(n)}</i>`;
+  };
+
+  function reportSection(period, owner) {
+    const loading = ensureReport(period, owner, () => dashboard(document.getElementById("vwrap")));
+    const r = REP.data;
+
+    const head = `<div class="vhead sm">
+        <h2>Progress</h2>
+        <span class="vsub">${r ? `${esc(r.from)} to ${esc(r.to)}` : "the same numbers by month, week and day"}</span>
+        <span class="vperiod">${["month", "week", "day"].map((p) => `
+          <button type="button" data-period="${p}" aria-pressed="${p === period}">${
+            p[0].toUpperCase() + p.slice(1)}</button>`).join("")}</span>
+      </div>`;
+
+    if (REP.error)
+      return head + `<p class="vwarn">Could not build the report — ${esc(REP.error)}.</p>`;
+    if (loading && !r) return head + `<p class="vnote">Reading the history…</p>`;
+    if (!r || !r.periods.length) return head + `<p class="vnote">No history yet.</p>`;
+
+    /* The headline: this period, against the last one. */
+    const cur = r.current || {}, prev = r.previous;
+    const tiles = REPORT_METRICS.map((m) => `
+      <div class="rtile">
+        <b>${cur[m.key] ?? 0}</b>
+        <span>${esc(m.label)}</span>
+        ${deltaHTML(cur.delta ? cur.delta[m.key] : null)}
+      </div>`).join("");
+
+    /* Best period and streak — the two things that read as encouragement rather
+       than as a ledger. Omitted entirely when there is nothing to celebrate,
+       because a "best: 0" is worse than silence. */
+    const bits = [];
+    if (r.streak > 1) bits.push(`<b>${r.streak}</b> ${period}s in a row with calls logged`);
+    for (const m of ["discovery", "sql"]) {
+      const b = r.best[m];
+      if (b && cur[m] && cur[m] >= b.value)
+        bits.push(`best ${period} yet for <b>${esc(REPORT_METRICS.find((x) => x.key === m).label)}</b>`);
+    }
+    const bestCalls = r.best.calls;
+    if (bestCalls && bestCalls.key !== cur.key)
+      bits.push(`most calls was <b>${bestCalls.value}</b> (${esc(bestCalls.label)})`);
+
+    const rows = [...r.periods].reverse().map((p) => `
+      <tr${p.key === cur.key ? ' class="now"' : ""}>
+        <td>${esc(p.label)}</td>
+        ${REPORT_METRICS.map((m) => `<td>${p[m.key]}${
+          p.delta && p.delta[m.key] !== null && p.delta[m.key] !== 0
+            ? ` ${deltaHTML(p.delta[m.key])}` : ""}</td>`).join("")}
+      </tr>`).join("");
+
+    return head + `
+      <div class="rnow">
+        <div class="rlabel">${esc(cur.label || "")}<em>${
+          prev ? `vs ${esc(prev.label)}` : "no earlier period"}</em></div>
+        <div class="rtiles">${tiles}</div>
+      </div>
+      ${bits.length ? `<p class="rgood">${bits.join(" · ")}</p>` : ""}
+      <div class="vsteps rtable">
+        <table>
+          <thead><tr><th>${period[0].toUpperCase() + period.slice(1)}</th>${
+            REPORT_METRICS.map((m) => `<th>${esc(m.label)}</th>`).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="vnote">Counted from the call log and the stage history, so a month, a week and a
+        day are the same rows cut three ways and always agree. A company is counted on the day it
+        FIRST reached a rung — moving on, or back and forth, never counts twice.</p>`;
+  }
+
   /* ── dashboard ─────────────────────────────────────────────────────── */
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
+  let DASH_PERIOD = "week";
 
   async function dashboard(host) {
     await restore();
@@ -600,6 +708,7 @@
       ${funnelHTML(cos)}
       <div class="vsec">${stepTable(cos, (c) => c.owner)}</div>
       <div class="vsec">${stackedByOwner(cos, (c) => c.owner)}</div>
+      <div class="vsec">${reportSection(DASH_PERIOD, DASH_OWNER === "all" ? "all" : "")}</div>
       <div class="vsec">${trendChart()}</div>`;
 
     const sel = document.getElementById("dOwner");
@@ -607,6 +716,9 @@
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };
     const rf = document.getElementById("dRefresh");
     if (rf) rf.onclick = () => { ensureCompanies(DASH_OWNER, () => dashboard(host), true); dashboard(host); };
+    host.querySelectorAll(".vperiod button").forEach((b) => {
+      b.onclick = () => { DASH_PERIOD = b.dataset.period; dashboard(host); };
+    });
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
   }
@@ -669,7 +781,13 @@
 
   /* A <details> popover: no library, keyboard-reachable, and it closes on the
      next click anywhere via the handler wired after render. */
-  function multiFilter(id, title, options, state, labelOf = (v) => v) {
+  /* `counts` is how many of the CURRENT rows carry each value. Without it the
+     Source filter offered values that no company row had — the account records
+     "source of data" on the contact, not the company — so every choice
+     returned nothing and the filter read as broken. A count next to each option
+     makes that visible before you click, which is what Airtable's own filter
+     menus do, and it turns "this is broken" into "there are none of those". */
+  function multiFilter(id, title, options, state, labelOf = (v) => v, counts = null) {
     const n = state.values.length;
     const summary = !n ? "All"
       : n === 1 ? `${state.mode === "none" ? "not " : ""}${labelOf(state.values[0])}`
@@ -681,9 +799,11 @@
           <button type="button" data-mode="any" aria-pressed="${state.mode === "any"}">is any of</button>
           <button type="button" data-mode="none" aria-pressed="${state.mode === "none"}">is none of</button>
         </div>
-        <div class="mflist">${options.length ? options.map((v) => `
-          <label><input type="checkbox" value="${esc(v)}"${
-            state.values.includes(v) ? " checked" : ""}> ${esc(labelOf(v))}</label>`).join("")
+        <div class="mflist">${options.length ? options.map((v) => {
+          const c = counts ? (counts.get(v) || 0) : null;
+          return `<label${c === 0 ? ' class="mfzero"' : ""}><input type="checkbox" value="${esc(v)}"${
+            state.values.includes(v) ? " checked" : ""}> <span>${esc(labelOf(v))}</span>${
+            c === null ? "" : `<i>${c}</i>`}</label>`; }).join("")
           : `<p class="mfnone">Nothing to filter on yet.</p>`}</div>
         <div class="mffoot"><button type="button" data-clear="1">Clear</button>
           <span>${n} selected</span></div>
@@ -779,7 +899,18 @@
     const union = (defined, present) =>
       [...new Set([...defined.filter(Boolean), ...present.filter(Boolean)])];
 
-    const sources = union(SOURCES, all.map((c) => c.source)).sort();
+    /* How many rows carry each value, for the counts in the popovers. */
+    const countBy = (rows, valuesOf) => {
+      const m = new Map();
+      for (const r of rows) for (const v of valuesOf(r)) m.set(v, (m.get(v) || 0) + 1);
+      return m;
+    };
+    const srcCount = countBy(all, (c) => (c.source ? [c.source] : []));
+    /* Values that exist first, then the rest of the account's list. Scrolling
+       past 40 unused options to reach the one with rows in it is the same
+       problem as not knowing the counts. */
+    const sources = union(SOURCES, all.map((c) => c.source))
+      .sort((a, b) => (srcCount.get(b) || 0) - (srcCount.get(a) || 0) || String(a).localeCompare(String(b)));
     const stages = union(STAGES, all.map((c) => c.stage))
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
 
@@ -835,10 +966,13 @@
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
         </select></label>
-        <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label)}</label>
-        <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label)}</label>
+        <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label,
+          countBy(all, (c) => (c.source ? [c.source] : [])))}</label>
+        <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label,
+          countBy(all, (c) => (c.stage ? [c.stage] : [])))}</label>
         <label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
-          (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k)}</label>
+          (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k,
+          countBy(all, (c) => FUNNEL.filter((f) => c[f.key]).map((f) => f.key)))}</label>
         <label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}

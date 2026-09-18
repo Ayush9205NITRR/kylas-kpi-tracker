@@ -254,7 +254,13 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
  *
  * Airtable is the definition now. This list is the contract between the two. */
 export const KPI_FIELDS = [
-  "Kylas Company ID", "Name", "Owner",
+  /* "Owner" was here and is NOT a field on the Companies table — the company's
+     owner lives in Kylas, not in the KPI store. Airtable rejects a fields[]
+     entry it does not recognise, so ONE wrong name failed the whole read, every
+     KPI fell back to the browser, and the console showed the amber
+     "Airtable unavailable" badge. test-kpi-fields.mjs now checks this list
+     against the schema, so a name that does not exist cannot ship again. */
+  "Kylas Company ID", "Name",
   /* the ladder */
   "KPI Rank", "KPI Stage", "KPI Stage At",
   /* the funnel, one flag each — every one an Airtable formula */
@@ -273,7 +279,20 @@ const flag = (v) => v === 1 || v === true || v === "1";
  * the console can make is the Kylas one — it has never seen an Airtable
  * record id and should not need to. */
 export async function readCompanyKpis(at, { log = () => {} } = {}) {
-  const recs = await at.listAll("Companies", { fields: KPI_FIELDS });
+  /* Asking for named fields is how the dependency stays documented, but one
+     name Airtable does not recognise fails the ENTIRE read — which is how a
+     single stale entry took every KPI off the dashboard. Falling back to "give
+     me everything" costs bandwidth and keeps the numbers on screen, which is
+     the right trade the one time it matters. */
+  let recs;
+  try {
+    recs = await at.listAll("Companies", { fields: KPI_FIELDS });
+  } catch (e) {
+    if (!/UNKNOWN_FIELD_NAME|INVALID_FILTER|422/i.test(e.message)) throw e;
+    log(`! airtable rejected the KPI field list (${e.message.slice(0, 120)})`);
+    log(`  reading every field instead — run scripts/test-kpi-fields.mjs to find the bad name`);
+    recs = await at.listAll("Companies");
+  }
   const byKylasId = new Map();
   let skipped = 0;
   for (const r of recs) {

@@ -19,6 +19,7 @@ import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis } from "./airtable.mjs";
+import { report, withDeltas } from "./report.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
@@ -314,6 +315,52 @@ const routes = {
         + (all ? "" : ` of ${companies.length}`)
         + (kpiSource === "airtable" ? `, ${matched} with Airtable KPIs` : ""));
     return { ...body, companies: out, owner: all ? "all" : String(owner) };
+  },
+
+  /* The same numbers by day, by week or by month.
+     Built from the two append-only tables rather than from Daily Snapshot: a
+     snapshot only exists for days the cron ran and cannot be cut finer than a
+     day, whereas Call Log and Stage Transitions are a complete history from the
+     first save. See scripts/report.mjs. */
+  "/report": async (url) => {
+    if (!airtable) return { error: "Airtable is not configured", periods: [] };
+    const period = ["day", "week", "month"].includes(url.searchParams.get("period"))
+      ? url.searchParams.get("period") : "week";
+    const from = url.searchParams.get("from") || "";
+    const to = url.searchParams.get("to") || "";
+    const owner = url.searchParams.get("owner") || "";
+
+    const [callRows, transRows, contactRows] = await Promise.all([
+      airtable.listAll("Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
+      airtable.listAll("Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
+      /* Right POC and discovery are DATA becoming true, not a stage move, so
+         they have no transition row. The closest honest timestamp is when the
+         contact's rank last rose — the save that filled the fields. */
+      airtable.listAll("Contacts", {
+        fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company"] }),
+    ]);
+
+    const calls = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
+                                         outcome: r.fields.Outcome }));
+    const transitions = transRows.map((r) => ({ at: r.fields["Changed At"], owner: r.fields.Owner,
+                                                to: r.fields["To Stage"],
+                                                company: (r.fields.Contact || [])[0] || "" }));
+    const signals = [];
+    for (const r of contactRows) {
+      const at = r.fields["KPI Rank At"];
+      if (!at) continue;
+      const co = (r.fields.Company || [])[0] || r.id;
+      if (r.fields["Is Right POC"]) signals.push({ at, owner: r.fields.Owner, company: co, metric: "right" });
+      if (r.fields["Is Discovery"]) signals.push({ at, owner: r.fields.Owner, company: co, metric: "discovery" });
+    }
+
+    const pick = (list) => (owner && owner !== "all"
+      ? list.filter((x) => String(x.owner || "") === owner) : list);
+    const out = withDeltas(report(period, { calls: pick(calls), transitions: pick(transitions),
+                                            signals: pick(signals) }, { from, to }));
+    log(`report ${period} ${out.from}..${out.to} — ${out.periods.length} period(s), ` +
+        `${out.totals.calls} call(s)`);
+    return out;
   },
 
   /* The frozen daily numbers, for the trend chart. Read from Airtable, which

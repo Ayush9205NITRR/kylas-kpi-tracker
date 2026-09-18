@@ -72,6 +72,13 @@
     companies: (owner, fresh) => req(
       `/companies?owner=${encodeURIComponent(owner || "")}${fresh ? "&fresh=1" : ""}`,
       { timeout: 60000 }),
+    /* The same numbers by day, week or month, with each period's change on the
+       one before. */
+    report: (period = "week", owner = "", from = "", to = "") => req(
+      `/report?period=${encodeURIComponent(period)}` +
+      (owner ? `&owner=${encodeURIComponent(owner)}` : "") +
+      (from ? `&from=${encodeURIComponent(from)}` : "") +
+      (to ? `&to=${encodeURIComponent(to)}` : ""), { timeout: 30000 }),
     /* Frozen daily rows from Airtable, for the trend chart. */
     snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),

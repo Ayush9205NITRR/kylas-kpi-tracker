@@ -619,3 +619,71 @@ The lesson, again: a checker that reports a difference it cannot justify is
 worse than no checker, because it spends the reader's trust and then their
 afternoon. `test-schema-diff.mjs` now rebuilds the schema's own formulas in id
 form and asserts that **none** of them read as drift.
+
+---
+
+## 10. Period reporting — added 2026-09-18
+
+Ayush: *"a month can be broken down into four weeks, four weeks into a day…
+it should act to the point of motivation rather it should be just a plain or
+dumb data."*
+
+### Where the numbers come from
+
+**The two append-only tables, not Daily Snapshot.**
+
+| | |
+|---|---|
+| `Call Log` | one row per save: `Called At`, `Owner`, `Outcome` |
+| `Stage Transitions` | one row per stage move: `Changed At`, `Owner`, `To Stage` |
+| `Contacts` | `Is Right POC` / `Is Discovery` with `KPI Rank At` — data becoming true has no transition row |
+
+A snapshot only exists for days the cron actually ran, and cannot be cut finer
+than a day. The event tables are a complete history from the first save, so
+**month, week and day are the same rows cut three ways and always agree** — a
+property worth having, because a report that disagrees with itself at two zoom
+levels is worse than no report.
+
+### Two rules that stop the numbers inflating
+
+1. **First arrival only.** A company is counted on the day it *first* reached a
+   rung. Moving on, or moving back and forth while a stage is corrected, never
+   counts twice.
+2. **Floors, not sets.** A company that goes straight to SQL also counted as
+   reaching SQL-meeting-booked, because rank only rises and the floor is what
+   "ever reached" means. Counting it only at SQL would under-report the funnel.
+
+### Weeks start Monday
+
+A BD week is Monday to Friday. A Sunday-start week splits it across two rows and
+makes every weekly comparison wrong by a day.
+
+### The motivating part
+
+A bare count motivates nobody, so every figure carries:
+
+- **its change on the period before** — up in blue, down in amber (never rose;
+  rose marks a required field, and a quiet week is not an error)
+- **the best period so far**, named, and a note when the current one matches it
+- **a streak** of consecutive periods with calls logged
+
+All three are omitted when there is nothing to say. "Best week: 0" is worse than
+silence.
+
+---
+
+## 11. Validation blocks only what the API rejects — corrected 2026-09-18
+
+The save gate refused to save a contact called `temp` with a website in the
+LinkedIn field. Both were **pre-existing Kylas data the associate had not
+typed**, and Kylas accepts both quite happily — so the gate was inventing a
+business rule and spending the associate's save on it. They could not record the
+call they had just made until they renamed a stranger's contact.
+
+The rule now: **block only what the API would reject.** A malformed phone number
+or email blocks, because Kylas answers those with a 400. Everything else —
+placeholder names, digits in a name, a non-LinkedIn URL — is advice, shown in
+grey under the footer, clickable to jump to the field, and never touching the
+Save button.
+
+A warning that looks like an error teaches people to ignore errors.

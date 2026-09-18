@@ -486,3 +486,59 @@ body.framed .ovOnly{display:inline-block}
 .vfilters .vage,.vhead .vage{font-size:var(--t-meta);color:var(--text3);align-self:center}
 .gbtn.sm{padding:6px 12px;font-size:var(--t-meta)}
 .vhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+
+
+/* ── advice, as distinct from a blocker ──────────────────────────────── */
+/* The footer's red "Still needed" line stops a save. This does not, and has to
+   look like it does not: grey, smaller, below. A warning that looks like an
+   error teaches people to ignore errors. */
+/* Option counts in a filter popover. A zero is the useful one: it says the
+   value exists in the account but no row here has it. */
+.mflist label{display:flex;align-items:baseline;gap:8px}
+.mflist label>span{flex:1;min-width:0}
+.mflist label i{font-style:normal;font-size:var(--t-meta);color:var(--text3);
+  font-variant-numeric:tabular-nums;flex:none}
+.mflist label.mfzero{opacity:.5}
+.mflist label.mfzero i{color:var(--text3)}
+
+.advice{flex-basis:100%;order:9;font-size:var(--t-meta);color:var(--text3);
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:4px;margin-top:2px}
+.advice button{background:transparent;border:0;padding:0;cursor:pointer;
+  font:inherit;color:var(--text2);text-decoration:underline dotted;text-underline-offset:3px}
+.advice button:hover{color:var(--blue)}
+
+
+/* ── the period report ───────────────────────────────────────────────── */
+.vperiod{display:inline-flex;gap:4px;margin-left:auto;align-self:center}
+.vperiod button{border:1px solid var(--line2);background:var(--panel);border-radius:8px;
+  padding:5px 13px;font-size:var(--t-meta);font-weight:600;color:var(--text2);cursor:pointer}
+.vperiod button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+
+/* This period, big, with what it was last period beside it. The comparison is
+   the point — a bare count tells nobody whether to be pleased. */
+.rnow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:16px 18px;box-shadow:var(--sh)}
+.rlabel{font-size:var(--t-sec);font-weight:800;letter-spacing:-.024em;flex:none;line-height:1.15}
+.rlabel em{display:block;font-style:normal;font-size:var(--t-meta);font-weight:500;color:var(--text3);
+  letter-spacing:0;margin-top:3px}
+.rtiles{display:flex;gap:10px;flex-wrap:wrap;flex:1;min-width:0}
+.rtile{flex:1 1 92px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  background:var(--panel2);min-width:92px}
+.rtile b{display:block;font-size:var(--t-name);font-weight:800;letter-spacing:-.03em;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.rtile span{display:block;font-size:var(--t-meta);color:var(--text2);margin-top:2px}
+
+/* Up is the accent, down is amber — NOT rose. Rose marks a required field, and
+   a quiet week is not an error. */
+.d{font-style:normal;font-size:var(--t-meta);font-weight:700;font-variant-numeric:tabular-nums}
+.d.up{color:var(--blue)}
+.d.down{color:var(--amber)}
+.d.flat{color:var(--text3);font-weight:500}
+.rtile .d{display:inline-block;margin-top:4px}
+
+.rgood{margin:12px 0 0;font-size:var(--t-label);color:var(--text2)}
+.rgood b{color:var(--blue);font-weight:800}
+.rtable{margin-top:14px}
+.rtable tbody tr.now td{background:var(--blueSoft);font-weight:700}
+.rtable td .d{margin-left:6px}

@@ -160,27 +160,40 @@ function splitName(raw) {
   return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
 }
 
+/* ok = Kylas will accept it. warn = it is a poor name and somebody should fix
+   it, but it is NOT a reason to refuse a save.
+
+   These were blocking once. That meant a contact ALREADY IN KYLAS called
+   "temp", created by somebody else, could not be saved at all — the associate
+   could not record the call they had just made until they renamed a stranger's
+   record. Kylas accepts "temp" quite happily, so the gate was inventing a
+   business rule and spending the save on it. Block only what the API rejects. */
 function checkName(raw) {
   const v = String(raw == null ? "" : raw).trim().replace(/\s+/g, " ");
   if (!v) return { ok: false, why: "a name is required", value: "" };
   if (v.length > 100) return { ok: false, why: "longer than 100 characters", value: v };
   /* Digits in a name are nearly always a phone number pasted into the wrong
      box, which is exactly the mistake that creates a junk contact. */
-  if (/\d/.test(v)) return { ok: false, why: "has digits in it — is that a phone number?", value: v };
+  if (/\d/.test(v))
+    return { ok: true, warn: "has digits in it — is that a phone number?", why: "", value: v };
   if (/^(test|temp|unknown|na|n\/a|-)$/i.test(v))
-    return { ok: false, why: "a placeholder name creates a contact nobody can find later", value: v };
+    return { ok: true, warn: "a placeholder name — nobody will find this contact later",
+             why: "", value: v };
   return { ok: true, why: "", value: v };
 }
 
+/* Same rule. A LinkedIn field holding a company website is untidy, not
+   invalid — Kylas stores whatever string it is given. Only something that is
+   not a web address at all is an error, and even that does not block. */
 function checkUrl(raw, { host = "" } = {}) {
   let v = String(raw == null ? "" : raw).trim();
   if (!v) return { ok: true, why: "", value: "" };
   if (!/^https?:\/\//i.test(v)) v = "https://" + v.replace(/^\/+/, "");
   let u;
-  try { u = new URL(v); } catch { return { ok: false, why: "not a web address", value: v }; }
+  try { u = new URL(v); } catch { return { ok: true, warn: "does not look like a web address", why: "", value: v }; }
   if (u.protocol !== "https:") u.protocol = "https:";
   if (host && !u.hostname.toLowerCase().endsWith(host))
-    return { ok: false, why: "expected a " + host + " address", value: u.href };
+    return { ok: true, warn: "not a " + host + " address", why: "", value: u.href };
   return { ok: true, why: "", value: u.href };
 }
 
@@ -242,11 +255,11 @@ function checkField(name, raw, opts) {
     }
     case "name": {
       const r = checkName(raw);
-      return { ok: r.ok, why: r.ok ? "" : f.label + ": " + r.why, value: r.value };
+      return { ok: r.ok, why: r.ok ? "" : f.label + ": " + r.why, value: r.value, warn: r.warn || "" };
     }
     case "url": {
       const r = checkUrl(raw, { host: f.host });
-      return { ok: r.ok, why: r.ok ? "" : f.label + ": " + r.why, value: r.value };
+      return { ok: r.ok, why: r.ok ? "" : f.label + ": " + r.why, value: r.value, warn: r.warn || "" };
     }
     case "date":
       return isDate(raw) ? { ok: true, why: "", value: String(raw) }
@@ -290,7 +303,8 @@ function checkContact(c, opts) {
   const add = (field, why, blocking) => problems.push({ field: field, why: why, blocking: blocking !== false });
 
   const nm = checkField("pocName", c.pocName);
-  if (!nm.ok) add("pocName", nm.why); else out.pocName = nm.value;
+  if (!nm.ok) add("pocName", nm.why);
+  else { out.pocName = nm.value; if (nm.warn) add("pocName", "Name: " + nm.warn, false); }
 
   for (const key of ["designation", "vendorInfo"]) {
     const r = checkField(key, c[key]);
@@ -299,7 +313,8 @@ function checkContact(c, opts) {
   }
 
   const li = checkField("linkedin", c.linkedin);
-  if (!li.ok) add("linkedin", li.why, false); else out.linkedin = li.value;
+  if (!li.ok) add("linkedin", li.why, false);
+  else { out.linkedin = li.value; if (li.warn) add("linkedin", "LinkedIn: " + li.warn, false); }
 
   /* Phones. At least one has to be dialable or the contact is useless to a
      caller, and every one that is present has to be valid or Kylas rejects the

@@ -8,6 +8,7 @@ import { splitPhone, checkPhone, e164, prettyPhone, checkEmail, checkName,
          checkUrl, splitName, checkContact } from "./fields.mjs";
 
 let pass = 0, fail = 0;
+const ok = (what, cond) => eq(what, !!cond, true);
 const eq = (what, got, want) => {
   const g = JSON.stringify(got), w = JSON.stringify(want);
   if (g === w) { pass++; return; }
@@ -61,8 +62,13 @@ console.log("names");
 eq("two words",  splitName("Nandini Shenoy"), { firstName: "Nandini", lastName: "Shenoy" });
 eq("one word",   splitName("Shenoy"), { firstName: "", lastName: "Shenoy" });
 eq("three",      splitName("Ram Prasad Iyer"), { firstName: "Ram Prasad", lastName: "Iyer" });
-eq("phone in the name box", checkName("8319585041").ok, false);
-eq("Temp is a placeholder", checkName("Temp").ok, false);
+/* NOT blocking. Kylas accepts both, so neither may cost the associate a save —
+   they are advice, carried as `warn`. */
+eq("a phone in the name box is allowed", checkName("8319585041").ok, true);
+ok("but flagged", !!checkName("8319585041").warn);
+eq("Temp is allowed", checkName("Temp").ok, true);
+ok("and flagged as a placeholder", /placeholder/.test(checkName("Temp").warn));
+eq("a real name has no warning", checkName("Nandini Shenoy").warn, undefined);
 eq("real name ok", checkName("  Nandini   Shenoy ").value, "Nandini Shenoy");
 
 console.log("urls");
@@ -70,14 +76,26 @@ eq("bare host gets https", checkUrl("linkedin.com/in/x", { host: "linkedin.com" 
    "https://linkedin.com/in/x");
 eq("http upgraded", checkUrl("http://www.linkedin.com/in/x", { host: "linkedin.com" }).value,
    "https://www.linkedin.com/in/x");
-eq("wrong host", checkUrl("https://example.com/x", { host: "linkedin.com" }).ok, false);
+eq("wrong host is allowed", checkUrl("https://example.com/x", { host: "linkedin.com" }).ok, true);
+ok("but flagged", /not a linkedin.com/.test(checkUrl("https://example.com/x", { host: "linkedin.com" }).warn));
+eq("gibberish is allowed too", checkUrl("not a url at all", { host: "linkedin.com" }).ok, true);
 eq("empty is fine", checkUrl("").ok, true);
 
 console.log("whole contact");
 const bad = checkContact({ pocName: "Temp", phones: [{ value: "+918319585041" }],
                            emails: [{ value: "not an email" }] });
+/* The EMAIL blocks — Kylas rejects it. The placeholder name does not. */
 eq("blocked", bad.ok, false);
-eq("names the fields", bad.problems.map((p) => p.field).sort(), ["emails.0", "pocName"]);
+eq("only the email blocks", bad.problems.filter((p) => p.blocking).map((p) => p.field), ["emails.0"]);
+eq("the name is reported, not blocking",
+   bad.problems.filter((p) => !p.blocking).map((p) => p.field), ["pocName"]);
+
+/* The case from the screenshot: an existing Kylas contact called "temp" with a
+   website in the LinkedIn box. It must SAVE. */
+const temp = checkContact({ pocName: "temp", phones: [{ value: "+918319585041" }],
+                            linkedin: "https://www.corporate-site.com" });
+eq("a pre-existing junk record still saves", temp.ok, true);
+eq("with both things flagged", temp.problems.map((p) => p.blocking), [false, false]);
 eq("phone was still normalised", bad.contact.phones, [{ type: "MOBILE", cc: "+91", value: "8319585041", primary: true }]);
 
 const good = checkContact({ pocName: "Nandini Shenoy", designation: "Hr Business Partner",
