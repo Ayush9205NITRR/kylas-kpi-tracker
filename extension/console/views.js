@@ -318,7 +318,12 @@
          broken. Say which. "check /kpi-debug" said neither: it asked the
          reader to leave the screen, open a terminal and run curl to find out
          what the proxy will answer in one call. Ask it here instead. */
-      ensureWhy(() => dashboard(document.getElementById("vwrap")));
+      /* The CALLER's repaint, not the dashboard's. kpiNote renders in both
+         views, so hard-coding dashboard() here swapped the Companies view for
+         the dashboard the moment the verdict landed — you pressed Companies
+         and a second later were looking at the funnel. Same callback the two
+         views already hand to ensureCompanies. */
+      if (opts?.repaint) ensureWhy(opts.repaint);
       return `<span class="vsrc off" title="Companies join to Airtable on the Kylas company id — see /kpi-debug for both sides in full">${
         WHY.loading ? "no company matched Airtable — finding out why…"
         : WHY.text ? esc(WHY.text)
@@ -406,6 +411,10 @@
     if (!force && fresh) return false;
     /* Nothing held and a previous attempt failed: do not loop. */
     if (!force && CACHE.error && !CACHE.companies.length && CACHE.at) return false;
+
+    /* Refresh means ask again, the verdict included — the usual reason
+       somebody presses it is that they have just fixed what it told them. */
+    if (force) { WHY.asked = false; WHY.text = ""; }
 
     inflight = true;
     CACHE.loading = true;
@@ -792,7 +801,7 @@
         ${API.isAdmin ? "" : `<span class="vrole" title="Set ADMIN_EMAILS in .env.local to see the team">your numbers</span>`}
         <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
-        ${kpiNote(cos, { storeIsPopulation: fromStore.length > 0 })}
+        ${kpiNote(cos, { storeIsPopulation: fromStore.length > 0, repaint: () => dashboard(host) })}
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
       </div>
@@ -1077,7 +1086,7 @@
         >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>
         <span class="vage">${CACHE.at ? esc(ageText())
           : ""}</span>
-        ${kpiNote(all)}
+        ${kpiNote(all, { repaint: () => companies(host) })}
       </div>
       ${chipStrip(rows, all)}
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
