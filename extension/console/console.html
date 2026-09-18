@@ -18,12 +18,16 @@
     <div class="pace"><span>Calls</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span></div>
     <div class="acct" id="acct"></div>
     <div class="sp"></div>
-    <button class="gbtn" id="newBtn">+ New contact</button>
-    <span class="link" id="linkState" title="Checking the proxy…">·</span>
-    <button class="gbtn" id="dashBtn" title="Numbers, and the captured data">Dashboard</button>
-    <span id="logCount" hidden>0</span>
-    <button class="gbtn ovOnly" id="dockBtn" title="Dock to the side">Dock</button>
-    <button class="gbtn ovOnly" id="closeBtn" title="Close (Esc)">Close</button>
+    <!-- One group, so the actions can never wrap away from each other and
+         land on a second row the bar has no height for. -->
+    <div class="acts">
+      <button class="gbtn" id="newBtn">+ New contact</button>
+      <span class="link" id="linkState" title="Checking the proxy…">·</span>
+      <button class="gbtn" id="dashBtn" title="Numbers, and the captured data">Dashboard</button>
+      <span id="logCount" hidden>0</span>
+      <button class="gbtn ovOnly" id="dockBtn" title="Dock to the side">Dock</button>
+      <button class="gbtn ovOnly" id="closeBtn" title="Close (Esc)">Close</button>
+    </div>
   </header>
 
   <div class="callbar"><div class="cbIn" id="callbar"></div></div>
@@ -68,6 +72,7 @@
 </div>
 
 <script src="stages.js"></script>
+<script src="fields.js"></script>
 <script src="store.js"></script>
 <script src="api.js"></script>
 <script src="console.js"></script>

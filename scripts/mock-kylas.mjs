@@ -220,8 +220,23 @@ createServer(async (req, res) => {
   }
 
   /* ── writes ──────────────────────────────────────────────────────── */
+  /* Kylas validates phone numbers and says almost nothing about why:
+       400 {"code":"002008","message":"Invalid Mobile Number.","errorDetails":[]}
+     It rejects a `value` that carries its own country code, which is what
+     happens when a pasted "+918319585041" is written straight back beside
+     dialCode "+91". Reproduced here so the fix cannot silently regress —
+     without it this mock accepts a body the real API refuses. */
+  const badPhone = (body) => (body.phoneNumbers || []).some((ph) => {
+    const v = String(ph?.value ?? "");
+    if (/[^\d]/.test(v)) return true;                      /* +, spaces, dashes */
+    if (String(ph?.dialCode || "+91") === "+91" && v.length !== 10) return true;
+    return false;
+  });
+
   if (p === "/v1/contacts" && req.method === "POST") {
     const body = JSON.parse(await text(req));
+    if (badPhone(body))
+      return json(res, 400, { code: "002008", message: "Invalid Mobile Number.", errorDetails: [] });
     const made = { id: nextId++, ...body, createdAt: new Date().toISOString() };
     CONTACTS.push(made);
     WRITES.push({ kind: "create", id: made.id, body });
@@ -231,6 +246,8 @@ createServer(async (req, res) => {
   const put = p.match(/^\/v1\/contacts\/(\d+)$/);
   if (put && req.method === "PUT") {
     const body = JSON.parse(await text(req));
+    if (badPhone(body))
+      return json(res, 400, { code: "002008", message: "Invalid Mobile Number.", errorDetails: [] });
     const at = CONTACTS.findIndex((c) => String(c.id) === put[1]);
     if (at < 0) return json(res, 404, { message: "no such contact" });
     CONTACTS[at] = { ...CONTACTS[at], ...body, updatedAt: new Date().toISOString() };

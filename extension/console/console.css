@@ -56,8 +56,15 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .app{height:100%;display:grid;grid-template-rows:auto auto 1fr auto;min-height:0}
 
 /* ── top bar ───────────────────────────────── */
+/* NO WRAP. With flex-wrap:wrap the buttons dropped onto a second row as soon
+   as a company name was long enough, and the bar's height did not follow —
+   "Close" ended up sitting on top of the callbar's top border. The bar is one
+   line now: the actions never shrink, and what is merely informative (pace,
+   KPI tiles) gives up its width first and is hidden outright when narrow. */
 .bar{background:var(--panel);border-bottom:1px solid var(--line);padding:0 22px;
-  padding-top:env(safe-area-inset-top,0px);display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-height:62px}
+  padding-top:env(safe-area-inset-top,0px);display:flex;align-items:center;gap:14px;
+  flex-wrap:nowrap;min-height:62px;overflow:hidden}
+.bar .acts{display:flex;align-items:center;gap:10px;flex:none}
 .bar .id{display:flex;align-items:center;gap:11px;flex:none}
 .bar .g{width:33px;height:33px;border-radius:9px;background:var(--blue);color:var(--onBlue);
   display:grid;place-items:center;font-weight:700;font-size:13px}
@@ -65,10 +72,12 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .bar .sp{flex:1}
 .pace{display:flex;align-items:center;gap:10px;font-size:var(--t-label);color:var(--text2);flex:none}
 .pace b{font-size:19px;color:var(--text);font-weight:700}
-.acct{display:flex;align-items:center;gap:11px;flex:none;min-width:0}
+/* Shrinks before the buttons do, and its contents clip rather than push. */
+.acct{display:flex;align-items:center;gap:11px;flex:0 1 auto;min-width:0;overflow:hidden}
+.bar h1{white-space:nowrap}
 .acct .scope{font-size:15px;font-weight:700;color:var(--text2);flex:none;
   border-left:2px solid var(--line2);padding-left:13px;margin-left:2px}
-.acct .tiles{display:flex;gap:8px;flex-wrap:wrap}
+.acct .tiles{display:flex;gap:8px;flex-wrap:nowrap;overflow:hidden}
 .acct .of{font-size:14px;color:var(--text3);font-weight:600;flex:none}
 .kpi{display:inline-flex;align-items:baseline;gap:8px;border:1.5px solid var(--line);border-radius:9px;
   padding:6px 13px;background:var(--panel2);font-size:14px;font-weight:700;
@@ -76,6 +85,7 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .kpi b{font-size:19px;font-weight:800;letter-spacing:-.02em;text-transform:none}
 .kpi.hit{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
 @media(max-width:1280px){.acct .of,.acct .scope{display:none}}
+@media(max-width:1180px){.pace{display:none}}
 @media(max-width:980px){.acct{display:none}}
 .meter{width:96px;height:7px;border-radius:4px;background:var(--panel3);overflow:hidden}
 .meter i{display:block;height:100%;background:var(--blue);border-radius:4px;transition:width .3s}
@@ -122,15 +132,26 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .oc:hover{border-color:var(--blue)}
 .oc[aria-pressed="true"]{border-color:var(--blue);background:var(--blue);color:var(--onBlue);font-weight:700}
 .oc[aria-pressed="true"] kbd{background:rgba(255,255,255,.2);border-color:transparent;color:inherit}
-.cbmeta{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:center;
-  gap:7px 16px;font-size:15px;color:var(--text3);font-weight:500;
-  border-left:1px solid var(--line);padding-left:18px;line-height:1.35}
-.cbmeta span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* LABEL ABOVE VALUE, not beside it. The <em> label had no margin of its own,
+   so it ran straight into the value — "Emailnandini.shenoy@jsw.in",
+   "ID5375405" — and at a glance the label read as part of the address. Each
+   item is now a two-line stack: a small grey caption over the value, in its own
+   column, with a rule between items instead of a guessed gap. */
+.cbmeta{flex:1 1 auto;min-width:0;display:flex;flex-wrap:nowrap;align-items:stretch;
+  gap:0;font-size:15px;color:var(--text3);font-weight:500;
+  border-left:1px solid var(--line);line-height:1.3;overflow:hidden}
+.cbmeta .mi{display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0;
+  padding:2px 18px;border-right:1px solid var(--line)}
+.cbmeta .mi:last-child{border-right:0}
+.cbmeta .mi em{font-style:normal;font-size:13px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--text3)}
+.cbmeta .mi>span,.cbmeta .mi{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .cbmeta .mail{color:var(--text2)}
+.cbmeta .mail .sel{font-weight:600}
 .cbmeta .due{color:var(--blue);font-weight:700}
-.cbmeta .kid{font-size:14px;letter-spacing:.02em}
+.cbmeta .kid{font-size:14px;letter-spacing:.02em;font-variant-numeric:tabular-nums}
 @media(max-width:1240px){.cbmeta .kid{display:none}}
-@media(max-width:1080px){.cbmeta{border-left:0;padding-left:0;flex-basis:100%}}
+@media(max-width:1080px){.cbmeta{border-left:0;flex-basis:100%}.cbmeta .mi:first-child{padding-left:0}}
 .nextbtn{flex:none;margin-left:auto}
 @media(max-width:860px){.who{flex:1 1 100%}.ocs{order:5}.nextbtn{flex:1 1 100%}.nextbtn button{width:100%}}
 
@@ -148,6 +169,9 @@ kbd{font-family:var(--f);font-size:13px;font-weight:700;border:1px solid var(--l
 .qf{flex:1;border:1.5px solid var(--line2);background:var(--panel);border-radius:9px;padding:10px 4px;
   font-size:15px;font-weight:700;color:var(--text2)}
 .qf[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+/* The count is the explanation. */
+.qf i{font-style:normal;font-weight:800;color:var(--text3);font-variant-numeric:tabular-nums}
+.qf[aria-pressed="true"] i{color:var(--onBlue);opacity:.75}
 .qlist{list-style:none;margin:0;padding:12px}
 .qi{width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);
   border-left:6px solid var(--line2);border-radius:12px;padding:16px 18px;

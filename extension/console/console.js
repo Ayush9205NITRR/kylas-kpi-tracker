@@ -282,7 +282,10 @@ function quickField(label,id,val,ph,on,chips){
 function renderCallbar(){
   const a=rec(),C=document.getElementById("callbar");C.innerHTML="";
   const ph=a.phones.find(p=>p.primary)||a.phones[0];
-  const num=ph?(ph.cc+" "+ph.value).trim():"";
+  /* Read it the way a person reads a number, dial it the way a dialler wants
+     it. One source for both, shared with the writers (fields.js). */
+  const num=ph?Fields.prettyPhone(ph):"";
+  const dialNum=ph?Fields.e164(ph):"";
 
   const q=qualOf(a);
   /* Company ABOVE the person, on its own line. An associate 80 calls into a
@@ -307,7 +310,7 @@ function renderCallbar(){
   link.type="button";
   link.setAttribute("aria-label",num?"Call "+a.pocName+" on "+num:"No number on file");
   link.onclick=e=>{
-    if(!num){toast("No number on file for "+a.pocName);return;}
+    if(!dialNum){toast("No number on file for "+a.pocName);return;}
     /* Never follow the tel: href. From inside the iframe that goes to the OS,
        and on a Mac with no softphone registered nothing happens at all — which
        is exactly the dead click Ayush reported. Kylas' dialler is a control in
@@ -316,8 +319,8 @@ function renderCallbar(){
        clipboard. */
     link.classList.add("calling");
     setTimeout(()=>link.classList.remove("calling"),2600);
-    if(typeof requestDial==="function")requestDial(num);
-    else copyNumber(num);
+    if(typeof requestDial==="function")requestDial(dialNum);
+    else copyNumber(dialNum);
   };
   d.appendChild(link);C.appendChild(d);
 
@@ -335,9 +338,9 @@ function renderCallbar(){
      failure mode as tel:, handing off to whatever the OS registered. Still
      selectable, so it can be copied. Revisit when templates exist. */
   if(em)bits.push(`<span class="mi mail"><em>Email</em><span class="sel">${esc(em)}</span></span>`);
-  if(a.nextCallDate)bits.push(`<span class="mi due"><em>Call back</em>${esc(fmtD(a.nextCallDate))}${
-    a.nextCallTime?" · "+esc(a.nextCallTime):""}</span>`);
-  bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em>${esc(a.kid||"unsaved")}</span>`);
+  if(a.nextCallDate)bits.push(`<span class="mi due"><em>Call back</em><span>${esc(fmtD(a.nextCallDate))}${
+    a.nextCallTime?" · "+esc(a.nextCallTime):""}</span></span>`);
+  bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
   const nb=el("div","nextbtn");
@@ -385,9 +388,24 @@ function setOutcome(o){
 const FILTERS=[["todo","To call"],["flag","Flagged"],["all","All"]];
 function renderFilters(){
   const w=document.getElementById("qfil");w.innerHTML="";
+  /* These three narrow the COMPANY roster. In Today mode they have no effect at
+     all — visible() ignores them, because "what is left to do" means nothing
+     over a list of calls already made — so three buttons sat there looking
+     live and doing nothing. Hidden where they do nothing, and carrying their
+     count where they do, so "To call" and "Flagged" explain themselves instead
+     of needing to be tried. */
+  if(mode==="session"||!scope){w.hidden=true;return;}
+  w.hidden=false;
+  const roster=DATA.filter(a=>String(a.companyId)===String(scope.id));
+  const n={todo:roster.filter(a=>!a.done).length,
+           flag:roster.filter(a=>a.flagged).length,
+           all:roster.length};
   FILTERS.forEach(([k,l])=>{
-    const b=el("button","qf",l);b.type="button";
+    const b=el("button","qf",`${l} <i>${n[k]}</i>`);b.type="button";
     b.setAttribute("aria-pressed",filter===k?"true":"false");
+    b.title=k==="todo"?"Contacts at this company not yet logged today"
+      :k==="flag"?"Contacts you flagged for end-of-day cleanup"
+      :"Every contact at this company";
     b.onclick=()=>{filter=k;renderFilters();renderQueue();};
     w.appendChild(b);
   });
@@ -414,7 +432,10 @@ const byRecentCall=(x,y)=>String(y.a.lastCallAt||"").localeCompare(String(x.a.la
 function visible(){
   const q=(document.getElementById("q").value||"").toLowerCase();
   const rows=DATA.map((a,i)=>({a,i}))
-    .filter(({a})=>mode==="session"?calledToday(a):(!scope||String(a.companyId)===String(scope.id)))
+    /* The record you are ON is always in the list. Today is a log of calls
+       made, and a contact opened from its Kylas page has not been called yet —
+       without this it would be missing from the very list it is selected in. */
+    .filter(({a,i})=>mode==="session"?(calledToday(a)||i===cur):(!scope||String(a.companyId)===String(scope.id)))
     .filter(({a})=>!q||(a.pocName+" "+a.company+" "+a.phones.map(p=>p.value).join(" ")).toLowerCase().includes(q))
     /* Done/flagged narrowing is about what is left to do, so it has no meaning
        over a list of calls already made. */
@@ -422,7 +443,7 @@ function visible(){
   return mode==="session"?rows.sort(byRecentCall):rows;
 }
 function renderQueue(){
-  renderMode();renderScope();
+  renderMode();renderScope();renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
   if(!rows.length){L.appendChild(el("li","qempty","Nothing here right now."));return;}
@@ -564,7 +585,7 @@ function contactField(a,kind){
     b.type="button";b.tabIndex=-1;b.title="Call this number";
     b.disabled=!String(e.value||"").trim();
     b.onclick=()=>{
-      const num=((e.cc||"")+String(e.value||"")).replace(/\s/g,"");
+      const num=Fields.e164(e);
       if(!num)return;
       startTimer("dial");
       /* Same route as the big button in the call bar. This one still did
@@ -588,8 +609,14 @@ function contactField(a,kind){
        is it doubles against the code beside it and the tel: link dials
        nothing. Tidy on blur rather than mid-keystroke. */
     if(isPh)i.onblur=v=>{
-      const t=localPart(v.target.value,e.cc);
-      if(t!==v.target.value){v.target.value=t;e.value=t;renderCallbar();validate();persist();}
+      const sp=Fields.splitPhone(v.target.value,e.cc);
+      if(!sp.value)return;
+      /* The country code moves to the box that is FOR the country code. A
+         number pasted as +918319585041 used to stay whole in this field and go
+         to Kylas as dialCode "+91" plus value "+918319585041" — the 400. */
+      if(sp.cc&&sp.cc!==e.cc){e.cc=sp.cc;const c=v.target.closest(".entry")?.querySelector(".cc");if(c)c.value=sp.cc;}
+      if(sp.value!==v.target.value){v.target.value=sp.value;e.value=sp.value;}
+      renderCallbar();validate();persist();
     };
     return i;
   };
@@ -667,16 +694,10 @@ function companyField(a){
   return f;
 }
 
-/* Strip a leading +cc, bare cc or trunk 0 so the field holds the local number
-   the country code beside it expects. */
-function localPart(v,cc){
-  let t=String(v||"").trim().replace(/[^\d+]/g,"");
-  const code=String(cc||"").replace(/\D/g,"");
-  if(t.startsWith("+"))t=t.slice(1);
-  if(code&&t.length>code.length&&t.startsWith(code))t=t.slice(code.length);
-  t=t.replace(/^0+/,"");
-  return t||String(v||"").trim();
-}
+/* localPart() used to live here — a second, weaker splitPhone with a bug of its
+   own (it stripped EVERY leading zero, and a bare "91" prefix, so a real
+   10-digit number starting 91 lost two digits). There is one implementation
+   now, in fields.js, shared with the proxy and the writers. */
 
 /* ── duplicates ──────────────────────────── */
 /* Three associates working shared lists will re-add the same person. Compare on
@@ -959,6 +980,32 @@ function missing(){
   need(!a.phones.some(p=>p.value.trim()),"Phone number","f-poc");
   need(!a.owner,"Owner","f-ow");
 
+  /* VALUES KYLAS WILL REJECT, caught here rather than as a 400 after the save.
+     Kylas answers a malformed phone number with
+     `002008 Invalid Mobile Number` — no field, no rule — and the whole save is
+     lost with it. The same rules run in the proxy (fields.js is generated for
+     both), so this is the version that can point at the offending box.
+     Reported with the real reason, not a generic "invalid": "9 digits after
+     +91, needs 10 digits" is fixable, "invalid phone" is not. */
+  a.phones.forEach(p=>{
+    if(!String(p.value||"").trim())return;
+    const r=Fields.checkPhone(p.value,{cc:p.cc,type:p.type});
+    if(!r.ok)need(true,`Phone ${String(p.value).trim()} — ${r.why}`,"f-ph");
+  });
+  a.emails.forEach(e=>{
+    if(!String(e.value||"").trim())return;
+    const r=Fields.checkEmail(e.value);
+    if(!r.ok)need(true,`Email ${String(e.value).trim()} — ${r.why}`,"f-em");
+  });
+  if(a.pocName.trim()){
+    const r=Fields.checkName(a.pocName);
+    if(!r.ok)need(true,`Name — ${r.why}`,"f-poc");
+  }
+  if(String(a.linkedin||"").trim()){
+    const r=Fields.checkUrl(a.linkedin,{host:"linkedin.com"});
+    if(!r.ok)need(true,`LinkedIn — ${r.why}`,"f-li");
+  }
+
   /* a.stage is a CODE (DISCOVERY_CALL_BOOKED), not a label. Three rules here
      used to match labels against it with regexes and a string equality, so
      none of them ever fired and nothing was actually being enforced. */
@@ -1155,7 +1202,15 @@ async function syncToKylas(a,call){
     a.syncError=res.error||"not sent";
   }
   persist();renderQueue();
-  if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
+  /* THREE outcomes, not two. A rejected VALUE is not an outage: telling the
+     associate it is "queued" is a lie that never resolves, because every retry
+     earns the same rejection. Name the field and say it is not queued. */
+  if(res.rejected){
+    const why=(res.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||res.error;
+    a.syncError="rejected: "+why;
+    toast(`${a.pocName} NOT saved to Kylas — ${why}`,()=>{cur=DATA.indexOf(a);render();jump("f-ph");});
+  }
+  else if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
   else if(res.created)toast(`${a.pocName} created in Kylas`);
 }
 

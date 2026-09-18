@@ -391,3 +391,67 @@ Two general rules fall out, both learned the hard way here:
    wrong".
 2. Field casing matters: Kylas stores email and phone types uppercase
    (`OFFICE`, `MOBILE`), so a title-case list never matches.
+
+---
+
+## 12. Field validation — what Kylas will and will not accept
+
+Added 2026-09-18 after `POST /v1/contacts` and `PUT /v1/contacts/6129324` both
+came back with:
+
+```
+400 {"code":"002008","message":"Invalid Mobile Number.","errorDetails":[]}
+```
+
+The number in question was `+918319585041`. Kylas' own UI displayed it exactly
+like that, so the country code was sitting inside `phoneNumbers[].value`.
+
+**The rule.** `value` is the NATIONAL number; the country lives in `dialCode`
+(and `code`, the ISO pair). `{ dialCode: "+91", value: "+918319585041" }` is the
+country code twice and is refused. Because the console wrote back whatever the
+field held, a contact created once that way could never be updated again — the
+same 400 on every PUT, for the life of the record.
+
+**The error tells you nothing.** No field name, no rule, no `errorDetails`. An
+associate 140 calls into a day cannot act on it, and the save is lost behind it.
+So the rules now run BEFORE the write, in one place — `scripts/gen-fields.mjs`,
+generated into `scripts/fields.mjs` and `extension/console/fields.js` so the
+browser and the writers cannot drift.
+
+### Permissible entries, per field
+
+| Field | Type | Accepted | Rejected |
+|---|---|---|---|
+| Phone | `{type, code, dialCode, value, primary}` | national digits only in `value`; +91 → exactly 10, starting 6-9 for `MOBILE`, 2-9 for `WORK`/`HOME` | a `+`, spaces, a trunk `0`, a repeated country code, 9 or 11 digits |
+| Email | `{type, value, primary}` | one `@`, a dotted domain, a 2+ char TLD; stored lowercase | spaces, two `@`, no domain dot, a leading/trailing dot |
+| Name | `firstName` + `lastName` | split on the LAST space; one word becomes `lastName` (Kylas requires it) | digits (a phone pasted into the name box), `Test`/`Temp`/`NA`/`-` |
+| LinkedIn | `linkedin` | any linkedin.com URL, `https` forced | another host |
+| Designation, vendor info | text | ≤255 / ≤1000 chars | longer (truncated, reported, not blocking) |
+| Stage, Source, Salutation, Mode | picklist **value id** | a value this account actually offers | anything else — reported, never dropped (see §11) |
+| Next call date / time | `YYYY-MM-DD` / `HH:MM` | — | any other shape |
+| Budget, timeline, pax, remarks | free text | **everything**, exactly as said | nothing. Never validate these — CLAUDE.md non-negotiable 2 |
+
+**Blocking vs reported.** A value Kylas would refuse, or one that makes the
+record unfindable, blocks the save and is named on the field. A stale picklist
+value or an over-long designation is reported and written anyway: it is our
+list that is wrong, not their data.
+
+**Where it runs.** The console gates the save (`missing()`) so the error appears
+on the box; `/save` re-checks and answers **422 with a `problems[]` list**, for
+an older extension or a queued outbox job. A 4xx never enters the outbox —
+retrying a rejected value forever is not an outage, and it blocks every save
+queued behind it.
+
+`scripts/mock-kylas.mjs` now reproduces the 400 for any `value` that is not
+bare national digits, so this cannot regress silently. `scripts/test-fields.mjs`
+holds the cases.
+
+### 12a. A server-side filter needs something to filter by
+
+Found while testing the above. Three of the five `/v1/search/company` shapes
+filter server-side on `ownerId`. Asked for *everyone* (the team view), `ownerId`
+is `null` and those shapes sent a rule asking for owner "null" — an empty page,
+so the Everyone view showed nothing. Masked on this account only because those
+three shapes 500 here anyway; the day Kylas fixes that endpoint the team
+dashboard would have gone blank. The filtering shapes are now skipped entirely
+when there is no owner.

@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
+import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact } from "./airtable.mjs";
 
 const KEY = process.env.KYLAS_KEY;
@@ -290,8 +291,28 @@ const routes = {
      the record first, then its call log. */
   "/save": async (url, req) => {
     const body = JSON.parse(await readBody(req));
-    const c = body.contact;
-    if (!c) throw Object.assign(new Error("contact is required"), { status: 400 });
+    const raw = body.contact;
+    if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
+
+    /* VALIDATE BEFORE WRITING. Kylas answers a bad field with a 400 that names
+       neither the field nor the rule, and the associate loses the whole save
+       over it. The same rules run in the console, so this is the backstop for
+       an older extension or a queued outbox job, not the first line of
+       defence. A 422 carries the field list back; the console shows it.
+
+       An existing contact may legitimately have no phone number on it — the
+       rule is there to stop a NEW one being created uncallable. */
+    const gate = checkContact(raw, { allowNoPhone: !!raw.kid });
+    if (!gate.ok) {
+      log(`! /save rejected ${raw.pocName || raw.kid}: ` +
+          gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; "));
+      throw Object.assign(new Error(gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; ")),
+                          { status: 422, problems: gate.problems });
+    }
+    /* Write the NORMALISED copy: split phone numbers, lowercased emails, the
+       name already split the way Kylas wants it. */
+    const c = gate.contact;
+    if (gate.problems.length) log(`  /save note: ${gate.problems.map((p) => p.why).join("; ")}`);
 
     /* The block is for a human reading the record, so use the name they know. */
     const stageLabel = STAGE_LABEL[c.stage] || c.stage || "";
@@ -382,7 +403,7 @@ const server = createServer(async (req, res) => {
     const status = e.status || 502;
     log(`! ${url.pathname} ${status} ${e.message}`);
     res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: e.message }));
+    res.end(JSON.stringify({ error: e.message, problems: e.problems }));
   }
 });
 

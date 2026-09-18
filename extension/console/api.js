@@ -23,7 +23,12 @@
       /* Deliberately not named `body` — that is the request payload above, and
          shadowing it here throws before the fetch ever runs. */
       const payload = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(payload?.error || `proxy returned ${res.status}`);
+      if (!res.ok) {
+        const err = new Error(payload?.error || `proxy returned ${res.status}`);
+        err.status = res.status;
+        err.problems = payload?.problems || null;
+        throw err;
+      }
       if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
       return payload;
     } catch (e) {
@@ -86,6 +91,11 @@
       const res = await API.save(contact, call);
       return { ok: true, ...res };
     } catch (e) {
+      /* The outbox is for an outage, not for a value Kylas will never accept.
+         A 4xx is a verdict on the data — queueing it means retrying the same
+         rejection forever and hiding the one thing the associate could fix. */
+      if (e.status >= 400 && e.status < 500)
+        return { ok: false, queued: false, rejected: true, error: e.message, problems: e.problems };
       const box = await Store.getSetting("outbox") || [];
       box.push(job);
       await Store.setSetting("outbox", box);
@@ -108,7 +118,16 @@
           box.shift();
           sent++;
           onEach?.(job, res);
-        } catch {
+        } catch (e) {
+          /* Same verdict as above: a rejected value blocks the whole queue
+             behind it, so drop it and tell the caller why rather than
+             retrying it on every save for the rest of the day. */
+          if (e.status >= 400 && e.status < 500) {
+            box.shift();
+            onEach?.(job, { ok: false, rejected: true, error: e.message, problems: e.problems });
+            await Store.setSetting("outbox", box);
+            continue;
+          }
           job.tries = (job.tries || 0) + 1;
           break;              /* still down — stop, keep the rest queued */
         }

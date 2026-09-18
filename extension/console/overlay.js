@@ -45,8 +45,14 @@
       if (i >= 0) {
         cur = i; isNew = false;
         const a = DATA[i];
+        /* ONE CONTACT, not their whole company. Opening a contact page used to
+           flip the queue into company mode, so clicking one person put their
+           four colleagues on screen and the record you asked for was merely
+           the selected row. The company is still remembered — the call bar
+           shows it, and the Company tab is one click away — but the console
+           opens on the contact you clicked. */
         scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
-        if (scope) mode = "company";
+        mode = "session";
         renderFilters();
       } else {
         DATA = [Object.assign(blank(), { kid: String(m.kylasId) }), ...DATA];

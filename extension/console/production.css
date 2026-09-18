@@ -147,7 +147,14 @@ body.framed .ovOnly{display:inline-block}
 
 /* ── the report views on /sales/home and /sales/companies/list ───────── */
 .viewport{position:absolute;inset:0;background:var(--ground);overflow-y:auto;z-index:20}
-.vwrap{max-width:1120px;margin:0 auto;padding:26px 22px 44px}
+/* TABULAR FIGURES EVERYWHERE IN A REPORT. Plus Jakarta Sans ships
+   proportional digits by default, so a 1 is narrower than a 7 and a column of
+   percentages shifts left and right down the page. Reading down a column is the
+   whole point of a benchmark table, so the digits are fixed-width for the
+   entire view rather than per cell — which is also how the per-cell rules below
+   stopped being enough. */
+.vwrap{max-width:1120px;margin:0 auto;padding:26px 22px 44px;
+  font-variant-numeric:tabular-nums}
 .vhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 18px;flex-wrap:wrap}
 .vhead.sm{margin-top:34px}
 .vhead h2{font-size:var(--t-name);font-weight:800;letter-spacing:-.028em}
@@ -167,19 +174,41 @@ body.framed .ovOnly{display:inline-block}
   border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
   padding:10px 11px;font-size:var(--t-label);font-weight:500;min-width:170px;
 }
-.vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh)}
+/* overflow:clip, NOT hidden. `hidden` makes this element the nearest
+   scrollport, and a sticky header inside a scrollport that cannot scroll never
+   moves — it would sit at the top of the table and scroll away with it. `clip`
+   still rounds the corners but creates no scrollport, so the header sticks to
+   #viewport instead. */
+.vtable{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  overflow:clip;box-shadow:var(--sh)}
 .vr{
-  display:grid;grid-template-columns:1.7fr 1.2fr .5fr 1.3fr 1.3fr .9fr 1fr .7fr;
-  gap:12px;padding:14px 17px;border-bottom:1px solid var(--line);align-items:center;
+  /* Widths follow what the cells actually hold: a company name and an
+     associate's full name need room, a POC count and a batch tag do not. An
+     even split truncated "Enout Super Admin" while Right POC sat empty. */
+  display:grid;grid-template-columns:1.9fr 1.15fr .42fr 1.1fr 1.1fr .8fr 1.3fr .55fr;
+  gap:14px;padding:11px 17px;border-bottom:1px solid var(--line);align-items:center;
   font-size:var(--t-label);cursor:pointer;
 }
 .vr:last-child{border-bottom:0}
 .vr:not(.vh):hover{background:var(--panel2)}
-.vr.vh{background:var(--panel2);cursor:default;font-size:var(--t-meta);color:var(--text3);font-weight:700}
+/* STICKY. At 250 rows the column you are reading is off screen by the time you
+   have scrolled to the row you care about, and every cell becomes a guess. */
+.vr.vh{position:sticky;top:0;z-index:3;
+  background:var(--panel2);cursor:default;font-size:var(--t-meta);color:var(--text3);font-weight:700;
+  text-transform:uppercase;letter-spacing:.04em;
+  box-shadow:0 1px 0 var(--line2)}
 .vr .c1 b{display:block;font-size:var(--t-body);font-weight:700}
 .vr .c1 em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+/* Colour marks a VALUE, never its absence. The em-dash placeholder was being
+   painted violet and blue along with the names, so an empty Right POC cell
+   read at a glance exactly like a filled one. */
 .vr .c4{color:var(--slate)}
 .vr .c5{color:var(--blue)}
+.vr .c4.no,.vr .c5.no,.vr .c6.no,.vr .c7.no,.vr .c9.no{color:var(--text3)}
+/* One line per cell. "Enout Super Admin" wrapping to two lines made every
+   other row 80px tall and the column edges ragged. */
+.vr>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.vr .c1 b,.vr .c1 em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Dates wear the same family as every other cell; tabular figures keep
    them aligned without switching typeface mid-row. */
 .vr .c6{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
@@ -378,7 +407,10 @@ body.framed .ovOnly{display:inline-block}
 .vsec:empty{display:none}
 
 /* Step conversion — the benchmark table. */
-.vsteps{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.vsteps{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:clip}
+/* Same reason as the companies table: the header has to survive the scroll. */
+.vsteps thead th,.vtbl thead th{position:sticky;top:0;z-index:2;background:var(--panel2);
+  box-shadow:0 1px 0 var(--line2)}
 .vsteps table{border-collapse:collapse;width:100%;font-size:var(--t-label)}
 .vsteps th,.vsteps td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line)}
 .vsteps thead th{font-size:var(--t-meta);font-weight:600;color:var(--text3);

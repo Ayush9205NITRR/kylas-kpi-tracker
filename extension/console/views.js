@@ -652,11 +652,15 @@
             <span class="c1"><b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
             <span class="c2">${esc(label(c.stage) || "—")}</span>
             <span class="c3">${c.contacts.length}</span>
-            <span class="c4">${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
-            <span class="c5">${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
-            <span class="c6">${day(c.lastCalledAt)}</span>
-            <span class="c7">${esc(c.owner || "—")}</span>
-            <span class="c9">${esc(c.batch || "—")}</span>
+            <span class="c4${c.pocs.right.length ? "" : " no"}"${
+              c.pocs.right.length > 1 ? ` title="${esc(c.pocs.right.join(", "))}"` : ""
+            }>${c.pocs.right.length ? esc(c.pocs.right.join(", ")) : "—"}</span>
+            <span class="c5${c.pocs.discovery.length ? "" : " no"}"${
+              c.pocs.discovery.length > 1 ? ` title="${esc(c.pocs.discovery.join(", "))}"` : ""
+            }>${c.pocs.discovery.length ? esc(c.pocs.discovery.join(", ")) : "—"}</span>
+            <span class="c6${c.lastCalledAt ? "" : " no"}">${day(c.lastCalledAt)}</span>
+            <span class="c7${c.owner ? "" : " no"}" title="${esc(c.owner || "")}">${esc(c.owner || "—")}</span>
+            <span class="c9${c.batch ? "" : " no"}">${esc(c.batch || "—")}</span>
           </div>`;
 
     host.innerHTML = `
@@ -685,7 +689,7 @@
         <div class="vr vh">
           <span class="c1">Company</span><span class="c2">Stage</span>
           <span class="c3">POCs</span><span class="c4">Right POC</span>
-          <span class="c5">Discovery</span><span class="c6">Last called</span>
+          <span class="c5">Discovery</span><span class="c6">Last call</span>
           <span class="c7">Allotted to</span><span class="c9">Batch</span>
         </div>
         <!-- rows painted by paint(), so the window applies to the first

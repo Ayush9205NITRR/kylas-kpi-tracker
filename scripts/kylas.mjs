@@ -1,6 +1,7 @@
 /* Kylas client: queueing, retries, and the mapping between their record shapes
    and the console's. Shared by the proxy and any script that needs it. */
 import { STAGE_ID } from "./stages.mjs";
+import { splitPhone, ISO_OF, checkEmail, splitName, e164 } from "./fields.mjs";
 
 const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
 /* Kylas throttles hard — a burst of 8 drew three 429s and even sequential calls
@@ -126,9 +127,16 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
        is a shortcut, never a commitment, so a stale hint (a different account,
        or Kylas fixing the endpoint) costs one failed call rather than the whole
        view. */
-    const tries = companyShape
-      ? [companyShape, ...COMPANY_SHAPES.filter((s) => s !== companyShape)]
-      : COMPANY_SHAPES;
+    /* A shape that filters server-side cannot be used when there is nobody to
+       filter BY. With ownerId null it would send a rule asking for owner
+       "null" and Kylas answers with an empty page — so the Everyone view came
+       back empty rather than with the account. It is masked on this account
+       today only because those three shapes 500 here anyway; the day Kylas
+       fixes that endpoint the team dashboard would silently go blank. */
+    const usable = ownerId == null ? COMPANY_SHAPES.filter((s) => !s.filtered) : COMPANY_SHAPES;
+    const tries = companyShape && usable.includes(companyShape)
+      ? [companyShape, ...usable.filter((s) => s !== companyShape)]
+      : usable;
     let shape = null, first = null, last;
     for (const s of tries) {
       try {
@@ -254,17 +262,25 @@ export function renderRemarks(c, { stageLabel } = {}) {
 /* The console's shape back into Kylas'. Only fields Kylas owns — the overlay's
    own data lives in Airtable and in the remarks block. */
 export function toKylasContact(c, { remarks } = {}) {
-  const parts = String(c.pocName || "").trim().split(/\s+/);
+  const { firstName, lastName } = splitName(c.pocName);
   const body = {
-    firstName: parts.length > 1 ? parts.slice(0, -1).join(" ") : undefined,
-    lastName: parts.length > 1 ? parts.at(-1) : (parts[0] || "Unknown"),
+    firstName: firstName || undefined,
+    lastName: lastName || "Unknown",
     designation: c.designation || undefined,
     linkedin: c.linkedin || undefined,
-    emails: (c.emails || []).filter((e) => e.value?.trim())
-      .map((e) => ({ type: e.type || "OFFICE", value: e.value.trim(), primary: !!e.primary })),
-    phoneNumbers: (c.phones || []).filter((p) => p.value?.trim())
-      .map((p) => ({ type: p.type || "MOBILE", dialCode: p.cc || "+91",
-                     value: p.value.trim(), primary: !!p.primary })),
+    emails: (c.emails || []).map((e) => ({ e, r: checkEmail(e.value) }))
+      .filter(({ r }) => r.ok)
+      .map(({ e, r }) => ({ type: e.type || "OFFICE", value: r.value, primary: !!e.primary })),
+    /* Kylas wants the NATIONAL number in `value` and the country in `dialCode`.
+       Anything else — "+918319585041", a pasted "0 8319 585041" — comes back as
+       400 002008 "Invalid Mobile Number", which names neither the field nor the
+       rule. splitPhone puts every form into the one shape Kylas accepts, so a
+       PUT also repairs a record that was stored wrong earlier. */
+    phoneNumbers: (c.phones || []).map((p) => ({ p, s: splitPhone(p.value, p.cc) }))
+      .filter(({ s }) => s.value)
+      .map(({ p, s }) => ({ type: p.type || "MOBILE", dialCode: s.cc || "+91",
+                            code: ISO_OF[s.cc || "+91"] || undefined,
+                            value: s.value, primary: !!p.primary })),
     customFieldValues: {},
   };
   if (c.companyId) body.company = Number(c.companyId);
@@ -287,7 +303,9 @@ const OUTCOME = { "No answer": "no_answer", "Wrong POC": "connected",
 
 export function toKylasCallLog(c, call) {
   const phone = (c.phones || []).find((p) => p.primary) || (c.phones || [])[0];
-  const number = phone ? String(phone.value || "").trim() : "";
+  /* The log wants the number as it would be dialled, so E.164 and not whatever
+     shape the field happens to hold. */
+  const number = phone ? e164(phone) : "";
   return {
     outcome: OUTCOME[call.outcome] || "connected",
     callType: "outgoing",
@@ -348,10 +366,14 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
       type: pick(e.type, "OFFICE"), value: pick(e.value, "") || "",
       primary: e.primary ?? i === 0,
     })),
-    phones: (c.phoneNumbers || []).map((p, i) => ({
-      type: pick(p.type, "MOBILE"), cc: pick(p.dialCode, "+91"),
-      value: pick(p.value, "") || "", primary: p.primary ?? i === 0,
-    })),
+    /* Normalised on the way IN as well: a record already stored with the
+       country code inside `value` would otherwise display as +91+918319..., and
+       the first save of it would fail. */
+    phones: (c.phoneNumbers || []).map((p, i) => {
+      const s = splitPhone(pick(p.value, "") || "", pick(p.dialCode, "+91"));
+      return { type: pick(p.type, "MOBILE"), cc: s.cc || "+91",
+               value: s.value, primary: p.primary ?? i === 0 };
+    }),
 
     stage: stageCode(pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)),
     stageLabel: lookupName(c, "cfPipelineStageBd", pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)) || "",
