@@ -347,3 +347,6 @@ body.framed .ovOnly{display:inline-block}
 .vhead.sm h2{font-size:var(--t-sec)}
 .vhead{margin-bottom:12px}
 .vnote{font-size:var(--t-meta);color:var(--text3);line-height:1.6;max-width:68ch}
+
+/* Selectable but not a link: it goes nowhere on purpose. */
+.cbmeta .mail .sel{user-select:all;cursor:text}

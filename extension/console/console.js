@@ -194,7 +194,14 @@ function liUrl(v){
   const t=String(v||"").trim();
   if(!t)return null;
   const u=/^https?:\/\//i.test(t)?t:"https://"+t.replace(/^\/+/,"");
-  try{const p=new URL(u);return /(^|\.)linkedin\.com$/i.test(p.hostname)?p.href:null;}catch(e){return null;}
+  try{
+    const p=new URL(u);
+    if(!/(^|\.)linkedin\.com$/i.test(p.hostname))return null;
+    /* Always https. The only reason to accept http:// above is that people
+       paste it; there is no reason to then send them over plaintext. */
+    p.protocol="https:";
+    return p.href;
+  }catch(e){return null;}
 }
 
 /* ── helpers ─────────────────────────────── */
@@ -323,7 +330,11 @@ function renderCallbar(){
   const em=(a.emails.find(x=>x.primary)||a.emails[0]||{}).value;
   const meta=el("div","cbmeta");
   const bits=[];
-  if(em)bits.push(`<span class="mi mail"><em>Email</em><a href="mailto:${esc(em)}">${esc(em)}</a></span>`);
+  /* Plain text, not mailto:. There is no send-from-here flow, so the link
+     promised an action the console cannot perform — and mailto: has the same
+     failure mode as tel:, handing off to whatever the OS registered. Still
+     selectable, so it can be copied. Revisit when templates exist. */
+  if(em)bits.push(`<span class="mi mail"><em>Email</em><span class="sel">${esc(em)}</span></span>`);
   if(a.nextCallDate)bits.push(`<span class="mi due"><em>Call back</em>${esc(fmtD(a.nextCallDate))}${
     a.nextCallTime?" · "+esc(a.nextCallTime):""}</span>`);
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em>${esc(a.kid||"unsaved")}</span>`);
@@ -556,7 +567,12 @@ function contactField(a,kind){
       const num=((e.cc||"")+String(e.value||"")).replace(/\s/g,"");
       if(!num)return;
       startTimer("dial");
-      window.open("tel:"+num,"_self");
+      /* Same route as the big button in the call bar. This one still did
+         window.open("tel:…","_self"), which from inside the iframe navigates
+         the frame to a tel: URL and does nothing — the dead dialler Ayush
+         found beside the phone field. Fixing the call bar and leaving this
+         one is exactly the kind of miss a link audit catches. */
+      if(typeof requestDial==="function")requestDial(num); else copyNumber(num);
     };
     return b;
   };
@@ -1090,7 +1106,14 @@ document.addEventListener("keydown",e=>{
   if(o){e.preventDefault();setOutcome(o);return;}
   const k=e.key.toLowerCase();
   if(k==="c"){const a=rec(),p=a.phones.find(x=>x.primary)||a.phones[0];
-    if(p&&p.value){startTimer();window.location.href="tel:"+(p.cc+p.value).replace(/\s/g,"");}return;}
+    if(p&&p.value){
+      startTimer();
+      /* window.location.href="tel:…" navigated the whole console frame away.
+         Third of three tel: navigations; all now go through the host page. */
+      const num=(p.cc+p.value).replace(/\s/g,"");
+      if(typeof requestDial==="function")requestDial(num); else copyNumber(num);
+    }
+    return;}
   if(k==="f"){document.getElementById("flagBtn").click();return;}
   if(k==="j"||k==="k"){
     const rows=visible();const at=rows.findIndex(r=>r.i===cur);
