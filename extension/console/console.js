@@ -1181,6 +1181,16 @@ document.addEventListener("keydown",e=>{
   }
   if(typing&&!(e.key==="Enter"&&(e.metaKey||e.ctrlKey)))return;
   if(e.key==="Enter"){e.preventDefault();saveNext();return;}
+  /* EVERY SHORTCUT BELOW IS A BARE KEY. Cmd, Ctrl and Alt belong to the
+     browser, and outside a field this handler was reading them as its own:
+     Cmd+C on the email selected in the call bar ran the "c" shortcut, so
+     copying an address started the call timer, asked the host page to dial,
+     and — when no dialler was found — wrote the PHONE NUMBER to the clipboard
+     over the address that had just been copied. Cmd+F flagged the record for
+     cleanup, Cmd+J and Cmd+K moved to a different one, and Cmd+1 through
+     Cmd+4, which on a Mac switch browser tabs, each SET A STAGE on whatever
+     record was open. */
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
   const o=OUTCOMES.find(x=>x.k===e.key);
   if(o){e.preventDefault();setOutcome(o);return;}
   const k=e.key.toLowerCase();
