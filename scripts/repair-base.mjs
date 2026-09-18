@@ -62,10 +62,42 @@ for (const step of FOLLOWUPS) wanted.push(step);
 const absent = new Set(d.missingFields.map(({ table, field }) => `${table}.${field.name}`));
 const missing = wanted.filter(({ table, field }) => absent.has(`${table}.${field.name}`));
 
+/* A MISSING TABLE used to be a hard stop with "use create-base.mjs" — which
+   refuses outright on a base whose tables exist, so the advice was a dead end.
+   Adding a table nobody has is as safe as adding a field nobody has, so it is
+   done here, with its own columns, before the field pass. */
+let createdTables = 0;
 if (d.missingTables.length) {
-  console.error(`These tables do not exist in ${BASE}: ${d.missingTables.join(", ")}`);
-  console.error(`This script only touches fields. Create the tables with create-base.mjs first.`);
-  process.exit(1);
+  console.log(`${d.missingTables.length} table(s) to create: ${d.missingTables.join(", ")}`);
+  if (DRY) {
+    for (const name of d.missingTables) {
+      const t = TABLES.find((x) => x.name === name);
+      console.log(`  + ${name}  (${(t?.fields || []).map((f) => f.name).join(", ")})`);
+    }
+  } else {
+    for (const name of d.missingTables) {
+      const t = TABLES.find((x) => x.name === name);
+      if (!t) { console.error(`  ! ${name} is not in the schema — nothing to create from`); continue; }
+      /* Only a table whose fields are all self-contained. Anything needing a
+         link to another table is a create-base.mjs job, because the order and
+         the reverse-link renaming matter. */
+      const needsLink = (t.fields || []).some((f) => f.type === "multipleRecordLinks");
+      if (needsLink) {
+        console.error(`  ! ${name} has a record link in it — create it with create-base.mjs`);
+        continue;
+      }
+      const made = await call("POST", `/bases/${BASE}/tables`, {
+        name: t.name, description: t.description,
+        fields: t.fields.map((f) => ({ name: f.name, type: f.type,
+          ...(f.description ? { description: f.description } : {}),
+          ...(f.options ? { options: f.options } : {}) })),
+      });
+      byName.set(t.name, { id: made.id, name: t.name, fields: made.fields || [] });
+      createdTables++;
+      console.log(`  + ${name} created with ${t.fields.length} field(s)`);
+    }
+    console.log();
+  }
 }
 
 /* ── report ────────────────────────────────────────────────────────── */
@@ -104,17 +136,20 @@ if (d.rollupDrift.length) {
               "  to have it recreated from the schema.\n");
 }
 
-if (d.choiceDrift.length) {
-  console.log(`${d.choiceDrift.length} select field(s) have the wrong choices:`);
-  for (const f of d.choiceDrift) {
-    console.log(`  ! ${f.table}.${f.field}`);
-    if (f.absent.length) console.log(`      not offered   ${f.absent.join(", ")}`);
-    if (f.surplus.length) console.log(`      retired       ${f.surplus.join(", ")}`);
-  }
-  console.log("  Add a missing choice in the UI. A RETIRED one is left alone on purpose:\n" +
-              "  deleting it would blank that value on every record still carrying it.\n" +
-              "  Migrate those records first — see scripts/migrate-ladder.mjs.\n");
-}
+/* Choices are informational. Every write goes out with typecast:true, so
+   Airtable adds a choice the first time a record uses it — an absent one
+   usually means nobody has been on that stage yet. Printed as a count, because
+   printing 23 stage codes per field buried the things that ARE faults. */
+if (d.choiceDrift.length)
+  console.log(`${d.choiceDrift.length} select field(s) have a different choice list. ` +
+              `Not a fault:\n  typecast adds a choice on first use, and a leftover one ` +
+              `is a value from before this\n  schema — deleting it would blank it on every ` +
+              `record still carrying it.\n`);
+
+if (d.rollupUnreadable.length)
+  console.log(`${d.rollupUnreadable.length} rollup(s) could not be checked — Airtable does ` +
+              `not report their\n  aggregation. Not a fault, just a gap in what can be ` +
+              `verified.\n`);
 
 if (d.wrongType.length) {
   console.log(`${d.wrongType.length} field(s) are the wrong type:`);
@@ -127,7 +162,9 @@ const willDo = missing.length + (FORMULAS ? d.formulaDrift.length : 0);
 if (!willDo) {
   const stuck = d.rollupDrift.length + d.choiceDrift.length + d.wrongType.length
     + (FORMULAS ? 0 : d.formulaDrift.length);
-  console.log(stuck ? "Nothing this script can do — see above." : "The base matches the schema.");
+  if (createdTables) console.log(`${createdTables} table(s) created.`);
+  console.log(stuck ? "Nothing else this script can do — see above."
+    : createdTables ? "Run verify-base.mjs to confirm." : "The base matches the schema.");
   process.exit(0);
 }
 if (DRY) { console.log("Dry run — nothing sent."); process.exit(0); }

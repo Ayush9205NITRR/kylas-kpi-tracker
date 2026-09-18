@@ -243,7 +243,11 @@
                   /* Where the KPI numbers came from this fetch: "airtable" once
                      the store answered, "none" when it is not configured or was
                      unreachable. Shown, not assumed. */
-                  kpiSource: "", kpiError: "", kpiMatched: 0 };
+                  kpiSource: "", kpiError: "", kpiMatched: 0,
+                  /* The crawl stopped at Kylas' page cap: what is here is a
+                     correct prefix, not the account. Never inferred — the
+                     proxy says so explicitly. */
+                  truncated: false, crawled: 0 };
   const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
   let inflight = false;
   let restored = false;
@@ -260,6 +264,16 @@
       return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">KPIs from Airtable · ${cos.length - n} not saved yet</span>`;
     return `<span class="vsrc off" title="${esc(CACHE.kpiError || "the KPI store did not answer")}">computed in this browser — Airtable unavailable</span>`;
   }
+
+  /* Kylas stopped answering before the account ran out. Amber, because this is
+     a warning about the DATA and not a styling choice: every count on screen is
+     computed over a list that is short by an unknown amount. */
+  const truncWarn = () => CACHE.truncated
+    ? `<p class="vwarn">Kylas stopped returning companies at its page limit —
+       ${esc(String(CACHE.crawled))} fetched, and there are more that are NOT here.
+       Every count below is short by an unknown amount. Restart the proxy with a
+       higher <code>KYLAS_MAX_PAGES</code>.</p>`
+    : "";
 
   const ageText = () => {
     if (!CACHE.at) return "";
@@ -291,6 +305,8 @@
         CACHE.from = "stored";
         CACHE.kpiSource = held.kpiSource || "";
         CACHE.kpiMatched = held.kpiMatched || 0;
+        CACHE.truncated = !!held.truncated;
+        CACHE.crawled = held.crawled || 0;
       }
     } catch { /* storage is a convenience here, never a dependency */ }
   }
@@ -316,11 +332,14 @@
         CACHE.kpiSource = r.kpiSource || "none";
         CACHE.kpiError = r.kpiError || "";
         CACHE.kpiMatched = r.kpiMatched || 0;
+        CACHE.truncated = !!r.truncated;
+        CACHE.crawled = r.crawled || 0;
         if (r.picklists) adoptPicklists(r.picklists);
         try {
           await Store.setSetting("companyCache",
             { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners,
-              kpiSource: CACHE.kpiSource, kpiMatched: CACHE.kpiMatched });
+              kpiSource: CACHE.kpiSource, kpiMatched: CACHE.kpiMatched,
+              truncated: CACHE.truncated, crawled: CACHE.crawled });
         } catch { /* over quota is survivable — it is only a head start */ }
       })
       .catch((e) => {
@@ -577,6 +596,7 @@
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
+      ${truncWarn()}
       ${funnelHTML(cos)}
       <div class="vsec">${stepTable(cos, (c) => c.owner)}</div>
       <div class="vsec">${stackedByOwner(cos, (c) => c.owner)}</div>
@@ -843,6 +863,7 @@
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         This is only what the browser holds, not everything allotted to you.</p>` : ""}
+      ${truncWarn()}
       <p class="vnote">Named POCs answer the question a manager actually asks — not how many right
         POCs, but which person. Stage is the highest any POC at that company has reached. A company
         with no POCs yet is one allotted to you that nobody has opened.

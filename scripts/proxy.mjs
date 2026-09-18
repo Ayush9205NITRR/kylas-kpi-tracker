@@ -205,20 +205,31 @@ const routes = {
     const all = want === "all";
     const owner = all ? null : (want || me?.id);
 
-    /* Served from memory for COMPANY_TTL. Paging the whole account is the most
-       expensive thing this proxy does — several searches at a 450ms gap plus an
-       owner lookup for anyone unknown — and with eight associates sharing one
-       proxy it would otherwise run once per person per page open. ?fresh=1 is
-       the Refresh button. */
-    const key = all ? "all" : String(owner);
-    const hit = companyCache.get(key);
+    /* ONE CRAWL OF THE ACCOUNT, cached, filtered per owner here.
+       The cache used to be keyed on owner, which read as prudent and was the
+       same mistake the console had: no shape that works on this account can
+       filter server-side, so asking for ONE owner pages the whole account
+       anyway — and then asking for "everyone", or for a second name, paged it
+       all over again. Ayush's log has "5000 across 25 page(s)" eight times in
+       one session, ~16s each, for data that had not changed.
+
+       So the crawl is keyed "all" and nothing else, and an owner is a filter
+       over it. If Kylas ever fixes /v1/search/company so a filtering shape
+       works, a server-side filter becomes worth having again — until then
+       filtering here is strictly cheaper. ?fresh=1 is the Refresh button. */
+    const hit = companyCache.get("all");
     const fresh = url.searchParams.get("fresh");
+    const ownedBy = (list) => (owner == null ? list
+      : list.filter((c) => String(c.ownerId ?? "") === String(owner)));
+
     if (hit && !fresh && Date.now() - hit.at < COMPANY_TTL) {
-      log(`companies for ${key} — ${hit.body.companies.length} (cached ${Math.round((Date.now() - hit.at) / 1000)}s)`);
-      return { ...hit.body, cachedSeconds: Math.round((Date.now() - hit.at) / 1000) };
+      const age = Math.round((Date.now() - hit.at) / 1000);
+      const companies = ownedBy(hit.body.companies);
+      log(`companies for ${all ? "all owners" : owner} — ${companies.length} (cached ${age}s)`);
+      return { ...hit.body, companies, owner: all ? "all" : String(owner), cachedSeconds: age };
     }
 
-    const raw = all ? await kylas.companies() : await kylas.companiesForOwner(owner);
+    const raw = await kylas.companies();
 
     /* ?keys=1 reports the shape this account's company search actually returns,
        WITHOUT the values — enough to find where a missing field lives, safe to
@@ -277,17 +288,32 @@ const routes = {
       kpiError = "Airtable is not configured";
     }
 
-    log(`companies for ${all ? "all owners" : owner} — ${companies.length}`
-        + (kpiSource === "airtable" ? `, ${matched} with Airtable KPIs` : ""));
+    /* A crawl that stopped at the page cap is a correct PREFIX of the answer,
+       not the answer. It travels with the rows so the console can say so —
+       silently serving a short list is how 19 of Arshdeep's 250 companies got
+       reported as all of them. */
+    const search = kylas.lastCompanySearch?.() || {};
+    if (search.truncated)
+      log(`! the company list is INCOMPLETE — stopped at ${search.pages} pages / ` +
+          `${search.total} companies. Raise KYLAS_MAX_PAGES and restart.`);
+
     /* The picklists too. The companies LIST page never calls /company, so
        without them the console's SOURCES stayed empty there and the Source
        filter could only offer values it happened to see in the loaded rows.
        meta() is cached, so this is free after the first call. */
-    const body = { owner: all ? "all" : String(owner), companies, owners: ownerList(),
+    const body = { owner: "all", companies, owners: ownerList(),
                    picklists: (await meta()).picklists,
-                   kpiSource, kpiError, kpiMatched: matched };
-    companyCache.set(key, { at: Date.now(), body });
-    return body;
+                   kpiSource, kpiError, kpiMatched: matched,
+                   truncated: !!search.truncated, crawled: search.total || companies.length,
+                   pages: search.pages || 1 };
+    /* The WHOLE account is cached, under one key, whoever asked. */
+    companyCache.set("all", { at: Date.now(), body });
+
+    const out = ownedBy(companies);
+    log(`companies for ${all ? "all owners" : owner} — ${out.length}`
+        + (all ? "" : ` of ${companies.length}`)
+        + (kpiSource === "airtable" ? `, ${matched} with Airtable KPIs` : ""));
+    return { ...body, companies: out, owner: all ? "all" : String(owner) };
   },
 
   /* The frozen daily numbers, for the trend chart. Read from Airtable, which

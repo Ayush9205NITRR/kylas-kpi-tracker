@@ -29,17 +29,16 @@ export function wantedFields() {
 /* Airtable reformats a formula it accepts — it adds and removes spaces around
    operators, commas and brackets — so comparing raw strings reports drift that
    is not there, and a check that cries wolf every run is a check nobody reads.
-   Whitespace OUTSIDE a string literal is never significant in an Airtable
-   formula, so all of it goes.
-   
-   Inside a literal it is the opposite: the ladder's labels are quoted strings
-   full of spaces ("19 · Discovery Call Booked"), and collapsing those would
-   make two genuinely different ladders compare equal. So this walks the string
-   and tracks whether it is inside quotes, rather than reaching for one regex
-   that cannot know the difference. */
+
+   Whitespace is dropped ONLY where it cannot matter: outside a string literal
+   AND outside a {field reference}. Both of those carry spaces that are part of
+   the value — "19 · Discovery Call Booked" is output, {Last Call At} is a field
+   name — and an earlier version of this stripped inside braces, which turned
+   every one of the schema's own formulas into a reference to a field that does
+   not exist and reported all 20 of them as drifted. */
 export function normFormula(input) {
   const s = String(input == null ? "" : input);
-  let out = "", quote = "";
+  let out = "", quote = "", inRef = false;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (quote) {
@@ -48,15 +47,37 @@ export function normFormula(input) {
       if (ch === quote) quote = "";
       continue;
     }
+    if (inRef) { out += ch; if (ch === "}") inRef = false; continue; }
     if (ch === '"' || ch === "'") { quote = ch; out += ch; continue; }
-    if (/\s/.test(ch)) continue;                       /* outside a literal: drop it */
+    if (ch === "{") { inRef = true; out += ch; continue; }
+    if (/\s/.test(ch)) continue;                       /* safe to drop */
     out += ch;
   }
   return out;
 }
 
-/* Reads the formula out of a live field, whichever shape it arrives in. */
-const liveFormula = (f) => normFormula(f?.options?.formula);
+/* AIRTABLE HANDS FORMULAS BACK WITH FIELD IDS, NOT NAMES.
+     schema:  IF({Last Call At}, 1, 0)
+     live:    IF({fld8OdJYZmWxVDp7S}, 1, 0)
+   I had this backwards in the first version and asserted the opposite in a
+   comment, so every formula in Ayush's base reported as drifted — 20 false
+   positives, and an invitation to rewrite 20 fields that were correct.
+
+   The live table list carries every field's id and name, so the ids can be
+   resolved back. Cross-table too: a formula can only reference fields in its
+   own table, but a rollup's target lives in another, and one id map for the
+   whole base costs nothing. An id we cannot resolve is left as it is rather
+   than blanked — an unresolvable reference is worth seeing. */
+function idNames(liveTables) {
+  const map = new Map();
+  for (const t of liveTables || [])
+    for (const f of t.fields || []) if (f.id && f.name) map.set(f.id, f.name);
+  return map;
+}
+
+const withNames = (formula, names) =>
+  String(formula == null ? "" : formula).replace(/\{(fld[A-Za-z0-9]{14})\}/g,
+    (whole, id) => (names.has(id) ? `{${names.get(id)}}` : whole));
 
 const choiceNames = (f) => (f?.options?.choices || []).map((c) => c.name);
 
@@ -72,12 +93,19 @@ const choiceNames = (f) => (f?.options?.choices || []).map((c) => c.name);
                      endpoint accepts
      rollupDrift     NOT patchable. The update endpoint takes only
                      options.formula, so a rollup has to be fixed in the UI
-     choiceDrift     NOT patchable either, and an ADDED choice is all we ever
-                     report: deleting one orphans every record using it
+     choiceDrift     INFORMATIONAL. Every write goes out with typecast:true, so
+                     Airtable creates a choice the first time a record uses it —
+                     an absent choice usually means "no record has been on that
+                     stage yet", not a fault. A surplus one is a value from
+                     before this schema, and deleting it would blank it on every
+                     record still carrying it. Neither is a script's business
      extra           in the base, not in the schema. Reported, never touched */
 export function diffBase(liveTables) {
   const byName = new Map(liveTables.map((t) => [t.name, t]));
   const wanted = wantedFields();
+  const names = idNames(liveTables);
+  /* Compare NAME form against NAME form. */
+  const liveFormula = (f) => normFormula(withNames(f?.options?.formula, names));
 
   /* The reverse half of every link, which Airtable creates on the other table
      and create-base.mjs renames. It has no schema definition of its own, so it
@@ -88,8 +116,8 @@ export function diffBase(liveTables) {
       reverses.push({ table: field.options.linkedTable, name: reverse });
 
   const out = { missingTables: [], missingFields: [], wrongType: [],
-                formulaDrift: [], rollupDrift: [], choiceDrift: [], extra: [],
-                missingReverse: [], checked: 0 };
+                formulaDrift: [], rollupDrift: [], rollupUnreadable: [],
+                choiceDrift: [], extra: [], missingReverse: [], checked: 0 };
 
   out.missingTables = [...new Set(wanted.map((w) => w.table))].filter((t) => !byName.has(t));
 
@@ -116,7 +144,13 @@ export function diffBase(liveTables) {
     if (field.type === "rollup") {
       const want = normFormula(field.options.formula);
       const got = liveFormula(live);
-      if (want !== got)
+      /* A rollup on Ayush's base comes back with NO formula in its options at
+         all — the meta API does not report the aggregation. Absence is not
+         drift: claiming 18 rollups had changed, on the strength of a field the
+         API never sent, was worse than saying nothing. Reported separately so
+         it reads as "cannot check this" and not as "this is wrong". */
+      if (!got) out.rollupUnreadable.push({ table, field: field.name, want });
+      else if (want !== got)
         out.rollupDrift.push({ table, field: field.name, id: live.id, was: got, want,
                                why: "rollup aggregation" });
     }
@@ -159,7 +193,8 @@ export function diffBase(liveTables) {
 export const manualCount = (d) =>
   d.wrongType.length + d.rollupDrift.length + d.choiceDrift.length + d.missingTables.length;
 
+/* rollupUnreadable is deliberately NOT a fault: it means the API did not tell
+   us, which is a gap in what we can check and not a gap in the base. */
 export const cleanExceptExtras = (d) =>
   !d.missingTables.length && !d.missingFields.length && !d.wrongType.length &&
-  !d.formulaDrift.length && !d.rollupDrift.length && !d.choiceDrift.length &&
-  !d.missingReverse.length;
+  !d.formulaDrift.length && !d.rollupDrift.length && !d.missingReverse.length;

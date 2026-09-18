@@ -83,6 +83,56 @@ console.log("\nTHE REAL ONE — the stale 24-rung ladder");
   eq("a name-and-type check would have reported NOTHING", nameAndTypeOnly, 0);
 }
 
+console.log("\nAIRTABLE'S OWN SHAPE — field ids, not names");
+{
+  /* Exactly what Ayush's base returned. Every formula came back with ids, and
+     the first version of this checker called all 20 of them drifted. */
+  const tables = liveFromSchema();
+  const names = new Map();
+  for (const t of tables) for (const f of t.fields) names.set(f.name, f.id);
+
+  /* Re-express each formula in id form, the way the API hands it back. */
+  for (const t of tables)
+    for (const f of t.fields)
+      if ((f.type === "formula" || f.type === "rollup") && f.options?.formula)
+        f.options = { ...f.options,
+          formula: f.options.formula.replace(/\{([^}]+)\}/g,
+            (whole, n) => (names.has(n) ? `{${names.get(n)}}` : whole)) };
+
+  const d = diffBase(tables);
+  eq("NOT drift — the same formula in id form", d.formulaDrift.map((x) => x.field), []);
+  eq("nor the rollups", d.rollupDrift.map((x) => x.field), []);
+  ok("and the base reads as clean", cleanExceptExtras(d));
+
+  /* And a genuine difference still surfaces through the id form. */
+  const f = find(tables, "Companies", "SQL");
+  f.options = { formula: `IF({${names.get("KPI Rank")}} >= 22, 1, 0)` };
+  eq("a real change still found", diffBase(tables).formulaDrift.map((x) => x.field), ["SQL"]);
+}
+
+console.log("\na field name with spaces survives");
+{
+  eq("braces are left alone", normFormula("IF( {Last Call At} , 1 , 0 )"), "IF({Last Call At},1,0)");
+  eq("so is a label", normFormula('IF({R}=1,"19 · Discovery Call Booked","")'),
+     'IF({R}=1,"19 · Discovery Call Booked","")');
+  /* The bug this replaced: {Last Call At} became {LastCallAt}, so every
+     schema formula referenced a field that does not exist. */
+  ok("not collapsed", normFormula("{Last Call At}").includes(" "));
+}
+
+console.log("\na rollup the API will not describe is NOT drift");
+{
+  const tables = liveFromSchema();
+  /* Ayush's base returns rollups with no formula in options at all. */
+  for (const t of tables)
+    for (const f of t.fields)
+      if (f.type === "rollup") f.options = { recordLinkFieldId: "fldx", fieldIdInLinkedTable: "fldy" };
+  const d = diffBase(tables);
+  eq("nothing called drifted", d.rollupDrift.length, 0);
+  ok("reported as unreadable instead", d.rollupUnreadable.length > 10);
+  ok("and that alone does not fail the base", cleanExceptExtras(d));
+}
+
 console.log("\nwhitespace is not drift");
 {
   const tables = liveFromSchema();

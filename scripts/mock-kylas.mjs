@@ -68,8 +68,12 @@ const COMPANIES = {
 /* Bulk, so pagination and the owner filter are exercised: 260 companies split
    between two owners means page 0 cannot hold them and a client-side owner
    filter over one page would silently drop most of them. */
-if (process.env.MOCK_MANY === "1") {
-  for (let i = 0; i < 260; i++) {
+/* MOCK_MANY=1 gives 260; MOCK_MANY=<n> gives n. Ayush's real account pages
+   past 5,000, which is the case that exposed the page cap — so the number has
+   to be settable, not a constant that happens to be smaller than the bug. */
+if (process.env.MOCK_MANY) {
+  const HOW_MANY = process.env.MOCK_MANY === "1" ? 260 : Number(process.env.MOCK_MANY) || 260;
+  for (let i = 0; i < HOW_MANY; i++) {
     const id = 200000 + i;
     COMPANIES[id] = { id, name: `bulk-${String(i).padStart(3, "0")}`,
       ownerId: i % 2 ? 74726 : 74725,

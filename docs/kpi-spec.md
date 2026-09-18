@@ -581,3 +581,41 @@ either — the base is shared, and the next machine would run it again.
 So the base carries a `Schema Migrations` table, and `migrate-ladder.mjs`
 refuses to repeat a key it finds there. If that table is absent it refuses to
 migrate at all rather than change data it cannot record having changed.
+
+### §9a · Two bugs in the first drift checker — 2026-09-18
+
+The first version of `schema-diff.mjs` reported **20 formulas and 18 rollups as
+drifted on a base where they were correct.** Both faults were mine, and both
+would have had somebody rewrite 38 working fields.
+
+**1. Airtable hands formulas back with field IDs, not names.**
+
+```
+schema:  IF({Last Call At}, 1, 0)
+live:    IF({fld8OdJYZmWxVDp7S}, 1, 0)
+```
+
+I asserted the opposite in a comment and never checked. Field ids are now
+resolved back to names from the live table list before comparing.
+
+**2. The normaliser stripped whitespace inside `{field references}`.**
+
+`{Last Call At}` became `{LastCallAt}`, so every formula the *schema* produced
+referenced a field that does not exist, and nothing could ever match. Whitespace
+is now dropped only outside both string literals and `{...}` — the two places
+where a space is part of the value.
+
+**A rollup's aggregation is not reported by the meta API at all** on this
+account: `options` comes back with the link and the target field and no formula.
+Absence is not drift, so those are counted as "not checked" rather than listed
+as faults.
+
+**Select choices are informational too.** Every write goes out with
+`typecast: true`, so Airtable creates a choice the first time a record uses it —
+an absent choice usually means nobody has been on that stage yet, not that the
+field is wrong.
+
+The lesson, again: a checker that reports a difference it cannot justify is
+worse than no checker, because it spends the reader's trust and then their
+afternoon. `test-schema-diff.mjs` now rebuilds the schema's own formulas in id
+form and asserts that **none** of them read as drift.

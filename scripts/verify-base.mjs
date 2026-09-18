@@ -52,7 +52,9 @@ for (const name of allTables) {
   const extra = at(d.extra, name);
   const live = tables.find((t) => t.name === name);
   if (!live) continue;
-  const problems = miss.length + wrong.length + fdrift.length + rdrift.length + cdrift.length;
+  /* Neither rollupUnreadable nor choice differences count as faults — see
+     schema-diff.mjs. A tick here means "nothing a script should act on". */
+  const problems = miss.length + wrong.length + fdrift.length + rdrift.length;
 
   console.log(`${problems ? "✗" : "✓"} ${name.padEnd(19)} ${live.fields.length} field(s)`);
   miss.forEach((m) => console.log(`     missing   ${m.field.name}  (${m.field.type})`));
@@ -69,10 +71,23 @@ for (const name of allTables) {
     console.log(`       base    ${short(f.was)}`);
     console.log(`       schema  ${short(f.want)}`);
   });
+  /* Counted, not listed, and explicitly not a fault: the meta API does not
+     report a rollup's aggregation on this account, so we cannot check it. An
+     earlier version printed all of them as "drifted" on the strength of a
+     field the API never sent. */
+  const unread = at(d.rollupUnreadable, name);
+  if (unread.length)
+    console.log(`     rollups   ${unread.length} not checked — Airtable does not report ` +
+                `their aggregation (not a fault)`);
+  /* Counted, with a couple of examples. Printing 23 stage codes per field
+     filled the screen with something that is not a fault — every write uses
+     typecast, so Airtable adds a choice the first time a record needs it. */
   cdrift.forEach((c) => {
-    console.log(`     CHOICES   ${c.field}`);
-    if (c.absent.length) console.log(`       missing ${c.absent.join(", ")}`);
-    if (c.surplus.length) console.log(`       retired ${c.surplus.join(", ")}`);
+    const some = (list) => list.slice(0, 3).join(", ") + (list.length > 3 ? `, +${list.length - 3} more` : "");
+    console.log(`     choices   ${c.field}: ` +
+      [c.absent.length ? `${c.absent.length} unused (${some(c.absent)})` : "",
+       c.surplus.length ? `${c.surplus.length} from before this schema (${some(c.surplus)})` : ""]
+        .filter(Boolean).join("; ") + "  (not a fault)");
   });
   if (extra.length) console.log(`     extra     ${extra.map((x) => x.field).join(", ")}  (harmless)`);
 }
@@ -88,13 +103,18 @@ if (cleanExceptExtras(d)) {
   process.exit(0);
 }
 
+if (d.choiceDrift.length || d.rollupUnreadable.length)
+  console.log(`\nNot faults: ${d.choiceDrift.length} select(s) whose choice list differs ` +
+              `(typecast adds one on first use), ${d.rollupUnreadable.length} rollup(s) whose ` +
+              `aggregation Airtable does not report.`);
+
 const lines = [];
 if (d.missingTables.length) lines.push(`${d.missingTables.length} table(s) missing`);
 if (d.missingFields.length) lines.push(`${d.missingFields.length} field(s) missing`);
 if (d.wrongType.length) lines.push(`${d.wrongType.length} of the wrong type`);
 if (d.formulaDrift.length) lines.push(`${d.formulaDrift.length} formula(s) drifted`);
 if (d.rollupDrift.length) lines.push(`${d.rollupDrift.length} rollup(s) drifted`);
-if (d.choiceDrift.length) lines.push(`${d.choiceDrift.length} select(s) with wrong choices`);
+
 if (d.missingReverse.length) lines.push(`${d.missingReverse.length} reverse link(s) missing`);
 console.log(lines.join(", ") + ".");
 

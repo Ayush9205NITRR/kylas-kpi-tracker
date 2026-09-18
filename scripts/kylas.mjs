@@ -116,7 +116,18 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
      Arshdeep's and silently dropped the rest. Keep asking until a short page
      comes back. */
   const PAGE = 200;
-  const MAX_PAGES = 25;            /* 5,000 companies — a stop, not a target */
+  /* Raised from 25 on 2026-09-18. Ayush's account paged the full 25 and logged
+     "5000 across 25 page(s)" — which is exactly MAX_PAGES × PAGE, so the crawl
+     stopped at the CAP and not at the end of the data. Every owner count was
+     then computed over a list that might have been missing companies, and
+     nothing said so. The cap is a stop against a runaway loop, so it stays;
+     hitting it is now reported as the incomplete answer it is. */
+  const MAX_PAGES = Number(process.env.KYLAS_MAX_PAGES || 60);   /* 12,000 */
+
+  /* What the last crawl did, for the proxy to pass on. A truncated list is not
+     an error — it is a correct prefix of a wrong length — so it travels
+     alongside the rows rather than as an exception. */
+  let lastSearch = { pages: 0, total: 0, truncated: false };
 
   async function searchCompany(size, ownerId) {
     const mine = (list) => (ownerId == null ? list
@@ -157,13 +168,21 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
 
     const all = [...first];
     /* A page shorter than we asked for is the last one. */
-    for (let p = 1; first.length === PAGE && p < MAX_PAGES; p++) {
+    let pages = 1, full = first.length === PAGE;
+    for (let p = 1; full && p < MAX_PAGES; p++) {
       const next = rows(await call("POST", page(p), shape.body(ownerId)));
       all.push(...next);
-      if (next.length < PAGE) break;
+      pages++;
+      full = next.length === PAGE;
       first = next;
     }
-    if (all.length >= PAGE) log(`company search: ${all.length} across ${Math.ceil(all.length / PAGE)} page(s)`);
+    /* Still a full page when the cap ran out: there is more we did not fetch. */
+    lastSearch = { pages, total: all.length, truncated: full && pages >= MAX_PAGES };
+    if (lastSearch.truncated)
+      log(`! company search STOPPED AT THE CAP after ${pages} pages (${all.length} companies). ` +
+          `There are more than this and they are NOT in the list. ` +
+          `Raise KYLAS_MAX_PAGES.`);
+    if (all.length >= PAGE) log(`company search: ${all.length} across ${pages} page(s)`);
 
     /* Server-side filtering is only trustworthy when the shape claims it. */
     const out = shape.filtered && ownerId != null ? all : mine(all);
@@ -215,6 +234,7 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
 
     /* Which shape won, for the /companies?keys=1 diagnostic. */
     companyShapeName: () => companyShape?.name || "not yet determined",
+    lastCompanySearch: () => ({ ...lastSearch }),
 
     contact: (id) => call("GET", `/v1/contacts/${id}`),
 

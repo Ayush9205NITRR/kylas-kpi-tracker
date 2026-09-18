@@ -455,3 +455,39 @@ so the Everyone view showed nothing. Masked on this account only because those
 three shapes 500 here anyway; the day Kylas fixes that endpoint the team
 dashboard would have gone blank. The filtering shapes are now skipped entirely
 when there is no owner.
+
+
+---
+
+## 13. `/v1/search/company` stops at whatever page cap you set
+
+Found in Ayush's proxy log, 2026-09-18:
+
+```
+company search: 5000 across 25 page(s)
+```
+
+5000 = 25 pages × 200, which was exactly `MAX_PAGES × PAGE`. **The crawl stopped
+at the cap, not at the end of the data.** Every owner count in that session
+(27, 82, 104) was computed over a list that was short by an unknown amount, and
+nothing said so — the same failure as the page-0-only search that reported 19 of
+Arshdeep's companies as all of them, one layer up.
+
+The cap now defaults to 60 pages (12,000) via `KYLAS_MAX_PAGES`, and hitting it
+is reported: the client records `lastCompanySearch().truncated`, the proxy logs
+it and puts `truncated` in the response, and both console views show an amber
+warning saying the counts are short. A cap is still right — a runaway loop
+against a rate-limited API is worse — but hitting one has to be loud.
+
+### One crawl per account, not one per owner
+
+The same log shows `5000 across 25 page(s)` eight times in one session, ~16s
+each, for data that had not changed. The proxy cached the result keyed on
+**owner** — which reads as prudent and was the same mistake the console had:
+no shape that works on this account can filter server-side, so asking for one
+owner pages the whole account anyway, and then asking for "everyone", or for a
+second name, pages it all over again.
+
+The crawl is now keyed `"all"` and an owner is a filter over it. Verified
+against 1,504 companies: three requests (all / owner A / owner B) → **one**
+crawl, 751 + 753 = 1504.
