@@ -130,3 +130,8 @@ const MILESTONE = {
   sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
   sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
 };
+
+/* RETIRED, RANK_REMAP and CODE_REMAP are deliberately NOT here. They exist for
+   migrating what the Airtable base already stores, which is a job for
+   scripts/migrate-ladder.mjs — the console only ever sees current stages, and
+   shipping a remap to the browser would invite someone to apply it twice. */

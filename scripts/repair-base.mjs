@@ -1,20 +1,33 @@
 #!/usr/bin/env node
-/* Adds fields the schema has and the live base does not.
+/* Brings a live base up to the schema.
  *
  *   AIRTABLE_PAT=pat... AIRTABLE_BASE=app... node scripts/repair-base.mjs --dry-run
  *   AIRTABLE_PAT=pat... AIRTABLE_BASE=app... node scripts/repair-base.mjs
+ *   ...                                      node scripts/repair-base.mjs --update-formulas
  *
  * create-base.mjs refuses to touch a base whose tables exist, on purpose — a
- * half-merge is worse to unpick than a refusal. This is the other half: it
- * changes nothing that is already there, only adds what is absent, in the order
- * the dependencies need.
+ * half-merge is worse to unpick than a refusal. This is the other half.
  *
- * Use it after the schema gains a field. Run verify-base.mjs first to see what
- * is missing, and again afterwards to confirm.
+ * TWO KINDS OF CHANGE, and the difference is deliberate:
+ *
+ *   ADDING an absent field is safe and happens by default. Nothing that exists
+ *   is touched, so the worst case is a column nobody uses.
+ *
+ *   CHANGING a formula that is already there is not safe by default — it
+ *   changes what every existing row reports. It needs --update-formulas, and
+ *   --dry-run prints the old and new text so it can be read before it is run.
+ *
+ * Neither the rollup aggregation nor a select's choices can be changed through
+ * the API at all: the update endpoint accepts `options.formula` and nothing
+ * else. Those are reported with what to do about them, not silently skipped.
+ *
+ * Run verify-base.mjs first to see the state, and again afterwards to confirm.
  */
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
+import { diffBase } from "./schema-diff.mjs";
 
 const DRY = process.argv.includes("--dry-run");
+const FORMULAS = process.argv.includes("--update-formulas");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
 if (!PAT || !BASE) {
@@ -36,32 +49,90 @@ async function call(method, path, body) {
 
 const live = await call("GET", `/bases/${BASE}/tables`);
 const byName = new Map(live.tables.map((t) => [t.name, t]));
-const has = (table, field) => (byName.get(table)?.fields || []).some((f) => f.name === field);
 const tableId = (name) => byName.get(name)?.id;
 
-/* Everything the schema declares, in the order it would have been created. */
+const d = diffBase(live.tables);
+
+/* Order matters in the schema — a rollup cannot exist before the link it rolls
+   up through — so the add list is rebuilt in declaration order rather than
+   taken from the diff, which groups by kind. */
 const wanted = [];
 for (const t of TABLES) for (const f of t.fields) wanted.push({ table: t.name, field: f });
 for (const step of FOLLOWUPS) wanted.push(step);
+const absent = new Set(d.missingFields.map(({ table, field }) => `${table}.${field.name}`));
+const missing = wanted.filter(({ table, field }) => absent.has(`${table}.${field.name}`));
 
-const missing = wanted.filter(({ table, field }) => byName.has(table) && !has(table, field.name));
-const unknownTables = [...new Set(wanted.map((w) => w.table))].filter((t) => !byName.has(t));
-
-if (unknownTables.length) {
-  console.error(`These tables do not exist in ${BASE}: ${unknownTables.join(", ")}`);
-  console.error(`This script only adds fields. Create the tables with create-base.mjs first.`);
+if (d.missingTables.length) {
+  console.error(`These tables do not exist in ${BASE}: ${d.missingTables.join(", ")}`);
+  console.error(`This script only touches fields. Create the tables with create-base.mjs first.`);
   process.exit(1);
 }
 
-if (!missing.length) {
-  console.log("Nothing missing — the base matches the schema.");
-  process.exit(0);
+/* ── report ────────────────────────────────────────────────────────── */
+const short = (s, n = 74) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+if (missing.length) {
+  console.log(`${missing.length} field(s) to add:`);
+  for (const { table, field } of missing) console.log(`  + ${table}.${field.name}  (${field.type})`);
+  console.log();
 }
 
-console.log(`${missing.length} field(s) to add:\n`);
-for (const { table, field } of missing) console.log(`  ${table}.${field.name}  (${field.type})`);
-if (DRY) { console.log("\nDry run — nothing sent."); process.exit(0); }
-console.log();
+if (d.formulaDrift.length) {
+  console.log(`${d.formulaDrift.length} formula(s) differ from the schema:`);
+  for (const f of d.formulaDrift) {
+    console.log(`  ~ ${f.table}.${f.field}`);
+    console.log(`      in the base  ${short(f.was)}`);
+    console.log(`      the schema   ${short(f.want)}`);
+  }
+  console.log(FORMULAS
+    ? "  These WILL be updated — every existing row's value changes with them.\n"
+    : "  Pass --update-formulas to write these. Not done by default: it changes\n" +
+      "  what every existing row reports.\n");
+}
+
+/* Things no script may fix, each with the reason and the remedy. Printed even
+   on a plain run, because the whole failure this was written for was a
+   difference nobody could see. */
+if (d.rollupDrift.length) {
+  console.log(`${d.rollupDrift.length} rollup(s) differ, and the API cannot change a rollup:`);
+  for (const f of d.rollupDrift) {
+    console.log(`  ! ${f.table}.${f.field}`);
+    console.log(`      in the base  ${short(f.was)}`);
+    console.log(`      the schema   ${short(f.want)}`);
+  }
+  console.log("  Fix these in the Airtable UI, or delete the field and re-run this script\n" +
+              "  to have it recreated from the schema.\n");
+}
+
+if (d.choiceDrift.length) {
+  console.log(`${d.choiceDrift.length} select field(s) have the wrong choices:`);
+  for (const f of d.choiceDrift) {
+    console.log(`  ! ${f.table}.${f.field}`);
+    if (f.absent.length) console.log(`      not offered   ${f.absent.join(", ")}`);
+    if (f.surplus.length) console.log(`      retired       ${f.surplus.join(", ")}`);
+  }
+  console.log("  Add a missing choice in the UI. A RETIRED one is left alone on purpose:\n" +
+              "  deleting it would blank that value on every record still carrying it.\n" +
+              "  Migrate those records first — see scripts/migrate-ladder.mjs.\n");
+}
+
+if (d.wrongType.length) {
+  console.log(`${d.wrongType.length} field(s) are the wrong type:`);
+  for (const f of d.wrongType) console.log(`  ! ${f.table}.${f.field} is ${f.was}, schema says ${f.want}`);
+  console.log("  Changing a field's type through the API discards what is in it, so this\n" +
+              "  script will not. Convert it in the UI, or delete it and re-run.\n");
+}
+
+const willDo = missing.length + (FORMULAS ? d.formulaDrift.length : 0);
+if (!willDo) {
+  const stuck = d.rollupDrift.length + d.choiceDrift.length + d.wrongType.length
+    + (FORMULAS ? 0 : d.formulaDrift.length);
+  console.log(stuck ? "Nothing this script can do — see above." : "The base matches the schema.");
+  process.exit(0);
+}
+if (DRY) { console.log("Dry run — nothing sent."); process.exit(0); }
+
+let failed = 0;
 
 for (const { table, field, reverse } of missing) {
   const payload = { name: field.name, type: field.type };
@@ -94,4 +165,32 @@ for (const { table, field, reverse } of missing) {
   }
 }
 
+/* ── formulas ──────────────────────────────────────────────────────── */
+/* options.formula is the ONE option the update endpoint accepts. Confirmed
+   against the official Airtable MCP server's update_field contract, which
+   documents exactly this and nothing else — so a rollup or a select's choices
+   are reported above rather than attempted here. */
+if (FORMULAS && d.formulaDrift.length) {
+  console.log();
+  for (const f of d.formulaDrift) {
+    try {
+      await call("PATCH", `/bases/${BASE}/tables/${tableId(f.table)}/fields/${f.id}`,
+                 { options: { formula: f.want } });
+      console.log(`  ~ ${f.table}.${f.field} updated`);
+    } catch (e) {
+      /* If Airtable refuses, say so with its own words and carry on with the
+         rest — one stubborn field must not leave the others stale. Exits
+         non-zero at the end so a caller can tell. */
+      failed++;
+      console.error(`  ! ${f.table}.${f.field} NOT updated`);
+      console.error(`    ${String(e.message).split("\n").slice(0, 2).join(" ")}`);
+      console.error(`    Paste this into the field in Airtable instead:\n      ${f.want}`);
+    }
+  }
+}
+
 console.log(`\nDone. Run verify-base.mjs to confirm.`);
+if (failed) {
+  console.error(`\n${failed} field(s) could not be updated through the API — see above.`);
+  process.exit(1);
+}

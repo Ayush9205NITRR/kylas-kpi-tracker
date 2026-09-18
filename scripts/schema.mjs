@@ -138,6 +138,27 @@ export const TABLES = [
       { name: "Frozen At", type: "dateTime", options: dateTime },
     ],
   },
+
+  /* ── a record of what has already been done to this base ─────────── */
+  /* A data migration is not idempotent and cannot be made so by inspection.
+     The ladder remap turns a stored rank of 22 into 21; run it twice and that
+     22 becomes 20, and nothing about the number says which it is. A local
+     marker file would not do either — the base is shared, and the next
+     machine would happily run it again.
+
+     So the base records its own migrations, and migrate-ladder.mjs refuses to
+     repeat one. Three fields; it earns them. */
+  {
+    name: "Schema Migrations",
+    description: "One row per migration applied to this base. Written by the migration scripts, read by them to refuse a second run. Do not delete a row unless you intend the migration to run again.",
+    fields: [
+      { name: "Key", type: "singleLineText",
+        description: "Stable id of the migration, e.g. ladder-2026-09-17-retire-reschedule-pending." },
+      { name: "Applied At", type: "dateTime", options: dateTime },
+      { name: "Note", type: "multilineText",
+        description: "What it changed, and how many rows." },
+    ],
+  },
 ];
 
 /* ── fields added afterwards, in dependency order ──────────────────── */

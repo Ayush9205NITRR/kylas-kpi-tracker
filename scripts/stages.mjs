@@ -145,3 +145,16 @@ export const MILESTONE = {
   sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
   sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
 };
+
+/* Stages removed from the pipeline, and where their records go. The live base
+   still holds both their code and the rank numbers from the ladder they were
+   part of. See docs/stages.json retiredNote. */
+export const RETIRED = [{"code":"RESCHEDULE_PENDING","label":"Reschedule Pending","wasRung":21,"removedOn":"2026-09-17","mapTo":"GHOSTED","why":"Removed from the Kylas pipeline. A contact waiting to reschedule got as far as a discovery call that did not happen, which is what Discovery Call No-Show (GHOSTED) already records."}];
+
+/* Stored KPI Rank remap, old numbering -> current. Derived by reconstructing
+   the old ladder from RETIRED[].wasRung, so it cannot drift from the stage
+   table. Anything absent here did not move. */
+export const RANK_REMAP = {"21":20,"22":21,"23":22,"24":23};
+
+/* Stage CODE remap for a value still sitting on a retired stage. */
+export const CODE_REMAP = {"RESCHEDULE_PENDING":"GHOSTED"};

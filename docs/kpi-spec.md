@@ -504,3 +504,80 @@ in the stage itself, not only in the call log.
 > **OPEN.** Key `2` currently sets `DISQUALIFIED_WRONG_POC`, but
 > `NOT_A_DECISION_MAKER_NDM` also exists. Which should the button set? And
 > should key `4` set Discovery **Booked** or Discovery **Done**?
+
+---
+
+## 9. Keeping the live base in step — added 2026-09-18
+
+### How the ladder went wrong without anybody seeing it
+
+`verify-base.mjs` and `repair-base.mjs` compared the live base against the
+schema **by name and type only**. Neither looked at a formula's text.
+
+So when Reschedule Pending was retired and the funnel went from 24 rungs to 23,
+the live base kept the old 24-rung formula in `Contacts.KPI Stage` and
+`Companies.KPI Stage` — and `verify-base.mjs` printed a clean ✓. A field with
+the right name and the right type can still be the wrong field.
+
+`schema-diff.mjs` now compares the formula text, the rollup aggregation and
+every select's choices as well, and both scripts use it. Whitespace outside a
+string literal is ignored (Airtable reformats what it accepts); whitespace
+*inside* one is not, because the ladder's labels are quoted strings and two
+different ladders must never compare equal.
+
+### The formula is only half of it
+
+Updating the label formula does not touch the rank **numbers** already stored on
+every contact. Those are on the old numbering:
+
+| stored rank | used to mean | reads as after the formula fix |
+|---|---|---|
+| 24 | SQL | nothing — there is no rung 24, so the formula falls through to rung 1 |
+| 23 | SQL | Discovery Call Done - Awaiting Client Inputs |
+| 22 | Closing Loops - Low Value | Discovery Call Done - Awaiting Client Inputs |
+| 21 | **Reschedule Pending** | **Closing Loops - Low Value — the SQL Meeting Done floor** |
+
+That last row is the one that costs something. Left alone, every contact still
+sitting on Reschedule Pending silently claims a meeting that never happened.
+
+`migrate-ladder.mjs` remaps the stored ranks and rewrites any value still on a
+retired stage code. The remap is **derived**, not typed: `docs/stages.json`
+declares `retired[].wasRung`, which is enough to reconstruct the old ladder
+exactly, so `RANK_REMAP` cannot drift from the stage table.
+
+A retired stage maps **down**, never up — `gen-stages.mjs` refuses a `mapTo` at
+a higher rung. Mapping Reschedule Pending up to Closing Loops would promote
+every one of those contacts past a milestone floor and invent a KPI.
+
+### The order to run them in
+
+```
+node scripts/verify-base.mjs                     see what differs
+node scripts/repair-base.mjs                     add missing fields (safe, default)
+node scripts/repair-base.mjs --update-formulas   rewrite the drifted formulas
+node scripts/migrate-ladder.mjs                  read the plan — writes nothing
+node scripts/migrate-ladder.mjs --apply          write it
+node scripts/verify-base.mjs                     confirm
+```
+
+Between the formula update and the migration the labels are wrong. Do both.
+
+### What a script may and may not change
+
+| | |
+|---|---|
+| add an absent field | **by default.** Nothing existing is touched |
+| change a formula | **`--update-formulas` only.** It changes what every row reports |
+| change a rollup | **never.** The update endpoint accepts `options.formula` and nothing else |
+| change select choices | **never.** Adding one is a UI job; deleting a retired one would blank that value on every record still carrying it, so migrate the records first |
+| change a field's type | **never.** Converting through the API discards the data in it |
+
+### Why the migration records itself
+
+The remap is **not idempotent**: run it twice and a rank of 22 becomes 20, and
+nothing about the number says which it is. A local marker file would not do
+either — the base is shared, and the next machine would run it again.
+
+So the base carries a `Schema Migrations` table, and `migrate-ladder.mjs`
+refuses to repeat a key it finds there. If that table is absent it refuses to
+migrate at all rather than change data it cannot record having changed.

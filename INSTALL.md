@@ -110,7 +110,12 @@ source .env.local
 node scripts/verify-base.mjs
 ```
 
-If it lists anything missing:
+`verify-base.mjs` checks names, types, **every formula's text, every rollup's
+aggregation and every select's choice list.** It used to check only names and
+types, which is how a stale ladder formula sat in the base for weeks under a
+clean tick.
+
+If it lists anything **missing**:
 
 ```bash
 node scripts/repair-base.mjs --dry-run     # read the list first
@@ -118,11 +123,36 @@ node scripts/repair-base.mjs               # then apply
 node scripts/verify-base.mjs               # confirm
 ```
 
-Expect `✓ Companies 19/19` and `✓ Contacts 36/36`.
+If it lists a **FORMULA** as drifted:
 
-`repair-base.mjs` only **adds** absent fields, in dependency order. It changes
-nothing already there. Read the dry run before applying anyway — a rollup
-created before the formula it reads points at nothing, silently.
+```bash
+node scripts/repair-base.mjs --update-formulas
+```
+
+Not the default, and deliberately so: adding a field is safe, whereas rewriting
+a formula changes what every existing row reports. `--dry-run` prints the old
+and the new text side by side first.
+
+If a drifted formula is a **KPI Stage**, the stored rank numbers are on the old
+ladder too and the formula alone is not enough:
+
+```bash
+node scripts/migrate-ladder.mjs            # reads the plan, writes nothing
+node scripts/migrate-ladder.mjs --apply
+```
+
+See `docs/kpi-spec.md` §9 for why, and for the order to run all of this in.
+
+A **ROLLUP**, a select's **CHOICES** or a wrong **type** cannot be changed
+through the Airtable API at all — the update endpoint takes `options.formula`
+and nothing else. `verify-base` names them and says so; fix those in the
+Airtable UI, or delete the field and re-run `repair-base.mjs` to have it
+recreated from the schema.
+
+`repair-base.mjs` only **adds** absent fields, in dependency order, and only
+changes an existing one when you pass `--update-formulas`. Read the dry run
+before applying anyway — a rollup created before the formula it reads points at
+nothing, silently.
 
 ## 6 · Start the proxy
 

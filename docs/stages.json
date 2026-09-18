@@ -1,7 +1,7 @@
 {
   "_": "Canonical cfPipelineStageBd data, pulled live 2026-09-16; Reschedule Pending retired 2026-09-17. Edit ONLY here, then run: node scripts/gen-stages.mjs",
   "field": "cfPipelineStageBd",
-  "note": "id is what a write sends \u2014 Kylas sets a picklist by id, not by code. rung is the funnel position, 24 = furthest along. callOrder = 25 - rung.",
+  "note": "id is what a write sends — Kylas sets a picklist by id, not by code. rung is the funnel position, 23 = furthest along. callOrder = 24 - rung.",
   "stages": [
     {
       "rung": 23,
@@ -181,5 +181,16 @@
   ],
   "untouched": [
     "YET_TO_BE_MINED"
+  ],
+  "retiredNote": "A stage removed from the Kylas pipeline. It stays declared here because the live Airtable base still HOLDS it: rows carry its code, and rows above its rung carry rank numbers from the old numbering. wasRung is the rung it occupied, which is enough to reconstruct the old ladder exactly and derive the rank remap — see scripts/migrate-ladder.mjs. mapTo is where a record still sitting on it should go: DOWN to the rung below, never up. Mapping Reschedule Pending up to Closing Loops would claim a meeting was held and would silently promote every one of those contacts past the SQL Meeting Done floor.",
+  "retired": [
+    {
+      "code": "RESCHEDULE_PENDING",
+      "label": "Reschedule Pending",
+      "wasRung": 21,
+      "removedOn": "2026-09-17",
+      "mapTo": "GHOSTED",
+      "why": "Removed from the Kylas pipeline. A contact waiting to reschedule got as far as a discovery call that did not happen, which is what Discovery Call No-Show (GHOSTED) already records."
+    }
   ]
 }

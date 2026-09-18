@@ -36,6 +36,44 @@ for (const [key, m] of Object.entries(src.milestones || {})) {
   if (!m.label) throw new Error(`milestone ${key} has no label`);
 }
 
+/* A retired stage has to name a real destination and a rung it actually
+   occupied, or the migration it exists for cannot be derived. */
+for (const r of src.retired || []) {
+  if (!r.code) throw new Error("a retired stage has no code");
+  if (RUNG_OF[r.code] !== undefined) throw new Error(`${r.code} is retired AND still in stages[]`);
+  if (!Number.isInteger(r.wasRung) || r.wasRung < 1) throw new Error(`${r.code} has no valid wasRung`);
+  if (!r.mapTo) throw new Error(`${r.code} has no mapTo — where should its records go?`);
+  if (RUNG_OF[r.mapTo] === undefined) throw new Error(`${r.code} maps to an unknown stage: ${r.mapTo}`);
+  /* Down, never up. Mapping a retired stage to a HIGHER rung silently promotes
+     every record on it, and past a milestone floor that invents a KPI. */
+  if (RUNG_OF[r.mapTo] >= r.wasRung)
+    throw new Error(`${r.code} maps UP (rung ${r.wasRung} -> ${RUNG_OF[r.mapTo]}). ` +
+                    `A retired stage must map to a lower rung; see docs/stages.json retiredNote.`);
+}
+
+/* THE OLD LADDER, reconstructed. Re-inserting each retired stage at the rung
+   it occupied gives back the exact numbering the live base was built with, so
+   the rank remap is derived from declared data rather than from git history. */
+function oldLadder() {
+  const list = byRungAsc.map((s) => ({ code: s.code, label: s.label }));
+  for (const r of [...(src.retired || [])].sort((a, b) => a.wasRung - b.wasRung))
+    list.splice(r.wasRung - 1, 0, { code: r.code, label: r.label, retired: true });
+  return list.map((s, i) => ({ ...s, rung: i + 1 }));
+}
+
+/* old rung -> new rung. A retired stage's records go to its mapTo; everything
+   else keeps its stage and takes that stage's current number. */
+function rankRemap() {
+  const map = {};
+  for (const s of oldLadder()) {
+    const to = s.retired
+      ? RUNG_OF[(src.retired.find((r) => r.code === s.code) || {}).mapTo]
+      : RUNG_OF[s.code];
+    if (to !== s.rung) map[s.rung] = to;
+  }
+  return map;
+}
+
 /* One renderer for both outputs, so the two can never disagree. */
 function milestoneLines() {
   return Object.entries(src.milestones || {}).map(([key, m]) =>
@@ -44,6 +82,7 @@ function milestoneLines() {
 }
 
 const byRung = [...S].sort((a, b) => a.rung - b.rung);        // 1 first
+const byRungAsc = byRung;
 const byCall = [...S].sort((a, b) => b.rung - a.rung);        // call order
 const q = (s) => JSON.stringify(s);
 const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.length));
@@ -93,6 +132,11 @@ const UNTOUCHED = ${q(src.untouched)};
 const MILESTONE = {
 ${milestoneLines()}
 };
+
+/* RETIRED, RANK_REMAP and CODE_REMAP are deliberately NOT here. They exist for
+   migrating what the Airtable base already stores, which is a job for
+   scripts/migrate-ladder.mjs — the console only ever sees current stages, and
+   shipping a remap to the browser would invite someone to apply it twice. */
 `);
 
 /* ── node ────────────────────────────────────────────────────────── */
@@ -129,10 +173,28 @@ export const UNTOUCHED = ${q(src.untouched)};
 export const MILESTONE = {
 ${milestoneLines()}
 };
+
+/* Stages removed from the pipeline, and where their records go. The live base
+   still holds both their code and the rank numbers from the ladder they were
+   part of. See docs/stages.json retiredNote. */
+export const RETIRED = ${q(src.retired || [])};
+
+/* Stored KPI Rank remap, old numbering -> current. Derived by reconstructing
+   the old ladder from RETIRED[].wasRung, so it cannot drift from the stage
+   table. Anything absent here did not move. */
+export const RANK_REMAP = ${q(rankRemap())};
+
+/* Stage CODE remap for a value still sitting on a retired stage. */
+export const CODE_REMAP = ${q(Object.fromEntries((src.retired || []).map((r) => [r.code, r.mapTo])))};
 `);
 
+const remap = rankRemap();
 console.log(`${S.length} stages → extension/console/stages.js and scripts/stages.mjs`);
 console.log(`  top rung  ${byRung.at(-1).rung}  ${byRung.at(-1).label}`);
 console.log(`  bottom    ${byRung[0].rung}  ${byRung[0].label}`);
 for (const [key, m] of Object.entries(src.milestones || {}))
   console.log(`  milestone ${pad(key, 18)} rung >= ${RUNG_OF[m.floor]}  (${m.label})`);
+for (const r of src.retired || [])
+  console.log(`  retired   ${pad(r.code, 18)} was rung ${r.wasRung} -> ${r.mapTo} (rung ${RUNG_OF[r.mapTo]})`);
+if (Object.keys(remap).length)
+  console.log(`  rank remap  ${Object.entries(remap).map(([a, b]) => `${a}->${b}`).join("  ")}`);

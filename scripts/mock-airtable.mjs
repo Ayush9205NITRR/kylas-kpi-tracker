@@ -4,9 +4,10 @@
  *   node scripts/mock-airtable.mjs               # listens on 9901
  *   AIRTABLE_BASE_URL=http://127.0.0.1:9901 ...  # point airtable.mjs at it
  *
- * Supports the three things the writer uses: upsert (PATCH with performUpsert),
- * select with filterByFormula, and delete. Rate limits above 5 requests a
- * second, like the real thing.
+ * Supports what the writer and the migrations use: upsert (PATCH with
+ * performUpsert), update by record id (plain PATCH), select with
+ * filterByFormula, pageSize/offset paging, fields[] projection and delete.
+ * Rate limits above 5 requests a second, like the real thing.
  */
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -87,6 +88,16 @@ createServer(async (req, res) => {
     return json(res, 404, { error: "not found" });
   }
   const name = decodeURIComponent(parts.slice(1).join("/"));
+
+  /* MOCK_AIRTABLE_404=<table>[,<table>] makes those tables absent.
+     This stand-in CREATES a table on first touch, which is convenient for the
+     writer and useless for testing what happens when a table is genuinely
+     missing — and "the table is missing" is exactly the case that must stop a
+     data migration, because it has nowhere to record that it ran. */
+  const absent = (process.env.MOCK_AIRTABLE_404 || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (absent.includes(name))
+    return json(res, 404, { error: { type: "TABLE_NOT_FOUND", message: `Table "${name}" not found` } });
+
   const rows = table(name);
 
   if (req.method === "GET") {
@@ -129,6 +140,21 @@ createServer(async (req, res) => {
   }
 
   const body = JSON.parse(await text(req) || "{}");
+
+  /* PATCH by record id — how a migration updates existing rows, as opposed to
+     the writer's upsert-on-a-key below. Unsupported here until now, so
+     migrate-ladder.mjs could not be tested against this stand-in at all. */
+  if (req.method === "PATCH" && !body.performUpsert) {
+    const out = [];
+    for (const r of body.records || []) {
+      const hit = rows.find((x) => x.id === r.id);
+      if (!hit) return json(res, 404, { error: { type: "MODEL_ID_NOT_FOUND", message: `no record ${r.id}` } });
+      hit.fields = { ...hit.fields, ...r.fields };
+      WRITES.push({ kind: "patch", table: name, id: hit.id, fields: r.fields });
+      out.push(hit);
+    }
+    return json(res, 200, { records: out });
+  }
 
   if (req.method === "PATCH" && body.performUpsert) {
     const key = body.performUpsert.fieldsToMergeOn[0];
