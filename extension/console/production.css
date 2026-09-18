@@ -399,3 +399,9 @@ body.framed .ovOnly{display:inline-block}
 /* A step rate over 100% is a capture gap, not a good number — marked the same
    way the funnel marks a widening rung. */
 .vsteps td.over{color:var(--amber);font-weight:700}
+
+/* Data age and an explicit refresh. The answer to "this is stale" is a
+   control the reader can see, not a shorter timer they cannot. */
+.vfilters .vage,.vhead .vage{font-size:var(--t-meta);color:var(--text3);align-self:center}
+.gbtn.sm{padding:6px 12px;font-size:var(--t-meta)}
+.vhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}

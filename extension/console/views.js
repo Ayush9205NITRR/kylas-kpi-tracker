@@ -191,49 +191,86 @@
 
   /* The allotted list is a search over up to 200 companies, so it is fetched
      once and reused by both views rather than on every repaint. */
-  const CACHE = { owner: null, companies: [], owners: [], error: "" };
+  /* ONE fetch for the whole account, filtered in the browser.
+     It used to be keyed on owner, single-slot: picking a name evicted the
+     previous one and refetched from Kylas — two paginated searches at a 450ms
+     gap each, plus an owner lookup for anyone unknown. Switching back refetched
+     again. That is the slowness; the cache DURATION was never the problem.
 
-  /* NEVER block the first paint on this. /companies is a search over up to 200
-     companies plus an owner-name lookup for each owner not already known, and
-     awaiting it before rendering meant the filter bar itself waited on the
-     network — which is the "source, stage and KPI load very slowly" Ayush saw.
-     The controls are local; only the rows need the data.
+     Fetching everyone costs the same as fetching one person anyway, because the
+     shape that works on this account cannot filter server-side — the proxy
+     already pages through the whole list and filters in memory. So do it once
+     and switch owners for free.
 
-     So: return what is cached immediately, start a fetch if needed, and
-     re-render when it lands. */
-  let inflight = null;
+     Persisted, and served stale on open while a refresh runs behind it, so a
+     reload paints instantly instead of waiting on the network. */
+  const CACHE = { at: 0, companies: [], owners: [], error: "", loading: false, from: "" };
+  const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
+  let inflight = false;
+  let restored = false;
 
-  const companiesNow = (owner) =>
-    (CACHE.owner === (owner || "") ? CACHE.companies : []);
+  const ageText = () => {
+    if (!CACHE.at) return "";
+    const s = Math.round((Date.now() - CACHE.at) / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`;
+  };
 
-  /* true while a fetch is outstanding, so the view can say "loading" instead of
-     rendering an empty list that reads as "you have nothing". */
-  function ensureCompanies(owner, onReady) {
-    const want = owner || "";
-    /* Owner match alone, NOT "&& !CACHE.error". CACHE.owner is set on failure
-       too, so including the error here would make the re-render that reports
-       the failure start another fetch, which fails, which re-renders — an
-       unbounded retry loop against a rate-limited API. One attempt per owner;
-       the error is surfaced in the view instead. */
-    if (CACHE.owner === want) return false;
-    if (inflight === want) return true;          /* already on its way */
-    inflight = want;
-    API.companies(want)
-      .then((r) => {
-        CACHE.owner = want;
+  /* Filter locally. Owner switching now touches no network at all. */
+  const companiesNow = (owner) => {
+    const want = String(owner || "");
+    if (!want || want === "all") return CACHE.companies;
+    return CACHE.companies.filter((c) =>
+      String(c.ownerId) === want || c.owner === want);
+  };
+
+  /* Read the last good list off disk once per session, so the first paint has
+     rows rather than a spinner. */
+  async function restore() {
+    if (restored) return;
+    restored = true;
+    try {
+      const held = await Store.getSetting("companyCache");
+      if (held?.companies?.length && !CACHE.companies.length) {
+        CACHE.companies = held.companies;
+        CACHE.owners = held.owners || [];
+        CACHE.at = held.at || 0;
+        CACHE.from = "stored";
+      }
+    } catch { /* storage is a convenience here, never a dependency */ }
+  }
+
+  /* Returns true while a fetch is outstanding. `force` is the Refresh button —
+     the answer to "the cache is too old" is a control, not a shorter timer. */
+  function ensureCompanies(_owner, onReady, force) {
+    if (inflight) return true;
+    const fresh = CACHE.at && Date.now() - CACHE.at < FRESH_MS;
+    if (!force && fresh) return false;
+    /* Nothing held and a previous attempt failed: do not loop. */
+    if (!force && CACHE.error && !CACHE.companies.length && CACHE.at) return false;
+
+    inflight = true;
+    CACHE.loading = true;
+    API.companies("all", force)
+      .then(async (r) => {
         CACHE.companies = r.companies || [];
         CACHE.owners = r.owners || [];
         CACHE.error = "";
-        /* So the Source filter can offer the account's whole list, not just
-           the values that happen to be on screen. */
+        CACHE.at = Date.now();
+        CACHE.from = "live";
         if (r.picklists) adoptPicklists(r.picklists);
+        try {
+          await Store.setSetting("companyCache",
+            { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners });
+        } catch { /* over quota is survivable — it is only a head start */ }
       })
       .catch((e) => {
-        /* Offline: fall back to contact-derived companies and say so, rather
-           than render an empty funnel that reads as "you have done nothing". */
-        CACHE.owner = want; CACHE.companies = []; CACHE.error = e.message;
+        /* Keep whatever is held. A failed refresh must not empty the view. */
+        CACHE.error = e.message;
+        if (!CACHE.at) CACHE.at = Date.now();
       })
-      .finally(() => { inflight = null; onReady(); });
+      .finally(() => { inflight = false; CACHE.loading = false; onReady(); });
     return true;
   }
 
@@ -455,6 +492,7 @@
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
 
   async function dashboard(host) {
+    await restore();
     const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
     const dbase = companiesNow(DASH_OWNER);
     const cos = rollup(DATA, dbase, dbase.length > 0);
@@ -473,8 +511,10 @@
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(DASH_OWNER) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
         </select></label>
-        <span class="vsub">${loading ? "loading…" : `${cos.length} compan${
-          cos.length === 1 ? "y" : "ies"}${CACHE.error ? " · from this browser only" : " allotted"}`}</span>
+        <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
+          CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
+        <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
+          title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
       </div>
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
@@ -484,7 +524,10 @@
       <div class="vsec">${trendChart()}</div>`;
 
     const sel = document.getElementById("dOwner");
+    /* No network: the whole account is already held, so this is a filter. */
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };
+    const rf = document.getElementById("dRefresh");
+    if (rf) rf.onclick = () => { ensureCompanies(DASH_OWNER, () => dashboard(host), true); dashboard(host); };
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
   }
@@ -574,6 +617,7 @@
        which companies exist. The owner filter here is the company's own owner
        in Kylas, which is what "allotted to me" means. Rendered from cache
        first — the filters are local and must not wait on a search. */
+    await restore();
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
     /* An owner is selected unless the filter is cleared, and "all" is still a
@@ -633,6 +677,9 @@
           (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k)}</label>
         <label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>
+        <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
+          title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
+        <span class="vage">${CACHE.at ? esc(ageText()) : ""}</span>
       </div>
       <div class="vtable">
         <div class="vr vh">
@@ -654,6 +701,7 @@
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
     on("fSince", "change", (e) => { FILTERS.calledSince = e.target.value; companies(host); });
+    on("fRefresh", "click", () => { ensureCompanies(who, () => companies(host), true); companies(host); });
     /* Clear is also the retry: it drops the cache so a failed fetch is tried
        again, which is otherwise a reload. */
     on("fClear", "click", () => {

@@ -10,7 +10,7 @@ const GAP = Number(process.env.KYLAS_GAP || 450);
 const CODE_BY_ID = Object.fromEntries(Object.entries(STAGE_ID).map(([code, id]) => [String(id), code]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createClient(key, { log = () => {} } = {}) {
+export function createClient(key, { log = () => {}, shapeHint = "", onShape = () => {} } = {}) {
   let chain = Promise.resolve();
 
 /* A rejected promise must not stay in the chain: `chain.then(...)` off a
@@ -101,7 +101,12 @@ export function createClient(key, { log = () => {} } = {}) {
     { name: "lean fields, no rule",
       body: () => ({ fields: COMPANY_LEAN }), filtered: false },
   ];
-  let companyShape = null;          // remembered once one works
+  /* Remembered once one works. A hint from the caller lets a restarted proxy
+     skip the probe entirely: three shapes fail on this account and each costs
+     a full rate-limit gap, so the probe alone was 1.35s of every cold start
+     after the first ever run. */
+  let companyShape = shapeHint ? COMPANY_SHAPES.find((s) => s.name === shapeHint) || null : null;
+  if (companyShape) log(`company search: using remembered shape "${companyShape.name}"`);
 
   /* PAGINATED. One page of 200 was not "the companies allotted to you", it was
      "the 200 most recently updated companies in the account" — and when the
@@ -116,13 +121,19 @@ export function createClient(key, { log = () => {} } = {}) {
     const mine = (list) => (ownerId == null ? list
       : list.filter((c) => Number(c.ownerId ?? c.owner?.id) === Number(ownerId)));
 
-    /* Settle the shape on page 0, then reuse it for the rest. */
-    const tries = companyShape ? [companyShape] : COMPANY_SHAPES;
+    /* Settle the shape on page 0, then reuse it for the rest. The remembered
+       shape goes first and the rest stay behind it: a hint from a previous run
+       is a shortcut, never a commitment, so a stale hint (a different account,
+       or Kylas fixing the endpoint) costs one failed call rather than the whole
+       view. */
+    const tries = companyShape
+      ? [companyShape, ...COMPANY_SHAPES.filter((s) => s !== companyShape)]
+      : COMPANY_SHAPES;
     let shape = null, first = null, last;
     for (const s of tries) {
       try {
         first = rows(await call("POST", page(0), s.body(ownerId)));
-        if (!companyShape) log(`company search: "${s.name}" works`);
+        if (companyShape !== s) { log(`company search: "${s.name}" works`); onShape(s.name); }
         companyShape = shape = s;
         break;
       } catch (e) {

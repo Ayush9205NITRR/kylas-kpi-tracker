@@ -64,7 +64,8 @@
     /* The authoritative list of companies allotted to someone — their OWN owner
        field in Kylas. Pass "all" for the team view. Slower than the others
        because it can be 200 rows, so the views cache it. */
-    companies: (owner) => req(`/companies${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`,
+    companies: (owner, fresh) => req(
+      `/companies?owner=${encodeURIComponent(owner || "")}${fresh ? "&fresh=1" : ""}`,
       { timeout: 60000 }),
     /* Frozen daily rows from Airtable, for the trend chart. */
     snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),

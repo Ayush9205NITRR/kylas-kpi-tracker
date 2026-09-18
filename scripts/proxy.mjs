@@ -13,6 +13,7 @@
  * marker block inside its remarks, and append a native Kylas call log.
  */
 import { createServer } from "node:http";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
@@ -26,7 +27,23 @@ if (!KEY) {
 }
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
-const kylas = createClient(KEY, { log });
+
+/* Which /v1/search/company shape this account accepts, remembered across
+   restarts. Three of the five fail here and each costs a full rate-limit gap,
+   so re-probing spent 1.35s of every cold start re-learning the same answer.
+   A file, not a constant, because the answer is per-account. */
+const SHAPE_FILE = new URL("../.company-shape", import.meta.url);
+let shapeHint = "";
+try { shapeHint = readFileSync(SHAPE_FILE, "utf8").trim(); } catch { /* first run */ }
+
+const kylas = createClient(KEY, {
+  log,
+  shapeHint,
+  onShape: (name) => {
+    try { writeFileSync(SHAPE_FILE, name); }
+    catch { /* unwritable is survivable — it only costs the probe again */ }
+  },
+});
 
 /* Airtable is optional: without a PAT the proxy still reads and writes Kylas,
    and each save reports that the Airtable half was skipped rather than failing.
@@ -64,6 +81,12 @@ async function ownerName(id) {
    blank company, and the companies list falls back to "Company 1776620".
    Resolving by id removes the dependency either way. Cached, so a queue of 100
    contacts across 30 companies costs 30 requests once, not 100 every fetch. */
+/* /companies responses, by owner key. Shared by every associate pointed at
+   this proxy, which is the point: one page-through of the account serves the
+   whole team for the window. */
+const companyCache = new Map();
+const COMPANY_TTL = Number(process.env.COMPANY_TTL_MS || 5 * 60 * 1000);
+
 const companyNames = new Map();
 async function companyName(id) {
   if (!id) return "";
@@ -181,6 +204,19 @@ const routes = {
     const all = want === "all";
     const owner = all ? null : (want || me?.id);
 
+    /* Served from memory for COMPANY_TTL. Paging the whole account is the most
+       expensive thing this proxy does — several searches at a 450ms gap plus an
+       owner lookup for anyone unknown — and with eight associates sharing one
+       proxy it would otherwise run once per person per page open. ?fresh=1 is
+       the Refresh button. */
+    const key = all ? "all" : String(owner);
+    const hit = companyCache.get(key);
+    const fresh = url.searchParams.get("fresh");
+    if (hit && !fresh && Date.now() - hit.at < COMPANY_TTL) {
+      log(`companies for ${key} — ${hit.body.companies.length} (cached ${Math.round((Date.now() - hit.at) / 1000)}s)`);
+      return { ...hit.body, cachedSeconds: Math.round((Date.now() - hit.at) / 1000) };
+    }
+
     const raw = all ? await kylas.companies() : await kylas.companiesForOwner(owner);
 
     /* ?keys=1 reports the shape this account's company search actually returns,
@@ -218,8 +254,10 @@ const routes = {
        without them the console's SOURCES stayed empty there and the Source
        filter could only offer values it happened to see in the loaded rows.
        meta() is cached, so this is free after the first call. */
-    return { owner: all ? "all" : String(owner), companies, owners: ownerList(),
-             picklists: (await meta()).picklists };
+    const body = { owner: all ? "all" : String(owner), companies, owners: ownerList(),
+                   picklists: (await meta()).picklists };
+    companyCache.set(key, { at: Date.now(), body });
+    return body;
   },
 
   /* The frozen daily numbers, for the trend chart. Read from Airtable, which
