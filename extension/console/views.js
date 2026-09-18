@@ -288,13 +288,27 @@
   /* The proxy already works out why the join is empty — /kpi-debug compares
      both sides and returns a verdict in one sentence. Fetched once, only when
      nothing matched, because it reads every Companies row in the base. */
-  const WHY = { text: "", loading: false, asked: false };
+  const WHY = { text: "", detail: "", loading: false, asked: false };
 
   function ensureWhy(onReady) {
     if (WHY.asked) return;
     WHY.asked = true; WHY.loading = true;
     API.kpiDebug()
-      .then((d) => { WHY.text = d?.verdict || d?.error || ""; })
+      .then((d) => {
+        WHY.text = d?.verdict || d?.error || "";
+        /* The ids themselves, on the hover. The verdict names the FAULT; two
+           ids side by side are what let somebody recognise their own data —
+           a mock id, a contact id where a company id belongs, a stray space.
+           That was the one thing the old "run curl" message did give, and
+           dropping it would have traded a terminal trip for a dead end. */
+        const at = (d?.airtable?.sampleIds || []).slice(0, 3).join(", ");
+        const ky = (d?.kylas?.sampleIds || []).slice(0, 3).join(", ");
+        WHY.detail = [
+          at ? `Airtable ids: ${at}` : "",
+          ky ? `Kylas ids: ${ky}` : "",
+          d?.fieldWarning || "",
+        ].filter(Boolean).join("\n");
+      })
       .catch((e) => { WHY.text = `could not check why — ${e.message}`; })
       .finally(() => { WHY.loading = false; onReady(); });
   }
@@ -324,7 +338,8 @@
          and a second later were looking at the funnel. Same callback the two
          views already hand to ensureCompanies. */
       if (opts?.repaint) ensureWhy(opts.repaint);
-      return `<span class="vsrc off" title="Companies join to Airtable on the Kylas company id — see /kpi-debug for both sides in full">${
+      return `<span class="vsrc off" title="${esc(WHY.detail
+        || "Companies join to Airtable on the Kylas company id — see /kpi-debug for both sides in full")}">${
         WHY.loading ? "no company matched Airtable — finding out why…"
         : WHY.text ? esc(WHY.text)
         : "no company matched Airtable"}</span>`;
@@ -414,7 +429,7 @@
 
     /* Refresh means ask again, the verdict included — the usual reason
        somebody presses it is that they have just fixed what it told them. */
-    if (force) { WHY.asked = false; WHY.text = ""; }
+    if (force) { WHY.asked = false; WHY.text = ""; WHY.detail = ""; }
 
     inflight = true;
     CACHE.loading = true;

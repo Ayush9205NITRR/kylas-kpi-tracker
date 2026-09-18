@@ -214,9 +214,23 @@ createServer(async (req, res) => {
        exactly the behaviour that lost 230 of Ayush's companies. */
     const size = Math.max(1, Number(url.searchParams.get("size") || 200));
     const pg = Math.max(0, Number(url.searchParams.get("page") || 0));
-    const slice = out.slice(pg * size, pg * size + size);
+
+    /* A RESULT WINDOW, which is not the same as a page size.
+       Ayush's account crawls to exactly 10,000 companies and then returns a
+       short page, so the client concludes it reached the end. 10,000 is
+       Elasticsearch's default max_result_window, and this endpoint is plainly
+       search-backed — the count is a CEILING, not his company count. A search
+       result that silently ends while GET /v1/companies/{id} still answers for
+       the rows past it is the exact shape of the fault, and it is unreproducible
+       without this switch.
+         MOCK_SEARCH_CEILING=<n>   nothing past offset n is searchable
+       Deliberately NOT applied to the by-id route above: that is the whole
+       point — the record exists, the search just cannot reach it. */
+    const ceiling = Number(process.env.MOCK_SEARCH_CEILING || 0);
+    const window = ceiling > 0 ? out.slice(0, ceiling) : out;
+    const slice = window.slice(pg * size, pg * size + size);
     return json(res, 200, { content: slice.map(withOwner),
-                            totalElements: out.length, page: pg, size });
+                            totalElements: window.length, page: pg, size });
   }
 
   if (p === "/v1/entities/contact/fields") {

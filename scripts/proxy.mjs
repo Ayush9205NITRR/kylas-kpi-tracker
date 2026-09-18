@@ -410,8 +410,24 @@ const routes = {
      id from a different account) is visible rather than inferred. */
   "/kpi-debug": async () => {
     if (!airtable) return { error: "Airtable is not configured" };
-    const rows = await airtable.listAll("Companies",
-      { fields: ["Kylas Company ID", "Name", "KPI Rank", "Right POC", "Successful Discovery"] });
+    /* Airtable rejects the WHOLE read for one unknown field name, so the
+       diagnostic died with a 422 on exactly the half-migrated base it exists to
+       explain — the badge then said "could not check why" and the fault was
+       still a mystery. Two fields are all it needs to answer the question; the
+       rest are a nicety, so they are asked for once and then dropped. */
+    const WANT = ["Kylas Company ID", "Name", "KPI Rank", "Right POC", "Successful Discovery"];
+    let rows, fieldWarning = null;
+    try {
+      rows = await airtable.listAll("Companies", { fields: WANT });
+    } catch (e) {
+      if (!/UNKNOWN_FIELD_NAME/.test(e.message)) throw e;
+      /* Airtable names the field inside escaped JSON, so pull it out rather
+         than pasting the tail of the error and its closing braces. */
+      const which = /Unknown field name:\s*\\?"([^"\\]+)/.exec(e.message)?.[1];
+      fieldWarning = `Companies has no field ${which ? `"${which}"` : "this check asked for"
+        }. Run scripts/repair-base.mjs. Read with the two join fields only.`;
+      rows = await airtable.listAll("Companies", { fields: ["Kylas Company ID", "Name"] });
+    }
     const ids = rows.map((r) => String(r.fields["Kylas Company ID"] ?? "").trim());
     const withId = ids.filter(Boolean);
 
@@ -419,6 +435,41 @@ const routes = {
     const kylasIds = (hit?.body?.companies || []).map((c) => String(c.id));
     const set = new Set(withId);
     const overlap = kylasIds.filter((id) => set.has(id));
+
+    /* ASK KYLAS, DO NOT INFER FROM THE CACHE.
+       "None overlap, so the ids are from a different account" was a guess
+       dressed as a verdict. The cached list is a capped, updatedAt-ordered
+       PREFIX of the account — on Ayush's it stops at exactly 10,000, which is
+       Elasticsearch's default max_result_window and not the end of his data —
+       so an id missing from it says nothing about whether it exists. There is
+       a direct answer one call away: GET /v1/companies/{id}.
+
+         404 → that id is genuinely not in this Kylas account
+         200 → the id is real and the CACHED LIST is what is wrong
+
+       Five ids, because the rate limit is the scarce thing here and five is
+       enough to tell a systematic fault from one bad row. */
+    const probe = [];
+    for (const id of withId.slice(0, 5)) {
+      try {
+        const co = await kylas.company(id);
+        probe.push({ id, found: true, name: co?.name || "(no name)",
+                     ownerId: String(co?.ownerId ?? co?.owner?.id ?? "") || null,
+                     inCachedList: set.size ? kylasIds.includes(id) : false });
+      } catch (e) {
+        probe.push({ id, found: false, status: e.status || null, why: e.message });
+      }
+    }
+    const real = probe.filter((p) => p.found);
+    const missing = probe.filter((p) => !p.found && p.status === 404);
+    /* Real in Kylas but absent from the list we joined against. */
+    const unlisted = real.filter((p) => !p.inCachedList);
+
+    const search = kylas.lastCompanySearch?.() || {};
+    /* 10,000 on the nose is a ceiling, not a count. Worth naming, because the
+       crawl stops there of its own accord — the page comes back short, `full`
+       goes false and `truncated` stays FALSE, so nothing warned. */
+    const atCeiling = kylasIds.length === 10000;
 
     return {
       airtable: {
@@ -433,8 +484,13 @@ const routes = {
         companiesCached: kylasIds.length,
         cachedAgeSeconds: hit ? Math.round((Date.now() - hit.at) / 1000) : null,
         sampleIds: kylasIds.slice(0, 5),
+        pagesCrawled: search.pages ?? null,
+        hitOurCap: !!search.truncated,
+        atTenThousandCeiling: atCeiling,
       },
+      probe,
       matching: overlap.length,
+      ...(fieldWarning ? { fieldWarning } : {}),
       verdict: !rows.length
         ? "Airtable has NO company rows. A contact saved with no companyId writes none — check the save log."
         : !withId.length
@@ -443,7 +499,21 @@ const routes = {
             ? "Nothing cached from Kylas yet — open the dashboard once, then call this again."
             : overlap.length
               ? `${overlap.length} company/companies join. The dashboard should show them.`
-              : "Both sides have ids and NONE overlap — the ids are from different accounts, or a different form.",
+              /* Ordered by what each case costs to fix. A real id that is not in
+                 the list is OUR bug; an id Kylas has never heard of is a data
+                 fault at the write end. */
+              : unlisted.length
+                ? `The ids are REAL — Kylas returned ${unlisted.length} of ${probe.length} sampled, e.g. ${
+                    unlisted[0].id} "${unlisted[0].name}". They are missing from the ${
+                    kylasIds.length}-company list the dashboard joins against${
+                    atCeiling ? ", which stopped at exactly 10,000 — a ceiling, not the end of your account"
+                              : search.truncated ? ", which stopped at our page cap" : ""
+                  }. The join is fine; the Kylas side of it is incomplete.`
+                : missing.length === probe.length
+                  ? `Kylas has never heard of these ids — all ${probe.length} sampled returned 404, e.g. ${
+                      probe[0].id}. They were written by a console pointed at a different account (the mock, or another Kylas tenant), so the rows are stale test data.`
+                  : `Sampled ${probe.length} ids: ${real.length} exist in Kylas, ${
+                      missing.length} do not. Mixed, so check the write path — the probe list says which is which.`,
     };
   },
 
