@@ -25,6 +25,16 @@ const json = (res, code, body) => {
 /* Only the shapes the writer actually sends:
      {Field} = 'value'     and    {Lookup (from Link)} = 'value'   */
 function matches(row, formula, all) {
+  /* IS_AFTER({Field}, 'yyyy-mm-dd') — used by /snapshots to fetch a window of
+     frozen days. Without it every date filter matched nothing and the endpoint
+     looked broken while actually being unsupported by the stand-in. */
+  const after = formula.match(/^IS_AFTER\(\{([^}]+)\},\s*'(.*)'\)$/i);
+  if (after) {
+    const [, field, when] = after;
+    const v = String(row.fields[field] ?? "");
+    return v !== "" && v.slice(0, 10) > when.slice(0, 10);
+  }
+
   const m = formula.match(/^\{([^}]+)\}\s*=\s*'(.*)'$/);
   if (!m) return false;
   const [, field, want] = m;

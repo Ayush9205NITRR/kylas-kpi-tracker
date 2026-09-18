@@ -218,13 +218,30 @@ body.framed .ovOnly{display:inline-block}
                     discharged by the legend and the table view below
      dark  #191A1E  CVD dE 9.4, normal dE 26.5, all >= 3:1
    Dark is stepped for the dark surface, not an automatic flip. */
-.vfun{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+/* Six categorical slots, in fixed order, on the whole view — the funnel bar,
+   the stacked bars and the trend lines all draw from the same order, so one
+   rung is one colour everywhere. Validated with the dataviz script against
+   this console's own surfaces:
+     light #FFFFFF  CVD dE 9.1, normal dE 19.6 — aqua, yellow and magenta warn
+                    below 3:1, discharged by the legends and tables shipped
+                    alongside every chart
+     dark  #191A1E  CVD dE 8.4, normal dE 19.3, all >= 3:1
+   Dark is stepped for the dark surface, not an automatic flip. */
+#vwrap{
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #vwrap{
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --s4:#c98500; --s5:#d55181; --s6:#008300;
+}}
+:root[data-theme="dark"] #vwrap{
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --s4:#c98500; --s5:#d55181; --s6:#008300;
+}
+
+.vfun{background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:6px 22px 14px;box-shadow:none;margin-bottom:18px}
-#vmode{--s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .vfun,
-  :root:not([data-theme="light"]) #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}}
-:root[data-theme="dark"] .vfun,:root[data-theme="dark"] #vmode{--s1:#3987e5; --s2:#d95926; --s3:#199e70}
 
 /* Minimal: one label, one mark, three numbers. The per-row definition moved to
    the row's title — six explanatory sublines under six bars is the thing that
@@ -355,3 +372,30 @@ body.framed .ovOnly{display:inline-block}
 /* The window sentinel: also the "there is more" affordance. */
 .vmore{padding:16px 18px;text-align:center;font-size:var(--t-meta);
   color:var(--text3);font-weight:600;border-top:1px solid var(--line)}
+
+/* ── dashboard sections ────────────────────────────────────────────────── */
+.vsec{margin-top:26px}
+.vsec:empty{display:none}
+
+/* Step conversion — the benchmark table. */
+.vsteps{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.vsteps table{border-collapse:collapse;width:100%;font-size:var(--t-label)}
+.vsteps th,.vsteps td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line)}
+.vsteps thead th{font-size:var(--t-meta);font-weight:600;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.vsteps tbody tr:last-child td{border-bottom:0}
+.vsteps td.tnum,.vsteps th.tnum{text-align:right;font-variant-numeric:tabular-nums}
+.vsteps thead th:not(:first-child):not(.tnum){text-align:right}
+.vsteps tbody td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
+/* The team row leads; per-associate rows are the comparison. */
+.vsteps tr.all td{font-weight:700;background:var(--panel2)}
+
+/* Trend — one line per conversion. */
+.vline{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.vline svg{width:100%;height:200px;display:block;overflow:visible}
+.vline .gl{stroke:var(--line);stroke-width:1}
+.vline .gt2{fill:var(--text3);font-size:10px;text-anchor:end;
+  font-family:var(--f);font-variant-numeric:tabular-nums}
+/* A step rate over 100% is a capture gap, not a good number — marked the same
+   way the funnel marks a widening rung. */
+.vsteps td.over{color:var(--amber);font-weight:700}

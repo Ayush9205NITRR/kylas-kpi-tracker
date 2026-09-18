@@ -4,7 +4,9 @@
      the most saturated thing on screen), which read as a second accent
      competing with the real one and made the form column look tinted. Same
      lightness, saturation dropped to a trace. */
-  --ground:#F0F1F3; --panel:#FFFFFF; --panel2:#F7F8F9; --panel3:#EAEBEE;
+  /* Lighter than #F0F1F3 — the panels sit on it and the text needs the
+     contrast more than the layout needs the separation. */
+  --ground:#F7F8F9; --panel:#FFFFFF; --panel2:#FAFAFB; --panel3:#EFF0F2;
   --line:#E2E4E8; --line2:#CBCED4;
   --text:#1A1D23; --text2:#5A6068; --text3:#8D929B;
   --blue:#2563EB; --blueSoft:#E8EFFE; --blueLine:#A6C1F7; --onBlue:#FFFFFF; --blueDeep:#1D4FD0;

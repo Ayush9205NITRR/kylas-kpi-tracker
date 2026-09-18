@@ -18,6 +18,34 @@
   /* Picked up: anything other than never-touched or a no-answer. */
   const picked = (c) => !!c.stage && !NOT_CONNECTED.includes(c.stage);
 
+  /* ── the five benchmark conversions ────────────────────────────────── */
+  /* Each is a STEP between adjacent rungs — the drop-off that is actually
+     managed. A single overall rate hides which step is losing companies. */
+  const STEPS = [
+    { from: "reached",   to: "right",     label: "Reached → Right POC" },
+    { from: "right",     to: "discovery", label: "Right POC → Discovery" },
+    { from: "discovery", to: "booked",    label: "Discovery → SQL booked" },
+    { from: "booked",    to: "done",      label: "SQL booked → SQL done" },
+    { from: "done",      to: "sql",       label: "SQL done → SQL" },
+  ];
+
+  /* Exclusive buckets, highest rung first — WHERE each company stopped.
+     This is what makes a stacked bar honest: the funnel rungs are NESTED (an
+     SQL company is also reached), so stacking the rungs themselves would add
+     overlapping counts and produce a bar whose height means nothing. Bucketed
+     by the furthest rung reached, the segments are disjoint, they sum to
+     companies reached, and the chart answers the better question — at which
+     step is this associate losing accounts. */
+  const BUCKETS = [
+    { key: "sql",       label: "SQL" },
+    { key: "done",      label: "SQL done" },
+    { key: "booked",    label: "SQL booked" },
+    { key: "discovery", label: "Discovery" },
+    { key: "right",     label: "Right POC" },
+    { key: "reached",   label: "Reached only" },
+  ];
+  const bucketOf = (co) => (BUCKETS.find((b) => co[b.key]) || {}).key || null;
+
   /* ── the funnel, defined once ──────────────────────────────────────── */
   /* Ayush's six, in his order (2026-09-17). Two different kinds of test sit in
      one list: reached/right/discovery come from the event DATA, booked/done/sql
@@ -266,62 +294,161 @@
       those fields are filled, so this should only reflect records entered before that.</p>` : ""}`;
   }
 
-  /* ── call-mode breakdown, stacked by mode ──────────────────────────── */
-  /* Segments come from the data, not a fixed list: the Mode of Meeting
-     vocabulary is still unsettled (In Person/Virtual/Calls/Text in the schema
-     vs Video/Audio/In-Person in the dashboard spec), and a hardcoded list
-     renders real values as nothing. Slots are assigned in a FIXED order over
-     the sorted mode names, so a filter that drops a mode cannot repaint the
-     survivors. Palette: categorical slots 1-3, validated for both surfaces. */
-  function modeChart(cos, byLabel) {
+  /* ── where companies stopped, stacked per associate ────────────────── */
+  /* Six disjoint segments summing to companies reached. Palette: categorical
+     slots 1-6, run through the dataviz validator against this console's
+     surfaces. Three of the six fall under 3:1 on white, which obliges the
+     legend and the table that ship with this chart. */
+  const slot = (i) => `var(--s${(i % 6) + 1})`;
+
+  function stackedByOwner(cos, byLabel) {
     const groups = new Map();
-    const modes = new Set();
     for (const co of cos) {
+      const b = bucketOf(co);
+      if (!b) continue;                       /* never reached — not in scope */
       const k = byLabel(co) || "Unassigned";
       if (!groups.has(k)) groups.set(k, {});
-      for (const [m, n] of Object.entries(co.modes || {})) {
-        groups.get(k)[m] = (groups.get(k)[m] || 0) + n;
-        modes.add(m);
-      }
+      groups.get(k)[b] = (groups.get(k)[b] || 0) + 1;
     }
-    const keys = [...modes].sort();
     const bars = [...groups.entries()]
       .map(([k, v]) => ({ k, v, total: Object.values(v).reduce((a, b) => a + b, 0) }))
       .filter((b) => b.total > 0)
       .sort((a, b) => b.total - a.total);
-    if (!bars.length || !keys.length) return "";
+    if (!bars.length) return "";
 
     const max = Math.max(...bars.map((b) => b.total), 1);
-    const slot = (i) => `var(--s${(i % 3) + 1})`;
-    /* Legend always, for two or more series — identity must never be colour
-       alone, and the light aqua slot sits under 3:1 on white, which obliges
-       visible labels and the table below. */
-    const legend = `<div class="vlg">${keys.map((m, i) =>
-      `<span class="lg"><i style="background:${slot(i)}"></i>${esc(m)}</span>`).join("")}</div>`;
+    const legend = `<div class="vlg">${BUCKETS.map((b, i) =>
+      `<span class="lg"><i style="background:${slot(i)}"></i>${esc(b.label)}</span>`).join("")}</div>`;
 
     const chart = `<div class="vbars">${bars.map((b) => `
       <div class="vbar">
         <span class="bk">${esc(b.k)}</span>
-        <span class="bt">${keys.map((m, i) => {
-          const n = b.v[m] || 0;
+        <span class="bt">${BUCKETS.map((bu, i) => {
+          const n = b.v[bu.key] || 0;
           if (!n) return "";
           return `<i style="width:${(n / max) * 100}%;background:${slot(i)}"
-                     title="${esc(b.k)} · ${esc(m)}: ${n}"></i>`;
+                     title="${esc(b.k)} · ${esc(bu.label)}: ${n}"></i>`;
         }).join("")}</span>
         <span class="bn tnum">${b.total}</span>
       </div>`).join("")}</div>`;
 
-    /* The table is the accessible equal, not an afterthought — it is also what
-       discharges the contrast warning on the light palette. */
     const table = `<details class="vtbl"><summary>Show as a table</summary>
-      <table><thead><tr><th>Associate</th>${keys.map((m) => `<th>${esc(m)}</th>`).join("")}<th>Total</th></tr></thead>
+      <table><thead><tr><th>Associate</th>${BUCKETS.map((b) =>
+        `<th>${esc(b.label)}</th>`).join("")}<th>Reached</th></tr></thead>
       <tbody>${bars.map((b) => `<tr><td>${esc(b.k)}</td>${
-        keys.map((m) => `<td class="tnum">${b.v[m] || 0}</td>`).join("")}<td class="tnum">${b.total}</td></tr>`).join("")}
-      </tbody></table></details>`;
+        BUCKETS.map((bu) => `<td class="tnum">${b.v[bu.key] || 0}</td>`).join("")
+        }<td class="tnum">${b.total}</td></tr>`).join("")}</tbody></table></details>`;
 
-    return `<div class="vhead sm"><h2>Call mode</h2>
-      <span class="vsub">Meetings at booked or beyond, split by how they were held.</span></div>
+    return `<div class="vhead sm"><h2>Where companies stopped</h2>
+      <span class="vsub">Each bar is one associate's reached companies, split by the furthest rung they got to.</span></div>
       ${legend}${chart}${table}`;
+  }
+
+  /* ── the benchmark table ───────────────────────────────────────────── */
+  const rate = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
+  const show = (v) => (v == null ? "—" : v + "%");
+
+  function stepTable(cos, byLabel) {
+    const count = (list, k) => list.filter((c) => c[k]).length;
+    const line = (label, list) => ({
+      label,
+      n: count(list, "reached"),
+      steps: STEPS.map((st) => rate(count(list, st.to), count(list, st.from))),
+    });
+
+    const people = [...new Set(cos.map((c) => byLabel(c) || "Unassigned"))].sort();
+    const rows = [line("All", cos),
+      ...(people.length > 1
+        ? people.map((p) => line(p, cos.filter((c) => (byLabel(c) || "Unassigned") === p)))
+        : [])];
+
+    return `<div class="vhead sm"><h2>Step conversion</h2>
+      <span class="vsub">Each column is one rung to the next — the five rates to benchmark against.</span></div>
+      <div class="vsteps">
+        <table>
+          <thead><tr><th>Who</th><th class="tnum">Reached</th>${
+            STEPS.map((st) => `<th>${esc(st.label)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((r, i) => `
+            <tr${i === 0 && rows.length > 1 ? ' class="all"' : ""}>
+              <td>${esc(r.label)}</td>
+              <td class="tnum">${r.n}</td>
+              ${r.steps.map((v) => `<td class="tnum${v != null && v > 100 ? " over" : ""}"${
+                v != null && v > 100
+                  ? ' title="Above 100%: the rung above was recorded without the qualification data the rung below is counted from."'
+                  : ""}>${show(v)}</td>`).join("")}
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>`;
+  }
+
+  /* ── trend, from the frozen daily rows ─────────────────────────────── */
+  /* Airtable, not the browser's own snapshots: those hold call outcomes, not
+     the company-level funnel, so a conversion trend cannot be computed from
+     them. Read through the proxy because the PAT lives there. */
+  const SNAP = { days: 60, rows: null, error: "", loading: false };
+
+  function trendChart() {
+    if (SNAP.loading) return `<p class="vnote">Loading the trend…</p>`;
+    if (SNAP.error) return `<p class="vnote">No trend yet — ${esc(SNAP.error)}.</p>`;
+    const rows = SNAP.rows || [];
+    if (rows.length < 2)
+      return `<div class="vhead sm"><h2>Trend</h2></div>
+        <p class="vnote">A line needs at least two frozen days. Days are frozen once, after they
+        end, by <code>scripts/snapshot.mjs</code> — run it on a daily cron and this fills in.</p>`;
+
+    const f = (r, k) => Number(r[k] || 0);
+    const series = STEPS.map((st, i) => ({
+      label: st.label, colour: slot(i),
+      points: rows.map((r) => ({
+        date: String(r.Date).slice(0, 10),
+        v: rate(f(r, SNAPFIELD[st.to]), f(r, SNAPFIELD[st.from])),
+      })),
+    }));
+
+    const W = 720, H = 200, PAD = { l: 34, r: 8, t: 8, b: 22 };
+    const x = (i) => PAD.l + (i / Math.max(1, rows.length - 1)) * (W - PAD.l - PAD.r);
+    const y = (v) => PAD.t + (1 - (v || 0) / 100) * (H - PAD.t - PAD.b);
+
+    const grid = [0, 25, 50, 75, 100].map((v) =>
+      `<line x1="${PAD.l}" y1="${y(v)}" x2="${W - PAD.r}" y2="${y(v)}" class="gl"/>
+       <text x="${PAD.l - 6}" y="${y(v) + 4}" class="gt2">${v}</text>`).join("");
+
+    const lines = series.map((s) => {
+      const pts = s.points.map((p, i) => (p.v == null ? null : `${x(i)},${y(p.v)}`)).filter(Boolean);
+      if (pts.length < 2) return "";
+      return `<polyline points="${pts.join(" ")}" fill="none" stroke="${s.colour}"
+                stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+        s.points.map((p, i) => p.v == null ? "" :
+          `<circle cx="${x(i)}" cy="${y(p.v)}" r="4" fill="${s.colour}">
+             <title>${esc(s.label)} · ${esc(p.date)}: ${p.v}%</title></circle>`).join("");
+    }).join("");
+
+    const first = rows[0].Date, last = rows[rows.length - 1].Date;
+    return `<div class="vhead sm"><h2>Trend</h2>
+      <span class="vsub">Each of the five conversions, per frozen day. ${esc(String(first).slice(0,10))} to ${esc(String(last).slice(0,10))}.</span></div>
+      <div class="vlg">${series.map((s) =>
+        `<span class="lg"><i style="background:${s.colour}"></i>${esc(s.label)}</span>`).join("")}</div>
+      <div class="vline"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+        role="img" aria-label="Step conversion over time">${grid}${lines}</svg></div>`;
+  }
+
+  /* Snapshot column per funnel rung. */
+  const SNAPFIELD = {
+    reached: "Companies Reached To Date",
+    right: "Companies At Right POC",
+    discovery: "Companies At Discovery",
+    booked: "Companies At SQL Booked",
+    done: "Companies At SQL Meeting Done",
+    sql: "Companies At SQL Accepted",
+  };
+
+  function ensureSnapshots(onReady) {
+    if (SNAP.rows || SNAP.error || SNAP.loading) return;
+    SNAP.loading = true;
+    API.snapshots(SNAP.days)
+      .then((r) => { SNAP.rows = r.snapshots || []; SNAP.error = r.reason || ""; })
+      .catch((e) => { SNAP.error = e.message; })
+      .finally(() => { SNAP.loading = false; onReady(); });
   }
 
   /* ── dashboard ─────────────────────────────────────────────────────── */
@@ -352,32 +479,20 @@
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
       ${funnelHTML(cos)}
-      <div id="vmode">${team ? modeChart(cos, (c) => c.owner) : ""}</div>
-      <div id="vdays"></div>`;
+      <div class="vsec">${stepTable(cos, (c) => c.owner)}</div>
+      <div class="vsec">${stackedByOwner(cos, (c) => c.owner)}</div>
+      <div class="vsec">${trendChart()}</div>`;
 
     const sel = document.getElementById("dOwner");
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };
-    paintDays(document.getElementById("vdays"));
+    /* Fetched once per session; the view repaints when it lands. */
+    ensureSnapshots(() => dashboard(host));
   }
 
-  /* Frozen days, so the trend does not silently rewrite itself. */
-  async function paintDays(host) {
-    if (!host) return;
-    await Store.freezeDays();
-    const rows = await Store.series(14);
-    const max = Math.max(...rows.map((r) => r.dials || 0), 1);
-    host.innerHTML = `
-      <div class="vhead sm"><h2>Last 14 days</h2>
-        <span class="vsub">Each day is counted once when it ends, then never recounted.</span></div>
-      <div class="vdays">${rows.map((d) => `
-        <div class="vd${d.live ? " live" : ""}">
-          <span class="dn">${day(d.date)}</span>
-          <span class="db"><i style="width:${Math.round((d.dials / max) * 100)}%"></i></span>
-          <span class="dv">${d.dials}</span>
-          <span class="dc">${d.connects} picked</span>
-          <span class="dl">${d.live ? "live" : "frozen"}</span>
-        </div>`).join("")}</div>`;
-  }
+  /* paintDays() and the "Last 14 days" list are gone. That data is frozen into
+     Airtable's Daily Snapshot and now feeds the Trend chart above, which
+     answers the question the list only implied. Store.freezeDays() still runs
+     on save, so the local history keeps accruing.
 
   /* ── companies list ────────────────────────────────────────────────── */
   /* Airtable-shaped: each dimension is a SET plus whether that set includes or

@@ -65,7 +65,9 @@
        field in Kylas. Pass "all" for the team view. Slower than the others
        because it can be 200 rows, so the views cache it. */
     companies: (owner) => req(`/companies${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`,
-      { timeout: 30000 }),
+      { timeout: 60000 }),
+    /* Frozen daily rows from Airtable, for the trend chart. */
+    snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
   };

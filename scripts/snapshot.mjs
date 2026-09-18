@@ -53,7 +53,7 @@ const companies = new Map();
 for (const c of contacts) {
   const co = (c.fields.Company || [])[0];
   if (!co) continue;
-  if (!companies.has(co)) companies.set(co, { reached: false, picked: false, right: false, discovery: false, booked: false, sql: false });
+  if (!companies.has(co)) companies.set(co, { reached: false, picked: false, right: false, discovery: false, booked: false, done: false, sql: false });
   const g = companies.get(co);
   const rank = Number(c.fields["KPI Rank"] || 0);
   if (rank > 0) g.reached = true;
@@ -61,11 +61,13 @@ for (const c of contacts) {
   if (signal(c.id)) g.right = true;
   if (complete(c.id)) g.discovery = true;
   if (rank >= STAGE_RUNG.DISCOVERY_CALL_BOOKED) g.booked = true;
+  if (rank >= STAGE_RUNG.CLOSING_LOOPS_LOW_VALUE) g.done = true;
   if (rank >= STAGE_RUNG.SQL_SALES_QUALIFIED_LEAD) g.sql = true;
 }
 /* Cumulative, so the funnel reads straight down. */
 for (const g of companies.values()) {
-  g.discovery = g.discovery || g.sql;
+  g.done = g.done || g.sql;
+  g.booked = g.booked || g.done;
   g.right = g.right || g.discovery;
   g.picked = g.picked || g.right;
   g.reached = g.reached || g.picked;
@@ -101,6 +103,7 @@ const fields = {
   "Companies At Right POC": count("right"),
   "Companies At Discovery": count("discovery"),
   "Companies At SQL Booked": count("booked"),
+  "Companies At SQL Meeting Done": count("done"),
   "Companies At SQL Accepted": count("sql"),
   "Companies Reached To Date": count("reached"),
 

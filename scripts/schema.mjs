@@ -127,6 +127,10 @@ export const TABLES = [
       { name: "Companies At Right POC", type: "number", options: num, description: "Where things STOOD at end of day. Summing across a week double-counts." },
       { name: "Companies At Discovery", type: "number", options: num },
       { name: "Companies At SQL Booked", type: "number", options: num },
+      /* Added 2026-09-18: the milestone ladder gained SQL Meeting Done (rung
+         21) after this table was written, so the trend chart had a gap exactly
+         where one of the five benchmark conversions is measured. */
+      { name: "Companies At SQL Meeting Done", type: "number", options: num },
       { name: "Companies At SQL Accepted", type: "number", options: num },
       { name: "Companies Reached To Date", type: "number", options: num },
 

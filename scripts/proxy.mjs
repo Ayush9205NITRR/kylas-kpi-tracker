@@ -222,6 +222,22 @@ const routes = {
              picklists: (await meta()).picklists };
   },
 
+  /* The frozen daily numbers, for the trend chart. Read from Airtable, which
+     is where the day/week/month history lives — the browser's own snapshots
+     only hold call outcomes, not the company-level funnel, so a conversion
+     trend cannot be computed locally. */
+  "/snapshots": async (url) => {
+    if (!airtable) return { snapshots: [], reason: "Airtable is not configured" };
+    const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days") || 60)));
+    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    const rows = await airtable.list("Daily Snapshot", `IS_AFTER({Date}, '${since}')`, 400);
+    const snapshots = rows.map((r) => r.fields)
+      .filter((f) => f.Date)
+      .sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
+    log(`snapshots since ${since} — ${snapshots.length}`);
+    return { snapshots, since };
+  },
+
   /* Session mode: everything this owner holds, ordered in the browser. */
   "/queue": async (url) => {
     const me = await kylas.me();
