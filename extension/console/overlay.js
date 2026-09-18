@@ -198,42 +198,33 @@
      come back must not land on top of the third. */
   let wanted = "";
 
+  /* Held already? Then show it now — an associate should never wait on the
+     network to read a record the console is already holding. Not held returns
+     false and paints NOTHING: the card stays on whatever was last on screen
+     until the fetch lands. A blank card stamped with the id was worse than the
+     wait it saved — it reads as a contact with no name and no number, and it
+     is the one thing on screen a person could start typing into. */
   function showContact(id) {
     const i = DATA.findIndex((a) => String(a.kid) === String(id));
-    if (i >= 0) {
-      cur = i; isNew = false;
-      const a = DATA[i];
-      /* ONE CONTACT, not their whole company. Opening a contact page used to
-         flip the queue into company mode, so clicking one person put their
-         four colleagues on screen and the record you asked for was merely
-         the selected row. The company is still remembered — the call bar
-         shows it, and the Company tab is one click away — but the console
-         opens on the contact you clicked. */
-      scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
-    } else {
-      /* The id and nothing else. Not the page heading: recordLabel() reads an
-         h1 that may still say something else while the SPA renders, and a
-         name invented here is a name the first save writes into Kylas. The
-         id is what the fetch joins on; the rest arrives with it.
-
-         isNew stays FALSE. This record exists in Kylas — we are standing on
-         its page. Calling it new set pendingCreate on the first save, which
-         shows a "new" badge on a contact that is not new and logs the call
-         with createdHere: true, putting a contact nobody created into the
-         KPI counts. */
-      DATA = [Object.assign(blank(), { kid: String(id) }), ...DATA];
-      cur = 0; isNew = false; filter = "all"; scope = null;
-    }
+    if (i < 0) return false;
+    cur = i; isNew = false;
+    const a = DATA[i];
+    /* ONE CONTACT, not their whole company. Opening a contact page used to
+       flip the queue into company mode, so clicking one person put their
+       four colleagues on screen and the record you asked for was merely
+       the selected row. The company is still remembered — the call bar
+       shows it, and the Company tab is one click away — but the console
+       opens on the contact you clicked. */
+    scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
     mode = "session";
     renderFilters();
     stopTimer(); secs = 0; render(); resetScroll();
-    return i >= 0;
+    return true;
   }
 
   async function openContact(id) {
     wanted = String(id);
     const had = showContact(id);
-    const before = DATA[cur];
     setLink("busy", "Loading from Kylas…");
 
     let res;
@@ -242,21 +233,10 @@
     } catch (e) {
       if (wanted !== String(id)) return;
       setLink("off", `Kylas unreachable — ${e.message}`);
-      /* A card holding nothing but an id is worse than no card: it reads as a
-         contact with no name and no number, and a save from it would write
-         those blanks over the real record. If it was invented for a fetch
-         that failed, take it back. */
-      if (!had && before && !before.pocName.trim() && String(before.kid) === String(id)) {
-        const at = DATA.indexOf(before);
-        if (at > -1) {
-          DATA.splice(at, 1);
-          cur = Math.max(0, Math.min(cur, DATA.length - 1));
-          isNew = false;
-          persist();
-        }
-      }
-      render();
-      if (!had) toast("Could not reach Kylas — start the proxy to load this contact");
+      /* Nothing was painted for this contact, so there is nothing to take
+         back. The card still holds the last record — which is why the toast
+         has to say that this is not it. */
+      if (!had) toast("Could not reach Kylas — still showing the last contact");
       return;
     }
 
@@ -265,6 +245,7 @@
     const fetched = res?.contact;
     if (!fetched?.kid) {
       setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
+      if (!had) toast(`Kylas returned nothing for contact ${id}`);
       return;
     }
 
@@ -273,9 +254,14 @@
        moment ago and not yet synced. */
     const at = DATA.findIndex((a) => String(a.kid) === String(fetched.kid));
     if (at > -1) DATA[at] = API.merge(DATA[at], fetched);
-    else DATA.unshift(fetched);
+    else { DATA.unshift(fetched); filter = "all"; }
     cur = at > -1 ? at : 0;
     isNew = false;
+
+    /* Only when the record on screen is about to change. The card was held
+       through the fetch, so an associate who hit dial during it has a timer
+       running on the record they are actually looking at. */
+    if (!had) { stopTimer(); secs = 0; }
 
     /* The company is remembered, not opened: the call bar and the Company tab
        need it, the queue stays on this one person. scope.name may fall back to

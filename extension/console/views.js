@@ -327,7 +327,24 @@
     if (CACHE.kpiSource === "airtable")
       return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">${
         n} with KPIs · ${cos.length - n} not saved yet</span>`;
-    return `<span class="vsrc off" title="${esc(CACHE.kpiError || "the KPI store did not answer")}">computed in this browser — Airtable unavailable</span>`;
+    /* NOT ASKED YET is not UNAVAILABLE. kpiSource is "" until the first
+       /companies answers, and on an account with thousands of companies that
+       crawl runs long enough to read the badge several times — during which
+       this said Airtable was down and the numbers were the browser's own.
+       Both were guesses, and the first one sent people looking for a fault in
+       a store that had not been asked a question yet. */
+    if (!CACHE.kpiSource)
+      return `<span class="vsrc part" title="The KPI store is read as part of the company list, so this can only answer once that returns.">checking Airtable…</span>`;
+    /* It answered, and the answer was no. Which no matters: a proxy started
+       without AIRTABLE_PAT is a line to add to .env.local, a 401 is a dead
+       token, a 404 is the wrong base id. "Unavailable" covered all three and
+       pointed at none of them, with the only clue in a tooltip. */
+    const why = CACHE.kpiError || "the KPI store did not answer";
+    const short = why.length > 74 ? why.slice(0, 73) + "…" : why;
+    return `<span class="vsrc off" title="${esc(why)}">${esc(
+      /not configured/i.test(why)
+        ? "Airtable is not configured on the proxy — counted in this browser"
+        : `Airtable did not answer — ${short}`)}</span>`;
   }
 
   /* Kylas stopped answering before the account ran out. Amber, because this is
@@ -369,6 +386,11 @@
         CACHE.at = held.at || 0;
         CACHE.from = "stored";
         CACHE.kpiSource = held.kpiSource || "";
+        /* Stored too, or a reload of a console whose proxy has no Airtable
+           credentials restores "not from Airtable" without the reason, and
+           the badge falls back to "did not answer" — which is not what
+           happened. */
+        CACHE.kpiError = held.kpiError || "";
         CACHE.kpiMatched = held.kpiMatched || 0;
         CACHE.truncated = !!held.truncated;
         CACHE.crawled = held.crawled || 0;
@@ -403,7 +425,8 @@
         try {
           await Store.setSetting("companyCache",
             { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners,
-              kpiSource: CACHE.kpiSource, kpiMatched: CACHE.kpiMatched,
+              kpiSource: CACHE.kpiSource, kpiError: CACHE.kpiError,
+              kpiMatched: CACHE.kpiMatched,
               truncated: CACHE.truncated, crawled: CACHE.crawled });
         } catch { /* over quota is survivable — it is only a head start */ }
       })
