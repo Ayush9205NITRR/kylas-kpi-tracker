@@ -9,6 +9,7 @@
  * second, like the real thing.
  */
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 
 const PORT = Number(process.env.PORT || 9901);
 const TABLES = {};                    // name -> [{id, fields}]
@@ -16,6 +17,23 @@ const WRITES = [];
 let nextId = 1;
 
 const rec = () => "rec" + String(nextId++).padStart(14, "0");
+
+/* MOCK_AIRTABLE_SEED=<file.json> pre-loads rows, e.g.
+     { "Companies": [ { "Kylas Company ID": "1776620", "Right POC": 1 } ] }
+   The read path needs rows carrying the FORMULA fields, and this stand-in does
+   not evaluate Airtable formulas — reimplementing them here would be testing a
+   second implementation rather than the one that ships. Seeding the answers
+   tests what actually changed: the read, the join on Kylas company id, and what
+   the view does with it. */
+function seed() {
+  const path = process.env.MOCK_AIRTABLE_SEED;
+  if (!path) return;
+  const data = JSON.parse(readFileSync(path, "utf8"));
+  for (const [name, list] of Object.entries(data))
+    for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([{ id: rec(), fields }]);
+  console.log(`  seeded ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
+}
+seed();
 const table = (name) => (TABLES[name] = TABLES[name] || []);
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -73,10 +91,32 @@ createServer(async (req, res) => {
 
   if (req.method === "GET") {
     const formula = url.searchParams.get("filterByFormula");
-    const max = Number(url.searchParams.get("maxRecords") || 100);
     const all = Object.values(TABLES).flat();
-    const out = (formula ? rows.filter((r) => matches(r, formula, all)) : rows).slice(0, max);
-    return json(res, 200, { records: out });
+    const hits = formula ? rows.filter((r) => matches(r, formula, all)) : rows;
+
+    /* HONOUR pageSize AND offset. Returning everything in one response left the
+       client's pagination loop untested — the same way this mock once ignored
+       Kylas' page/size and hid the bug that lost 230 companies. Airtable's
+       offset is an opaque token; a row index serves, and being opaque is the
+       point, so the client cannot treat it as a number. */
+    const size = Math.min(100, Math.max(1, Number(url.searchParams.get("pageSize") || 100)));
+    const max = Number(url.searchParams.get("maxRecords") || 0);
+    const from = Number(Buffer.from(url.searchParams.get("offset") || "", "base64")
+      .toString("utf8").replace(/\D/g, "") || 0);
+    const limited = max ? hits.slice(0, max) : hits;
+    const page = limited.slice(from, from + size);
+    const next = from + size < limited.length
+      ? Buffer.from(`row${from + size}`, "utf8").toString("base64") : "";
+
+    /* fields[] — the real API returns ONLY the named fields. Honoured so a
+       caller that forgets to ask for a field it uses fails here rather than in
+       production. */
+    const want = url.searchParams.getAll("fields[]");
+    const trim = (r) => (want.length
+      ? { id: r.id, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => want.includes(k))) }
+      : r);
+
+    return json(res, 200, { records: page.map(trim), ...(next ? { offset: next } : {}) });
   }
 
   if (req.method === "DELETE") {

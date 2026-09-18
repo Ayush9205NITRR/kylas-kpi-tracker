@@ -111,6 +111,7 @@
       const co = by.get(id);
       if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch", "health", "lastCalledAt"])
         if (!co[k] && seed[k]) co[k] = seed[k];
+      if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       return co;
     };
 
@@ -121,7 +122,7 @@
       if (!co?.id) continue;
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
-                           lastCalledAt: co.lastCalledAt });
+                           lastCalledAt: co.lastCalledAt, kpi: co.kpi });
     }
 
     for (const c of data) {
@@ -178,6 +179,40 @@
       co.booked = co.rung >= MILESTONE.sqlMeetingBooked.floor;
       co.done = co.rung >= MILESTONE.sqlMeetingDone.floor;
       co.sql = co.rung >= MILESTONE.sql.floor;
+
+      /* AIRTABLE WINS. Everything above this line is the same rule set
+         expressed in JavaScript, and it exists only for a company Airtable has
+         not seen yet — one allotted to you that nobody has saved from the
+         console. Where Airtable has the row, its formulas are the definition
+         and these values are replaced wholesale rather than merged, because a
+         merge of two definitions is a third definition.
+
+         co.from records WHICH, per row, so the view can say so. A number whose
+         provenance is invisible is a number nobody can check. */
+      if (co.kpi) {
+        const k = co.kpi;
+        co.from = "airtable";
+        co.reached = k.reached; co.picked = k.picked;
+        co.right = k.right; co.discovery = k.discovery;
+        co.booked = k.booked; co.done = k.done; co.sql = k.sql;
+        co.rung = k.rank || co.rung;
+        /* NOT co.stage. Airtable's "KPI Stage" is a ladder LABEL
+           ("19 · Discovery Call Booked"); co.stage is a Kylas stage CODE, and
+           the Stage filter and the row both match on the code. Overwriting it
+           would empty the filter and render the label twice. */
+        co.kpiStage = k.stage || "";
+        co.stageAt = k.stageAt || "";
+        if (k.rightNames.length) co.pocs.right = k.rightNames;
+        if (k.discoveryNames.length) co.pocs.discovery = k.discoveryNames;
+        if (k.lastCalledAt) co.lastCalledAt = k.lastCalledAt > (co.lastCalledAt || "")
+          ? k.lastCalledAt : co.lastCalledAt;
+        co.calls = k.calls; co.talkSeconds = k.talkSeconds;
+        if (!co.name && k.name) co.name = k.name;
+      } else {
+        co.from = "browser";
+      }
+      /* Every implication in cumulative() is true whichever source supplied
+         the flags, so it runs either way. */
       cumulative(co);
       /* Only now, once every source has had its say. */
       if (!co.name) co.name = "Company " + co.id;
@@ -204,10 +239,27 @@
 
      Persisted, and served stale on open while a refresh runs behind it, so a
      reload paints instantly instead of waiting on the network. */
-  const CACHE = { at: 0, companies: [], owners: [], error: "", loading: false, from: "" };
+  const CACHE = { at: 0, companies: [], owners: [], error: "", loading: false, from: "",
+                  /* Where the KPI numbers came from this fetch: "airtable" once
+                     the store answered, "none" when it is not configured or was
+                     unreachable. Shown, not assumed. */
+                  kpiSource: "", kpiError: "", kpiMatched: 0 };
   const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
   let inflight = false;
   let restored = false;
+
+  /* WHERE THE NUMBERS CAME FROM, on screen. Airtable's formulas are the
+     definition of the funnel; the browser's copy is a fallback for a company
+     the store has not seen. Which one produced what you are reading is not a
+     detail — it is the difference between an auditable number and a guess. */
+  function kpiNote(cos) {
+    const n = cos.filter((c) => c.from === "airtable").length;
+    if (CACHE.kpiSource === "airtable" && n === cos.length && cos.length)
+      return `<span class="vsrc ok" title="Right POC, discovery and the three milestones are Airtable formulas — see scripts/schema.mjs">KPIs from Airtable</span>`;
+    if (CACHE.kpiSource === "airtable")
+      return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">KPIs from Airtable · ${cos.length - n} not saved yet</span>`;
+    return `<span class="vsrc off" title="${esc(CACHE.kpiError || "the KPI store did not answer")}">computed in this browser — Airtable unavailable</span>`;
+  }
 
   const ageText = () => {
     if (!CACHE.at) return "";
@@ -237,6 +289,8 @@
         CACHE.owners = held.owners || [];
         CACHE.at = held.at || 0;
         CACHE.from = "stored";
+        CACHE.kpiSource = held.kpiSource || "";
+        CACHE.kpiMatched = held.kpiMatched || 0;
       }
     } catch { /* storage is a convenience here, never a dependency */ }
   }
@@ -259,10 +313,14 @@
         CACHE.error = "";
         CACHE.at = Date.now();
         CACHE.from = "live";
+        CACHE.kpiSource = r.kpiSource || "none";
+        CACHE.kpiError = r.kpiError || "";
+        CACHE.kpiMatched = r.kpiMatched || 0;
         if (r.picklists) adoptPicklists(r.picklists);
         try {
           await Store.setSetting("companyCache",
-            { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners });
+            { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners,
+              kpiSource: CACHE.kpiSource, kpiMatched: CACHE.kpiMatched });
         } catch { /* over quota is survivable — it is only a head start */ }
       })
       .catch((e) => {
@@ -513,6 +571,7 @@
         </select></label>
         <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
+        ${kpiNote(cos)}
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
       </div>
@@ -549,6 +608,36 @@
     stage: { mode: "any", values: [] },
     kpi: { mode: "any", values: [] },
   };
+
+  /* ── the columns, declared once ────────────────────────────────────── */
+  /* The header, the cell and the sort all come from this one list, so a column
+     cannot be sortable by something it does not display. `dir` is the direction
+     a FIRST click gives you: a date and a count want their biggest value first,
+     a name wants A-Z. Guessing wrong here means every useful sort takes two
+     clicks. */
+  const COLS = [
+    { c: "c1", label: "Company",     sort: "name",     dir: 1,  get: (r) => String(r.name || "").toLowerCase() },
+    { c: "c2", label: "Stage",       sort: "rung",     dir: -1, get: (r) => r.rung || 0 },
+    { c: "c3", label: "POCs",        sort: "contacts", dir: -1, get: (r) => r.contacts.length },
+    { c: "c4", label: "Right POC",   sort: "right",    dir: -1, get: (r) => r.pocs.right.length },
+    { c: "c5", label: "Discovery",   sort: "discovery",dir: -1, get: (r) => r.pocs.discovery.length },
+    { c: "c6", label: "Last call",   sort: "called",   dir: -1, get: (r) => String(r.lastCalledAt || "") },
+    { c: "c7", label: "Allotted to", sort: "owner",    dir: 1,  get: (r) => String(r.owner || "").toLowerCase() },
+    { c: "c9", label: "Batch",       sort: "batch",    dir: 1,  get: (r) => String(r.batch || "").toLowerCase() },
+  ];
+  /* The list opened fixed at "highest rung first" and could not be reordered at
+     all, so "who have I not called longest" — the most ordinary question anyone
+     asks a 250-row grid — had no answer. */
+  const SORT = { key: "rung", dir: -1 };
+  const colOf = (key) => COLS.find((x) => x.sort === key) || COLS[1];
+
+  /* Rows per screen. ~11 at comfortable, ~18 at compact: on a list this long
+     that is the difference between three scrolls and one. Remembered, because
+     it is a preference and not a mode. */
+  let DENSITY = "comfortable";
+  async function restoreDensity() {
+    try { DENSITY = (await Store.getSetting("density")) || "comfortable"; } catch { /* default */ }
+  }
 
   /* KPI is a set of booleans on the row, not one value, so "is any of" asks
      whether the company sits at ANY of the ticked rungs. */
@@ -612,12 +701,48 @@
     };
   }
 
+  /* ── what is actually filtered, always visible ─────────────────────── */
+  /* Scroll the filter row away and the view became "19 of 250" with no stated
+     reason. That is how the owner-filter bug hid for a week: the count was
+     right there and there was nothing on screen to say why. Each active
+     constraint is a chip you can read and remove, and the strip sticks to the
+     top of the scroller with the header. */
+  function chipStrip(rows, all) {
+    const chips = [];
+    const add = (kind, value, text) =>
+      chips.push(`<button class="vchip" type="button" data-kind="${kind}" data-value="${esc(value)}"
+        title="Remove this filter">${esc(text)}<i>×</i></button>`);
+
+    if (FILTERS.owner === "all") add("owner", "", "Allotted to: everyone");
+    else if (FILTERS.owner) {
+      const o = CACHE.owners.find((x) => String(x.id) === String(FILTERS.owner));
+      add("owner", "", `Allotted to: ${o?.name || FILTERS.owner}`);
+    }
+    for (const [key, name, lab] of [["source", "Source", label],
+                                    ["stage", "Stage", label],
+                                    ["kpi", "KPI", (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k]]) {
+      const st = FILTERS[key];
+      const not = st.mode === "none" ? "not " : "";
+      /* One chip per VALUE, not one per dimension: removing a single stage from
+         a set of four is the common correction, and a chip you can only remove
+         wholesale forces you to re-tick the other three. */
+      for (const v of st.values) add(key, v, `${name}: ${not}${lab(v)}`);
+    }
+    if (FILTERS.calledSince) add("calledSince", "", `Called since ${FILTERS.calledSince}`);
+
+    if (!chips.length) return "";
+    return `<div class="vchips">${chips.join("")}
+      <button class="vchip clr" type="button" data-kind="all">Clear all</button>
+      <span class="vcount">${rows.length} of ${all.length}</span></div>`;
+  }
+
   async function companies(host) {
     /* Same allotted list the dashboard uses, so the two cannot disagree about
        which companies exist. The owner filter here is the company's own owner
        in Kylas, which is what "allotted to me" means. Rendered from cache
        first — the filters are local and must not wait on a search. */
     await restore();
+    await restoreDensity();
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
     /* An owner is selected unless the filter is cleared, and "all" is still a
@@ -638,12 +763,27 @@
     const stages = union(STAGES, all.map((c) => c.stage))
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
 
-    const rows = all.filter((c) =>
+    /* The filter test and the sort, both used by the first paint and by
+       matching() below. One definition each — the shell used to describe rows
+       the table then painted differently. */
+    const keep = (c) =>
       matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
       matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
       matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
-      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince))
-      .sort((a, b) => (b.rung - a.rung) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")));
+      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince);
+
+    const ordered = (list) => {
+      const col = colOf(SORT.key);
+      /* A stable tiebreak, so two companies at the same rung never swap places
+         between repaints. */
+      return [...list].sort((x, y) => {
+        const a = col.get(x), b = col.get(y);
+        if (a < b) return -SORT.dir;
+        if (a > b) return SORT.dir;
+        return String(x.name || "").localeCompare(String(y.name || ""));
+      });
+    };
+    const rows = ordered(all.filter(keep));
 
 
     /* One definition, used by the first paint and by every filter tick. */
@@ -683,14 +823,20 @@
         <button class="gbtn" id="fClear" type="button">Clear</button>
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
-        <span class="vage">${CACHE.at ? esc(ageText()) : ""}</span>
+        <button class="gbtn" id="fDensity" type="button"
+          title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
+        >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>
+        <span class="vage">${CACHE.at ? esc(ageText())
+          : ""}</span>
+        ${kpiNote(all)}
       </div>
-      <div class="vtable">
-        <div class="vr vh">
-          <span class="c1">Company</span><span class="c2">Stage</span>
-          <span class="c3">POCs</span><span class="c4">Right POC</span>
-          <span class="c5">Discovery</span><span class="c6">Last call</span>
-          <span class="c7">Allotted to</span><span class="c9">Batch</span>
+      ${chipStrip(rows, all)}
+      <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
+        <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
+          SORT.key === col.sort ? " on" : ""}" data-sort="${col.sort}"
+          role="button" tabindex="0"
+          title="Sort by ${esc(col.label.toLowerCase())}">${esc(col.label)}<i>${
+            SORT.key === col.sort ? (SORT.dir === 1 ? "↑" : "↓") : ""}</i></span>`).join("")}
         </div>
         <!-- rows painted by paint(), so the window applies to the first
              render as well as to every filter change -->
@@ -717,12 +863,75 @@
     /* Ticking a box must not re-render the whole view — that would close the
        popover on every click. Only the rows and the summary are refreshed. */
     for (const [id, st] of [["fSource", FILTERS.source], ["fStage", FILTERS.stage], ["fKpi", FILTERS.kpi]])
-      wireMulti(id, st, () => repaintRows());
+      wireMulti(id, st, () => { repaintRows(); repaintChips(); });
+
+    /* Density. Stored then re-rendered, so the class and the button label can
+       never disagree about which state we are in. */
+    on("fDensity", "click", async () => {
+      DENSITY = DENSITY === "compact" ? "comfortable" : "compact";
+      try { await Store.setSetting("density", DENSITY); } catch { /* preference only */ }
+      companies(host);
+    });
+
+    /* SORT. Clicking the column you are already sorted by reverses it; a new
+       column starts in that column's own natural direction. Only the rows are
+       repainted — re-rendering the shell would scroll you back to the top,
+       which is the opposite of what someone sorting a list wants. */
+    const wireSort = () => host.querySelectorAll(".vr.vh [data-sort]").forEach((h) => {
+      const go = () => {
+        const key = h.dataset.sort;
+        if (SORT.key === key) SORT.dir = -SORT.dir;
+        else { SORT.key = key; SORT.dir = colOf(key).dir; }
+        repaintHead(); repaintRows();
+      };
+      h.addEventListener("click", go);
+      h.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+      });
+    });
+
+    /* Redraw just the header's sort marks. */
+    function repaintHead() {
+      host.querySelectorAll(".vr.vh [data-sort]").forEach((h) => {
+        const on = h.dataset.sort === SORT.key;
+        h.classList.toggle("on", on);
+        const i = h.querySelector("i");
+        if (i) i.textContent = on ? (SORT.dir === 1 ? "↑" : "↓") : "";
+      });
+    }
+
+    /* Chips. Rebuilt in place rather than by re-rendering the view, so removing
+       one does not close a popover or lose the scroll position. */
+    function repaintChips() {
+      const next = chipStrip(matching(), all);
+      const held = host.querySelector(".vchips");
+      if (!next) { held?.remove(); return; }
+      if (held) held.outerHTML = next;
+      else host.querySelector(".vfilters")?.insertAdjacentHTML("afterend", next);
+      wireChips();
+    }
+    function wireChips() {
+      host.querySelectorAll(".vchips .vchip").forEach((b) => b.addEventListener("click", () => {
+        const { kind, value } = b.dataset;
+        if (kind === "all") {
+          FILTERS.owner = ""; FILTERS.calledSince = "";
+          for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
+        } else if (kind === "owner") FILTERS.owner = "";
+        else if (kind === "calledSince") FILTERS.calledSince = "";
+        else if (FILTERS[kind]) FILTERS[kind].values = FILTERS[kind].values.filter((v) => v !== value);
+        /* The owner filter changes which companies are IN the list, so that one
+           needs the full re-render; the rest are local. */
+        companies(host);
+      }));
+    }
+    wireChips();
 
     /* A row is a way into the company, not a dead end. */
     const bindRows = () => host.querySelectorAll(".vr[data-id]").forEach((r) =>
       r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
 
+    /* The rows also carry the count in the chip strip, so a repaint that
+       changes what matches has to update it. */
     /* Redraw the table and each popover's own summary in place. */
     /* Rows are rendered in a WINDOW, not all at once. At 250+ companies
        rebuilding every row's HTML on each checkbox tick is what made the list
@@ -737,12 +946,7 @@
     let frame = null;
     let io = null;
 
-    const matching = () => all.filter((c) =>
-      matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
-      matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
-      matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
-      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince))
-      .sort((a, b) => (b.rung - a.rung) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")));
+    const matching = () => ordered(all.filter(keep));
 
     function paint() {
       const next = matching();
@@ -756,6 +960,9 @@
               ? `<div class="vmore" id="vmore">${next.length - shown} more…</div>` : "")
           : `<div class="vempty">Nothing matches those filters.</div>`);
         bindRows();
+        /* The header is re-serialised with the body, so its listeners went with
+           it — sorting worked once and then died silently. */
+        wireSort(); repaintHead();
 
         /* Grow when the sentinel comes into view. Observer rebuilt each paint
            because the node it watches is replaced. */
@@ -771,6 +978,8 @@
       const sub = host.querySelector(".vhead .vsub");
       if (sub) sub.textContent = loading ? "loading…"
         : `${next.length} of ${all.length}${next.length > shown ? ` · showing ${shown}` : ""}`;
+      const cnt = host.querySelector(".vchips .vcount");
+      if (cnt) cnt.textContent = `${next.length} of ${all.length}`;
       syncSummaries();
     }
 

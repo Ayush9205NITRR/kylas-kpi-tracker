@@ -18,7 +18,7 @@ import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
-import { createAirtable, syncContact } from "./airtable.mjs";
+import { createAirtable, syncContact, readCompanyKpis } from "./airtable.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
@@ -250,13 +250,42 @@ const routes = {
         ownerId: String(co.ownerId ?? ""),
       });
     }
-    log(`companies for ${all ? "all owners" : owner} — ${companies.length}`);
+    /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
+       Right POC, Successful Discovery and the three milestones in the browser
+       from Kylas data, which meant the same rules lived twice and only the
+       browser copy was ever on screen. The numbers come from the Airtable
+       formulas now; the browser keeps its own version strictly as a fallback
+       for a company Airtable has not seen yet, and says so on screen.
+
+       A failure here is NOT a failed request. Kylas' half of this response is
+       the roster an associate calls from, and it must arrive whether or not
+       the KPI store is reachable. */
+    let kpiSource = "none", kpiError = "", matched = 0;
+    if (airtable) {
+      try {
+        const kpis = await readCompanyKpis(airtable, { log });
+        for (const co of companies) {
+          const k = kpis.get(String(co.id));
+          if (k) { co.kpi = k; matched++; }
+        }
+        kpiSource = "airtable";
+      } catch (e) {
+        kpiError = e.message;
+        log(`! airtable kpis: ${e.message}`);
+      }
+    } else {
+      kpiError = "Airtable is not configured";
+    }
+
+    log(`companies for ${all ? "all owners" : owner} — ${companies.length}`
+        + (kpiSource === "airtable" ? `, ${matched} with Airtable KPIs` : ""));
     /* The picklists too. The companies LIST page never calls /company, so
        without them the console's SOURCES stayed empty there and the Source
        filter could only offer values it happened to see in the loaded rows.
        meta() is cached, so this is free after the first call. */
     const body = { owner: all ? "all" : String(owner), companies, owners: ownerList(),
-                   picklists: (await meta()).picklists };
+                   picklists: (await meta()).picklists,
+                   kpiSource, kpiError, kpiMatched: matched };
     companyCache.set(key, { at: Date.now(), body });
     return body;
   },

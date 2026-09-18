@@ -113,3 +113,62 @@ moves outside the console.
   append-only and will be the tables that grow; budget for archiving them
   annually rather than letting them run forever.
 - The proxy needs no database. It is stateless.
+
+---
+
+## 5. Who owns the KPI definition — settled 2026-09-18
+
+Ayush asked the right question: *why do we need Airtable if the numbers are
+already being worked out?* The answer at the time was uncomfortable — **they
+were being worked out twice.**
+
+The dashboard called `/companies`, pulled the contacts the browser held, and
+recomputed Right POC, Successful Discovery and the three milestones in
+JavaScript (`rollup()` in `extension/console/views.js`). The identical rules
+also existed as Airtable formulas (`scripts/schema.mjs`). Only the browser copy
+was ever on screen; Airtable was read for exactly one thing, the trend chart.
+
+Two implementations of one definition, one of them invisible, is how a number
+goes wrong quietly — and it already had: `cumulative()` was deriving a
+successful discovery from a booked meeting, crediting a call that had not
+happened.
+
+### The decision
+
+**Airtable owns the definition. The browser's copy is a fallback and says so.**
+
+- `readCompanyKpis()` in `scripts/airtable.mjs` reads the `Companies` table,
+  following Airtable's offset so a 250-row table is not silently truncated to
+  the first page. `KPI_FIELDS` names every field the dashboard depends on, so
+  that dependency is a list somebody can read rather than a grep.
+- The proxy joins it onto `/companies` per company, keyed on **Kylas company
+  id** — the only id the console has ever seen.
+- `rollup()` replaces its own flags wholesale where Airtable has the row, and
+  records `co.from = "airtable" | "browser"` per row. Wholesale, not merged:
+  merging two definitions produces a third.
+- Every view shows which source it is reading. `KPIs from Airtable`, or
+  `KPIs from Airtable · 112 not saved yet` for companies allotted in Kylas that
+  nobody has saved from the console yet, or an amber
+  `computed in this browser — Airtable unavailable`.
+
+### Why the fallback stays
+
+Deleting it would mean no dashboard at all when the KPI store is unreachable —
+and the same response carries the roster an associate calls from. A failed KPI
+read is therefore not a failed request: Kylas' half arrives regardless, and the
+badge turns amber. What is *not* acceptable is an unlabelled number, which is
+what we had.
+
+### What Airtable is actually for
+
+Three things the browser cannot do, and the reason the answer was not "drop it":
+
+1. **History.** Kylas stores the *current* stage, not that a company was at MQL
+   on 4 September and SQL on 17 September. `Stage Transitions` and
+   `Daily Snapshot` are the only record of time; recomputing from Kylas can only
+   ever describe today.
+2. **The granular data Kylas has no field for** — budget, timeline, pax, per
+   event, past and current. Custom fields cost money, which is why this project
+   exists. The remarks block is a rendering for a human, not a store.
+3. **A place to look without the extension** — a manager, a phone, a grid with
+   its own filters and views.

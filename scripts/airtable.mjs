@@ -74,6 +74,30 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
       return r?.records || [];
     },
 
+    /* EVERY record, following Airtable's offset. list() caps at one page, which
+       is fine for the event rows of one contact and silently wrong for a table
+       of 250 companies — the same class of mistake as asking Kylas for page 0
+       and calling it "everything allotted to you".
+
+       `fields` is not an optimisation: a company row carries ~30 computed
+       fields and we want a named handful, so asking for them by name also
+       documents which ones the dashboard depends on. */
+    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40 } = {}) {
+      const out = [];
+      let offset = "";
+      for (let p = 0; p < maxPages; p++) {
+        const q = [`pageSize=${pageSize}`,
+                   formula ? `filterByFormula=${encodeURIComponent(formula)}` : "",
+                   ...fields.map((f) => `fields[]=${encodeURIComponent(f)}`),
+                   offset ? `offset=${encodeURIComponent(offset)}` : ""].filter(Boolean).join("&");
+        const r = await call("GET", `${t(table)}?${q}`);
+        (r?.records || []).forEach((x) => out.push(x));
+        offset = r?.offset || "";
+        if (!offset) break;
+      }
+      return out;
+    },
+
     async create(table, records) {
       const out = [];
       for (let i = 0; i < records.length; i += 10) {
@@ -217,4 +241,71 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
 
   log(`airtable: ${wrote.join(", ")}`);
   return { recordId: contactRec.id, rank, rankRose, rightPOC: hasSignal(c), discovery: isComplete(c), wrote };
+}
+
+/* ── the read ───────────────────────────────────────────────────────── */
+/* THE KPI FIELDS THE DASHBOARD DEPENDS ON, named.
+ *
+ * Until now the dashboard recomputed every one of these in the browser from
+ * Kylas data, so the same rules existed twice — once as the Airtable formulas
+ * in scripts/schema.mjs, once as JavaScript in views.js — and only the browser
+ * copy was ever on screen. They can drift, and they did: the browser copy was
+ * crediting a successful discovery to a meeting that only existed in the diary.
+ *
+ * Airtable is the definition now. This list is the contract between the two. */
+export const KPI_FIELDS = [
+  "Kylas Company ID", "Name", "Owner",
+  /* the ladder */
+  "KPI Rank", "KPI Stage", "KPI Stage At",
+  /* the funnel, one flag each — every one an Airtable formula */
+  "Reached", "Phone Picked", "Right POC", "Successful Discovery",
+  "SQL Meeting Booked", "SQL Meeting Done", "SQL",
+  /* the names behind the flags, which is what a manager actually asks for */
+  "Right POC Contacts", "Discovery Contacts",
+  "Contact Count", "Last Call At", "Call Count", "Talk Seconds",
+];
+
+const flag = (v) => v === 1 || v === true || v === "1";
+
+/* Every company Airtable knows, keyed by Kylas company id.
+ *
+ * Keyed on the Kylas id and not on Airtable's own record id, because the join
+ * the console can make is the Kylas one — it has never seen an Airtable
+ * record id and should not need to. */
+export async function readCompanyKpis(at, { log = () => {} } = {}) {
+  const recs = await at.listAll("Companies", { fields: KPI_FIELDS });
+  const byKylasId = new Map();
+  let skipped = 0;
+  for (const r of recs) {
+    const f = r.fields || {};
+    const id = String(f["Kylas Company ID"] || "").trim();
+    /* A company with no Kylas id cannot be joined to anything the console
+       holds. Counted rather than dropped silently — it means a row was created
+       by hand in Airtable, which is worth knowing about. */
+    if (!id) { skipped++; continue; }
+    byKylasId.set(id, {
+      name: f.Name || "",
+      rank: Number(f["KPI Rank"] || 0),
+      stage: f["KPI Stage"] || "",
+      stageAt: f["KPI Stage At"] || "",
+      reached: flag(f.Reached),
+      picked: flag(f["Phone Picked"]),
+      right: flag(f["Right POC"]),
+      discovery: flag(f["Successful Discovery"]),
+      booked: flag(f["SQL Meeting Booked"]),
+      done: flag(f["SQL Meeting Done"]),
+      sql: flag(f.SQL),
+      /* ARRAYJOIN gives "Hema Bharathi, Shipra Gupta" — split back so the
+         console never has to parse a display string. */
+      rightNames: String(f["Right POC Contacts"] || "").split(",").map((x) => x.trim()).filter(Boolean),
+      discoveryNames: String(f["Discovery Contacts"] || "").split(",").map((x) => x.trim()).filter(Boolean),
+      contacts: Number(f["Contact Count"] || 0),
+      lastCalledAt: String(f["Last Call At"] || "").slice(0, 10),
+      calls: Number(f["Call Count"] || 0),
+      talkSeconds: Number(f["Talk Seconds"] || 0),
+    });
+  }
+  log(`airtable kpis: ${byKylasId.size} compan${byKylasId.size === 1 ? "y" : "ies"}`
+      + (skipped ? ` (${skipped} with no Kylas id, skipped)` : ""));
+  return byKylasId;
 }

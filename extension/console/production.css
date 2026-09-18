@@ -202,8 +202,11 @@ body.framed .ovOnly{display:inline-block}
 /* Colour marks a VALUE, never its absence. The em-dash placeholder was being
    painted violet and blue along with the names, so an empty Right POC cell
    read at a glance exactly like a filled one. */
-.vr .c4{color:var(--slate)}
-.vr .c5{color:var(--blue)}
+/* :not(.vh) — these colours belong to the VALUES. Inherited into the header
+   they made Right POC and Discovery look permanently selected, which is the
+   same mark the sorted column wears. */
+.vr:not(.vh) .c4{color:var(--slate)}
+.vr:not(.vh) .c5{color:var(--blue)}
 .vr .c4.no,.vr .c5.no,.vr .c6.no,.vr .c7.no,.vr .c9.no{color:var(--text3)}
 /* One line per cell. "Enout Super Admin" wrapping to two lines made every
    other row 80px tall and the column edges ragged. */
@@ -211,9 +214,55 @@ body.framed .ovOnly{display:inline-block}
 .vr .c1 b,.vr .c1 em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Dates wear the same family as every other cell; tabular figures keep
    them aligned without switching typeface mid-row. */
-.vr .c6{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
-.vr .c9{font-size:var(--t-meta);color:var(--text3)}
+.vr:not(.vh) .c6{font-size:var(--t-meta);color:var(--text2);font-variant-numeric:tabular-nums}
+.vr:not(.vh) .c9{font-size:var(--t-meta);color:var(--text3)}
 .vempty{padding:36px;text-align:center;color:var(--text3);font-size:var(--t-label)}
+
+/* ── sortable headers ────────────────────────────────────────────────── */
+/* A header that sorts has to LOOK like it sorts before it is clicked, or the
+   affordance only exists for whoever was told about it. */
+.vr.vh .srt{cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none;
+  border-radius:5px;padding:2px 4px;margin:-2px -4px}
+.vr.vh .srt:hover{color:var(--text);background:var(--panel3)}
+.vr.vh .srt i{font-style:normal;font-size:12px;line-height:1;opacity:.85}
+.vr.vh .srt.on{color:var(--blue)}
+.vr.vh .srt:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+
+/* ── active filters, stated ──────────────────────────────────────────── */
+/* Sticks with the header: the whole point is that it is readable at row 200,
+   which is exactly where the filter row above it has scrolled away. */
+.vchips{position:sticky;top:0;z-index:4;display:flex;flex-wrap:wrap;gap:7px;align-items:center;
+  padding:9px 2px 11px;background:var(--ground)}
+.vchip{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  border:1px solid var(--blueLine);background:var(--blueSoft);color:var(--blue);
+  border-radius:20px;padding:5px 12px;font-size:var(--t-meta);font-weight:600}
+.vchip i{font-style:normal;font-size:15px;line-height:1;opacity:.7}
+.vchip:hover{background:var(--blue);color:var(--onBlue);border-color:var(--blue)}
+.vchip:hover i{opacity:1}
+/* Clear all is not one of the filters, so it does not wear their colour. */
+.vchip.clr{border-color:var(--line2);background:transparent;color:var(--text2)}
+.vchip.clr:hover{border-color:var(--rose);color:var(--rose);background:transparent}
+.vchips .vcount{font-size:var(--t-meta);color:var(--text3);margin-left:auto;
+  font-variant-numeric:tabular-nums}
+/* The chip strip and the table header both stick; the header has to sit under
+   the strip rather than behind it. */
+.vchips ~ .vtable .vr.vh{top:46px}
+
+/* ── compact density ─────────────────────────────────────────────────── */
+/* ~11 rows per screen becomes ~18. The second line under the company name is
+   the first thing to go: source is filterable and does not need to be read on
+   every row. */
+.vtable.dense .vr{padding:6px 14px;gap:10px;font-size:var(--t-meta)}
+.vtable.dense .vr .c1 b{font-size:var(--t-label)}
+.vtable.dense .vr .c1 em{display:none}
+
+/* ── where the numbers came from ─────────────────────────────────────── */
+.vsrc{font-size:var(--t-meta);font-weight:600;border-radius:11px;padding:4px 10px;
+  border:1px solid var(--line2);color:var(--text3);white-space:nowrap;align-self:center;cursor:help}
+.vsrc.ok{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
+.vsrc.part{border-color:var(--line2);background:var(--panel2);color:var(--text2)}
+/* Amber marks a warning, and reading a number from the wrong place is one. */
+.vsrc.off{border-color:var(--amber);background:var(--amberSoft);color:var(--amber)}
 @media(max-width:860px){
   .vr{grid-template-columns:1.6fr 1fr .6fr}
   .vr .c4,.vr .c5,.vr .c6,.vr .c7,.vr .c9{display:none}

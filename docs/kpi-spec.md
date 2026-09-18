@@ -198,10 +198,13 @@ Segmented by `Mode of Meeting`, giving the in-person / virtual / text split.
 > ignores `Remarks`. If `Remarks` must also be filled, the count will drop
 > noticeably. Confirm.
 >
-> **OPEN — mode of meeting values.** The prototype has four (`In Person`,
-> `Virtual`, `Calls`, `Text`); you described three (online, in person, text).
-> `Virtual` and `Calls` are probably the same thing split two ways. Confirm the
-> final list — this is a reporting dimension, so merging later is messy.
+> **SETTLED 2026-09-18 — mode of meeting values.** Four, as the schema has
+> them: `In Person | Virtual | Calls | Text`. Ayush confirmed this list is
+> accurate, so the `Video | Audio | In-Person` wording in the dashboard spec is
+> superseded. `Virtual` and `Calls` stay separate. The stacked chart builds its
+> segments from the data rather than a hardcoded list, so nothing needed to
+> change in the code — `extension/console/console.js` and
+> `scripts/schema.mjs` already carried exactly these four.
 
 ---
 
@@ -261,10 +264,9 @@ silently withhold the credit from someone who did fill budget, timeline and pax.
 > "the service or solution pitched", which wants a value. Needs a field-type
 > decision before it can be enforced.
 >
-> **OPEN — Mode of Meeting values.** The schema has
-> `In Person | Virtual | Calls | Text`; the dashboard spec asks for
-> `Video | Audio | In-Person`. These are not the same list and the stacked chart
-> depends on which one is real.
+> **SETTLED 2026-09-18 — Mode of Meeting values.** `In Person | Virtual |
+> Calls | Text` is the real list; see §6. The dashboard spec's
+> `Video | Audio | In-Person` is superseded.
 
 ---
 
