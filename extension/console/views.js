@@ -260,8 +260,14 @@
     const n = cos.filter((c) => c.from === "airtable").length;
     if (CACHE.kpiSource === "airtable" && n === cos.length && cos.length)
       return `<span class="vsrc ok" title="Right POC, discovery and the three milestones are Airtable formulas — see scripts/schema.mjs">KPIs from Airtable</span>`;
+    if (CACHE.kpiSource === "airtable" && n === 0 && cos.length)
+      /* NONE matched. "10000 not saved yet" is true and useless — it reads as
+         "you have not worked these yet" when it can equally mean the join is
+         broken. Say which, and say what answers it. */
+      return `<span class="vsrc off" title="Run: curl -s http://127.0.0.1:8787/kpi-debug | python3 -m json.tool">no company matched Airtable — check /kpi-debug</span>`;
     if (CACHE.kpiSource === "airtable")
-      return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">KPIs from Airtable · ${cos.length - n} not saved yet</span>`;
+      return `<span class="vsrc part" title="A company appears here as soon as it is allotted to you in Kylas. It reaches Airtable the first time somebody saves from the console.">${
+        n} with KPIs · ${cos.length - n} not saved yet</span>`;
     return `<span class="vsrc off" title="${esc(CACHE.kpiError || "the KPI store did not answer")}">computed in this browser — Airtable unavailable</span>`;
   }
 
@@ -690,12 +696,14 @@
         <span class="vsub">Every number counts companies, not contacts.</span>
       </div>
       <div class="vfilters">
-        <label>Who<select id="dOwner">
-          <option value=""${!team ? " selected" : ""}>Me</option>
-          <option value="all"${team ? " selected" : ""}>Everyone</option>
+        <label>Who<select id="dOwner"${API.isAdmin ? "" : " disabled"}>
+          <option value=""${!team ? " selected" : ""}>${
+            API.isAdmin ? "Me" : esc(API.state.user?.name || "Me")}</option>
+          ${API.isAdmin ? `<option value="all"${team ? " selected" : ""}>Everyone</option>
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
-            String(DASH_OWNER) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
+            String(DASH_OWNER) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}` : ""}
         </select></label>
+        ${API.isAdmin ? "" : `<span class="vrole" title="Set ADMIN_EMAILS in .env.local to see the team">your numbers</span>`}
         <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
         ${kpiNote(cos)}
@@ -960,11 +968,12 @@
         <span class="vsub">${loading ? "loading…" : `${rows.length} of ${all.length}`}</span>
       </div>
       <div class="vfilters">
-        <label>Allotted to<select id="fOwner">
-          <option value=""${!FILTERS.owner ? " selected" : ""}>Me</option>
-          <option value="all"${FILTERS.owner === "all" ? " selected" : ""}>Everyone</option>
+        <label>Allotted to<select id="fOwner"${API.isAdmin ? "" : " disabled"}>
+          <option value=""${!FILTERS.owner ? " selected" : ""}>${
+            API.isAdmin ? "Me" : esc(API.state.user?.name || "Me")}</option>
+          ${API.isAdmin ? `<option value="all"${FILTERS.owner === "all" ? " selected" : ""}>Everyone</option>
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
-            String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
+            String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}` : ""}
         </select></label>
         <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label,
           countBy(all, (c) => (c.source ? [c.source] : [])))}</label>

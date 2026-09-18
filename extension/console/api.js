@@ -6,7 +6,7 @@
 (function (global) {
   const DEFAULT_BASE = "http://127.0.0.1:8787";
   let base = DEFAULT_BASE;
-  let state = { online: false, reason: "not checked yet", user: null };
+  let state = { online: false, reason: "not checked yet", user: null, role: "admin" };
   const listeners = new Set();
 
   const announce = () => listeners.forEach((fn) => fn(state));
@@ -58,11 +58,16 @@
     async health() {
       try {
         const r = await req("/health", { timeout: 4000 });
-        state = { online: true, reason: "", user: r.user || null };
+        /* The proxy holds one Kylas key and Kylas says whose it is. That is the
+           identity the views scope to — an associate sees their own numbers,
+           an admin can switch to the team. */
+        state = { online: true, reason: "", user: r.user || null, role: r.role || "admin" };
         announce();
         return r;
       } catch { return null; }
     },
+    get role() { return state.role || "admin"; },
+    get isAdmin() { return (state.role || "admin") === "admin"; },
 
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),

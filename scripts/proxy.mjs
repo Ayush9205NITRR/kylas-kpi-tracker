@@ -86,6 +86,48 @@ async function ownerName(id) {
 /* /companies responses, by owner key. Shared by every associate pointed at
    this proxy, which is the point: one page-through of the account serves the
    whole team for the window. */
+/* ── who is using this proxy, and what may they see ────────────────────
+   The proxy holds ONE Kylas API key, and Kylas tells us whose it is. That is
+   the identity: an associate runs the proxy with their own key and the console
+   scopes to them; an admin's key is listed in ADMIN_EMAILS (or ADMIN_IDS) and
+   unlocks the team view.
+
+   THIS IS SCOPING, NOT SECURITY, and the difference matters. Anyone who can
+   edit their own .env.local can name themselves an admin — the file is on their
+   machine. What it buys is that eight people each see their own numbers by
+   default instead of everyone's, which is what makes the dashboard usable and
+   stops one associate's bad week being everybody's business. Real access
+   control needs the proxy deployed once, centrally, with a login in front of
+   it — see docs/architecture.md. */
+const ADMINS = String(process.env.ADMIN_EMAILS || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+const ADMIN_IDS = String(process.env.ADMIN_IDS || "").split(",").map((x) => x.trim()).filter(Boolean);
+const userName = (u) => [u?.firstName, u?.lastName].filter(Boolean).join(" ").trim();
+let warnedNoEmail = false;
+function roleOf(me) {
+  if (!ADMINS.length && !ADMIN_IDS.length) return "admin";   /* nobody configured: nothing to lock */
+  const email = String(me?.email || "").toLowerCase();
+  /* Kylas does not always return an email on /v1/users/me. If it does not, an
+     ADMIN_EMAILS list can never match anybody and every key silently becomes an
+     associate — including the owner's. Said once, with the fix. */
+  if (!email && ADMINS.length && !ADMIN_IDS.length && !warnedNoEmail) {
+    warnedNoEmail = true;
+    log(`! ADMIN_EMAILS is set but Kylas returned no email for this key (id ${me?.id}).`);
+    log(`  Nobody can match by email. Use ADMIN_IDS=${me?.id} instead.`);
+  }
+  return (email && ADMINS.includes(email)) || ADMIN_IDS.includes(String(me?.id)) ? "admin" : "associate";
+}
+
+/* An associate may only ask about themselves. Returns the owner the caller is
+   ALLOWED to see, which is their own id unless they are an admin. */
+async function scopeOwner(requested) {
+  const me = await kylas.me();
+  if (roleOf(me) === "admin") return requested;
+  const mine = String(me?.id ?? "");
+  if (requested && requested !== "all" && String(requested) !== mine)
+    log(`  scope: ${userName(me)} asked for owner ${requested}, served their own`);
+  return mine;
+}
+
 const companyCache = new Map();
 const COMPANY_TTL = Number(process.env.COMPANY_TTL_MS || 5 * 60 * 1000);
 
@@ -179,7 +221,8 @@ const routes = {
 
   "/health": async () => {
     const me = await kylas.me();
-    return { ok: true, user: { id: me?.id, name: [me?.firstName, me?.lastName].filter(Boolean).join(" ") } };
+    return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "" },
+             role: roleOf(me), admins: ADMINS.length };
   },
 
   /* Everything the console needs when it opens on a company page: the company
@@ -201,7 +244,7 @@ const routes = {
      worked, which is exactly the list an associate needs at the start of a day.
      ?owner= for one person, ?owner=all for the team view. */
   "/companies": async (url) => {
-    const want = url.searchParams.get("owner");
+    const want = await scopeOwner(url.searchParams.get("owner"));
     const me = await kylas.me();
     const all = want === "all";
     const owner = all ? null : (want || me?.id);
@@ -317,6 +360,55 @@ const routes = {
     return { ...body, companies: out, owner: all ? "all" : String(owner) };
   },
 
+  /* WHY DO THE COMPANY KPIs NOT MATCH?
+     The dashboard joins Kylas companies to Airtable rows on the Kylas company
+     id. When that join finds nothing, every company-level number reads zero
+     while the Progress section — which reads the event tables directly and
+     needs no join — shows real data. Two right-looking halves and no way to
+     tell which side is empty.
+
+     This answers it in one call: what each side holds, and a sample of ids
+     from both so a mismatch in FORM (a number vs a string, a stray space, an
+     id from a different account) is visible rather than inferred. */
+  "/kpi-debug": async () => {
+    if (!airtable) return { error: "Airtable is not configured" };
+    const rows = await airtable.listAll("Companies",
+      { fields: ["Kylas Company ID", "Name", "KPI Rank", "Right POC", "Successful Discovery"] });
+    const ids = rows.map((r) => String(r.fields["Kylas Company ID"] ?? "").trim());
+    const withId = ids.filter(Boolean);
+
+    const hit = companyCache.get("all");
+    const kylasIds = (hit?.body?.companies || []).map((c) => String(c.id));
+    const set = new Set(withId);
+    const overlap = kylasIds.filter((id) => set.has(id));
+
+    return {
+      airtable: {
+        companyRows: rows.length,
+        withKylasId: withId.length,
+        blankKylasId: rows.length - withId.length,
+        sampleIds: withId.slice(0, 5),
+        sampleNames: rows.slice(0, 5).map((r) => r.fields.Name || "(no name)"),
+        anyRank: rows.filter((r) => Number(r.fields["KPI Rank"] || 0) > 0).length,
+      },
+      kylas: {
+        companiesCached: kylasIds.length,
+        cachedAgeSeconds: hit ? Math.round((Date.now() - hit.at) / 1000) : null,
+        sampleIds: kylasIds.slice(0, 5),
+      },
+      matching: overlap.length,
+      verdict: !rows.length
+        ? "Airtable has NO company rows. A contact saved with no companyId writes none — check the save log."
+        : !withId.length
+          ? "Airtable has company rows but none carry a Kylas Company ID, so nothing can join."
+          : !kylasIds.length
+            ? "Nothing cached from Kylas yet — open the dashboard once, then call this again."
+            : overlap.length
+              ? `${overlap.length} company/companies join. The dashboard should show them.`
+              : "Both sides have ids and NONE overlap — the ids are from different accounts, or a different form.",
+    };
+  },
+
   /* The same numbers by day, by week or by month.
      Built from the two append-only tables rather than from Daily Snapshot: a
      snapshot only exists for days the cron ran and cannot be cut finer than a
@@ -328,7 +420,13 @@ const routes = {
       ? url.searchParams.get("period") : "week";
     const from = url.searchParams.get("from") || "";
     const to = url.searchParams.get("to") || "";
-    const owner = url.searchParams.get("owner") || "";
+    /* CAREFUL: /companies filters on an owner ID (Kylas), this filters on an
+       owner NAME (Airtable's Owner column holds the name the writer put there).
+       Passing an id straight through here matched nothing and would have shown
+       an associate an empty report while telling them it was theirs. */
+    const askedId = await scopeOwner(url.searchParams.get("owner"));
+    const owner = askedId === "all" ? "all"
+      : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await kylas.me()) || "");
 
     const [callRows, transRows, contactRows] = await Promise.all([
       airtable.listAll("Call Log", { fields: ["Called At", "Owner", "Outcome"] }),

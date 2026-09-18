@@ -548,3 +548,7 @@ body.framed .ovOnly{display:inline-block}
 .rtable{margin-top:14px}
 .rtable tbody tr.now td{background:var(--blueSoft);font-weight:var(--w-strong)}
 .rtable td .d{margin-left:6px}
+
+/* Whose numbers these are, when the viewer cannot change it. */
+.vrole{font-size:var(--t-meta);color:var(--text3);border:1px solid var(--line2);
+  border-radius:11px;padding:3px 9px;align-self:center;cursor:help}

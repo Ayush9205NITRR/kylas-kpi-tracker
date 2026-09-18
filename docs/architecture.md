@@ -172,3 +172,66 @@ Three things the browser cannot do, and the reason the answer was not "drop it":
    exists. The remarks block is a rendering for a human, not a store.
 3. **A place to look without the extension** — a manager, a phone, a grid with
    its own filters and views.
+
+---
+
+## 6. Who sees what — added 2026-09-18
+
+Ayush: *"Everyone is not required to see the data of all the executives… create
+a sign-in system so once you sign up you're only seeing your concerned data,
+while the admin can see all the data."*
+
+### What identity we already have, for free
+
+The proxy holds **one Kylas API key**, and Kylas will say whose it is
+(`GET /v1/users/me`). An associate runs the proxy with their own key, so the
+proxy already knows who is sitting in front of it. No login screen needed for
+the common case.
+
+```
+ADMIN_IDS=74725,82866       # Kylas user ids, the reliable form
+ADMIN_EMAILS=ayush@enout.in # works only if /v1/users/me returns an email
+```
+
+- **Nobody listed** → everyone is an admin. Nothing is locked until somebody
+  decides to lock it, so an existing install does not change behaviour.
+- **Listed** → `role: "admin"`, the Who / Allotted-to selector offers Everyone
+  and each associate by name.
+- **Not listed** → `role: "associate"`. The selector is disabled and shows only
+  their own name; `/companies` and `/report` serve their own rows whatever the
+  request asks for, and the substitution is logged.
+
+Kylas does not always return an email. If `ADMIN_EMAILS` is set and the email
+comes back blank, **nobody can ever match** — including the owner. The proxy
+says so once, with the `ADMIN_IDS` line to use instead, rather than silently
+demoting everybody.
+
+### This is scoping, not security
+
+Worth being exact about, because the difference decides what it is good for.
+The allowlist lives in the associate's own `.env.local`, on their own laptop.
+Anyone who can edit that file can call themselves an admin, and anyone holding
+a Kylas key can query Kylas directly regardless of this.
+
+What it buys is that eight people each open the dashboard on **their own
+numbers** instead of the whole team's — which is what makes it usable, and stops
+one associate's bad week being everybody's business by default.
+
+**Real access control needs the proxy deployed once, centrally**, with a login
+in front of it and per-user keys held server-side. That is the same change
+already wanted for the eight-laptop problem, and it is the point at which this
+scoping becomes enforcement. Until then, treat it as a default view, not a
+permission.
+
+### Why the admin view of the whole team was empty
+
+Not a permissions problem. The company-level KPIs join Kylas companies to
+Airtable rows on the Kylas company id, and when that join matches nothing every
+company number reads zero — while the Progress section, which reads the event
+tables directly and needs no join, shows real data. Two right-looking halves and
+nothing saying which side was empty.
+
+`/kpi-debug` answers it in one call: how many company rows Airtable holds, how
+many carry a Kylas id, samples from both sides, and the overlap. The dashboard
+badge now says *"no company matched Airtable — check /kpi-debug"* rather than
+counting thousands of companies as "not saved yet", which is true and useless.
