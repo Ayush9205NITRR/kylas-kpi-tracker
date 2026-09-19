@@ -200,6 +200,32 @@ level. That is the thing this whole design is for.
 
 ---
 
+## 7b · One-off repairs, if you are upgrading an existing base
+
+Two faults were found by running the console end to end on 2026-09-19. The code
+is fixed; these repair rows written before it. Both are dry by default and both
+are safe to run twice.
+
+```bash
+source .env.local
+node scripts/seed-transitions.mjs          # read the plan
+node scripts/seed-transitions.mjs --apply
+node scripts/migrate-ever-picked.mjs       # read the plan
+node scripts/migrate-ever-picked.mjs --apply
+```
+
+**Order matters.** `migrate-ever-picked` decides whether a contact ever
+answered by looking for a connected stage in Stage Transitions. If the console
+logged calls before it wrote transitions, that evidence is missing, and a
+contact who answered in July and has since drifted back down the Could Not
+Connect ladder gets wrongly cleared. `seed-transitions` rebuilds the missing
+history from Call Log, which recorded `Stage Set` on every save all along —
+Kylas itself has no stage history to give, so this is the only real source.
+
+Seeding back-fills real arrivals, so **past weeks in the report will gain
+numbers**. That is the correction, not a side effect: the arrivals happened,
+nothing was recording them. The current week is unaffected.
+
 ## 8 · Schedule the background jobs
 
 Three jobs keep the base current and bounded. They run on whichever machine
