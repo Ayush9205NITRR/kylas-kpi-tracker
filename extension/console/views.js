@@ -280,7 +280,8 @@
                   /* The crawl stopped at Kylas' page cap: what is here is a
                      correct prefix, not the account. Never inferred — the
                      proxy says so explicitly. */
-                  truncated: false, crawled: 0 };
+                  truncated: false, crawled: 0,
+                  reportedTotal: null, short: 0, hitTheirCeiling: false };
   const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
   let inflight = false;
   let restored = false;
@@ -370,12 +371,26 @@
   /* Kylas stopped answering before the account ran out. Amber, because this is
      a warning about the DATA and not a styling choice: every count on screen is
      computed over a list that is short by an unknown amount. */
-  const truncWarn = () => CACHE.truncated
-    ? `<p class="vwarn">Kylas stopped returning companies at its page limit —
-       ${esc(String(CACHE.crawled))} fetched, and there are more that are NOT here.
-       Every count below is short by an unknown amount. Restart the proxy with a
-       higher <code>KYLAS_MAX_PAGES</code>.</p>`
-    : "";
+  /* "Short by an unknown amount" was the best this could say while the crawl
+     discarded Kylas' own totalElements. It is known now, and the two causes
+     need OPPOSITE advice: raising KYLAS_MAX_PAGES fixes our cap and does
+     nothing whatever for Kylas' result window. Sending somebody to change a
+     number that cannot help is worse than saying nothing. */
+  const truncWarn = () => {
+    if (!CACHE.truncated) return "";
+    const got = esc(String(CACHE.crawled));
+    if (CACHE.hitTheirCeiling && CACHE.reportedTotal != null)
+      return `<p class="vwarn">Kylas says this account has
+        <strong>${esc(String(CACHE.reportedTotal))}</strong> companies and served
+        ${got} of them — ${esc(String(CACHE.short))} are missing. Its paged search
+        will not return the rest however many pages we ask for, so every count
+        below is short by that many. Raising <code>KYLAS_MAX_PAGES</code> will not
+        help; the remainder has to be fetched another way.</p>`;
+    return `<p class="vwarn">Kylas stopped returning companies at our page limit —
+       ${got} fetched, and there are more that are NOT here. Every count below is
+       short by an unknown amount. Restart the proxy with a higher
+       <code>KYLAS_MAX_PAGES</code>.</p>`;
+  };
 
   const ageText = () => {
     if (!CACHE.at) return "";
@@ -414,6 +429,9 @@
         CACHE.kpiMatched = held.kpiMatched || 0;
         CACHE.truncated = !!held.truncated;
         CACHE.crawled = held.crawled || 0;
+        CACHE.reportedTotal = held.reportedTotal ?? null;
+        CACHE.short = held.short || 0;
+        CACHE.hitTheirCeiling = !!held.hitTheirCeiling;
       }
     } catch { /* storage is a convenience here, never a dependency */ }
   }
@@ -445,13 +463,18 @@
         CACHE.kpiMatched = r.kpiMatched || 0;
         CACHE.truncated = !!r.truncated;
         CACHE.crawled = r.crawled || 0;
+        CACHE.reportedTotal = r.reportedTotal ?? null;
+        CACHE.short = r.short || 0;
+        CACHE.hitTheirCeiling = !!r.hitTheirCeiling;
         if (r.picklists) adoptPicklists(r.picklists);
         try {
           await Store.setSetting("companyCache",
             { at: CACHE.at, companies: CACHE.companies, owners: CACHE.owners,
               kpiSource: CACHE.kpiSource, kpiError: CACHE.kpiError,
               kpiMatched: CACHE.kpiMatched,
-              truncated: CACHE.truncated, crawled: CACHE.crawled });
+              truncated: CACHE.truncated, crawled: CACHE.crawled,
+              reportedTotal: CACHE.reportedTotal, short: CACHE.short,
+              hitTheirCeiling: CACHE.hitTheirCeiling });
         } catch { /* over quota is survivable — it is only a head start */ }
       })
       .catch((e) => {

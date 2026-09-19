@@ -148,10 +148,18 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
     const tries = companyShape && usable.includes(companyShape)
       ? [companyShape, ...usable.filter((s) => s !== companyShape)]
       : usable;
-    let shape = null, first = null, last;
+    let shape = null, first = null, last, reportedTotal = null;
     for (const s of tries) {
       try {
-        first = rows(await call("POST", page(0), s.body(ownerId)));
+        /* KEEP THE ENVELOPE, not just the rows. Kylas states how many records
+           matched, in totalElements, and we were throwing it away — so the one
+           number that says whether our list is complete was discarded on every
+           crawl. Ayush's dashboard read "10000 of 10000" while his account
+           plainly held more, and nothing could contradict it. */
+        const body = await call("POST", page(0), s.body(ownerId));
+        first = rows(body);
+        const t = Number(body?.totalElements ?? body?.total ?? NaN);
+        reportedTotal = Number.isFinite(t) ? t : null;
         if (companyShape !== s) { log(`company search: "${s.name}" works`); onShape(s.name); }
         companyShape = shape = s;
         break;
@@ -176,12 +184,31 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
       full = next.length === PAGE;
       first = next;
     }
-    /* Still a full page when the cap ran out: there is more we did not fetch. */
-    lastSearch = { pages, total: all.length, truncated: full && pages >= MAX_PAGES };
-    if (lastSearch.truncated)
-      log(`! company search STOPPED AT THE CAP after ${pages} pages (${all.length} companies). ` +
-          `There are more than this and they are NOT in the list. ` +
+    /* THREE WAYS THE LIST CAN BE SHORT, and only one of them was detected.
+         our cap   — still a full page when MAX_PAGES ran out
+         their cap — the endpoint stops serving rows past a fixed offset while
+                     still reporting the true match count. 10,000 is
+                     Elasticsearch's default max_result_window and this endpoint
+                     is search-backed, so the crawl ends on a short page and
+                     `full` goes false: our own truncation check CANNOT see it.
+         neither    — we really did reach the end
+       totalElements settles it without another request. */
+    const shortBy = reportedTotal != null ? reportedTotal - all.length : 0;
+    lastSearch = { pages, total: all.length,
+                   reportedTotal,
+                   short: shortBy > 0 ? shortBy : 0,
+                   hitOurCap: full && pages >= MAX_PAGES,
+                   /* Their ceiling: we stopped of our own accord, yet Kylas
+                      says there are more. */
+                   hitTheirCeiling: shortBy > 0 && !(full && pages >= MAX_PAGES),
+                   truncated: (full && pages >= MAX_PAGES) || shortBy > 0 };
+    if (lastSearch.hitOurCap)
+      log(`! company search STOPPED AT OUR CAP after ${pages} pages (${all.length} companies). ` +
           `Raise KYLAS_MAX_PAGES.`);
+    if (lastSearch.hitTheirCeiling)
+      log(`! company search: Kylas reports ${reportedTotal} companies but served only ` +
+          `${all.length} — it stopped ${shortBy} short of its own count on a short page. ` +
+          `A paged search cannot reach the rest; fetch them by id or by updatedAt window.`);
     if (all.length >= PAGE) log(`company search: ${all.length} across ${pages} page(s)`);
 
     /* Server-side filtering is only trustworthy when the shape claims it. */

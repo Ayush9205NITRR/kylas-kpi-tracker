@@ -362,9 +362,19 @@ const routes = {
        silently serving a short list is how 19 of Arshdeep's 250 companies got
        reported as all of them. */
     const search = kylas.lastCompanySearch?.() || {};
-    if (search.truncated)
-      log(`! the company list is INCOMPLETE — stopped at ${search.pages} pages / ` +
+    /* TWO DIFFERENT FAULTS WITH TWO DIFFERENT FIXES, and one message used to
+       cover both. Raising KYLAS_MAX_PAGES is the answer when WE stopped early;
+       it does nothing at all when Kylas stops serving rows past a fixed offset
+       while still reporting the true count, which is what Ayush hit. Telling
+       him to raise the cap would have sent him to change a number that cannot
+       help. */
+    if (search.hitOurCap)
+      log(`! the company list is INCOMPLETE — we stopped at ${search.pages} pages / ` +
           `${search.total} companies. Raise KYLAS_MAX_PAGES and restart.`);
+    else if (search.hitTheirCeiling)
+      log(`! the company list is INCOMPLETE — Kylas reports ${search.reportedTotal} ` +
+          `companies and served ${search.total}, ${search.short} short. Its paged ` +
+          `search will not go further; the rest need fetching by id or by updatedAt.`);
 
     /* The picklists too. The companies LIST page never calls /company, so
        without them the console's SOURCES stayed empty there and the Source
@@ -374,7 +384,13 @@ const routes = {
                    picklists: (await meta()).picklists,
                    kpiSource, kpiError, kpiMatched: matched,
                    truncated: !!search.truncated, crawled: search.total || companies.length,
-                   pages: search.pages || 1 };
+                   pages: search.pages || 1,
+                   /* What Kylas itself says exists, so the console can stop
+                      guessing at "an unknown amount". */
+                   reportedTotal: search.reportedTotal ?? null,
+                   short: search.short || 0,
+                   hitOurCap: !!search.hitOurCap,
+                   hitTheirCeiling: !!search.hitTheirCeiling };
     /* The WHOLE account is cached, under one key, whoever asked. */
     companyCache.set("all", { at: Date.now(), body });
 

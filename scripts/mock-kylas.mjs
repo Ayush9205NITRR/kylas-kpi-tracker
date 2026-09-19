@@ -229,8 +229,13 @@ createServer(async (req, res) => {
     const ceiling = Number(process.env.MOCK_SEARCH_CEILING || 0);
     const window = ceiling > 0 ? out.slice(0, ceiling) : out;
     const slice = window.slice(pg * size, pg * size + size);
+    /* totalElements is the TRUE match count even when the window refuses to
+       serve those rows — that is how a search index behaves, and it is the
+       only thing that tells a client its list is short. Reporting the windowed
+       length instead would make the ceiling undetectable, which is the bug
+       rather than the fixture. */
     return json(res, 200, { content: slice.map(withOwner),
-                            totalElements: window.length, page: pg, size });
+                            totalElements: out.length, page: pg, size });
   }
 
   if (p === "/v1/entities/contact/fields") {
