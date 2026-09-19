@@ -974,6 +974,104 @@
      borrows the accent or the flag colours. */
   const hueOf = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 
+  /* ── the team panel ───────────────────────────────────────────────────
+     Ticking who is in the funnel. A LIST OF EVERY NAME THE BASE HAS EVER
+     RECORDED AS AN OWNER, not a box to type into: a typed name that does not
+     match the Owner column exactly counts for nobody, silently, and there is
+     nothing on screen that would ever say so.
+
+     Membership is one checkbox. Role is beside it because it is worth knowing
+     who somebody is, but it decides nothing — the design this came from tested
+     the role text against a regular expression, and "BD Associate" instead of
+     "Business Development Associate" drops a person out of the funnel with no
+     explanation anywhere. */
+  const TEAM = { list: [], owners: [], at: 0, loading: false, error: "", configured: true };
+
+  function ensureTeam(repaint) {
+    if (TEAM.loading || (TEAM.at && Date.now() - TEAM.at < SWR_TTL)) return TEAM.loading;
+    TEAM.loading = true;
+    API.team()
+      .then((r) => { TEAM.list = r.team || []; TEAM.owners = r.owners || [];
+                     TEAM.configured = r.configured !== false; TEAM.error = ""; })
+      .catch((e) => { TEAM.error = e.message; })
+      .finally(() => { TEAM.loading = false; TEAM.at = Date.now(); repaint?.(); });
+    return true;
+  }
+
+  function openTeamSheet(repaint) {
+    const known = new Map(TEAM.list.map((p) => [p.name, p]));
+    /* Every candidate, with what the roster currently says about them. A name
+       nobody has ruled on is counted — so it opens ticked, which is what the
+       report is already doing. */
+    const rows = TEAM.owners.map((name) => ({
+      name,
+      role: known.get(name)?.role || "",
+      inFunnel: known.has(name) ? known.get(name).inFunnel : true,
+      seen: known.has(name),
+    }));
+    const s = document.createElement("div");
+    s.className = "scrim";
+    const draw = (msg) => {
+      const n = rows.filter((r) => r.inFunnel).length;
+      s.innerHTML = `<div class="sheet wide">
+        <div class="h"><h3>Who is in the funnel</h3>
+          <span class="vsub">${n} of ${rows.length}</span>
+          <button class="gbtn" id="tx" type="button">Close</button></div>
+        <div class="b">
+          <p class="dnote">Only these people are counted in the team funnel and given a column on
+            the ladder. Everyone the base has ever recorded as an owner is listed — leavers and
+            admin accounts included, which is the point. A name nobody has ruled on counts.</p>
+          <div class="teamrows">
+            ${rows.map((r, i) => `<label class="teamrow">
+              <input type="checkbox" data-i="${i}"${r.inFunnel ? " checked" : ""}>
+              <span class="nm">${esc(r.name)}</span>
+              <input class="role" type="text" data-role="${i}" value="${esc(r.role)}"
+                placeholder="Role — optional" aria-label="Role for ${esc(r.name)}">
+              ${r.seen ? "" : `<i class="new" title="Not on the roster yet">new</i>`}
+            </label>`).join("")}
+          </div>
+          <div class="dactions">
+            <button class="gbtn" id="tsave" type="button">Save roster</button>
+            <span class="vsub" id="tmsg">${esc(msg || "")}</span>
+          </div>
+        </div></div>`;
+      s.querySelector("#tx").onclick = () => { s.remove(); repaint?.(); };
+      s.querySelectorAll("[data-i]").forEach((b) => b.onchange = () => {
+        rows[Number(b.dataset.i)].inFunnel = b.checked;
+        s.querySelector(".sheet .vsub").textContent =
+          `${rows.filter((r) => r.inFunnel).length} of ${rows.length}`;
+      });
+      s.querySelectorAll("[data-role]").forEach((b) => b.oninput = () => {
+        rows[Number(b.dataset.role)].role = b.value;
+      });
+      s.querySelector("#tsave").onclick = async () => {
+        const msgEl = s.querySelector("#tmsg");
+        msgEl.textContent = "saving…";
+        try {
+          const r = await API.teamSave(rows.map(({ name, role, inFunnel }) => ({ name, role, inFunnel })));
+          TEAM.list = r.team || []; TEAM.at = Date.now();
+          /* The report was built from the OLD roster, so it has to be asked
+             again — otherwise the ladder keeps the columns you just removed.
+             The stored copies go too: they are keyed by period and window, and
+             every one of them counted the wrong population.
+
+             REP.data IS LEFT ALONE. Nulling it blanked the ladder and the
+             Progress table until the refetch landed — several seconds of empty
+             page after a click, which reads as having broken something. The old
+             numbers stay up and are replaced when the new ones arrive, which is
+             what every other read here does. */
+          for (const k of Object.keys(DISK.report)) delete DISK.report[k];
+          persist("report");
+          REP.key = "";
+          s.remove(); repaint?.();
+        } catch (e) { msgEl.textContent = `not saved — ${e.message}`.slice(0, 120); }
+      };
+    };
+    draw();
+    document.body.appendChild(s);
+    s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); repaint?.(); } });
+  }
+
   function ladderHTML(r) {
     if (!r || !r.current) return "";
     const cur = r.current, prev = r.previous;
@@ -990,7 +1088,11 @@
     return `
       <div class="vsec">
         <div class="vhead sm"><h2>The ladder</h2>
-          <span class="vsub">${esc(cur.label)} · every number counts companies, not contacts</span></div>
+          <span class="vsub">${esc(cur.label)} · every number counts companies, not contacts</span>
+          <button class="gbtn sm" id="teamBtn" type="button"
+            title="Choose who is counted in the funnel">Team${people.length ? ` · ${people.length}` : ""}</button></div>
+        ${(r.excluded || []).length ? `<p class="vnote">Not counted: ${
+          r.excluded.map((n) => esc(n)).join(", ")}. Change that under <b>Team</b>.</p>` : ""}
         <div class="card scroll"><table class="ladder">
           <thead><tr>
             <th class="rung">Rung</th><th class="teamcol">Team</th><th class="conv">Step conv.</th>
@@ -1383,6 +1485,9 @@
     ensureSnapshots(() => dashboard(host));
     ensureRca(DASH_OWNER, () => dashboard(host));
     wireRca(host, () => dashboard(host));
+    ensureTeam(() => dashboard(host));
+    const tb = host.querySelector("#teamBtn");
+    if (tb) tb.addEventListener("click", () => openTeamSheet(() => dashboard(host)));
   }
 
   /* paintDays() and the "Last 14 days" list are gone. That data is frozen into

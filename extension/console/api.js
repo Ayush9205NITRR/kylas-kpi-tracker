@@ -130,6 +130,9 @@
        what it is, so six browsers cannot hold six versions of it. */
     rca: (owner) => req(`/rca${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
+    /* Who the funnel counts, and every name it could count. */
+    team: () => req("/team", { timeout: 20000 }),
+    teamSave: (team) => req("/team-save", { method: "POST", body: { team }, timeout: 20000 }),
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
   };
 

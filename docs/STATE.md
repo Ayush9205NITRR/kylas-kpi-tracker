@@ -146,22 +146,27 @@ code and answers everything cheerfully. **Restart the proxy after editing
 
 ## 5 · Open — ask Ayush, do not guess
 
-1. **One proxy or eight?** Per-laptop works today with no code change but puts
+1. **The team roster is live but empty on your base.** `Team` is a new table;
+   until somebody ticks it, every owner counts — which is the old behaviour, so
+   nothing breaks by ignoring it. Open the dashboard as Everyone and use the
+   **Team** button beside the ladder.
+2. **One proxy or eight?** Per-laptop works today with no code change but puts
    the Kylas key and Airtable PAT on every machine and makes the nightly sync
    depend on a laptop being awake. A shared proxy needs a host added to
    `host_permissions` and **must** have Cloudflare Access or Tailscale in front
    — it has no auth of its own. Asked three times, unanswered.
-2. **The call-back date never leaves the browser.** `nextCallDate` is
+3. **The call-back date never leaves the browser.** `nextCallDate` is
    overlay-owned and blanked on read, so an account where the prospect said
    "call me after the AGM" is indistinguishable from a neglected one. Needs a
    `Next Call At` column, a writer, and a company-level rollup. This is the last
    unbuilt piece of Ayush's own "stays in my loop until it gives me a date".
-3. **The RCA reason lists are drafts.** `docs/rca-reasons.json`, written to get
+4. **The RCA reason lists are drafts.** `docs/rca-reasons.json`, written to get
    the mechanism working. Ayush said he would rewrite them.
-4. **Which Contact and Companies-table fields to cut.** He said he would send a
+5. **Which Contact and Companies-table fields to cut.** He said he would send a
    list; it never came. The conservative cuts already made are in the log.
-5. **`Source of Data`, `Offsite Timeline`, `Salutation` picklists** are guesses.
-6. **Google Workspace?** Decides whether the store listing can be "private to
+6. **`Source of Data` and `Salutation` picklists** are guesses. Offsite Timeline
+   is settled — Kylas only accepts quarters and Ayush confirmed that stands.
+7. **Google Workspace?** Decides whether the store listing can be "private to
    your organisation", which is the right setting for an internal tool.
 
 ## 6 · Ayush's to-do, outside this repo

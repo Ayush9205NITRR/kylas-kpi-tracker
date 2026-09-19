@@ -330,6 +330,23 @@ body.framed .ovOnly{display:inline-block}
   padding:9px 11px;font:inherit;font-size:var(--t-label);resize:vertical}
 .rcaNote textarea:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
 
+/* ── the team roster panel ───────────────────────────────────────────── */
+.teamrows{display:grid;gap:2px;max-height:46vh;overflow:auto;margin:12px 0 14px;
+  border:1px solid var(--line);border-radius:var(--r);padding:6px}
+.teamrow{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:6px;
+  font-size:var(--t-label);cursor:pointer;margin:0}
+.teamrow:hover{background:var(--panel2)}
+.teamrow input[type=checkbox]{flex:none;width:16px;height:16px;accent-color:var(--blue)}
+.teamrow .nm{flex:0 0 11rem;font-weight:var(--w-med);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.teamrow .role{flex:1;min-width:0;border:1px solid transparent;background:transparent;border-radius:6px;
+  padding:5px 8px;font:inherit;font-size:var(--t-meta);color:var(--text2)}
+.teamrow .role:hover{border-color:var(--line)}
+.teamrow .role:focus{border-color:var(--blue);background:var(--panel);outline:none;color:var(--text)}
+/* Somebody the roster has never ruled on. They are counted — the tick says so —
+   but it is worth knowing nobody has decided. */
+.teamrow .new{font-style:normal;font-size:var(--t-meta);color:var(--amber);
+  background:var(--amberSoft);border-radius:4px;padding:1px 6px;flex:none}
+
 /* ── what a POC row tells you before you open it ─────────────────────── */
 /* A second line under the stage. The roster used to look identical whether
    you had spoken to nine of ten POCs or none of them; these four facts are

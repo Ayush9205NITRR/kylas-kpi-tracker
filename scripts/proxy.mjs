@@ -21,7 +21,8 @@ import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant,
-         readRcaDue, writeRcaAnswer } from "./airtable.mjs";
+         readRcaDue, writeRcaAnswer,
+         readTeam, writeTeam, counter } from "./airtable.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
@@ -827,8 +828,34 @@ const routes = {
       if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
     }
 
-    const pick = (list) => (owner && owner !== "all"
-      ? list.filter((x) => String(x.owner || "") === owner) : list);
+    /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
+       Dropping non-team people in the view would leave the Team column summing
+       everybody while the per-person columns beside it summed the team — two
+       numbers on one row that do not add up, which is the exact class of bug
+       the ladder was just fixed for. It happens here, once, so every total on
+       the page is of the same population.
+
+       Skipped entirely when looking at one person: you asked for that person,
+       and hiding their numbers because somebody forgot to tick them is a blank
+       screen with no explanation. */
+    const team = airtable ? await readTeam(airtable).catch(() => []) : [];
+    const counts = counter(team);
+    /* Filled below, once calls/transitions/signals all exist — an earlier
+       version declared it here and read it before anything had been pushed
+       into it, so the list of people left out was always empty and the funnel
+       shrank with nothing on screen saying why. */
+    let excluded = [];
+    const pick = (list) => {
+      const byOwner = owner && owner !== "all"
+        ? list.filter((x) => String(x.owner || "") === owner) : list;
+      return owner === "all" && team.length ? byOwner.filter((x) => counts(x.owner)) : byOwner;
+    };
+    /* Every owner the data mentions, before the roster narrows it — so the
+       console can NAME who was left out rather than silently shrinking. */
+    if (owner === "all" && team.length)
+      excluded = [...new Set([...calls, ...transitions, ...signals]
+        .map((x) => String(x.owner || "").trim())
+        .filter((o) => o && !counts(o)))].sort();
     const out = withDeltas(report(period, { calls: pick(calls), transitions: pick(transitions),
                                             signals: pick(signals) }, { from, to }));
     log(`report ${period} ${out.from}..${out.to} — ${out.periods.length} period(s), ` +
@@ -838,7 +865,7 @@ const routes = {
        got what it asked for then computed a drill-down window from week keys as
        if they were years — "2026-NaN-0 to 2026-NaN-N". Saying so lets the
        caller notice the mismatch instead of rendering nonsense. */
-    return { ...out, period };
+    return { ...out, period, team, excluded };
   },
 
   /* The frozen daily numbers, for the trend chart. Read from Airtable, which
@@ -1072,6 +1099,40 @@ const routes = {
     });
     log(`rca: ${body.kid} ${gate.key} -> ${body.reason}`);
     return { ok: true, id: rec?.id || null };
+  },
+
+  /* ── the team roster ────────────────────────────────────────────────
+     Who the funnel counts. The candidate names are everyone the base has ever
+     recorded as an owner, so the panel is a list to tick rather than a form to
+     type names into — a typed name that does not match the Owner column
+     exactly would silently count for nobody. */
+  "/team": async () => {
+    if (!airtable) return { team: [], owners: [], configured: false };
+    /* CANDIDATES FROM THE SAME POPULATION THE REPORT COUNTS. Reading only the
+       Companies table missed anyone who owns contacts but no company — which on
+       this fixture is one of two people, and on a real base is anyone who has
+       been called for rather than allotted to. A roster that cannot offer you a
+       name is a roster that cannot exclude them either. */
+    const [team, companies, contacts] = await Promise.all([
+      readTeam(airtable),
+      readCompanies(airtable).catch(() => []),
+      listTolerant(airtable, "Contacts", { fields: ["Owner"], pageSize: 100, maxPages: 200 })
+        .catch(() => []),
+    ]);
+    const seen = new Set(companies.map((c) => c.owner).filter(Boolean));
+    for (const r of contacts) if (r.fields?.Owner) seen.add(String(r.fields.Owner).trim());
+    for (const p of team) seen.add(p.name);
+    return { team, owners: [...seen].sort(), configured: true };
+  },
+
+  "/team-save": async (url, req) => {
+    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to keep the roster"), { status: 503 });
+    const body = JSON.parse(await readBody(req));
+    if (!Array.isArray(body.team)) throw Object.assign(new Error("team must be an array"), { status: 400 });
+    await writeTeam(airtable, body.team);
+    const team = await readTeam(airtable);
+    log(`team: ${team.filter((p) => p.inFunnel).length} of ${team.length} in the funnel`);
+    return { ok: true, team };
   },
 
   /* Whether each half of the write is configured, so the console can say so

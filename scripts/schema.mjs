@@ -283,6 +283,35 @@ export const TABLES = [
         description: "Whose account it was when the question was asked." },
     ],
   },
+  /* WHO COUNTS AS THE TEAM.
+     The ladder's per-person columns were every owner who had ever logged a
+     call, which over time is leavers, an admin account, and whoever covered a
+     week in March. Ayush: "a section where I can probably just mark the people
+     who is a part of my team."
+
+     IN AIRTABLE, NOT IN THE BROWSER. Eight associates each keeping their own
+     idea of who the team is, is eight different funnels, and the one number a
+     manager compares people against would depend on whose screen it was on.
+
+     MEMBERSHIP IS A CHECKBOX, NOT A JOB TITLE. The design this came from tests
+     the role against /business development associate|\bbda\b/i, which is fine
+     until somebody types "BD Associate" and disappears from the funnel with
+     nothing saying why. Role is kept because it is worth knowing; it decides
+     nothing. */
+  {
+    name: "Team",
+    description: "One row per person who may appear in the funnel. `In Funnel` alone decides whether their numbers are counted — Role is informational. Read by the dashboard, edited from the console's Team panel.",
+    fields: [
+      { name: "Name", type: "singleLineText",
+        description: "Exactly as the Owner field spells it elsewhere in this base — that is what the report joins on." },
+      { name: "Role", type: "singleLineText",
+        description: "Free text, e.g. Business Development Associate. Informational only." },
+      { name: "In Funnel", type: "checkbox", options: check,
+        description: "Ticked = their calls and companies are counted in the team funnel and they get a column on the ladder." },
+      { name: "Note", type: "singleLineText" },
+      { name: "Updated At", type: "dateTime", options: dateTime },
+    ],
+  },
   {
     name: "Schema Migrations",
     description: "One row per migration applied to this base. Written by the migration scripts, read by them to refuse a second run. Do not delete a row unless you intend the migration to run again.",

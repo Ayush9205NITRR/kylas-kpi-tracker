@@ -748,6 +748,49 @@ export async function writeRcaAnswer(at, { key, kid, recordId, gate, reason, not
   return at.upsert("RCA", "Key", fields);
 }
 
+/* ── the team roster ───────────────────────────────────────────────────
+   Who the funnel counts. Read on every report; edited from the console.
+
+   A MISSING ROW IS NOT "EXCLUDED". An empty Team table means nobody has said
+   who the team is yet, and answering "then nobody counts" would blank the
+   dashboard for every base that has not set one up — including, on the day this
+   ships, all of them. Unknown means counted, and the console says so. */
+export async function readTeam(at) {
+  const rows = await listTolerant(at, "Team",
+    { fields: ["Name", "Role", "In Funnel", "Note"], pageSize: 100, maxPages: 20 }).catch(() => []);
+  return rows.map((r) => ({
+    id: r.id,
+    name: String(r.fields?.Name || "").trim(),
+    role: r.fields?.Role || "",
+    inFunnel: !!r.fields?.["In Funnel"],
+    note: r.fields?.Note || "",
+  })).filter((p) => p.name);
+}
+
+/* Returns a predicate, so every caller asks the same question the same way.
+   `known` is the set of names the roster has an opinion about — a name it has
+   never heard of is counted, per the rule above. */
+export function counter(team) {
+  const known = new Map(team.map((p) => [p.name, p.inFunnel]));
+  return (name) => {
+    const n = String(name || "").trim();
+    if (!n) return false;                 /* an unattributed row is nobody's */
+    return known.has(n) ? known.get(n) : true;
+  };
+}
+
+export async function writeTeam(at, people) {
+  const rows = people.filter((p) => String(p.name || "").trim()).map((p) => ({
+    Name: String(p.name).trim(),
+    Role: p.role || "",
+    "In Funnel": !!p.inFunnel,
+    Note: p.note || "",
+    "Updated At": new Date().toISOString(),
+  }));
+  if (!rows.length) return [];
+  return at.upsertMany("Team", "Name", rows);
+}
+
 /* What the last sync managed, so the console can say how complete this mirror
    is instead of implying it is the whole account. */
 export async function readSyncState(at) {
