@@ -266,6 +266,29 @@ body.framed .ovOnly{display:inline-block}
 .vtable.dense .vr .c1 b{font-size:var(--t-label)}
 .vtable.dense .vr .c1 em{display:none}
 
+/* ── the one progress table ──────────────────────────────────────────── */
+/* Two header bands, not two tables: counts on the left, the conversion between
+   them on the right, so a row is read once. */
+.onegrid thead tr.band th{font-size:var(--t-meta);text-transform:uppercase;letter-spacing:.05em;
+  color:var(--text3);font-weight:var(--w-med);border-bottom:0;padding-bottom:2px}
+.onegrid th.rt,.onegrid td.rt{background:var(--panel2)}
+.onegrid td.rt{color:var(--text2)}
+.onegrid tbody tr[data-into]{cursor:pointer}
+.onegrid tbody tr[data-into]:hover{background:var(--panel3)}
+.onegrid tbody tr[data-into]:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.onegrid td.pl{white-space:nowrap}
+/* The chevron only appears on hover: a column of them reads as decoration, and
+   on the day level there is nothing to open and it must not be there at all. */
+.onegrid td.pl .into{font-style:normal;color:var(--text3);margin-left:6px;opacity:0}
+.onegrid tbody tr[data-into]:hover .into,
+.onegrid tbody tr[data-into]:focus-visible .into{opacity:1}
+
+.vcrumbs{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.vcrumbs button{border:0;background:transparent;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--blue);cursor:pointer;padding:3px 6px;border-radius:6px}
+.vcrumbs button:hover{background:var(--blueSoft)}
+.vcrumbs button+button::before{content:"› ";color:var(--text3)}
+
 /* ── the four headline numbers ───────────────────────────────────────── */
 /* Bigger than a tile elsewhere in the app, because this is the one thing on the
    page meant to be read from across a desk. */

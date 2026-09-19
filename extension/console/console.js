@@ -452,13 +452,11 @@ const calledToday=a=>String(a.lastCallAt||"").slice(0,10)===today();
 const byRecentCall=(x,y)=>String(y.a.lastCallAt||"").localeCompare(String(x.a.lastCallAt||""));
 
 function visible(){
-  const q=(document.getElementById("q").value||"").toLowerCase();
   const rows=DATA.map((a,i)=>({a,i}))
     /* The record you are ON is always in the list. Today is a log of calls
        made, and a contact opened from its Kylas page has not been called yet —
        without this it would be missing from the very list it is selected in. */
     .filter(({a,i})=>mode==="session"?(calledToday(a)||i===cur):(!scope||String(a.companyId)===String(scope.id)))
-    .filter(({a})=>!q||(a.pocName+" "+a.company+" "+a.phones.map(p=>p.value).join(" ")).toLowerCase().includes(q))
     /* Done/flagged narrowing is about what is left to do, so it has no meaning
        over a list of calls already made. */
     .filter(({a})=>mode==="session"||filter==="all"||(filter==="flag"?a.flagged:!a.done));
@@ -802,7 +800,7 @@ function renderBasic(){
       ? select("f-src",SOURCES,a.source,v=>a.source=v)
       : el("div","locked",`<b>waiting</b><span>Source of Data comes from Kylas — connect the proxy to load it.</span>`)));
   grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
-  W.appendChild(group("Who you're calling",[grid]));
+  const whoCard=group("Who you're calling",[grid]);
 
   /* Stage & follow-up */
   const ncd=el("div","f");ncd.id="f-next";
@@ -843,7 +841,18 @@ function renderBasic(){
      are already over there. Sitting next to the call notes it was also on
      screen for every no-answer call, which is the 65% that never gets near it. */
 
+  /* ORDER: WHAT YOU TOUCH, THEN WHAT YOU READ.
+     Identity sat first and pushed the stage and the call-back date below the
+     fold, so the two fields that are filled on EVERY call — including the 65%
+     where nobody picks up — could not be reached without scrolling. And it is
+     all a second copy: the header band above already carries the name, the
+     number, the email, the company and the role. Scrolling past a duplicate to
+     reach the only thing you came for is the cost paid 200 times a day.
+
+     The identity card keeps every field, because that is where they are
+     EDITED. It just stops being the thing in the way. */
   W.appendChild(group("Where this stands",[sRow,rRow]));
+  W.appendChild(whoCard);
 }
 
 function renderRight(){
@@ -1194,7 +1203,6 @@ function openKb(){
       <div class="krow"><span class="kk"><kbd>C</kbd></span><span>Dial the primary number</span></div>
       <div class="krow"><span class="kk"><kbd>F</kbd></span><span>Flag this record for end-of-day cleanup</span></div>
       <div class="krow"><span class="kk"><kbd>J</kbd> <kbd>K</kbd></span><span>Next / previous contact in the queue</span></div>
-      <div class="krow"><span class="kk"><kbd>/</kbd></span><span>Jump to search</span></div>
       <div class="krow"><span class="kk"><kbd>Esc</kbd></span><span>Leave the field you are in</span></div>
       <div class="krow"><span class="kk"><kbd>?</kbd></span><span>This sheet</span></div>
     </div></div>`;
@@ -1204,7 +1212,6 @@ function openKb(){
 }
 
 /* ── wiring ──────────────────────────────── */
-document.getElementById("q").addEventListener("input",renderQueue);
 const on=(id,ev,fn)=>{const n=document.getElementById(id);if(n)n.addEventListener(ev,fn);};
 on("kbBtn","click",openKb);
 on("qToggle","click",e=>{
@@ -1268,7 +1275,6 @@ document.addEventListener("keydown",e=>{
     const nx=k==="j"?at+1:at-1;
     if(rows[nx]){cur=rows[nx].i;stopTimer();secs=0;render();resetScroll();}
     return;}
-  if(e.key==="/"){e.preventDefault();document.getElementById("q").focus();return;}
   if(e.key==="?"){openKb();return;}
 });
 

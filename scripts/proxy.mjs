@@ -759,7 +759,7 @@ const routes = {
      first save. See scripts/report.mjs. */
   "/report": async (url) => {
     if (!airtable) return { error: "Airtable is not configured", periods: [] };
-    const period = ["day", "week", "month"].includes(url.searchParams.get("period"))
+    const period = ["day", "week", "month", "quarter", "year"].includes(url.searchParams.get("period"))
       ? url.searchParams.get("period") : "week";
     const from = url.searchParams.get("from") || "";
     const to = url.searchParams.get("to") || "";
@@ -822,7 +822,12 @@ const routes = {
                                             signals: pick(signals) }, { from, to }));
     log(`report ${period} ${out.from}..${out.to} — ${out.periods.length} period(s), ` +
         `${out.totals.calls} call(s)`);
-    return out;
+    /* WHICH PERIOD THIS ACTUALLY IS. An older proxy silently falls back to
+       "week" for a period it has never heard of, and a console that assumed it
+       got what it asked for then computed a drill-down window from week keys as
+       if they were years — "2026-NaN-0 to 2026-NaN-N". Saying so lets the
+       caller notice the mismatch instead of rendering nonsense. */
+    return { ...out, period };
   },
 
   /* The frozen daily numbers, for the trend chart. Read from Airtable, which

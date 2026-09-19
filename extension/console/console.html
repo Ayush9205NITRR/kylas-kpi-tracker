@@ -36,8 +36,13 @@
     <aside class="queue">
       <div class="qmode" id="qmode"></div>
       <div class="qscope" id="qscope" hidden></div>
+      <!-- The search box is gone. It promised "name, company, phone" and could
+           not deliver any of the three: visible() narrows to the open company
+           BEFORE the query runs, so searching a contact at another company, or
+           any company name but the one you are in, returned nothing every time.
+           A box that can only find what is already on screen is worse than no
+           box, and the queue it sat over is a handful of rows. -->
       <div class="qtop">
-        <input id="q" type="search" placeholder="Search name, company, phone" aria-label="Search">
         <div class="qfil" id="qfil"></div>
       </div>
       <button class="qnew" id="qNewBtn" type="button">+ New contact</button>

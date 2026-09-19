@@ -766,12 +766,12 @@
      Week is instant rather than a round trip each time. */
   const REP = { data: null, period: "week", owner: "", loading: false, error: "", key: "" };
 
-  function ensureReport(period, owner, onReady) {
-    const key = `${period}|${owner}`;
+  function ensureReport(period, owner, onReady, from = "", to = "") {
+    const key = `${period}|${owner}|${from}|${to}`;
     if (REP.key === key && (REP.data || REP.error)) return false;
     if (REP.loading) return true;
     REP.loading = true; REP.key = key; REP.period = period; REP.owner = owner;
-    API.report(period, owner)
+    API.report(period, owner, from, to)
       .then((r) => { REP.data = r; REP.error = r?.error || ""; })
       .catch((e) => { REP.data = null; REP.error = e.message; })
       .finally(() => { REP.loading = false; onReady(); });
@@ -797,71 +797,153 @@
     return `<i class="d ${n > 0 ? "up" : "down"}">${n > 0 ? "▲" : "▼"}${Math.abs(n)}</i>`;
   };
 
-  function reportSection(period, owner) {
-    const loading = ensureReport(period, owner, () => dashboard(document.getElementById("vwrap")));
+  /* ── ONE TABLE ────────────────────────────────────────────────────────
+     The dashboard used to be five views of the same six numbers: four tiles, a
+     funnel table, a step-conversion table, a stacked bar per associate and a
+     period table — each correct, each saying again what the one above it had
+     just said. Ayush asked for a table. This is the table.
+
+     COUNTS AND CONVERSIONS IN ONE GRID, not two. They are the same rows: the
+     conversion is the count beside it divided by the count before it, and
+     putting them in separate tables means reading a row twice to ask one
+     question. Two header bands rather than two tables.
+
+     LEVELS, top down. Year opens into quarters, a quarter into months, a month
+     into weeks, a week into days — which is how somebody actually reads a
+     number they do not like: what made that year, which quarter, which month,
+     which day. The level buttons jump straight there; clicking a row goes down
+     one and leaves a crumb to come back by. */
+  const LEVELS = [
+    { key: "year", label: "Year" },
+    { key: "quarter", label: "Quarter" },
+    { key: "month", label: "Month" },
+    { key: "week", label: "Week" },
+    { key: "day", label: "Day" },
+  ];
+  /* What each level opens into. Mirrors DRILL_INTO in report.mjs; the browser
+     cannot import it, so it is stated once here and nowhere else. */
+  const INTO = { year: "quarter", quarter: "month", month: "week", week: "day", day: null };
+
+  /* The columns. `of` names the metric the rate is measured against, so the
+     table and its header can never disagree about what a percentage means. */
+  const COUNT_COLS = [
+    { key: "calls", label: "Calls" },
+    { key: "connects", label: "Connected" },
+    { key: "right", label: "Right POC" },
+    { key: "discovery", label: "Discovery" },
+    { key: "booked", label: "SQL booked" },
+  ];
+  const RATE_COLS = [
+    { key: "connects", of: "calls", label: "Connect" },
+    { key: "right", of: "connects", label: "→ Right POC" },
+    { key: "discovery", of: "right", label: "→ Discovery" },
+    { key: "booked", of: "discovery", label: "→ Booked" },
+  ];
+
+  /* Where the report is pointed: which level, and the window a drill-down has
+     narrowed it to. The trail is what "back" means. */
+  let DASH_LEVEL = "month";
+  let DASH_FROM = "", DASH_TO = "";
+  let DASH_TRAIL = [];
+
+  /* Local, because the browser has no report.mjs. Only the two levels a drill
+     can produce need it. */
+  function rangeOf(level, key) {
+    if (level === "year") return [`${key}-01-01`, `${key}-12-31`];
+    if (level === "quarter") {
+      const y = key.slice(0, 4), q = Number(key.slice(6));
+      const first = (q - 1) * 3 + 1, last = first + 2;
+      const endDay = new Date(Date.UTC(Number(y), last, 0)).getUTCDate();
+      return [`${y}-${String(first).padStart(2, "0")}-01`,
+              `${y}-${String(last).padStart(2, "0")}-${endDay}`];
+    }
+    if (level === "month") {
+      const [y, m] = key.split("-");
+      const endDay = new Date(Date.UTC(Number(y), Number(m), 0)).getUTCDate();
+      return [`${key}-01`, `${key}-${endDay}`];
+    }
+    if (level === "week") {
+      const a = new Date(key + "T00:00:00Z");
+      const b = new Date(a); b.setUTCDate(b.getUTCDate() + 6);
+      return [key, b.toISOString().slice(0, 10)];
+    }
+    return [key, key];
+  }
+
+  function reportSection(owner) {
+    const loading = ensureReport(DASH_LEVEL, owner,
+      () => dashboard(document.getElementById("vwrap")), DASH_FROM, DASH_TO);
     const r = REP.data;
+
+    const crumbs = `<span class="vcrumbs">
+      ${DASH_TRAIL.length ? `<button type="button" data-crumb="-1">All time</button>` : ""}
+      ${DASH_TRAIL.map((t, i) => `<button type="button" data-crumb="${i}">${esc(t.label)}</button>`).join("")}
+    </span>`;
 
     const head = `<div class="vhead sm">
         <h2>Progress</h2>
-        <span class="vsub">${r ? `${esc(r.from)} to ${esc(r.to)}` : "the same numbers by month, week and day"}</span>
-        <span class="vperiod">${["month", "week", "day"].map((p) => `
-          <button type="button" data-period="${p}" aria-pressed="${p === period}">${
-            p[0].toUpperCase() + p.slice(1)}</button>`).join("")}</span>
+        <span class="vsub">${r ? `${esc(r.from)} to ${esc(r.to)}` : "counts and conversion, one row per period"}</span>
+        ${crumbs}
+        <span class="vperiod">${LEVELS.map((l) => `
+          <button type="button" data-period="${l.key}" aria-pressed="${l.key === DASH_LEVEL}">${
+            esc(l.label)}</button>`).join("")}</span>
       </div>`;
 
-    if (REP.error)
-      return head + `<p class="vwarn">Could not build the report — ${esc(REP.error)}.</p>`;
+    if (REP.error) return head + `<p class="vwarn">Could not build the report — ${esc(REP.error)}.</p>`;
     if (loading && !r) return head + `<p class="vnote">Reading the history…</p>`;
-    if (!r || !r.periods.length) return head + `<p class="vnote">No history yet.</p>`;
+    if (!r || !r.periods.length) return head + `<p class="vnote">No history in this window yet.</p>`;
 
-    /* The headline: this period, against the last one. */
-    const cur = r.current || {}, prev = r.previous;
-    const tiles = REPORT_METRICS.map((m) => `
-      <div class="rtile">
-        <b>${cur[m.key] ?? 0}</b>
-        <span>${esc(m.label)}</span>
-        ${deltaHTML(cur.delta ? cur.delta[m.key] : null)}
-      </div>`).join("");
-
-    /* Best period and streak — the two things that read as encouragement rather
-       than as a ledger. Omitted entirely when there is nothing to celebrate,
-       because a "best: 0" is worse than silence. */
-    const bits = [];
-    if (r.streak > 1) bits.push(`<b>${r.streak}</b> ${period}s in a row with calls logged`);
-    for (const m of ["discovery", "sql"]) {
-      const b = r.best[m];
-      if (b && cur[m] && cur[m] >= b.value)
-        bits.push(`best ${period} yet for <b>${esc(REPORT_METRICS.find((x) => x.key === m).label)}</b>`);
-    }
-    const bestCalls = r.best.calls;
-    if (bestCalls && bestCalls.key !== cur.key)
-      bits.push(`most calls was <b>${bestCalls.value}</b> (${esc(bestCalls.label)})`);
+    const cur = r.current || {};
+    /* THE SERVER'S PERIOD, not the one we asked for. A proxy that predates a
+       level falls back to "week" without complaint, and drilling on rows that
+       are not the level you think they are computes a window from the wrong key
+       shape. Trust what came back. */
+    const level = r.period || DASH_LEVEL;
+    const stale = level !== DASH_LEVEL;
+    const canDrill = !stale && !!INTO[level];
+    const rate = (p, c) => {
+      const d = p[c.of] || 0;
+      if (!d) return "—";
+      return Math.round(((p[c.key] || 0) / d) * 100) + "%";
+    };
 
     const rows = [...r.periods].reverse().map((p) => `
-      <tr${p.key === cur.key ? ' class="now"' : ""}>
-        <td>${esc(p.label)}</td>
-        ${REPORT_METRICS.map((m) => `<td>${p[m.key]}${
-          p.delta && p.delta[m.key] !== null && p.delta[m.key] !== 0
-            ? ` ${deltaHTML(p.delta[m.key])}` : ""}</td>`).join("")}
+      <tr${p.key === cur.key ? ' class="now"' : ""}${
+        canDrill ? ` data-into="${esc(p.key)}" tabindex="0" role="button"` : ""}>
+        <td class="pl">${esc(p.label)}${canDrill ? `<i class="into">\u203a</i>` : ""}</td>
+        ${COUNT_COLS.map((c) => `<td class="tnum">${p[c.key] || 0}${
+          p.delta && p.delta[c.key] ? ` ${deltaHTML(p.delta[c.key])}` : ""}</td>`).join("")}
+        ${RATE_COLS.map((c) => `<td class="tnum rt">${rate(p, c)}</td>`).join("")}
       </tr>`).join("");
 
     return head + `
-      <div class="rnow">
-        <div class="rlabel">${esc(cur.label || "")}<em>${
-          prev ? `vs ${esc(prev.label)}` : "no earlier period"}</em></div>
-        <div class="rtiles">${tiles}</div>
-      </div>
-      ${bits.length ? `<p class="rgood">${bits.join(" · ")}</p>` : ""}
-      <div class="vsteps rtable">
+      ${stale ? `<p class="vwarn">This proxy does not know the
+        <b>${esc(DASH_LEVEL)}</b> level and answered with <b>${esc(level)}</b> instead. It is running
+        an older build than the console — restart it from the repo. Drilling is off until it
+        matches, because the rows are not the period they are labelled.</p>` : ""}
+      <div class="vsteps rtable onegrid">
         <table>
-          <thead><tr><th>${period[0].toUpperCase() + period.slice(1)}</th>${
-            REPORT_METRICS.map((m) => `<th>${esc(m.label)}</th>`).join("")}</tr></thead>
+          <thead>
+            <tr class="band">
+              <th></th>
+              <th colspan="${COUNT_COLS.length}">How many</th>
+              <th colspan="${RATE_COLS.length}" class="rt">Conversion, each from the one before</th>
+            </tr>
+            <tr>
+              <th>${esc((LEVELS.find((l) => l.key === level) || {}).label || level)}</th>
+              ${COUNT_COLS.map((c) => `<th>${esc(c.label)}</th>`).join("")}
+              ${RATE_COLS.map((c) => `<th class="rt">${esc(c.label)}</th>`).join("")}
+            </tr>
+          </thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="vnote">Counted from the call log and the stage history, so a month, a week and a
-        day are the same rows cut three ways and always agree. A company is counted on the day it
-        FIRST reached a rung — moving on, or back and forth, never counts twice.</p>`;
+      <p class="vnote">${canDrill
+        ? `Click any row to open it — ${esc(LEVELS.find((l) => l.key === DASH_LEVEL).label.toLowerCase())}
+           opens into ${esc(INTO[DASH_LEVEL])}s. `
+        : ""}Counted from the call log and the stage history, so every level is the same rows cut a
+        different way and they always agree. A company is counted on the period it FIRST reached a
+        rung — moving on, or back and forth, never counts twice.</p>`;
   }
 
   /* ── RCA: why an account stopped moving ────────────────────────────────
@@ -999,7 +1081,6 @@
 
   /* ── dashboard ─────────────────────────────────────────────────────── */
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
-  let DASH_PERIOD = "week";
 
   async function dashboard(host) {
     await restore();
@@ -1038,19 +1119,73 @@
       ${truncWarn()}
       ${headlineHTML(cos)}
       ${rcaStrip()}
-      ${funnelHTML(cos)}
-      <div class="vsec">${stepTable(cos, (c) => c.owner)}</div>
-      <div class="vsec">${stackedByOwner(cos, (c) => c.owner)}</div>
-      <div class="vsec">${reportSection(DASH_PERIOD, DASH_OWNER === "all" ? "all" : "")}</div>
-      <div class="vsec">${trendChart()}</div>`;
+      <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
+      ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
+           something. On your own numbers it is one row saying what the four
+           tiles above already said; across the team it is the only place you
+           can see whose funnel is leaking. The funnel table, the stacked bar
+           and the trend chart are gone from the page — each was a fifth view of
+           the same six numbers. stepTable, stackedByOwner, funnelHTML and
+           trendChart are all still in this file, so putting any of them back is
+           one line. */
+        team ? `<div class="vsec">${stepTable(cos, (c) => c.owner)}</div>` : ""}`;
 
     const sel = document.getElementById("dOwner");
     /* No network: the whole account is already held, so this is a filter. */
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };
     const rf = document.getElementById("dRefresh");
     if (rf) rf.onclick = () => { ensureCompanies(DASH_OWNER, () => dashboard(host), true); dashboard(host); };
+    /* A level button JUMPS, and a jump is a fresh start: keeping a window from
+       a drill-down would show "Year" filtered to one week and look broken. */
     host.querySelectorAll(".vperiod button").forEach((b) => {
-      b.onclick = () => { DASH_PERIOD = b.dataset.period; dashboard(host); };
+      b.onclick = () => {
+        DASH_LEVEL = b.dataset.period;
+        DASH_FROM = ""; DASH_TO = ""; DASH_TRAIL = [];
+        dashboard(host);
+      };
+    });
+
+    /* Opening a row: go down one level, narrowed to that row's dates, and leave
+       a crumb. The crumb carries the window it came from rather than being
+       recomputed on the way back — recomputing is how a breadcrumb ends up
+       somewhere the user has never been. */
+    const drill = (key) => {
+      const next = INTO[DASH_LEVEL];
+      if (!next) return;
+      let [from, to] = rangeOf(DASH_LEVEL, key);
+      if (!from || !to || /NaN/.test(from + to)) return;   /* never navigate to a window we cannot compute */
+      /* CLAMPED TO TODAY. Opening the current year handed back four quarters,
+         and the three that have not happened yet sat at the top of the table as
+         zeros — the newest period is first, so the first thing you read after
+         drilling was a row about the future. A period that has not started is
+         not a period with no activity. */
+      const today = new Date().toISOString().slice(0, 10);
+      if (from > today) return;
+      if (to > today) to = today;
+      const row = REP.data?.periods.find((p) => p.key === key);
+      DASH_TRAIL = [...DASH_TRAIL, { label: row?.label || key, level: DASH_LEVEL, from, to }];
+      DASH_LEVEL = next; DASH_FROM = from; DASH_TO = to;
+      dashboard(host);
+    };
+    host.querySelectorAll("tr[data-into]").forEach((tr) => {
+      tr.addEventListener("click", () => drill(tr.dataset.into));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(tr.dataset.into); }
+      });
+    });
+    host.querySelectorAll(".vcrumbs button").forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.crumb);
+        if (i < 0) { DASH_TRAIL = []; DASH_FROM = ""; DASH_TO = ""; DASH_LEVEL = "month"; }
+        else {
+          const t = DASH_TRAIL[i];
+          DASH_TRAIL = DASH_TRAIL.slice(0, i);
+          DASH_LEVEL = t.level;
+          const prev = DASH_TRAIL[DASH_TRAIL.length - 1];
+          DASH_FROM = prev ? prev.from : ""; DASH_TO = prev ? prev.to : "";
+        }
+        dashboard(host);
+      };
     });
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
@@ -1173,9 +1308,67 @@
   const STALE_DAYS = 14;
 
   let VIEW_MODE = "board";
+  /* WHAT THE COLUMNS MEAN is now a choice, not a decision taken for you.
+     Three axes, because there are three questions and they are asked on
+     different days: "what do I do next" (state), "where is my pipeline sitting"
+     (stage), "which list is paying" (source). Whichever is not the axis stays
+     available as a filter, so the board narrows rather than needing a
+     different board. */
+  const AXES = [
+    { key: "state",  label: "KPI state" },
+    { key: "stage",  label: "Pipeline stage" },
+    { key: "source", label: "Source" },
+  ];
+  let GROUP_BY = "state";
+
   async function restoreViewMode() {
     try { VIEW_MODE = (await Store.getSetting("companiesView")) || "board"; }
     catch { /* default */ }
+    try { GROUP_BY = (await Store.getSetting("companiesGroupBy")) || "state"; }
+    catch { /* default */ }
+    if (!AXES.some((a) => a.key === GROUP_BY)) GROUP_BY = "state";
+  }
+
+  /* The company's stage: its POCs' best rung where contacts are loaded, its own
+     mirrored stage otherwise. Same fallback the card's stage line uses, so a
+     company cannot be filed under one stage and labelled with another. */
+  const stageOf = (co) => co.stage || co.kylasStage || "";
+
+  /* LANES, for whichever axis is selected.
+     state  — fixed six, because the funnel has a shape and an empty rung is
+              information: "nothing in Discovery" is the finding.
+     stage  — only the stages actually present. The picklist has 23 and a board
+              of 23 columns, 19 of them empty, is not a board.
+     source — only the sources present, busiest first, with the unattributed
+              rows gathered rather than dropped: "where did these come from" is
+              a real question and a silent omission is not an answer. */
+  function lanesFor(list) {
+    if (GROUP_BY === "state") {
+      const by = new Map(LANES.map((l) => [l.key, []]));
+      for (const c of list) by.get(laneOf(c))?.push(c);
+      return LANES.map((l) => ({ ...l, list: by.get(l.key) || [] }));
+    }
+    const by = new Map();
+    for (const c of list) {
+      const k = GROUP_BY === "stage" ? stageOf(c) : (c.source || "");
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(c);
+    }
+    const out = [...by.entries()].map(([k, arr]) => ({
+      key: k || "(none)",
+      label: k ? (GROUP_BY === "stage" ? label(k) : k)
+               : (GROUP_BY === "stage" ? "No stage" : "No source"),
+      /* No hint. The fixed six explain themselves because their names are
+         internal jargon; a stage or a source is its own explanation, and the
+         count is already in the header beside it. */
+      hint: "",
+      list: arr,
+    }));
+    if (GROUP_BY === "stage")
+      out.sort((a, b) => (STAGE_RUNG[b.key] || 0) - (STAGE_RUNG[a.key] || 0));
+    else
+      out.sort((a, b) => b.list.length - a.list.length || a.label.localeCompare(b.label));
+    return out;
   }
 
   /* KPI is a set of booleans on the row, not one value, so "is any of" asks
@@ -1373,19 +1566,27 @@
        The named POC is on the card because it is the question a manager
        actually asks — not how many right POCs, which person — and because on
        this board it is also the reason the card has stopped moving. */
+    /* THE COLUMN ALREADY SAYS ONE OF THESE, so the card does not repeat it.
+       Grouped by stage, every card in a column carries the same stage line;
+       grouped by source, the same source. Repeating the axis on every card is
+       the noise that made the first version feel like a table cut into strips.
+       Name, when it was last touched, and the two facts the column is not
+       telling you. */
     const cardHTML = (c) => {
       const d = daysSince(c.lastCalledAt);
       const stale = d !== null && d >= STALE_DAYS;
       const who = c.pocs.discovery[0] || c.pocs.right[0] || "";
       const more = (c.pocs.discovery.length || c.pocs.right.length) - 1;
+      const showStage = GROUP_BY !== "stage";
+      const showSource = GROUP_BY !== "source";
       return `
         <button class="vcard${stale ? " stale" : ""}" type="button" data-id="${esc(c.id)}">
           <b>${esc(c.name)}</b>
-          <em>${esc(label(c.stage) || label(c.kylasStage) || c.kpiStage || "Not reached")}</em>
+          ${showStage ? `<em>${esc(label(stageOf(c)) || c.kpiStage || "Not reached")}</em>` : ""}
           ${who ? `<span class="who" title="${esc([...c.pocs.discovery, ...c.pocs.right].join(", "))}"
             >${esc(who)}${more > 0 ? ` +${more}` : ""}</span>` : ""}
           <span class="foot">
-            <i class="src">${esc(c.source || "no source")}</i>
+            ${showSource ? `<i class="src">${esc(c.source || "no source")}</i>` : ""}
             <i class="age">${d === null ? "never called"
               : d === 0 ? "today" : d === 1 ? "yesterday" : `${d}d ago`}</i>
           </span>
@@ -1408,7 +1609,7 @@
       return `
         <section class="vcol" data-lane="${lane.key}">
           <header><b>${esc(lane.label)}</b><span>${list.length}</span>
-            <em>${esc(lane.hint)}</em></header>
+            ${lane.hint ? `<em>${esc(lane.hint)}</em>` : ""}</header>
           <div class="vcards">
             ${list.length ? list.slice(0, cap).map(cardHTML).join("")
                           : `<p class="vnone">Nothing here.</p>`}
@@ -1420,11 +1621,11 @@
     };
 
     const boardHTML = (list) => {
-      const by = new Map(LANES.map((l) => [l.key, []]));
-      for (const c of list) by.get(laneOf(c))?.push(c);
-      for (const arr of by.values()) arr.sort(byColdest);
-      return `<div class="vboard">${
-        LANES.map((l) => laneHTML(l, by.get(l.key) || [])).join("")}</div>`;
+      const lanes = lanesFor(list);
+      for (const l of lanes) l.list.sort(byColdest);
+      if (!lanes.length)
+        return `<div class="vempty">Nothing matches those filters.</div>`;
+      return `<div class="vboard">${lanes.map((l) => laneHTML(l, l.list)).join("")}</div>`;
     };
 
     host.innerHTML = `
@@ -1455,6 +1656,9 @@
         <button class="gbtn" id="fClear" type="button">Clear</button>
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
+        ${VIEW_MODE === "board" ? `<label>Group by<select id="fGroup">
+          ${AXES.map((a) => `<option value="${a.key}"${GROUP_BY === a.key ? " selected" : ""}>${esc(a.label)}</option>`).join("")}
+        </select></label>` : ""}
         <button class="gbtn" id="fMode" type="button"
           title="${VIEW_MODE === "board" ? "Every column, sortable" : "Group by where each account stopped"}"
         >${VIEW_MODE === "board" ? "Table" : "Board"}</button>
@@ -1482,12 +1686,17 @@
         This is only what the browser holds, not everything allotted to you.</p>` : ""}
       ${truncWarn()}
       ${VIEW_MODE === "board"
-        ? `<p class="vnote">Columns are where each account stopped, so every company sits in exactly
-        one. Inside a column the coldest is first — the top of each is what has gone quiet longest,
-        and anything untouched for ${STALE_DAYS} days or more is marked. <b>Closed</b> is a company
-        with nobody left to call: every POC on it has reached a dead end. Source and stage are
-        filters here rather than columns, because where a name came from does not tell you what to
-        do with it.</p>`
+        ? `<p class="vnote">Every company sits in exactly one column, and inside a column the coldest
+        is first — the top of each is what has gone quiet longest, and anything untouched for
+        ${STALE_DAYS} days or more is marked. ${GROUP_BY === "state"
+          ? `Columns are where each account stopped. <b>Closed</b> is a company with nobody left to
+             call: every POC on it has reached a dead end.`
+          : GROUP_BY === "stage"
+          ? `Columns are the pipeline stage the company's furthest POC has reached, best first.
+             Only stages with companies in them are shown.`
+          : `Columns are where the name came from, busiest first.`}
+        Whatever is not the column is still a filter above, so this narrows rather than needing a
+        different board.</p>`
         : `<p class="vnote">Named POCs answer the question a manager actually asks — not how many right
         POCs, but which person. Stage is the highest any POC at that company has reached. A company
         with no POCs yet is one allotted to you that nobody has opened.
@@ -1522,6 +1731,12 @@
     /* Board or table. A MODE, not a preference — it changes what the view is
        for — but remembered all the same, because being put back in the other
        one every morning is its own kind of broken. */
+    on("fGroup", "change", async (e) => {
+      GROUP_BY = e.target.value;
+      try { await Store.setSetting("companiesGroupBy", GROUP_BY); } catch { /* preference only */ }
+      companies(host);
+    });
+
     on("fMode", "click", async () => {
       VIEW_MODE = VIEW_MODE === "board" ? "table" : "board";
       try { await Store.setSetting("companiesView", VIEW_MODE); } catch { /* preference only */ }

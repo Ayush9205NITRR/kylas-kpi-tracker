@@ -34,11 +34,59 @@ export function weekKey(iso) {
 
 export const monthKey = (iso) => String(iso || "").slice(0, 7);
 
-export const KEY_OF = { day: dayKey, week: weekKey, month: monthKey };
+/* Quarter and year, so the report can be read from the top down: a year opens
+   into its four quarters, a quarter into its months, a month into its days.
+   Keyed so they still sort as strings, which is what every period here relies
+   on — "2026-Q2" sorts after "2026-Q1" and before "2027-Q1". */
+export function quarterKey(iso) {
+  const m = Number(String(iso || "").slice(5, 7));
+  if (!m) return "";
+  return `${String(iso).slice(0, 4)}-Q${Math.floor((m - 1) / 3) + 1}`;
+}
+export const yearKey = (iso) => String(iso || "").slice(0, 4);
+
+export const KEY_OF = { day: dayKey, week: weekKey, month: monthKey,
+                        quarter: quarterKey, year: yearKey };
+
+/* Which period a level opens INTO. The report is one table at a time and this
+   is the only thing that says what "click a row" means, so it lives beside the
+   keys rather than in the view. A day does not open into anything. */
+export const DRILL_INTO = { year: "quarter", quarter: "month", month: "week", week: "day", day: null };
+
+/* Whether a key at one level sits inside a key at the level above. Used to
+   narrow the window when a row is opened; string prefixes would be wrong for
+   quarter -> month (2026-Q1 is not a prefix of 2026-02), so it is a date range
+   in both directions. */
+export function periodRange(period, key) {
+  if (period === "year") return [`${key}-01-01`, `${key}-12-31`];
+  if (period === "quarter") {
+    const y = key.slice(0, 4), q = Number(key.slice(6));
+    const first = (q - 1) * 3 + 1;
+    const last = first + 2;
+    const endDay = new Date(Date.UTC(Number(y), last, 0)).getUTCDate();
+    return [`${y}-${String(first).padStart(2, "0")}-01`, `${y}-${String(last).padStart(2, "0")}-${endDay}`];
+  }
+  if (period === "month") {
+    const [y, m] = key.split("-");
+    const endDay = new Date(Date.UTC(Number(y), Number(m), 0)).getUTCDate();
+    return [`${key}-01`, `${key}-${endDay}`];
+  }
+  if (period === "week") {
+    const a = new Date(key + "T00:00:00Z");
+    const b = new Date(a); b.setUTCDate(b.getUTCDate() + 6);
+    return [key, b.toISOString().slice(0, 10)];
+  }
+  return [key, key];
+}
 
 /* How a period reads to a person. A week is named by the Monday it starts on,
    which is ambiguous on its own, so it carries its range. */
 export function periodLabel(period, key) {
+  if (period === "year") return key;
+  if (period === "quarter") {
+    const [y, q] = key.split("-");
+    return `${q} ${y}`;
+  }
   if (period === "month") {
     const [y, m] = key.split("-");
     return new Date(Date.UTC(Number(y), Number(m) - 1, 1))
@@ -62,8 +110,12 @@ export function periodsBetween(period, fromISO, toISO) {
   const out = [];
   const d = new Date(dayKey(fromISO) + "T00:00:00Z");
   const end = new Date(dayKey(toISO) + "T00:00:00Z");
+  /* 4000 days was a fine ceiling when the coarsest period was a month. A year
+     view over a decade is 3,650 steps and would have been silently truncated —
+     a report that stops early and says nothing is the failure mode this whole
+     function exists to avoid. */
   let guard = 0;
-  while (d <= end && guard++ < 4000) {
+  while (d <= end && guard++ < 40000) {
     const k = key(d.toISOString());
     if (!out.length || out[out.length - 1] !== k) out.push(k);
     d.setUTCDate(d.getUTCDate() + 1);
