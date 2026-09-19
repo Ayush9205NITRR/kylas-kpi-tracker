@@ -11,6 +11,15 @@
 
   const announce = () => listeners.forEach((fn) => fn(state));
 
+  /* This console's own build. Guarded: the page is also opened as a plain tab
+     during testing, where there is no chrome.runtime and an unguarded call
+     throws before the first health check runs. No version means no comparison,
+     which is the right answer rather than a false alarm. */
+  const myVersion = () => {
+    try { return chrome?.runtime?.getManifest?.().version || ""; }
+    catch { return ""; }
+  };
+
   async function req(path, { timeout = 12000, method = "GET", body } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
@@ -61,13 +70,39 @@
         /* The proxy holds one Kylas key and Kylas says whose it is. That is the
            identity the views scope to — an associate sees their own numbers,
            an admin can switch to the team. */
-        state = { online: true, reason: "", user: r.user || null, role: r.role || "admin" };
+        /* THE PROXY IS A SEPARATE, LONG-LIVED PROCESS. Reloading the extension
+           does not restart it, so after a `git pull` the two halves can be
+           different builds — and a stale proxy is not broken, it just answers
+           from old code. That cost a day: a verdict sentence deleted from the
+           tree kept appearing on screen because the proxy had been up for 17
+           hours. Both halves take their version from the same manifest, so a
+           mismatch here means exactly one thing: restart the proxy. */
+        const mine = myVersion();
+        const theirs = r.version || "";
+        /* NO version at all is the case that actually bit. Every build from
+           here on reports one, so a proxy that reports none is necessarily
+           older than this check — which is precisely the proxy that has been
+           up since before the last pull. Treat absence as stale, or the
+           handshake would stay silent on the very instance that motivated it.
+           "unknown" is different: that is a build which reported, from outside
+           a checkout, and there is nothing to compare. */
+        const stale = mine ? (!theirs || (theirs !== "unknown" && theirs !== mine)) : false;
+        state = { online: true, reason: "", user: r.user || null, role: r.role || "admin",
+                  version: theirs, staleProxy: stale,
+                  staleNote: !stale ? ""
+                    : theirs
+                      ? `The proxy is running build ${theirs}, this console is ${mine}. ` +
+                        `Restart it: stop node scripts/proxy.mjs, then start it again.`
+                      : `The proxy predates this console (${mine}) — it is old enough not to ` +
+                        `report its build. Restart it: stop node scripts/proxy.mjs, then start it again.` };
         announce();
         return r;
       } catch { return null; }
     },
     get role() { return state.role || "admin"; },
     get isAdmin() { return (state.role || "admin") === "admin"; },
+    get staleProxy() { return !!state.staleProxy; },
+    get staleNote() { return state.staleNote || ""; },
 
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),

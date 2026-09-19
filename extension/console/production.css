@@ -26,6 +26,10 @@ body.framed .ovOnly{display:inline-block}
 .link.on{background:var(--blueSoft);border-color:var(--blueLine);color:var(--blue)}
 .link.off{background:var(--amberSoft);border-color:var(--amber);color:var(--amber);cursor:pointer}
 .link.busy{background:var(--panel3);color:var(--text2)}
+/* Connected, but to a proxy running a different build. Amber, because this is
+   the same class of fact as offline — what is on screen cannot be trusted —
+   and not a style choice. Reads as its own state, never as "on". */
+.link.stale{background:var(--amberSoft);border-color:var(--amber);color:var(--amber)}
 
 /* ── company / session switch ────────────────────────────────────────── */
 .qmode{display:flex;gap:4px;padding:8px 8px 0}

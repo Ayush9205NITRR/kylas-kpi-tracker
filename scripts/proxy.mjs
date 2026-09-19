@@ -21,6 +21,24 @@ import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis } from "./airtable.mjs";
 import { report, withDeltas } from "./report.mjs";
 
+/* WHICH BUILD IS THIS PROCESS RUNNING?
+   The proxy is a long-lived process an associate starts by hand, and the
+   extension is reloaded separately. So `git pull` updates neither: Ayush spent
+   a day looking at a verdict sentence that had been deleted from the tree,
+   because the proxy he was talking to had been up for 17 hours. Nothing on
+   screen could have told him — a stale proxy answers every request happily and
+   correctly, just from yesterday's code.
+
+   One version for both halves, read from the extension manifest so there is no
+   second number to forget to bump. */
+let VERSION = "unknown";
+try {
+  VERSION = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8")).version
+            || "unknown";
+} catch { /* running outside the repo: the handshake degrades to "unknown" */ }
+
+const STARTED = new Date().toISOString();
+
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
 if (!KEY) {
@@ -228,7 +246,8 @@ const routes = {
   "/health": async () => {
     const me = await kylas.me();
     return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "" },
-             role: roleOf(me), admins: ADMINS.length };
+             role: roleOf(me), admins: ADMINS.length,
+             version: VERSION, startedAt: STARTED };
   },
 
   /* Everything the console needs when it opens on a company page: the company
@@ -735,6 +754,6 @@ server.on("error", (e) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  log(`proxy on http://127.0.0.1:${PORT}`);
+  log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION}`);
   log(`routes: ${Object.keys(routes).join("  ")}`);
 });

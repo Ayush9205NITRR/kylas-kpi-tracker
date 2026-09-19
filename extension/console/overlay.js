@@ -282,9 +282,15 @@
   const linkEl = document.getElementById("linkState");
   function setLink(kind, title) {
     if (!linkEl) return;
-    linkEl.className = "link " + kind;
-    linkEl.textContent = kind === "on" ? "Kylas" : kind === "busy" ? "…" : "offline";
-    linkEl.title = title || "";
+    /* A connected-but-stale proxy outranks "on": the link is up, and that is
+       exactly what makes it misleading. Every answer on screen is being served
+       by code that is not the code in front of you. */
+    const k = kind === "on" && API.staleProxy ? "stale" : kind;
+    linkEl.className = "link " + k;
+    linkEl.textContent = k === "on" ? "Kylas"
+      : k === "stale" ? "old proxy"
+      : k === "busy" ? "…" : "offline";
+    linkEl.title = k === "stale" ? API.staleNote : (title || "");
   }
   if (linkEl) linkEl.onclick = async () => {
     if (API.state.online) return;
