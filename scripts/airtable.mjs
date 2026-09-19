@@ -184,6 +184,26 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     Designation: c.designation || "",
     LinkedIn: c.linkedin ? (/^https?:/i.test(c.linkedin) ? c.linkedin : "https://" + c.linkedin) : "",
     Owner: c.owner || "",
+    /* THE CONSOLE READS THESE BACK AND ITS OWN SAVE WAS NOT WRITING THEM.
+       Once reads moved to Airtable, a contact saved from the console came back
+       with phones: [] and emails: [] — so the card had no number to dial and
+       the save gate blocked on "Phone number". The associate could not log the
+       next call on a contact they had just logged one on, and the number was
+       gone from the console's view until the nightly sync put it back.
+       Written in exactly the shape sync-kylas.mjs uses so the reader parses
+       one thing, not two.
+       "Kylas Updated At" is deliberately NOT here: it is the sync's watermark,
+       meaning "as of this Kylas updatedAt", and a console save is not that.
+       Writing it would move the watermark past records the sync has not seen
+       and skip them for ever. */
+    Phones: c.phones?.length ? JSON.stringify(c.phones) : "",
+    Phone: c.phones?.length ? `${c.phones[0].cc || ""} ${c.phones[0].value || ""}`.trim() : "",
+    Emails: c.emails?.length ? JSON.stringify(c.emails) : "",
+    Email: c.emails?.[0]?.value || "",
+    Salutation: c.salutation || "",
+    "Kylas Owner ID": String(c.ownerId || ""),
+    "Source of Data": c.source || "",
+    Remarks: c.remarks || "",
     "Current Stage": c.stage || "",
     "Previous Stage": prev?.fields?.["Current Stage"] && prev.fields["Current Stage"] !== c.stage
       ? prev.fields["Current Stage"] : (prev?.fields?.["Previous Stage"] || ""),
@@ -212,7 +232,16 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   };
   if (rankRose) fields["KPI Rank At"] = new Date().toISOString();
   if (companyRec) fields.Company = [companyRec.id];
+  /* Dropping blanks protects USER-ENTERED fields: a value absent from this
+     save is not an instruction to wipe what somebody typed last time. */
   for (const k of Object.keys(fields)) if (fields[k] === "") delete fields[k];
+  /* But Exit Reason is DERIVED from the stage, not entered, so it has to track
+     the stage in both directions. Dropped along with the other blanks, it could
+     be set and never cleared: a contact marked Not Interested who later
+     re-engaged stayed flagged as exited for ever, on a field whose whole job is
+     to say where they stopped. Assigned after the blank pass, so "" is written
+     rather than skipped. */
+  fields["Exit Reason"] = EXIT_STAGES.includes(c.stage) ? c.stage : "";
   fields["Kylas Contact ID"] = String(c.kid || "");
 
   /* 3 · the contact */
