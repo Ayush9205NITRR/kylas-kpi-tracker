@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 const src = JSON.parse(readFileSync(new URL("../docs/stages.json", import.meta.url), "utf8"));
 const S = src.stages;
 
-/* sanity: the funnel must be a clean 1..24 with unique codes and ids */
+/* sanity: the funnel must be a clean 1..N with unique codes and ids */
 const rungs = S.map((s) => s.rung).sort((a, b) => a - b);
 const expect = Array.from({ length: S.length }, (_, i) => i + 1);
 if (JSON.stringify(rungs) !== JSON.stringify(expect)) throw new Error(`rungs are not 1..${S.length}: ${rungs}`);
@@ -73,11 +73,29 @@ for (const r of src.retired || []) {
                     `A retired stage must map to a lower rung; see docs/stages.json retiredNote.`);
 }
 
+/* An added stage has to name itself and when it arrived, or the ladder it
+   arrived into cannot be reconstructed. */
+for (const a of src.added || []) {
+  if (!a.code) throw new Error("an added stage has no code");
+  if (RUNG_OF[a.code] === undefined)
+    throw new Error(`${a.code} is declared as added but is not in stages[]`);
+  if (!a.addedOn) throw new Error(`${a.code} has no addedOn — the migration key is derived from it`);
+}
+
 /* THE OLD LADDER, reconstructed. Re-inserting each retired stage at the rung
    it occupied gives back the exact numbering the live base was built with, so
    the rank remap is derived from declared data rather than from git history. */
 function oldLadder() {
-  const list = byRungAsc.map((s) => ({ code: s.code, label: s.label }));
+  /* ADDED STAGES COME OUT FIRST, and declaring them is the whole point. This
+     rebuilt the old ladder from the CURRENT stage list, which assumed a ladder
+     only ever changes by retirement. Add three stages and it reconstructs an
+     "old" ladder that never existed: every rank below the insertion maps to
+     itself so no entry is emitted, and the rank that DID move is never
+     remapped. Every contact stored at the old SQL rank would then read as
+     whichever stage took its number. See docs/stages.json addedNote. */
+  const added = new Set((src.added || []).map((a) => a.code));
+  const list = byRungAsc.filter((s) => !added.has(s.code))
+                        .map((s) => ({ code: s.code, label: s.label }));
   for (const r of [...(src.retired || [])].sort((a, b) => a.wasRung - b.wasRung))
     list.splice(r.wasRung - 1, 0, { code: r.code, label: r.label, retired: true });
   return list.map((s, i) => ({ ...s, rung: i + 1 }));
@@ -107,6 +125,12 @@ const byRung = [...S].sort((a, b) => a.rung - b.rung);        // 1 first
 const byRungAsc = byRung;
 const byCall = [...S].sort((a, b) => b.rung - a.rung);        // call order
 const q = (s) => JSON.stringify(s);
+/* An object key that is not a bare JS identifier must be QUOTED, or the file
+   this generates does not parse. Kylas ships a stage code with an EN-DASH in
+   it — ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS — and emitting
+   that unquoted took out every module importing the stage tables, the console
+   included. Anything keyed by a Kylas value goes through this. */
+const key = (code) => (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(code) ? code : JSON.stringify(code));
 const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.length));
 
 const HEAD = (how) => `/* GENERATED FROM docs/stages.json — do not edit.
@@ -123,12 +147,12 @@ ${byCall.map((s) => `  ${q(s.code)},`).join("\n")}
 
 /* Kylas sets a picklist by id, not by code. A write sends this number. */
 const STAGE_ID = {
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${s.id},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.id},`).join("\n")}
 };
 
 /* 24 is furthest along. callOrder = 25 - rung, so one list serves both. */
 const STAGE_RUNG = {
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${s.rung},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.rung},`).join("\n")}
 };
 
 const STAGE_PRIORITY = Object.fromEntries(
@@ -141,7 +165,7 @@ const LABEL = {
   JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec",
   OFFICE: "Office", PERSONAL: "Personal", OTHER: "Other",
   MOBILE: "Mobile", WORK: "Work", HOME: "Home",
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${q(s.label)},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${q(s.label)},`).join("\n")}
 };
 
 const CNC_LADDER = ${q(src.cncLadder)};
@@ -184,16 +208,16 @@ ${byCall.map((s) => `  ${q(s.code)},`).join("\n")}
 ];
 
 export const STAGE_ID = {
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${s.id},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.id},`).join("\n")}
 };
 
 export const STAGE_RUNG = {
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${s.rung},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.rung},`).join("\n")}
 };
 
 /* What a person reading the record calls it. */
 export const STAGE_LABEL = {
-${byCall.map((s) => `  ${pad(s.code + ":", 46)} ${q(s.label)},`).join("\n")}
+${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${q(s.label)},`).join("\n")}
 };
 
 /* [rung, label] lowest first, for the Airtable ladder formula. */
@@ -225,6 +249,11 @@ ${milestoneLines()}
    still holds both their code and the rank numbers from the ladder they were
    part of. See docs/stages.json retiredNote. */
 export const RETIRED = ${q(src.retired || [])};
+
+/* Stages ADDED after the live base was numbered. Declared for the same reason
+   retired ones are, and the migration key is derived from both lists so a
+   ladder change of either kind produces a key that has not run yet. */
+export const ADDED = ${q(src.added || [])};
 
 /* Stored KPI Rank remap, old numbering -> current. Derived by reconstructing
    the old ladder from RETIRED[].wasRung, so it cannot drift from the stage

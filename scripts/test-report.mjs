@@ -39,11 +39,11 @@ const calls = [
   { at: "2026-09-22T11:00:00Z", owner: "Charu", outcome: "Wrong POC" },
 ];
 const transitions = [
-  { at: "2026-09-15T10:05:00Z", owner: "Ayush", company: "C1", to: "DISCOVERY_CALL_BOOKED" },
+  { at: "2026-09-15T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_BOOKED" },
   /* the same company moving on — booked must NOT count twice */
-  { at: "2026-09-16T10:05:00Z", owner: "Ayush", company: "C1", to: "CLOSING_LOOPS_LOW_VALUE" },
+  { at: "2026-09-16T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS" },
   /* and going backwards then forwards again */
-  { at: "2026-09-17T10:05:00Z", owner: "Ayush", company: "C1", to: "DISCOVERY_CALL_BOOKED" },
+  { at: "2026-09-17T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_BOOKED" },
   { at: "2026-09-22T09:00:00Z", owner: "Charu", company: "C2", to: "SQL_SALES_QUALIFIED_LEAD" },
 ];
 const signals = [
@@ -65,7 +65,7 @@ const signals = [
   eq("and not again later", on("2026-09-16").right, 0);
   eq("booked counted on first arrival", on("2026-09-15").booked, 1);
   eq("not when it re-enters", on("2026-09-17").booked, 0);
-  /* CLOSING_LOOPS is rung 21, at or above the SQL-meeting-done floor. */
+  /* Active Requirement Call Done is rung 25 — the SQL-meeting-done floor. */
   eq("crossing a higher floor counts for that floor", on("2026-09-16").done, 1);
   eq("SQL", on("2026-09-22").sql, 1);
   eq("totals add up", r.totals.calls, 5);

@@ -1,13 +1,31 @@
 {
-  "_": "Canonical cfPipelineStageBd data, pulled live 2026-09-16; Reschedule Pending retired 2026-09-17. Edit ONLY here, then run: node scripts/gen-stages.mjs Families added 2026-09-19 for the Accounts view.",
+  "_": "Canonical cfPipelineStageBd data, pulled live 2026-09-19. Reschedule Pending retired 2026-09-17; families added 2026-09-19 for the Accounts view; the three Active Requirement Call stages added 2026-09-19. Edit ONLY here, then run: node scripts/gen-stages.mjs",
   "field": "cfPipelineStageBd",
-  "note": "id is what a write sends — Kylas sets a picklist by id, not by code. rung is the funnel position, 23 = furthest along. callOrder = 24 - rung.",
+  "note": "id is what a write sends — Kylas sets a picklist by id, not by code. rung is the funnel position, 26 = furthest along. callOrder = 27 - rung. ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS contains an EN-DASH (–, U+2013), not a hyphen — that is what Kylas returns, and anything matching this code by regex, slug, filename or unquoted object key needs the exact character.",
   "stages": [
     {
-      "rung": 23,
+      "rung": 26,
       "id": 2862830,
       "code": "SQL_SALES_QUALIFIED_LEAD",
       "label": "SQL (Sales Qualified Lead)"
+    },
+    {
+      "rung": 25,
+      "id": 2991647,
+      "code": "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
+      "label": "Active Requirement Call Done – Awaiting Client Inputs"
+    },
+    {
+      "rung": 24,
+      "id": 2991646,
+      "code": "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+      "label": "Active Requirement Call No-Show"
+    },
+    {
+      "rung": 23,
+      "id": 2991645,
+      "code": "ACTIVE_REQUIREMENT_CALL_BOOKED",
+      "label": "Active Requirement Call Booked"
     },
     {
       "rung": 22,
@@ -142,14 +160,14 @@
       "label": "LinkedIn Outreach Initiated"
     }
   ],
-  "milestonesNote": "Each milestone is a FLOOR on the ladder: every stage at that rung or above counts. Because KPI Rank only ever rises, 'ever reached X' and 'is at or past X' are the same question, so a floor needs no member list. Reschedule Pending was retired from the Kylas pipeline on 2026-09-17 and removed here, which makes each floor match Ayush's stage sets exactly.",
+  "milestonesNote": "Each milestone is a FLOOR on the ladder: every stage at that rung or above counts. Because KPI Rank only ever rises, 'ever reached X' and 'is at or past X' are the same question, so a floor needs no member list. Until 2026-09-19 Kylas had one meeting track, so SQL Meeting Booked and Done floored on Discovery Call Booked and Closing Loops - Low Value as stand-ins. The Active Requirement Call stages are the real thing and the floors now name them. Closing Loops - Low Value stays at rung 21 on purpose: Ayush, 2026-09-19 — it can follow EITHER meeting, so its rung cannot say which. A company that reached Active Requirement Call Done and then closed keeps that rank because KPI Rank never falls; one that closed before any Active Requirement call correctly does not count.",
   "milestones": {
     "sqlMeetingBooked": {
-      "floor": "DISCOVERY_CALL_BOOKED",
+      "floor": "ACTIVE_REQUIREMENT_CALL_BOOKED",
       "label": "SQL Meeting Booked"
     },
     "sqlMeetingDone": {
-      "floor": "CLOSING_LOOPS_LOW_VALUE",
+      "floor": "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
       "label": "SQL Meeting Done"
     },
     "sql": {
@@ -181,6 +199,9 @@
     "DISCOVERY_CALL_BOOKED",
     "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
     "GHOSTED",
+    "ACTIVE_REQUIREMENT_CALL_BOOKED",
+    "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+    "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
     "ACTIVATION",
     "SQL_SALES_QUALIFIED_LEAD"
   ],
@@ -229,7 +250,9 @@
         "FOLLOW_UP_2",
         "FOLLOW_UP_3",
         "DISCOVERY_CALL_BOOKED",
-        "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS"
+        "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+        "ACTIVE_REQUIREMENT_CALL_BOOKED",
+        "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"
       ]
     },
     {
@@ -249,7 +272,8 @@
         "CONNECT_LATER",
         "OFFSITE_DELAYED",
         "OFFSITE_DONE_LATE_REACHOUT",
-        "GHOSTED"
+        "GHOSTED",
+        "ACTIVE_REQUIREMENT_CALL_NO_SHOW"
       ]
     },
     {
@@ -264,6 +288,24 @@
         "NOT_A_DECISION_MAKER_NDM",
         "POC_ORGANIZATION_CHANGED"
       ]
+    }
+  ],
+  "addedNote": "A stage ADDED to the Kylas pipeline after the live base was numbered. Declared for the same reason a retired one is: the base still holds rank numbers from the ladder that existed BEFORE it. Without this list gen-stages.mjs reconstructs the old ladder from the CURRENT stages and derives a remap for a ladder that never existed — every rank below the insertion maps to itself, so nothing is emitted, and the rank that actually moved is never remapped. addedOn also feeds the migration key, so a ladder change caused by an addition produces a key that has not run yet instead of inheriting the last retirement's.",
+  "added": [
+    {
+      "code": "ACTIVE_REQUIREMENT_CALL_BOOKED",
+      "addedOn": "2026-09-19",
+      "why": "Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."
+    },
+    {
+      "code": "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+      "addedOn": "2026-09-19",
+      "why": "Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."
+    },
+    {
+      "code": "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
+      "addedOn": "2026-09-19",
+      "why": "Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."
     }
   ]
 }

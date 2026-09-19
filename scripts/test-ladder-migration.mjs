@@ -91,7 +91,7 @@ async function rows(table) {
 const contacts = async () => (await rows("Contacts")).map((x) => x.fields);
 
 console.log("the remap itself");
-eq("derived from the declared retirement", RANK_REMAP, { 21: 20, 22: 21, 23: 22, 24: 23 });
+eq("derived from the declared retirement", RANK_REMAP, { 21: 20, 22: 21, 23: 22, 24: 26 });
 
 console.log("\ndry run");
 {
@@ -124,7 +124,7 @@ console.log("\napply");
   eq("every rank agrees with its stage", wrong, []);
 
   const byName = Object.fromEntries(after.map((f) => [f.Name, f]));
-  eq("old SQL 24 -> 23", byName["old SQL"]["KPI Rank"], 23);
+  eq("old SQL 24 -> 26", byName["old SQL"]["KPI Rank"], 26);
   eq("old closing 22 -> 21", byName["old closing"]["KPI Rank"], 21);
   eq("retired stage -> GHOSTED", byName["on the retired stage"]["Current Stage"], "GHOSTED");
   eq("and DOWN to rung 20, not up to 21", byName["on the retired stage"]["KPI Rank"], 20);

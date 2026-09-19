@@ -32,7 +32,7 @@
  *   node scripts/verify-base.mjs                        confirm
  */
 import { createAirtable } from "./airtable.mjs";
-import { RANK_REMAP, CODE_REMAP, RETIRED, STAGE_RUNG, STAGE_LABEL } from "./stages.mjs";
+import { RANK_REMAP, CODE_REMAP, RETIRED, ADDED, STAGE_RUNG, STAGE_LABEL } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const PAT = process.env.AIRTABLE_PAT;
@@ -45,7 +45,16 @@ if (!PAT || !BASE) {
 /* One key per migration. Derived from what is being migrated, so adding a
    second retirement later produces a different key and runs again — while
    re-running this one does not. */
-const KEY = `ladder-${RETIRED.map((r) => `${r.removedOn}-${r.code}`).join("+") || "none"}`;
+/* BOTH LISTS, not just RETIRED. A ladder changes when a stage is added as
+   readily as when one is retired, and an addition renumbers every rung above
+   it. Keyed on retirements alone, the migration for an addition inherits the
+   last retirement's key, finds that row in Schema Migrations and reports
+   "Already applied" — skipping the remap and leaving every rank above the
+   insertion pointing at the wrong stage. */
+const KEY = `ladder-${[
+  ...RETIRED.map((r) => `${r.removedOn}-${r.code}`),
+  ...ADDED.map((a) => `${a.addedOn}+${a.code}`),
+].join("+") || "none"}`;
 
 const at = createAirtable(PAT, BASE, { log: (m) => console.log("  " + m) });
 

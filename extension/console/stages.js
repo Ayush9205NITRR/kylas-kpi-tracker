@@ -5,6 +5,9 @@
 /* Call order: index 0 is dialled first. Funnel rung is the reverse. */
 const STAGES = [
   "SQL_SALES_QUALIFIED_LEAD",
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
+  "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+  "ACTIVE_REQUIREMENT_CALL_BOOKED",
   "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
   "CLOSING_LOOPS_LOW_VALUE",
   "GHOSTED",
@@ -32,6 +35,9 @@ const STAGES = [
 /* Kylas sets a picklist by id, not by code. A write sends this number. */
 const STAGE_ID = {
   SQL_SALES_QUALIFIED_LEAD:                      2862830,
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": 2991647,
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               2991646,
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                2991645,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    2910918,
   CLOSING_LOOPS_LOW_VALUE:                       2909381,
   GHOSTED:                                       2909382,
@@ -58,7 +64,10 @@ const STAGE_ID = {
 
 /* 24 is furthest along. callOrder = 25 - rung, so one list serves both. */
 const STAGE_RUNG = {
-  SQL_SALES_QUALIFIED_LEAD:                      23,
+  SQL_SALES_QUALIFIED_LEAD:                      26,
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": 25,
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               24,
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                23,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    22,
   CLOSING_LOOPS_LOW_VALUE:                       21,
   GHOSTED:                                       20,
@@ -84,7 +93,7 @@ const STAGE_RUNG = {
 };
 
 const STAGE_PRIORITY = Object.fromEntries(
-  Object.entries(STAGE_RUNG).map(([code, rung]) => [code, 24 - rung]));
+  Object.entries(STAGE_RUNG).map(([code, rung]) => [code, 27 - rung]));
 
 const LABEL = {
   MR: "Mr.", MRS: "Mrs.", MISS: "Miss",
@@ -94,6 +103,9 @@ const LABEL = {
   OFFICE: "Office", PERSONAL: "Personal", OTHER: "Other",
   MOBILE: "Mobile", WORK: "Work", HOME: "Home",
   SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": "Active Requirement Call Done – Awaiting Client Inputs",
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               "Active Requirement Call No-Show",
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                "Active Requirement Call Booked",
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
   CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",
   GHOSTED:                                       "Discovery Call No-Show",
@@ -120,15 +132,15 @@ const LABEL = {
 
 const CNC_LADDER = ["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
 const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_NO_SHOW","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
 const UNTOUCHED = ["YET_TO_BE_MINED"];
 
 /* Pipeline families: how the Accounts view groups the stage tiles. Ordered as
    the board reads top to bottom. */
-const STAGE_FAMILIES = [{"key":"new","label":"Not touched yet","hint":"never called","stages":["YET_TO_BE_MINED"]},{"key":"trying","label":"Trying to connect","hint":"calls going out, no real conversation","stages":["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"]},{"key":"talking","label":"In conversation","hint":"right person found, qualifying","stages":["MQL_MARKETING_QUALIFIED_LEAD","FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3","DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS"]},{"key":"qualified","label":"Qualified","hint":"SQL and beyond","stages":["SQL_SALES_QUALIFIED_LEAD","ACTIVATION"]},{"key":"parked","label":"Parked","hint":"alive, but not now","stages":["CONNECT_LATER","OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT","GHOSTED"]},{"key":"closed","label":"Closed out","hint":"not a fit, or lost","stages":["CLOSING_LOOPS_LOW_VALUE","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"]}];
+const STAGE_FAMILIES = [{"key":"new","label":"Not touched yet","hint":"never called","stages":["YET_TO_BE_MINED"]},{"key":"trying","label":"Trying to connect","hint":"calls going out, no real conversation","stages":["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"]},{"key":"talking","label":"In conversation","hint":"right person found, qualifying","stages":["MQL_MARKETING_QUALIFIED_LEAD","FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3","DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"]},{"key":"qualified","label":"Qualified","hint":"SQL and beyond","stages":["SQL_SALES_QUALIFIED_LEAD","ACTIVATION"]},{"key":"parked","label":"Parked","hint":"alive, but not now","stages":["CONNECT_LATER","OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT","GHOSTED","ACTIVE_REQUIREMENT_CALL_NO_SHOW"]},{"key":"closed","label":"Closed out","hint":"not a fit, or lost","stages":["CLOSING_LOOPS_LOW_VALUE","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"]}];
 
 /* stage code -> family key. Every stage has one; see docs/stages.json. */
-const FAMILY_OF = {"YET_TO_BE_MINED":"new","CNC_COULD_NOT_CONNECT":"trying","CNC_COULD_NOT_CONNECT_2":"trying","CNC_COULD_NOT_CONNECT_3":"trying","FOLLOWUP_CNC":"trying","MQL_MARKETING_QUALIFIED_LEAD":"talking","FOLLOW_UP_1":"talking","FOLLOW_UP_2":"talking","FOLLOW_UP_3":"talking","DISCOVERY_CALL_BOOKED":"talking","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS":"talking","SQL_SALES_QUALIFIED_LEAD":"qualified","ACTIVATION":"qualified","CONNECT_LATER":"parked","OFFSITE_DELAYED":"parked","OFFSITE_DONE_LATE_REACHOUT":"parked","GHOSTED":"parked","CLOSING_LOOPS_LOW_VALUE":"closed","NOT_INTERESTED":"closed","INVALID_CONTACT":"closed","DISQUALIFIED_WRONG_POC":"closed","NOT_A_DECISION_MAKER_NDM":"closed","POC_ORGANIZATION_CHANGED":"closed"};
+const FAMILY_OF = {"YET_TO_BE_MINED":"new","CNC_COULD_NOT_CONNECT":"trying","CNC_COULD_NOT_CONNECT_2":"trying","CNC_COULD_NOT_CONNECT_3":"trying","FOLLOWUP_CNC":"trying","MQL_MARKETING_QUALIFIED_LEAD":"talking","FOLLOW_UP_1":"talking","FOLLOW_UP_2":"talking","FOLLOW_UP_3":"talking","DISCOVERY_CALL_BOOKED":"talking","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS":"talking","ACTIVE_REQUIREMENT_CALL_BOOKED":"talking","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS":"talking","SQL_SALES_QUALIFIED_LEAD":"qualified","ACTIVATION":"qualified","CONNECT_LATER":"parked","OFFSITE_DELAYED":"parked","OFFSITE_DONE_LATE_REACHOUT":"parked","GHOSTED":"parked","ACTIVE_REQUIREMENT_CALL_NO_SHOW":"parked","CLOSING_LOOPS_LOW_VALUE":"closed","NOT_INTERESTED":"closed","INVALID_CONTACT":"closed","DISQUALIFIED_WRONG_POC":"closed","NOT_A_DECISION_MAKER_NDM":"closed","POC_ORGANIZATION_CHANGED":"closed"};
 
 
 /* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
@@ -141,9 +153,9 @@ const NOT_CONNECTED = ["YET_TO_BE_MINED","CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_
 /* Funnel milestones, as a floor rung each. Rank only rises, so "ever reached"
    and "is at or past" are one question. */
 const MILESTONE = {
-  sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },
-  sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
-  sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
+  sqlMeetingBooked:    { floor: 23, stage: "ACTIVE_REQUIREMENT_CALL_BOOKED", label: "SQL Meeting Booked" },
+  sqlMeetingDone:      { floor: 25, stage: "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS", label: "SQL Meeting Done" },
+  sql:                 { floor: 26, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
   engaged:             { floor: 13, stage: "ACTIVATION", label: "Engaged" },
 };
 

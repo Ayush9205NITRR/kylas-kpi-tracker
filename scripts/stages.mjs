@@ -4,6 +4,9 @@
 
 export const STAGES = [
   "SQL_SALES_QUALIFIED_LEAD",
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
+  "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+  "ACTIVE_REQUIREMENT_CALL_BOOKED",
   "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
   "CLOSING_LOOPS_LOW_VALUE",
   "GHOSTED",
@@ -30,6 +33,9 @@ export const STAGES = [
 
 export const STAGE_ID = {
   SQL_SALES_QUALIFIED_LEAD:                      2862830,
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": 2991647,
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               2991646,
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                2991645,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    2910918,
   CLOSING_LOOPS_LOW_VALUE:                       2909381,
   GHOSTED:                                       2909382,
@@ -55,7 +61,10 @@ export const STAGE_ID = {
 };
 
 export const STAGE_RUNG = {
-  SQL_SALES_QUALIFIED_LEAD:                      23,
+  SQL_SALES_QUALIFIED_LEAD:                      26,
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": 25,
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               24,
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                23,
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    22,
   CLOSING_LOOPS_LOW_VALUE:                       21,
   GHOSTED:                                       20,
@@ -83,6 +92,9 @@ export const STAGE_RUNG = {
 /* What a person reading the record calls it. */
 export const STAGE_LABEL = {
   SQL_SALES_QUALIFIED_LEAD:                      "SQL (Sales Qualified Lead)",
+  "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": "Active Requirement Call Done – Awaiting Client Inputs",
+  ACTIVE_REQUIREMENT_CALL_NO_SHOW:               "Active Requirement Call No-Show",
+  ACTIVE_REQUIREMENT_CALL_BOOKED:                "Active Requirement Call Booked",
   DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:    "Discovery Call Done - Awaiting Client Inputs",
   CLOSING_LOOPS_LOW_VALUE:                       "Closing Loops - Low Value",
   GHOSTED:                                       "Discovery Call No-Show",
@@ -131,16 +143,19 @@ export const LADDER = [
   [20, "20 · Discovery Call No-Show"],
   [21, "21 · Closing Loops - Low Value"],
   [22, "22 · Discovery Call Done - Awaiting Client Inputs"],
-  [23, "23 · SQL (Sales Qualified Lead)"],
+  [23, "23 · Active Requirement Call Booked"],
+  [24, "24 · Active Requirement Call No-Show"],
+  [25, "25 · Active Requirement Call Done – Awaiting Client Inputs"],
+  [26, "26 · SQL (Sales Qualified Lead)"],
 ];
 
 export const CNC_LADDER = ["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
 export const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_NO_SHOW","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
 export const UNTOUCHED = ["YET_TO_BE_MINED"];
 
-export const STAGE_FAMILIES = [{"key":"new","label":"Not touched yet","hint":"never called","stages":["YET_TO_BE_MINED"]},{"key":"trying","label":"Trying to connect","hint":"calls going out, no real conversation","stages":["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"]},{"key":"talking","label":"In conversation","hint":"right person found, qualifying","stages":["MQL_MARKETING_QUALIFIED_LEAD","FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3","DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS"]},{"key":"qualified","label":"Qualified","hint":"SQL and beyond","stages":["SQL_SALES_QUALIFIED_LEAD","ACTIVATION"]},{"key":"parked","label":"Parked","hint":"alive, but not now","stages":["CONNECT_LATER","OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT","GHOSTED"]},{"key":"closed","label":"Closed out","hint":"not a fit, or lost","stages":["CLOSING_LOOPS_LOW_VALUE","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"]}];
-export const FAMILY_OF = {"YET_TO_BE_MINED":"new","CNC_COULD_NOT_CONNECT":"trying","CNC_COULD_NOT_CONNECT_2":"trying","CNC_COULD_NOT_CONNECT_3":"trying","FOLLOWUP_CNC":"trying","MQL_MARKETING_QUALIFIED_LEAD":"talking","FOLLOW_UP_1":"talking","FOLLOW_UP_2":"talking","FOLLOW_UP_3":"talking","DISCOVERY_CALL_BOOKED":"talking","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS":"talking","SQL_SALES_QUALIFIED_LEAD":"qualified","ACTIVATION":"qualified","CONNECT_LATER":"parked","OFFSITE_DELAYED":"parked","OFFSITE_DONE_LATE_REACHOUT":"parked","GHOSTED":"parked","CLOSING_LOOPS_LOW_VALUE":"closed","NOT_INTERESTED":"closed","INVALID_CONTACT":"closed","DISQUALIFIED_WRONG_POC":"closed","NOT_A_DECISION_MAKER_NDM":"closed","POC_ORGANIZATION_CHANGED":"closed"};
+export const STAGE_FAMILIES = [{"key":"new","label":"Not touched yet","hint":"never called","stages":["YET_TO_BE_MINED"]},{"key":"trying","label":"Trying to connect","hint":"calls going out, no real conversation","stages":["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"]},{"key":"talking","label":"In conversation","hint":"right person found, qualifying","stages":["MQL_MARKETING_QUALIFIED_LEAD","FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3","DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"]},{"key":"qualified","label":"Qualified","hint":"SQL and beyond","stages":["SQL_SALES_QUALIFIED_LEAD","ACTIVATION"]},{"key":"parked","label":"Parked","hint":"alive, but not now","stages":["CONNECT_LATER","OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT","GHOSTED","ACTIVE_REQUIREMENT_CALL_NO_SHOW"]},{"key":"closed","label":"Closed out","hint":"not a fit, or lost","stages":["CLOSING_LOOPS_LOW_VALUE","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"]}];
+export const FAMILY_OF = {"YET_TO_BE_MINED":"new","CNC_COULD_NOT_CONNECT":"trying","CNC_COULD_NOT_CONNECT_2":"trying","CNC_COULD_NOT_CONNECT_3":"trying","FOLLOWUP_CNC":"trying","MQL_MARKETING_QUALIFIED_LEAD":"talking","FOLLOW_UP_1":"talking","FOLLOW_UP_2":"talking","FOLLOW_UP_3":"talking","DISCOVERY_CALL_BOOKED":"talking","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS":"talking","ACTIVE_REQUIREMENT_CALL_BOOKED":"talking","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS":"talking","SQL_SALES_QUALIFIED_LEAD":"qualified","ACTIVATION":"qualified","CONNECT_LATER":"parked","OFFSITE_DELAYED":"parked","OFFSITE_DONE_LATE_REACHOUT":"parked","GHOSTED":"parked","ACTIVE_REQUIREMENT_CALL_NO_SHOW":"parked","CLOSING_LOOPS_LOW_VALUE":"closed","NOT_INTERESTED":"closed","INVALID_CONTACT":"closed","DISQUALIFIED_WRONG_POC":"closed","NOT_A_DECISION_MAKER_NDM":"closed","POC_ORGANIZATION_CHANGED":"closed"};
 
 /* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
    is the inverse of this, so the two runtimes MUST agree on it. console.js
@@ -151,9 +166,9 @@ export const NOT_CONNECTED = ["YET_TO_BE_MINED","CNC_COULD_NOT_CONNECT","CNC_COU
 
 /* Funnel milestones, as a floor rung each. See docs/stages.json. */
 export const MILESTONE = {
-  sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },
-  sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
-  sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
+  sqlMeetingBooked:    { floor: 23, stage: "ACTIVE_REQUIREMENT_CALL_BOOKED", label: "SQL Meeting Booked" },
+  sqlMeetingDone:      { floor: 25, stage: "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS", label: "SQL Meeting Done" },
+  sql:                 { floor: 26, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
   engaged:             { floor: 13, stage: "ACTIVATION", label: "Engaged" },
 };
 
@@ -162,10 +177,15 @@ export const MILESTONE = {
    part of. See docs/stages.json retiredNote. */
 export const RETIRED = [{"code":"RESCHEDULE_PENDING","label":"Reschedule Pending","wasRung":21,"removedOn":"2026-09-17","mapTo":"GHOSTED","why":"Removed from the Kylas pipeline. A contact waiting to reschedule got as far as a discovery call that did not happen, which is what Discovery Call No-Show (GHOSTED) already records."}];
 
+/* Stages ADDED after the live base was numbered. Declared for the same reason
+   retired ones are, and the migration key is derived from both lists so a
+   ladder change of either kind produces a key that has not run yet. */
+export const ADDED = [{"code":"ACTIVE_REQUIREMENT_CALL_BOOKED","addedOn":"2026-09-19","why":"Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."},{"code":"ACTIVE_REQUIREMENT_CALL_NO_SHOW","addedOn":"2026-09-19","why":"Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."},{"code":"ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS","addedOn":"2026-09-19","why":"Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."}];
+
 /* Stored KPI Rank remap, old numbering -> current. Derived by reconstructing
    the old ladder from RETIRED[].wasRung, so it cannot drift from the stage
    table. Anything absent here did not move. */
-export const RANK_REMAP = {"21":20,"22":21,"23":22,"24":23};
+export const RANK_REMAP = {"21":20,"22":21,"23":22,"24":26};
 
 /* Stage CODE remap for a value still sitting on a retired stage. */
 export const CODE_REMAP = {"RESCHEDULE_PENDING":"GHOSTED"};
