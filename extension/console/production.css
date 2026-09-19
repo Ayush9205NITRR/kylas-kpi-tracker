@@ -167,12 +167,15 @@ body.framed .ovOnly{display:inline-block}
 .vwrap.board{max-width:1560px}
 .vhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 18px;flex-wrap:wrap}
 .vhead.sm{margin-top:34px}
-.vhead h2{font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.012em}
+/* The display face on headings and on the numbers meant to be read first —
+   which is the whole job it was picked for. Everything else stays on the body
+   face; two faces is the reference's scheme, three would be nobody's. */
+.vhead h2{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);letter-spacing:-.012em}
 .vsub{font-size:var(--t-label);color:var(--text2)}
 .vgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 @media(max-width:860px){.vgrid{grid-template-columns:repeat(2,1fr)}}
 .vt{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:var(--sh)}
-.vt b{display:block;font-size:var(--t-name);font-weight:var(--w-strong);letter-spacing:-.032em;line-height:1.05}
+.vt b{display:block;font-family:var(--display);font-size:var(--t-name);font-weight:var(--w-max);letter-spacing:-.032em;line-height:1.05}
 .vt span{display:block;font-size:var(--t-label);color:var(--text2);margin-top:6px}
 .vt i{display:block;font-style:normal;font-size:var(--t-meta);color:var(--text3);margin-top:3px}
 .vt.v2 b{color:var(--blue)} .vt.v3 b{color:var(--slate)} .vt.v4 b{color:var(--blue)}
@@ -293,7 +296,7 @@ body.framed .ovOnly{display:inline-block}
 /* Bigger than a tile elsewhere in the app, because this is the one thing on the
    page meant to be read from across a desk. */
 .vhead4{margin-bottom:16px}
-.vhead4 .vt b{font-size:32px;letter-spacing:-.034em}
+.vhead4 .vt b{font-family:var(--display);font-size:32px;letter-spacing:-.034em}
 .vhead4 .vt i{margin-top:4px}
 @media(max-width:620px){.vhead4{grid-template-columns:repeat(2,1fr)}}
 
@@ -338,7 +341,7 @@ table.ladder thead th{font-size:var(--t-meta);color:var(--text3);text-transform:
   letter-spacing:.04em;font-weight:var(--w-med);white-space:nowrap}
 table.ladder th.rung,table.ladder td.rung{text-align:left;min-width:220px}
 table.ladder td.teamcol,table.ladder th.teamcol{text-align:left;white-space:nowrap}
-table.ladder td.teamcol b{font-size:var(--t-sec);font-weight:var(--w-max);margin-right:6px}
+table.ladder td.teamcol b{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);margin-right:6px}
 table.ladder td.conv,table.ladder th.conv{text-align:left;white-space:nowrap;color:var(--text2);
   font-size:var(--t-meta)}
 table.ladder td.conv b{font-size:var(--t-label);color:var(--text)}
@@ -359,24 +362,10 @@ table.ladder .lbar{height:3px;border-radius:2px;background:var(--panel3);margin-
 table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 
 /* ── accounts: families, tiles, explorer ─────────────────────────────── */
-/* Laid out after Ayush's reference design, drawn with THIS project's tokens.
-   The reference carries six violet rung colours and two typefaces; both would
-   be a second accent and a sixth type size here, which CLAUDE.md rules out. The
-   rung scale is one hue stepped in lightness, and the freshness scale is the
-   only place a second hue is earned — it encodes time, not category, and a
-   single-hue ramp cannot say "recent" and "stale" at opposite ends. */
-:root{
-  --r0:#DCE6FB; --r1:#BBCDF7; --r2:#93B0F1; --r3:#6A91E8; --r4:#3F6FD8; --r5:#2550B4; --rn:#E4E6EA;
-  --f-fresh:#1F8A5B; --f-warm:#6E9A2E; --f-cool:#C98404; --f-cold:#C2413A; --f-never:#B9B8C8;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --r0:#1E2A47; --r1:#27395F; --r2:#32497A; --r3:#41609C; --r4:#5A80C4; --r5:#7FA5E8; --rn:#2A2C33;
-  --f-fresh:#4CC38A; --f-warm:#A4CC5C; --f-cool:#E0A64E; --f-cold:#F0736B; --f-never:#55536B;
-}}
-:root[data-theme="dark"]{
-  --r0:#1E2A47; --r1:#27395F; --r2:#32497A; --r3:#41609C; --r4:#5A80C4; --r5:#7FA5E8; --rn:#2A2C33;
-  --f-fresh:#4CC38A; --f-warm:#A4CC5C; --f-cool:#E0A64E; --f-cold:#F0736B; --f-never:#55536B;
-}
+/* Laid out after Ayush's reference design. The rung ramp (--r0..--r5) and the
+   freshness scale (--f-*) are tokens in console.css, beside every other colour
+   in the app — they were declared here while this view was the only thing using
+   them, and the ladder now uses the ramp too. One :root, per CLAUDE.md. */
 .f-fresh{background:var(--f-fresh)} .f-warm{background:var(--f-warm)}
 .f-cool{background:var(--f-cool)} .f-cold{background:var(--f-cold)} .f-never{background:var(--f-never)}
 .r0{background:var(--r0)} .r1{background:var(--r1)} .r2{background:var(--r2)}
@@ -395,7 +384,7 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .tile:hover{border-color:var(--line2)}
 .tile[aria-pressed="true"]{border-color:var(--blue);background:var(--blueSoft)}
 .tile .nm{font-size:var(--t-meta);color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tile .ct{font-size:var(--t-sec);font-weight:var(--w-max);line-height:1;font-variant-numeric:tabular-nums}
+.tile .ct{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);line-height:1;font-variant-numeric:tabular-nums}
 /* The bar is the reason a tile beats a number: 40 companies means nothing
    until you know whether they were called last week or last year. */
 .tile .fresh{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--panel3)}
@@ -407,7 +396,7 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 
 .explorer{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
 .exhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-.exhead h2{margin:0;font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.012em}
+.exhead h2{margin:0;font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);letter-spacing:-.012em}
 .exhead .exn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
 .exhead p{flex:1 0 100%;margin:2px 0 0;font-size:var(--t-meta);color:var(--text3)}
 .extools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}

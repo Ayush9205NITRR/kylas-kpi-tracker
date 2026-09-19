@@ -3,9 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>Enout Call Console</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!-- No remote stylesheet. Plus Jakarta Sans and IBM Plex Mono were fetched from
+     fonts.googleapis.com on every open: a DNS lookup, a TLS handshake and two
+     requests before the first glyph, on a console an associate opens all day and
+     often on a hotel wifi. Both faces are replaced by the bundled ones in
+     fonts.css; the mono uses of var(--m, ui-monospace) fall back to the system
+     monospace, which is what they were already written to do. -->
+<link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="console.css">
 <link rel="stylesheet" href="production.css">
 </head>

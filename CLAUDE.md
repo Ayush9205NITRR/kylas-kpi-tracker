@@ -41,9 +41,36 @@ Do not undo these without asking. Each was arrived at after a rejected alternati
 
 ## Colour discipline
 
-One accent — **blue**. Violet carries "past". Rose only marks required. Amber only marks flags.
-A five-hue version was built and rejected as rainbow soup. Do not add a hue to distinguish a
-section; sections are separated by **structure** (card + header band), not colour.
+The palette is **`docs/bd-ladder-reference.html`**, verbatim — Ayush supplied it as the design and
+asked for it unchanged. It replaced a blue-accent scheme on 2026-09-19. Values live in
+`console.css` `:root`; there is exactly one `:root`, and `production.css` declares no tokens of
+its own.
+
+One accent — **indigo `--blue`** (the name is historical; the value is the reference's `#4338CA`).
+Rose only marks required. Amber — the reference's marigold — only marks flags. "Past" is neutral
+grey, because the accent is violet now and past cannot be violet too.
+
+Two systems are allowed a hue of their own, and no third one is:
+
+- **the rung ramp** `--r0..--r5`, one hue stepped in lightness, for the six funnel rungs. Used by
+  the ladder's step numbers, the KPI status chips and the board.
+- **the freshness scale** `--f-fresh` … `--f-never`, green → olive → marigold → red → grey. This is
+  the one place a second hue is earned: it encodes **time**, and a single-hue ramp cannot say
+  "called this week" and "not since March" at its two ends.
+
+Do not add a hue to distinguish a section; sections are separated by **structure** (card + header
+band), not colour. A five-hue version of the *chrome* was built and rejected as rainbow soup, and
+that still holds — the two scales above are data, not decoration.
+
+## Type
+
+Two faces, both **bundled** in `extension/console/fonts/` — never linked from a CDN, because a
+font fetched on every open is a DNS lookup and a handshake before the first glyph.
+
+- `--display` Bricolage Grotesque: headings, and the numbers meant to be read first.
+- `--f` Instrument Sans: everything else.
+
+Still **five sizes**. Adding a sixth is how the UI drifted before.
 
 ## Workflow for UI changes
 
@@ -53,7 +80,8 @@ toggle should read as a different state". Then:
 1. Read `UI-SPEC.md` for the token or component involved.
 2. Change the **token**, not the call site. If a size or colour is hard-coded anywhere, that is a
    bug — move it into `:root`.
-3. Keep the type scale at five sizes. Adding a sixth is how the UI drifted before.
+3. Keep the type scale at five sizes, and to two faces. Adding a sixth size or a third face is how
+   the UI drifted before.
 4. Re-open the file in a browser and check both light and dark before saying it is done.
 
 ## Still open — ask before assuming

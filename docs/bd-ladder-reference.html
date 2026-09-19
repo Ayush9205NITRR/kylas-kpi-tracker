@@ -1,0 +1,844 @@
+<title>Enout BD Ladder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F5F5F8; --surface:#FFFFFF; --surface-2:#FAFAFC; --ink:#1C1B2E; --muted:#6B6A80; --faint:#9C9BAF;
+  --line:#E4E3EC; --line-strong:#CFCDDB;
+  --accent:#4338CA; --accent-ink:#FFFFFF; --accent-soft:#ECEBFB;
+  --marigold:#C98404; --marigold-soft:#FDF1D8;
+  --good:#1F8A5B; --warm:#6E9A2E; --bad:#C2413A; --never:#B9B8C8;
+  --r0:#DCDAF8; --r1:#BBB7F0; --r2:#948EE2; --r3:#6E67D3; --r4:#4F47C0; --r5:#2F279A;
+  --shadow:0 1px 2px rgba(28,27,46,.05),0 4px 16px rgba(28,27,46,.05);
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12111B; --surface:#1B1A27; --surface-2:#211F2F; --ink:#ECEBF5; --muted:#A3A2B8; --faint:#77768C;
+  --line:#2D2B3E; --line-strong:#3D3B52;
+  --accent:#A7A2F7; --accent-ink:#17152A; --accent-soft:#29274A;
+  --marigold:#F0B444; --marigold-soft:#3A2E14;
+  --good:#4CC38A; --warm:#A4CC5C; --bad:#F0736B; --never:#55536B;
+  --r0:#2E2B55; --r1:#3E3A78; --r2:#534C9C; --r3:#6F68C2; --r4:#908ADF; --r5:#B9B5F5;
+  --shadow:0 1px 2px rgba(0,0,0,.3);
+}}
+:root[data-theme="dark"]{
+  --bg:#12111B; --surface:#1B1A27; --surface-2:#211F2F; --ink:#ECEBF5; --muted:#A3A2B8; --faint:#77768C;
+  --line:#2D2B3E; --line-strong:#3D3B52;
+  --accent:#A7A2F7; --accent-ink:#17152A; --accent-soft:#29274A;
+  --marigold:#F0B444; --marigold-soft:#3A2E14;
+  --good:#4CC38A; --warm:#A4CC5C; --bad:#F0736B; --never:#55536B;
+  --r0:#2E2B55; --r1:#3E3A78; --r2:#534C9C; --r3:#6F68C2; --r4:#908ADF; --r5:#B9B5F5;
+  --shadow:0 1px 2px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:0 48px}
+.wrap{max-width:1180px;margin:0 auto}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+b,strong{font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:14px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:8px;margin-right:auto}
+.brand h1{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:-.01em;margin:0}
+.brand span{color:var(--muted);font-size:13px}
+.tabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.tabs button{border:0;background:none;padding:6px 14px;border-radius:7px;font-weight:500;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.actions{display:flex;gap:8px;align-items:center}
+.btn{border:1px solid var(--line-strong);background:var(--surface);padding:7px 12px;border-radius:8px;font-weight:500;font-size:14px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.linkish{border:0;background:none;padding:0;color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+
+.banner{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;background:var(--marigold-soft);border:1px solid color-mix(in srgb,var(--marigold) 35%,transparent);padding:10px 14px;border-radius:10px;font-size:14px}
+.banner .dot{width:8px;height:8px;border-radius:50%;background:var(--marigold);flex:none}
+.banner.live{background:var(--surface);border-color:var(--line)}
+.banner.live .dot{background:var(--good)}
+
+/* period */
+.periodbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:22px}
+.seg{display:flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:6px 12px;font-size:14px;color:var(--muted);font-weight:500}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);font-size:16px;line-height:1}
+.plabel{font-family:var(--display);font-weight:500;font-size:18px;min-width:12ch}
+.fy{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.fy select{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;padding:3px 6px;font-size:13px}
+
+.story{font-family:var(--display);font-weight:500;font-size:clamp(20px,2.6vw,27px);line-height:1.35;letter-spacing:-.01em;max-width:34em;margin:18px 0 6px;text-wrap:pretty}
+.story b{font-weight:700;color:var(--accent)}
+.story .sub{display:block;font-family:var(--body);font-size:15px;font-weight:400;color:var(--muted);margin-top:8px;letter-spacing:0}
+.nudges{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 22px}
+.nudge{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;font-size:14px;max-width:100%}
+.nudge:hover{border-color:var(--marigold)}
+.nudge .n{font-family:var(--display);font-weight:700;font-size:20px;color:var(--marigold)}
+.nudge .go{color:var(--accent);font-weight:600;white-space:nowrap}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.scroll{overflow-x:auto}
+h2.sec{font-family:var(--display);font-weight:700;font-size:19px;margin:34px 0 4px}
+p.sec-sub{color:var(--muted);margin:0 0 14px;font-size:14px}
+
+/* ladder */
+table.ladder{border-collapse:separate;border-spacing:0;width:100%;min-width:640px}
+.ladder th,.ladder td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.ladder tr:last-child td{border-bottom:0}
+.ladder thead th{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;background:var(--surface-2);white-space:nowrap}
+.ladder thead th:first-child{border-top-left-radius:14px}.ladder thead th:last-child{border-top-right-radius:14px}
+.ladder .rung{position:sticky;left:0;background:var(--surface);z-index:1;min-width:210px}
+.ladder thead .rung{background:var(--surface-2)}
+.rungname{display:flex;align-items:center;gap:10px;font-weight:500}
+.step{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+.step.l{color:var(--ink)}
+.cellv{font-family:var(--display);font-weight:700;font-size:19px;line-height:1.1}
+.bar{height:4px;border-radius:2px;background:var(--line);margin-top:6px;width:72px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:2px}
+.delta{font-size:12px;font-weight:600;margin-left:6px}
+.delta.up{color:var(--good)}.delta.down{color:var(--bad)}.delta.flat{color:var(--faint)}
+.conv{font-size:13px;color:var(--muted)}
+.conv b{color:var(--ink)}
+.teamcol{background:color-mix(in srgb,var(--accent-soft) 55%,var(--surface))}
+.bdh{display:flex;align-items:center;gap:8px;border:0;background:none;padding:0;text-transform:none;letter-spacing:0;font-size:13px;font-weight:600;color:var(--ink)}
+.bdh:hover span{color:var(--accent);text-decoration:underline}
+.av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none;color:#fff}
+
+/* people */
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.person{padding:16px;display:flex;flex-direction:column;gap:10px}
+.person header{display:flex;align-items:center;gap:10px}
+.person header .av{width:34px;height:34px;font-size:13px}
+.person h3{margin:0;font-family:var(--display);font-size:17px;font-weight:700}
+.person .role{font-size:12px;color:var(--muted)}
+.person p{margin:0;font-size:14px;color:var(--ink)}
+.minifunnel{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;align-items:center;font-size:12px;color:var(--muted)}
+.minifunnel .t{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.minifunnel .t i{display:block;height:100%}
+.minifunnel .v{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600;text-align:right}
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 9px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line)}
+.tag.warn{background:var(--marigold-soft);border-color:transparent}
+.tag.good{background:color-mix(in srgb,var(--good) 12%,var(--surface));border-color:transparent}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+
+/* accounts */
+.fams{display:flex;flex-direction:column;gap:22px;margin-top:22px}
+.fam h3{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0 0 10px;font-family:var(--display);font-size:17px;font-weight:700}
+.fam h3 button{border:0;background:none;padding:0;font:inherit;color:inherit}
+.fam h3 button:hover{color:var(--accent)}
+.fam h3 .c{font-family:var(--body);font-size:14px;font-weight:600;color:var(--muted)}
+.fam h3 .h{font-family:var(--body);font-size:13px;font-weight:400;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.tile{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;min-height:92px}
+.tile:hover{border-color:var(--line-strong)}
+.tile[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.tile .nm{font-size:13.5px;font-weight:500;line-height:1.3}
+.tile .ct{font-family:var(--display);font-weight:700;font-size:22px;margin-top:auto}
+.tile.zero{opacity:.55}
+.fresh{display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--line)}
+.fresh i{display:block;height:100%}
+.f-fresh{background:var(--good)}.f-warm{background:var(--warm)}.f-cool{background:var(--marigold)}.f-cold{background:var(--bad)}.f-never{background:var(--never)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+.explorer{margin-top:28px;padding:18px}
+.exhead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline}
+.exhead h2{font-family:var(--display);font-size:21px;font-weight:700;margin:0}
+.exhead p{margin:4px 0 0;color:var(--muted);font-size:14px;flex-basis:100%}
+.filters{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.frow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.frow .lbl{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);width:92px;flex:none}
+.chip{border:1px solid var(--line-strong);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:13px;display:inline-flex;gap:6px;align-items:center}
+.chip .k{color:var(--muted);font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed="true"] .k{color:inherit;opacity:.8}
+.chip.zero{opacity:.45}
+.chip .sw{width:8px;height:8px;border-radius:50%}
+.inputs{display:flex;flex-wrap:wrap;gap:8px}
+.inputs input,.inputs select{border:1px solid var(--line-strong);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:14px;min-width:0}
+.inputs input{flex:1 1 220px}
+table.acc{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+.acc th{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+.acc td{padding:9px 10px;border-bottom:1px solid var(--line)}
+.acc td.co{font-weight:500}
+.kpi{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.lc{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.lc i{width:8px;height:8px;border-radius:50%}
+.more{display:flex;justify-content:center;padding:14px}
+.clear{margin-left:auto}
+
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+dialog::backdrop{background:rgba(18,17,27,.45)}
+.dlg{padding:20px;display:flex;flex-direction:column;gap:14px}
+.dlg h2{margin:0;font-family:var(--display);font-size:20px}
+.dlg p{margin:0;color:var(--muted);font-size:14px}
+.maprow{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;font-size:14px}
+.maprow select,.dlg input[type=text]{border:1px solid var(--line-strong);background:var(--surface);border-radius:7px;padding:6px 8px;width:100%;min-width:0}
+.maprow .req{color:var(--bad)}
+.dlg .foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+.dlg .foot .note{margin-right:auto;font-size:13px;color:var(--muted)}
+.choice{display:flex;gap:8px;flex-wrap:wrap}
+.choice label{flex:1 1 200px;border:1px solid var(--line-strong);border-radius:10px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.choice label small{display:block;color:var(--muted)}
+.choice input{margin-top:4px}
+table.roster{width:100%;border-collapse:collapse;font-size:14px}
+.roster td,.roster th{padding:6px 6px;border-bottom:1px solid var(--line);text-align:left}
+.roster th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.roster .counted{font-size:12px;font-weight:600;color:var(--good)}
+.roster .skip{font-size:12px;color:var(--faint)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;max-width:calc(100vw - 32px)}
+@media (max-width:640px){
+  .fy{margin-left:0}
+  .frow .lbl{width:100%}
+  .maprow{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><h1>BD Ladder</h1><span>Enout · business development</span></div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-funnel" aria-selected="true" data-tab="funnel">Team funnel</button>
+      <button role="tab" id="tab-accounts" aria-selected="false" data-tab="accounts">Accounts</button>
+    </nav>
+    <div class="actions">
+      <button class="btn" id="teamBtn">Team</button>
+      <button class="btn primary" id="importBtn">Import from Kylas</button>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+
+  <main>
+    <section id="view-funnel">
+      <div class="periodbar">
+        <div class="seg" id="grainSeg">
+          <button data-g="week">Week</button><button data-g="month">Month</button><button data-g="quarter">Quarter</button><button data-g="year">Year</button>
+        </div>
+        <div class="stepper">
+          <button id="prevP" aria-label="Previous period">‹</button>
+          <span class="plabel" id="plabel"></span>
+          <button id="nextP" aria-label="Next period">›</button>
+        </div>
+        <label class="fy">Year runs
+          <select id="fySel"><option value="fy">Apr–Mar (FY)</option><option value="cal">Jan–Dec</option></select>
+        </label>
+      </div>
+      <p class="story" id="story"></p>
+      <div class="nudges" id="nudges"></div>
+
+      <div class="card scroll"><table class="ladder" id="ladder"></table></div>
+
+      <h2 class="sec">How each BD is doing</h2>
+      <p class="sec-sub">Only active Business Development Associates are counted. Change who's in from <button class="linkish" id="teamLink">Team</button>.</p>
+      <div class="people" id="people"></div>
+    </section>
+
+    <section id="view-accounts" hidden>
+      <div class="fams" id="fams"></div>
+      <div class="legend" id="legend"></div>
+      <div class="card explorer" id="explorer">
+        <div class="exhead" id="exhead"></div>
+        <div class="filters">
+          <div class="inputs">
+            <input id="q" type="search" placeholder="Search a company…" aria-label="Search companies">
+            <select id="bdSel" aria-label="BD"></select>
+            <select id="sortSel" aria-label="Sort">
+              <option value="recent">Most recently called</option>
+              <option value="stale">Longest since last call</option>
+              <option value="kpi">Furthest up the ladder</option>
+              <option value="az">A–Z</option>
+            </select>
+          </div>
+          <div class="frow" id="fSource"></div>
+          <div class="frow" id="fKpi"></div>
+          <div class="frow" id="fFresh"></div>
+        </div>
+        <div class="scroll" style="margin-top:14px"><table class="acc" id="accTable"></table></div>
+        <div class="more" id="more"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="importDlg"><form method="dialog" class="dlg" id="importForm"></form></dialog>
+<dialog id="teamDlg"><form method="dialog" class="dlg" id="teamForm"></form></dialog>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- constants ---------- */
+const RUNGS=[
+  {name:"Companies reached",short:"Reached"},
+  {name:"Right POC connected",short:"Right POC"},
+  {name:"Successful discovery call",short:"Discovery"},
+  {name:"SQL meeting booked",short:"SQL booked"},
+  {name:"SQL meeting done",short:"SQL done"},
+  {name:"SQL",short:"SQL"}];
+const KPI_LABELS=["Not reached","Reached","Right POC","Discovery done","SQL booked","SQL done","SQL"];
+const FAMILIES=[
+  {k:"new",label:"Not touched yet",hint:"never called"},
+  {k:"trying",label:"Trying to connect",hint:"calls going out, no real conversation"},
+  {k:"talking",label:"In conversation",hint:"right person found, qualifying"},
+  {k:"qualified",label:"Qualified",hint:"SQL and beyond"},
+  {k:"parked",label:"Parked",hint:"alive, but not now"},
+  {k:"closed",label:"Closed out",hint:"not a fit, or lost"},
+  {k:"other",label:"Other stages",hint:"not grouped yet"}];
+const FAM_RULES=[
+  ["closed",/not interested|not relevant|lost|budget|in-?house|exit|dead|junk|invalid|dnd|disqualif/i],
+  ["parked",/holding|delay|no.?show|low value|later|nurture|future|on hold/i],
+  ["talking",/right poc|discovery|awaiting|to be sql|interested|follow/i],
+  ["qualified",/sql|proposal|negotiat|won|active pipeline/i],
+  ["trying",/cnc|not connected|call ?back|wrong|gatekeeper|busy|no answer|ringing|switched off|not reachable|voicemail/i],
+  ["new",/^new$|untouched|not contacted|fresh/i]];
+const FRESH=[
+  {k:"fresh",label:"Called ≤ 7 days",cls:"f-fresh"},
+  {k:"warm",label:"8–30 days",cls:"f-warm"},
+  {k:"cool",label:"31–90 days",cls:"f-cool"},
+  {k:"cold",label:"90+ days",cls:"f-cold"},
+  {k:"never",label:"Never called",cls:"f-never"}];
+const BDA_RE=/business development associate|\bbda\b/i;
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS_L=["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dn=(y,m,d)=>Math.floor(Date.UTC(y,m,d)/864e5);
+const ymd=n=>{const d=new Date(n*864e5);return[d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()]};
+const now=new Date();
+const TODAY=dn(now.getFullYear(),now.getMonth(),now.getDate());
+const dow=n=>((n+4)%7+7)%7; // 0=Sun
+const fmtDay=n=>{const[y,m,d]=ymd(n);return d+" "+MONTHS[m]+(y!==ymd(TODAY)[0]?" "+y:"")};
+const pct=(a,b)=>b?Math.round(a/b*100):0;
+const store={get(k,d){try{const v=localStorage.getItem("bdl."+k);return v==null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem("bdl."+k,v)}catch(e){}}};
+function famOf(stage){for(const[k,re] of FAM_RULES) if(re.test(stage||"")) return k;return "other"}
+function freshOf(lc){if(lc==null)return"never";const a=TODAY-lc;return a<=7?"fresh":a<=30?"warm":a<=90?"cool":"cold"}
+function initials(n){const p=String(n).trim().split(/\s+/);return((p[0]||"?")[0]+(p[1]?p[1][0]:"")).toUpperCase()}
+function hueOf(n){let h=0;for(const c of String(n))h=(h*31+c.charCodeAt(0))%360;return h}
+function avatar(n){return `<span class="av" style="background:hsl(${hueOf(n)} 45% 46%)" aria-hidden="true">${esc(initials(n))}</span>`}
+function firstName(n){return String(n).split(/\s+/)[0]}
+function toast(msg){const t=$("#toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3600)}
+const rungColor=i=>`var(--r${i})`;
+const kpiChip=k=>k<0?`<span class="kpi" style="background:var(--surface-2);color:var(--muted);border:1px solid var(--line)">Not reached</span>`:`<span class="kpi" style="background:${rungColor(k)};color:${k>=3?"#fff":"var(--ink)"}">${KPI_LABELS[k+1]}</span>`;
+
+/* ---------- sample data (shown only until a Kylas import exists) ---------- */
+function makeSample(){
+  let seed=20260919;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296};
+  const pick=a=>a[Math.floor(rnd()*a.length)];
+  const ri=(a,b)=>a+Math.floor(rnd()*(b-a+1));
+  const team=[["Riya Kapoor",1.15],["Kabir Sethi",1.0],["Neha Joshi",0.9],["Arjun Rao",1.05],["Tanvi Bhatt",0.85],["Dev Malhotra",1.1],["Ishita Verma",0.95],["Vikram Nair",1.0],["Sahil Gupta",0.8]];
+  const roster={};
+  team.forEach(([n])=>roster[n]={role:"Business Development Associate",active:true});
+  roster["Vikram Nair"]={role:"Sales Manager",active:true};
+  roster["Sahil Gupta"]={role:"Business Development Associate",active:false};
+  const A=["Vertex","Nimbus","Saffron","Kaveri","Indus","Arcadia","Bluepeak","Crestline","Deccan","Everfield","Falcon","Granite","Helix","Ironwood","Juniper","Kestrel","Lotus","Meridian","Northstar","Orion","Pinnacle","Quantum","Redwood","Sterling","Trident","Vanguard","Willow","Zenith","Aravali","Coral","Monsoon","Tidewater","Silverline","Emberly","Konark","Palmyra"];
+  const B=["Pharma","Fintech","Motors","Labs","Systems","Foods","Logistics","Insurance","Retail","Energy","Health","Software","Capital","Textiles","Infra","Telecom","Analytics","Hospitality"];
+  const SRC=["Apollo","Apollo","Apollo","LinkedIn","Lost Deals","Inbound","Referral","Past Client","Event Database"];
+  const byRung={
+    "-1":["New"],
+    "0":["CNC","CNC","CNC","Call Back Requested","Wrong Number","Gatekeeper","Not Interested","Not Relevant"],
+    "1":["Right POC Identified","Right POC Identified","Discovery Call Booked","Not Interested","Budget Constraints","Offsite Delayed","Event Done In-house"],
+    "2":["Discovery Call Done","Discovery Call Done – Awaiting Client Inputs","To be SQL","Holding Pad","Low Value","No Show","Offsite Delayed"],
+    "3":["SQL Meeting Booked","SQL Meeting Booked","No Show"],
+    "4":["SQL Meeting Done","SQL Meeting Done","Lost to Competitor"],
+    "5":["SQL / Active Pipeline","Proposal Ready","Proposal Ready","Won","Exit Pipeline"]};
+  const probs=[0.36,0.5,0.46,0.78,0.62];
+  const names=new Set(),rows=[];
+  for(let i=0;i<760;i++){
+    let nm;do{nm=pick(A)+" "+pick(B)+(rnd()<.3?" Pvt Ltd":"")}while(names.has(nm)&&names.size<600);
+    if(names.has(nm))nm+=" "+i;names.add(nm);
+    const [owner,skill]=pick(team);
+    const src=pick(SRC);
+    const r=[null,null,null,null,null,null];
+    let top=-1;
+    if(rnd()>0.09){
+      const back=Math.floor(Math.pow(rnd(),1.7)*430);
+      r[0]=TODAY-back;top=0;
+      for(let k=1;k<6;k++){
+        const p=Math.min(.95,probs[k-1]*(k===1?skill:Math.sqrt(skill))*(src==="Past Client"||src==="Referral"?1.35:1));
+        if(rnd()<p){const d=r[k-1]+ri(1,k===1?6:18);if(d>TODAY)break;r[k]=d;top=k}else break;
+      }
+    }
+    const stage=pick(byRung[String(top)]);
+    let lc=null;
+    if(top>=0){lc=Math.min(TODAY,r[top]+(rnd()<.55?ri(0,12):ri(10,120)));}
+    rows.push({n:nm,o:owner,st:stage,src,lc,r});
+  }
+  return{rows,roster};
+}
+
+/* ---------- state ---------- */
+const SAMPLE=makeSample();
+const S={
+  mode:"sample",           // sample | kylas | loading
+  rows:SAMPLE.rows,
+  roster:SAMPLE.roster,
+  meta:null,
+  tab:store.get("tab","funnel"),
+  grain:store.get("grain","month"),
+  fy:store.get("fy","fy"),
+  off:0,
+  acc:{stages:null,label:"",bd:"",sources:new Set(),kpis:new Set(),fresh:new Set(),q:"",sort:"recent",limit:100}
+};
+let db=null,dbChunks=[],dbMeta=null,dbRoster=null,writable=true;
+
+function decorate(rows){
+  for(const x of rows){
+    let k=-1;for(let i=5;i>=0;i--) if(x.r[i]!=null){k=i;break}
+    x.kpi=k;x.fam=famOf(x.st);x.fresh=freshOf(x.lc);
+  }
+  return rows;
+}
+decorate(S.rows);
+
+function isCounted(name){const p=S.roster[name];return !!(p&&p.active&&BDA_RE.test(p.role||""))}
+
+/* ---------- periods ---------- */
+function range(grain,off){
+  const[y,m]=ymd(TODAY);
+  if(grain==="week"){const s=TODAY-((dow(TODAY)+6)%7)+7*off;return{s,e:s+6}}
+  if(grain==="month"){return{s:dn(y,m+off,1),e:dn(y,m+off+1,1)-1}}
+  if(grain==="quarter"){const qm=m-m%3+3*off;return{s:dn(y,qm,1),e:dn(y,qm+3,1)-1}}
+  if(S.fy==="fy"){const sy=(m>=3?y:y-1)+off;return{s:dn(sy,3,1),e:dn(sy+1,3,1)-1}}
+  return{s:dn(y+off,0,1),e:dn(y+off+1,0,1)-1};
+}
+function label(grain,off){
+  const{s,e}=range(grain,off);const[sy,sm,sd]=ymd(s);const[ey,em,ed]=ymd(e);
+  if(grain==="week")return`${sd} ${MONTHS[sm]} – ${ed} ${MONTHS[em]}${ey!==ymd(TODAY)[0]?" "+ey:""}`;
+  if(grain==="month")return`${MONTHS_L[sm]} ${sy}`;
+  if(grain==="quarter"){
+    if(S.fy==="fy"){const q=((sm-3+12)%12)/3+1;const fy=sm>=3?sy+1:sy;return`Q${q} FY${String(fy).slice(2)} · ${MONTHS[sm]}–${MONTHS[em]}`}
+    return`Q${sm/3+1} ${sy} · ${MONTHS[sm]}–${MONTHS[em]}`;
+  }
+  if(S.fy==="fy")return`FY${String(ey).slice(2)} · Apr ${sy} – Mar ${ey}`;
+  return String(sy);
+}
+function lead(grain,off){
+  const w={week:"week",month:"month",quarter:"quarter",year:"year"}[grain];
+  if(off===0)return`This ${w} so far,`;
+  if(off===-1)return`Last ${w},`;
+  if(grain==="month")return`In ${label(grain,off)},`;
+  if(grain==="week")return`In the week of ${label(grain,off).split(" – ")[0]},`;
+  return`In ${label(grain,off).split(" · ")[0]},`;
+}
+
+/* ---------- funnel ---------- */
+function tally(s,e){
+  const per={},team=[0,0,0,0,0,0];
+  for(const x of S.rows){
+    if(!isCounted(x.o))continue;
+    const a=per[x.o]||(per[x.o]=[0,0,0,0,0,0]);
+    for(let i=0;i<6;i++){const d=x.r[i];if(d!=null&&d>=s&&d<=e){a[i]++;team[i]++}}
+  }
+  Object.keys(S.roster).forEach(n=>{if(isCounted(n)&&!per[n])per[n]=[0,0,0,0,0,0]});
+  return{per,team};
+}
+function deltaHtml(cur,prev){
+  if(!prev&&!cur)return"";
+  if(!prev)return`<span class="delta up">new</span>`;
+  const d=Math.round((cur-prev)/prev*100);
+  if(d===0)return`<span class="delta flat">±0%</span>`;
+  return`<span class="delta ${d>0?"up":"down"}" title="vs previous period">${d>0?"▲":"▼"}${Math.abs(d)}%</span>`;
+}
+function renderFunnel(){
+  document.querySelectorAll("#grainSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.g===S.grain));
+  $("#fySel").value=S.fy;
+  $("#plabel").textContent=label(S.grain,S.off);
+  $("#nextP").disabled=S.off>=0;
+  const{s,e}=range(S.grain,S.off);const pr=range(S.grain,S.off-1);
+  const cur=tally(s,e),prev=tally(pr.s,pr.e);
+  const T=cur.team,P=prev.team;
+  const bds=Object.keys(cur.per).sort((a,b)=>cur.per[b][5]-cur.per[a][5]||cur.per[b][0]-cur.per[a][0]||a.localeCompare(b));
+
+  /* story */
+  const st=$("#story");
+  if(!bds.length){st.innerHTML=`Nobody is set up as an active Business Development Associate yet.<span class="sub">Open <b>Team</b> and mark who's a BDA — the funnel counts only them.</span>`}
+  else if(!T[0]&&!T[1]&&!T[5]){st.innerHTML=`${esc(lead(S.grain,S.off))} nothing has moved up the ladder yet.<span class="sub">Counts appear as soon as a BD logs a call dated inside ${esc(label(S.grain,S.off))}.</span>`}
+  else{
+    let d="";
+    if(P[0]){const x=Math.round((T[0]-P[0])/P[0]*100);d=x===0?", level with the period before":`, ${x>0?"up":"down"} ${Math.abs(x)}% on the period before`}
+    let t=`${esc(lead(S.grain,S.off))} the team reached <b>${T[0]}</b> ${T[0]===1?"company":"companies"}${d}. <b>${T[1]}</b> got through to the right POC${T[0]?` (${pct(T[1],T[0])}%)`:""}, <b>${T[2]}</b> had a successful discovery call, and <b>${T[5]}</b> ${T[5]===1?"became an SQL":"became SQLs"}.`;
+    const byDisc=[...bds].sort((a,b)=>cur.per[b][2]-cur.per[a][2]);
+    const bySql=[...bds].sort((a,b)=>cur.per[b][5]-cur.per[a][5]);
+    const bits=[];
+    if(cur.per[byDisc[0]][2]>0)bits.push(`${esc(firstName(byDisc[0]))} led on discovery calls with ${cur.per[byDisc[0]][2]}`);
+    if(cur.per[bySql[0]][5]>0&&bySql[0]!==byDisc[0])bits.push(`${esc(firstName(bySql[0]))} closed the most SQLs (${cur.per[bySql[0]][5]})`);
+    const booked=T[3],done=T[4];
+    if(booked&&done<booked*0.7)bits.push(`${booked-done} booked SQL meetings haven't happened yet — worth confirming`);
+    st.innerHTML=t+(bits.length?`<span class="sub">${bits.join(" · ")}.</span>`:"");
+  }
+
+  /* nudges (not period-bound) */
+  const live=S.rows.filter(x=>isCounted(x.o)&&(x.fam==="talking"||x.fam==="qualified"));
+  const cold=live.filter(x=>x.fresh==="cool"||x.fresh==="cold"||x.fresh==="never");
+  const fu=S.rows.filter(x=>isCounted(x.o)&&/awaiting|call ?back|to be sql/i.test(x.st)&&(x.lc==null||TODAY-x.lc>7));
+  const nd=[];
+  if(cold.length)nd.push(`<button class="nudge" data-nudge="cold"><span class="n num">${cold.length}</span><span>live conversations haven't had a call in 30+ days</span><span class="go">See them →</span></button>`);
+  if(fu.length)nd.push(`<button class="nudge" data-nudge="fu"><span class="n num">${fu.length}</span><span>follow-ups (awaiting inputs, call-backs, to-be-SQL) are over a week old</span><span class="go">See them →</span></button>`);
+  $("#nudges").innerHTML=nd.join("");
+
+  /* ladder table */
+  const rowMax=RUNGS.map((_,i)=>Math.max(1,...bds.map(b=>cur.per[b][i])));
+  let h=`<thead><tr><th class="rung">Rung</th><th class="teamcol">Team</th><th>Step conv.</th>${bds.map(b=>`<th><button class="bdh" data-bd="${esc(b)}" title="Open ${esc(b)}'s accounts">${avatar(b)}<span>${esc(firstName(b))}</span></button></th>`).join("")}</tr></thead><tbody>`;
+  RUNGS.forEach((r,i)=>{
+    h+=`<tr><td class="rung"><div class="rungname"><span class="step ${i<2?"l":""}" style="background:${rungColor(i)}">${i+1}</span>${esc(r.name)}</div></td>`;
+    h+=`<td class="teamcol"><span class="cellv num">${T[i]}</span>${deltaHtml(T[i],P[i])}</td>`;
+    h+=`<td class="conv">${i===0?"—":`<b class="num">${pct(T[i],T[i-1])}%</b> of ${esc(RUNGS[i-1].short.toLowerCase())}`}</td>`;
+    bds.forEach(b=>{const v=cur.per[b][i];h+=`<td><div class="cellv num" style="${v?"":"color:var(--faint)"}">${v}</div><div class="bar"><i style="width:${v/rowMax[i]*100}%;background:${rungColor(Math.max(i,2))}"></i></div></td>`});
+    h+=`</tr>`;
+  });
+  h+=`</tbody>`;
+  $("#ladder").innerHTML=bds.length?h:`<tbody><tr><td class="empty">No active BDAs to show.</td></tr></tbody>`;
+
+  /* people */
+  const teamConv=[1,2,3,4,5].map(i=>T[i-1]?T[i]/T[i-1]:0);
+  $("#people").innerHTML=bds.map(b=>{
+    const a=cur.per[b];const mine=S.rows.filter(x=>x.o===b);
+    const liveCold=mine.filter(x=>(x.fam==="talking"||x.fam==="qualified")&&(x.fresh==="cool"||x.fresh==="cold"||x.fresh==="never")).length;
+    const pipe=mine.filter(x=>x.fam==="talking"||x.fam==="qualified").length;
+    let sent;
+    if(!a[0]&&!a[2]&&!a[5])sent=`No ladder movement logged for this period. ${pipe?`Still holding ${pipe} live ${pipe===1?"conversation":"conversations"}.`:""}`;
+    else{
+      sent=`Reached ${a[0]} ${a[0]===1?"company":"companies"}, ${a[1]} to the right POC and ${a[2]} into a proper discovery call`;
+      sent+=a[5]?`, with ${a[5]} ${a[5]===1?"SQL":"SQLs"} to show for it.`:".";
+    }
+    const tags=[];
+    let best=-1,bestLift=0;
+    for(let i=1;i<6;i++){if(a[i-1]>=4&&teamConv[i-1]>0){const c=a[i]/a[i-1];const lift=c-teamConv[i-1];if(lift>bestLift+0.05){bestLift=lift;best=i}}}
+    if(best>0)tags.push(`<span class="tag good">Strong at ${esc(RUNGS[best-1].short)} → ${esc(RUNGS[best].short)}: ${pct(a[best],a[best-1])}% vs team ${Math.round(teamConv[best-1]*100)}%</span>`);
+    if(liveCold)tags.push(`<button class="tag warn" data-bdcold="${esc(b)}">${liveCold} live ${liveCold===1?"account":"accounts"} going cold →</button>`);
+    const mx=Math.max(1,a[0]);
+    const mf=RUNGS.map((r,i)=>`<span>${esc(r.short)}</span><span class="t"><i style="width:${a[i]/mx*100}%;background:${rungColor(i)}"></i></span><span class="v">${a[i]}</span>`).join("");
+    return`<article class="card person"><header>${avatar(b)}<div><h3>${esc(b)}</h3><div class="role">${esc(S.roster[b]?.role||"")}</div></div></header><p>${sent}</p><div class="minifunnel">${mf}</div>${tags.length?`<div class="tags">${tags.join("")}</div>`:""}</article>`;
+  }).join("")||`<div class="card empty">Mark people as active Business Development Associates in <b>Team</b> to see them here.</div>`;
+}
+
+/* ---------- accounts ---------- */
+function matches(x,skip){
+  const A=S.acc;
+  if(skip!=="stage"&&A.stages&&!A.stages.has(x.st))return false;
+  if(A.bd==="__bda"){if(!isCounted(x.o))return false}else if(A.bd&&x.o!==A.bd)return false;
+  if(skip!=="source"&&A.sources.size&&!A.sources.has(x.src||"—"))return false;
+  if(skip!=="kpi"&&A.kpis.size&&!A.kpis.has(x.kpi))return false;
+  if(skip!=="fresh"&&A.fresh.size&&!A.fresh.has(x.fresh))return false;
+  if(A.q&&!x.n.toLowerCase().includes(A.q))return false;
+  return true;
+}
+function renderAccounts(){
+  const A=S.acc;
+  /* families + tiles (count with every filter but stage) */
+  const base=S.rows.filter(x=>matches(x,"stage"));
+  const byStage={};
+  for(const x of S.rows){if(!byStage[x.st])byStage[x.st]={fam:x.fam,rows:[]}}
+  for(const x of base)byStage[x.st].rows.push(x);
+  let h="";
+  for(const f of FAMILIES){
+    const stages=Object.keys(byStage).filter(s=>byStage[s].fam===f.k).sort((a,b)=>byStage[b].rows.length-byStage[a].rows.length||a.localeCompare(b));
+    if(!stages.length)continue;
+    const tot=stages.reduce((t,s)=>t+byStage[s].rows.length,0);
+    h+=`<div class="fam"><h3><button data-fam="${f.k}" title="Show every stage in ${esc(f.label)}">${esc(f.label)}</button><span class="c num">${tot}</span><span class="h">${esc(f.hint)}</span></h3><div class="tiles">`;
+    for(const s of stages){
+      const rs=byStage[s].rows;const n=rs.length;
+      const fc={};FRESH.forEach(z=>fc[z.k]=0);rs.forEach(x=>fc[x.fresh]++);
+      const on=A.stages&&A.stages.size===1&&A.stages.has(s);
+      h+=`<button class="tile ${n?"":"zero"}" data-stage="${esc(s)}" aria-pressed="${!!on}"><span class="nm">${esc(s)}</span><span class="ct num">${n}</span><span class="fresh" title="Last-call freshness">${n?FRESH.map(z=>fc[z.k]?`<i class="${z.cls}" style="width:${fc[z.k]/n*100}%"></i>`:"").join(""):""}</span></button>`;
+    }
+    h+=`</div></div>`;
+  }
+  $("#fams").innerHTML=h;
+  $("#legend").innerHTML="Bar under each stage = when its accounts were last called: "+FRESH.map(z=>`<span><i class="${z.cls}"></i>${esc(z.label)}</span>`).join("");
+
+  /* bd select */
+  const owners=[...new Set(S.rows.map(x=>x.o))].sort();
+  $("#bdSel").innerHTML=`<option value="">All owners</option><option value="__bda">Active BDAs only</option>`+owners.map(o=>`<option value="${esc(o)}">${esc(o)}${isCounted(o)?"":" (not counted)"}</option>`).join("");
+  $("#bdSel").value=A.bd;
+  $("#sortSel").value=A.sort;
+  if($("#q").value.toLowerCase()!==A.q)$("#q").value=A.q;
+
+  /* chips */
+  const chipRow=(el,lbl,key,values,labelOf,setRef,sw)=>{
+    const pool=S.rows.filter(x=>matches(x,key));
+    const cnt=new Map();pool.forEach(x=>{const v=key==="source"?(x.src||"—"):key==="kpi"?x.kpi:x.fresh;cnt.set(v,(cnt.get(v)||0)+1)});
+    el.innerHTML=`<span class="lbl">${lbl}</span>`+values.map(v=>{const c=cnt.get(v)||0;return`<button class="chip ${c?"":"zero"}" data-f="${key}" data-v="${esc(String(v))}" aria-pressed="${setRef.has(v)}">${sw?sw(v):""}${esc(labelOf(v))}<span class="k">${c}</span></button>`}).join("");
+  };
+  const sources=[...new Set(S.rows.map(x=>x.src||"—"))].sort();
+  chipRow($("#fSource"),"Source","source",sources,v=>v,A.sources);
+  chipRow($("#fKpi"),"KPI status","kpi",[-1,0,1,2,3,4,5],v=>KPI_LABELS[v+1],A.kpis,v=>`<span class="sw" style="background:${v<0?"var(--never)":rungColor(v)}"></span>`);
+  chipRow($("#fFresh"),"Last call","fresh",FRESH.map(z=>z.k),v=>FRESH.find(z=>z.k===v).label,A.fresh,v=>`<span class="sw ${FRESH.find(z=>z.k===v).cls}"></span>`);
+
+  /* list */
+  let rows=S.rows.filter(x=>matches(x));
+  const srt={
+    recent:(a,b)=>(b.lc??-1e9)-(a.lc??-1e9),
+    stale:(a,b)=>(a.lc??-1e9)-(b.lc??-1e9),
+    kpi:(a,b)=>b.kpi-a.kpi||(b.lc??-1e9)-(a.lc??-1e9),
+    az:(a,b)=>a.n.localeCompare(b.n)}[A.sort];
+  rows.sort(srt);
+  const any=A.stages||A.bd||A.sources.size||A.kpis.size||A.fresh.size||A.q;
+  const title=A.stages?A.label:"All accounts";
+  let sub="";
+  if(rows.length){
+    const sc={};rows.forEach(x=>sc[x.src||"—"]=(sc[x.src||"—"]||0)+1);
+    const top=Object.entries(sc).sort((a,b)=>b[1]-a[1])[0];
+    const coldN=rows.filter(x=>x.fresh==="cool"||x.fresh==="cold").length;
+    const never=rows.filter(x=>x.fresh==="never").length;
+    const ow={};rows.forEach(x=>ow[x.o]=(ow[x.o]||0)+1);
+    const topO=Object.entries(ow).sort((a,b)=>b[1]-a[1])[0];
+    const parts=[];
+    if(top&&Object.keys(sc).length>1)parts.push(`Most came from ${esc(top[0])} (${top[1]})`);
+    if(topO&&Object.keys(ow).length>1&&!A.bd)parts.push(`${esc(firstName(topO[0]))} owns the most (${topO[1]})`);
+    if(coldN)parts.push(`${coldN} haven't had a call in over a month`);
+    if(never)parts.push(`${never} never called`);
+    sub=parts.join(" · ")+(parts.length?".":"");
+  }else sub="Nothing matches these filters.";
+  $("#exhead").innerHTML=`<h2>${esc(title)}</h2><span class="num" style="color:var(--muted);font-weight:600">${rows.length} ${rows.length===1?"company":"companies"}</span>${any?`<button class="btn clear" id="clearF">Clear filters</button>`:""}<p>${sub}</p>`;
+  const shown=rows.slice(0,A.limit);
+  $("#accTable").innerHTML=`<thead><tr><th>Company</th><th>Pipeline stage</th><th>BD</th><th>Source</th><th>KPI status</th><th>Last call</th></tr></thead><tbody>`+
+    shown.map(x=>{const fz=FRESH.find(z=>z.k===x.fresh);return`<tr><td class="co">${esc(x.n)}</td><td>${esc(x.st)}</td><td>${esc(x.o)}</td><td>${esc(x.src||"—")}</td><td>${kpiChip(x.kpi)}</td><td><span class="lc"><i class="${fz.cls}"></i>${x.lc==null?"Never":(TODAY-x.lc===0?"Today":(TODAY-x.lc)+"d ago")}<span style="color:var(--faint)">${x.lc==null?"":" · "+esc(fmtDay(x.lc))}</span></span></td></tr>`}).join("")+`</tbody>`;
+  $("#more").innerHTML=rows.length>A.limit?`<button class="btn" id="moreBtn">Show ${Math.min(100,rows.length-A.limit)} more of ${rows.length-A.limit}</button>`:"";
+}
+
+/* ---------- banner + global render ---------- */
+function renderBanner(){
+  const b=$("#banner");
+  if(S.mode==="sample"){
+    b.innerHTML=`<div class="banner"><span class="dot"></span><span><b>You're looking at sample data</b> — made-up companies and people, so you can see how it works. Import a Kylas export to put your team's real numbers here.</span><button class="linkish" id="bannerImport">Import from Kylas</button></div>`;
+  }else if(S.mode==="kylas"){
+    const m=S.meta||{};const when=m.importedAt?new Date(m.importedAt):null;
+    const unknown=[...new Set(S.rows.map(x=>x.o))].filter(o=>!S.roster[o]).length;
+    b.innerHTML=`<div class="banner live"><span class="dot"></span><span><b>${(m.count||S.rows.length).toLocaleString("en-IN")}</b> accounts from ${esc(m.fileName||"Kylas export")}${when?`, imported ${esc(when.toLocaleDateString("en-IN",{day:"numeric",month:"short"}))} ${esc(when.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"}))}`:""}.${unknown?` <b>${unknown}</b> owners have no role yet, so they aren't counted.`:""}</span>${unknown?`<button class="linkish" id="bannerTeam">Set roles</button>`:""}</div>`;
+  }else b.innerHTML=`<div class="banner live"><span class="dot" style="background:var(--faint)"></span><span>Loading the team's data…</span></div>`;
+}
+function render(){
+  document.querySelectorAll(".tabs button").forEach(t=>t.setAttribute("aria-selected",t.dataset.tab===S.tab));
+  $("#view-funnel").hidden=S.tab!=="funnel";
+  $("#view-accounts").hidden=S.tab!=="accounts";
+  renderBanner();
+  if(S.tab==="funnel")renderFunnel();else renderAccounts();
+}
+function goAccounts(patch){
+  const A=S.acc;
+  A.stages=null;A.label="";A.bd="";A.sources=new Set();A.kpis=new Set();A.fresh=new Set();A.q="";A.limit=100;A.sort="recent";
+  Object.assign(A,patch||{});
+  S.tab="accounts";store.set("tab","accounts");render();
+  window.scrollTo({top:0});
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",e=>{
+  const t=e.target.closest("button");if(!t)return;
+  if(t.dataset.tab){S.tab=t.dataset.tab;store.set("tab",S.tab);render();return}
+  if(t.dataset.g){S.grain=t.dataset.g;S.off=0;store.set("grain",S.grain);render();return}
+  if(t.id==="prevP"){S.off--;render();return}
+  if(t.id==="nextP"){if(S.off<0){S.off++;render()}return}
+  if(t.id==="importBtn"||t.id==="bannerImport"){openImport();return}
+  if(t.id==="teamBtn"||t.id==="teamLink"||t.id==="bannerTeam"){openTeam();return}
+  if(t.dataset.bd){goAccounts({bd:t.dataset.bd});return}
+  if(t.dataset.bdcold){const st=new Set(S.rows.filter(x=>x.fam==="talking"||x.fam==="qualified").map(x=>x.st));goAccounts({bd:t.dataset.bdcold,stages:st,label:"Live conversations going cold",fresh:new Set(["cool","cold","never"]),sort:"stale"});return}
+  if(t.dataset.nudge==="cold"){const st=new Set(S.rows.filter(x=>x.fam==="talking"||x.fam==="qualified").map(x=>x.st));goAccounts({bd:"__bda",stages:st,label:"Live conversations going cold",fresh:new Set(["cool","cold","never"]),sort:"stale"});return}
+  if(t.dataset.nudge==="fu"){const st=new Set(S.rows.filter(x=>/awaiting|call ?back|to be sql/i.test(x.st)).map(x=>x.st));goAccounts({bd:"__bda",stages:st,label:"Follow-ups due",fresh:new Set(["warm","cool","cold","never"]),sort:"stale"});return}
+  if(t.dataset.fam){const f=FAMILIES.find(z=>z.k===t.dataset.fam);S.acc.stages=new Set(S.rows.filter(x=>x.fam===f.k).map(x=>x.st));S.acc.label=f.label;S.acc.limit=100;renderAccounts();$("#explorer").scrollIntoView({behavior:"smooth",block:"start"});return}
+  if(t.dataset.stage!=null){const s=t.dataset.stage;const on=S.acc.stages&&S.acc.stages.size===1&&S.acc.stages.has(s);S.acc.stages=on?null:new Set([s]);S.acc.label=on?"":s;S.acc.limit=100;renderAccounts();if(!on)$("#explorer").scrollIntoView({behavior:"smooth",block:"start"});return}
+  if(t.dataset.f){const k=t.dataset.f;let v=t.dataset.v;if(k==="kpi")v=+v;const set=k==="source"?S.acc.sources:k==="kpi"?S.acc.kpis:S.acc.fresh;set.has(v)?set.delete(v):set.add(v);S.acc.limit=100;renderAccounts();return}
+  if(t.id==="clearF"){goAccounts({});return}
+  if(t.id==="moreBtn"){S.acc.limit+=100;renderAccounts();return}
+});
+$("#fySel").addEventListener("change",e=>{S.fy=e.target.value;store.set("fy",S.fy);render()});
+$("#bdSel").addEventListener("change",e=>{S.acc.bd=e.target.value;S.acc.limit=100;renderAccounts()});
+$("#sortSel").addEventListener("change",e=>{S.acc.sort=e.target.value;renderAccounts()});
+let qT;$("#q").addEventListener("input",e=>{clearTimeout(qT);qT=setTimeout(()=>{S.acc.q=e.target.value.trim().toLowerCase();S.acc.limit=100;renderAccounts()},150)});
+
+/* ---------- CSV import ---------- */
+function parseCSV(text){
+  text=text.replace(/^﻿/,"");
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;
+    else if(c===","){row.push(f);f=""}
+    else if(c==="\n"||c==="\r"){if(c==="\r"&&text[i+1]==="\n")i++;row.push(f);f="";if(row.some(v=>v.trim()!==""))rows.push(row);row=[]}
+    else f+=c;
+  }
+  row.push(f);if(row.some(v=>v.trim()!==""))rows.push(row);
+  return rows;
+}
+function parseDate(v){
+  v=String(v||"").trim();if(!v)return null;
+  let m=v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if(m){let y=+m[3];if(y<100)y+=2000;const d=+m[1],mo=+m[2]-1;if(mo>=0&&mo<12&&d>=1&&d<=31)return dn(y,mo,d)}
+  m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return dn(+m[1],+m[2]-1,+m[3]);
+  const t=Date.parse(v);if(!isNaN(t)){const d=new Date(t);return dn(d.getFullYear(),d.getMonth(),d.getDate())}
+  return null;
+}
+const ACC_FIELDS=[
+  {k:"name",label:"Company name",req:1,re:/^(company|account)( name)?$|company name|account name|organi[sz]ation/i},
+  {k:"owner",label:"Owner (BD)",req:1,re:/owner|assigned|sales ?rep|\bbd\b/i},
+  {k:"stage",label:"Account pipeline stage",req:1,re:/pipeline stage|^stage|stage\b/i},
+  {k:"source",label:"Source",re:/source/i},
+  {k:"last",label:"Last call date",re:/last.*call|last.*contact|last activity/i},
+  {k:"r0",label:"Reached on (first call)",re:/first.*call|reached|contacted on/i},
+  {k:"r1",label:"Right POC connected on",re:/right ?poc/i},
+  {k:"r2",label:"Discovery call done on",re:/discovery.*(done|complet|date|on)/i},
+  {k:"r3",label:"SQL meeting booked on",re:/(sql|meeting).*book/i},
+  {k:"r4",label:"SQL meeting done on",re:/(sql|meeting).*(done|complet|held)/i},
+  {k:"r5",label:"Became SQL on",re:/(became|converted|marked).*sql|sql (date|on)$/i}];
+const USER_FIELDS=[
+  {k:"name",label:"Name",req:1,re:/^name$|full name|user name|^user$/i},
+  {k:"role",label:"Designation / role",req:1,re:/designation|role|profile|title/i},
+  {k:"status",label:"Status (active / inactive)",re:/status|active/i}];
+let imp=null;
+function guess(fields,headers){
+  const used=new Set(),map={};
+  for(const f of fields){const i=headers.findIndex((h,ix)=>!used.has(ix)&&f.re.test(h.trim()));if(i>=0){used.add(i);map[f.k]=i}else map[f.k]=-1}
+  return map;
+}
+function openImport(){imp={step:1,kind:"accounts"};drawImport();$("#importDlg").showModal()}
+function drawImport(){
+  const F=$("#importForm");
+  if(imp.step===1){
+    F.innerHTML=`<h2>Import from Kylas</h2><p>Export a CSV from Kylas and drop it here. It replaces what's on this page for everyone on the team.</p>
+    <div class="choice">
+      <label><input type="radio" name="kind" value="accounts" ${imp.kind==="accounts"?"checked":""}><span><b>Accounts / leads</b><small>Company, owner, pipeline stage, source, call and milestone dates</small></span></label>
+      <label><input type="radio" name="kind" value="users" ${imp.kind==="users"?"checked":""}><span><b>Team (users)</b><small>Name, designation, active status — decides who's counted</small></span></label>
+    </div>
+    <input type="file" id="csvFile" accept=".csv,text/csv">
+    <div class="foot"><button class="btn" value="cancel">Cancel</button></div>`;
+    F.querySelectorAll("input[name=kind]").forEach(r=>r.addEventListener("change",e=>imp.kind=e.target.value));
+    F.querySelector("#csvFile").addEventListener("change",async e=>{
+      const file=e.target.files[0];if(!file)return;
+      const rows=parseCSV(await file.text());
+      if(rows.length<2){toast("That file has no data rows.");return}
+      imp.file=file.name;imp.headers=rows[0];imp.data=rows.slice(1);
+      imp.fields=imp.kind==="accounts"?ACC_FIELDS:USER_FIELDS;imp.map=guess(imp.fields,imp.headers);imp.step=2;drawImport();
+    });
+  }else{
+    const opts=i=>`<option value="-1">— not in this file —</option>`+imp.headers.map((h,ix)=>`<option value="${ix}" ${ix===i?"selected":""}>${esc(h)}</option>`).join("");
+    F.innerHTML=`<h2>Match the columns</h2><p><b>${esc(imp.file)}</b> · ${imp.data.length.toLocaleString("en-IN")} rows. Check each field points at the right Kylas column.${imp.kind==="accounts"?" Milestone dates drive the weekly/monthly funnel; without them only the last call date is used.":""}</p>
+    ${imp.fields.map(f=>`<div class="maprow"><label for="map-${f.k}">${esc(f.label)} ${f.req?'<span class="req">*</span>':""}</label><select id="map-${f.k}" data-k="${f.k}">${opts(imp.map[f.k])}</select></div>`).join("")}
+    <div class="foot"><span class="note" id="impNote"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" type="button" id="doImport">Replace data</button></div>`;
+    F.querySelectorAll("select[data-k]").forEach(s=>s.addEventListener("change",e=>imp.map[e.target.dataset.k]=+e.target.value));
+    F.querySelector("#doImport").addEventListener("click",runImport);
+  }
+}
+async function runImport(){
+  const miss=imp.fields.filter(f=>f.req&&imp.map[f.k]<0);
+  if(miss.length){$("#impNote").textContent="Pick a column for: "+miss.map(f=>f.label).join(", ");return}
+  const btn=$("#doImport");btn.disabled=true;btn.textContent="Saving…";
+  const col=(r,k)=>imp.map[k]>=0?(r[imp.map[k]]||"").trim():"";
+  try{
+    if(imp.kind==="accounts"){
+      const rows=[];
+      for(const r of imp.data){
+        const n=col(r,"name");if(!n)continue;
+        const rr=[0,1,2,3,4,5].map(i=>parseDate(col(r,"r"+i)));
+        const lc=parseDate(col(r,"last"));
+        if(rr[0]==null&&lc!=null)rr[0]=lc;
+        for(let i=4;i>=0;i--)if(rr[i]==null&&rr[i+1]!=null)rr[i]=rr[i+1];
+        rows.push([n,col(r,"owner")||"Unassigned",col(r,"stage")||"(no stage)",col(r,"source"),lc,...rr]);
+      }
+      await saveAccounts(rows,imp.file);
+      toast(`Imported ${rows.length.toLocaleString("en-IN")} accounts.`);
+    }else{
+      const people={...S.roster};
+      for(const r of imp.data){
+        const n=col(r,"name");if(!n)continue;
+        const st=col(r,"status");
+        const active=imp.map.status<0?true:!/inactive|deactiv|disabled|false|^no$|^0$/i.test(st);
+        people[n]={role:col(r,"role"),active};
+      }
+      await saveRoster(people);
+      toast(`Updated ${imp.data.length} team members.`);
+    }
+    $("#importDlg").close();
+  }catch(err){
+    btn.disabled=false;btn.textContent="Replace data";
+    $("#impNote").textContent=err&&err.code==="invalid_argument"?"You don't have permission to change this page's data. Ask the owner for edit access.":err&&err.code==="quota_exceeded"?"The shared store is full. Try a smaller export.":"Couldn't save: "+(err&&err.message||err);
+  }
+}
+const CHUNK=700;
+async function saveAccounts(rows,fileName){
+  if(!db){applyAccounts(rows,{fileName,count:rows.length,importedAt:new Date().toISOString()});toast("Shown for you only — shared saving isn't available here.");return}
+  const importId=Date.now().toString(36);
+  const n=Math.max(1,Math.ceil(rows.length/CHUNK));
+  for(let i=0;i<n;i++){
+    await db.doc("accounts/c"+String(i).padStart(3,"0")).set({i,importId,data:JSON.stringify(rows.slice(i*CHUNK,(i+1)*CHUNK))});
+  }
+  await db.doc("meta/info").set({importId,chunks:n,count:rows.length,fileName,importedAt:new Date().toISOString()});
+  for(const c of dbChunks){if(c.i>=n)await db.doc("accounts/c"+String(c.i).padStart(3,"0")).delete()}
+}
+function applyAccounts(arr,meta){
+  S.rows=decorate(arr.map(a=>({n:a[0],o:a[1],st:a[2],src:a[3],lc:a[4],r:a.slice(5,11)})));
+  S.meta=meta;S.mode="kylas";
+  if(!dbRoster)S.roster={};
+  render();
+}
+async function saveRoster(people){
+  if(S.mode==="sample"&&!dbMeta){S.roster=people;render();if(db)toast("Sample mode — team changes stay on this screen until you import real data.");return}
+  if(!db){S.roster=people;render();return}
+  await db.doc("meta/roster").set({people:Object.entries(people).map(([name,p])=>({name,role:p.role||"",active:!!p.active}))});
+}
+
+/* ---------- team dialog ---------- */
+function openTeam(){
+  const names=[...new Set([...Object.keys(S.roster),...S.rows.map(x=>x.o)])].sort();
+  const F=$("#teamForm");
+  F.innerHTML=`<h2>Team</h2><p>The funnel counts people whose role contains <b>Business Development Associate</b> (or BDA) and who are active. Import a Kylas users export to fill this in, or edit here.</p>
+  <div class="scroll"><table class="roster"><thead><tr><th>Name</th><th>Role</th><th>Active</th><th></th></tr></thead><tbody>
+  ${names.map((n,i)=>{const p=S.roster[n]||{role:"",active:true};return`<tr><td>${esc(n)}</td><td><input type="text" id="role-${i}" data-n="${esc(n)}" value="${esc(p.role)}" list="roles" placeholder="e.g. Business Development Associate"></td><td><input type="checkbox" id="act-${i}" data-n="${esc(n)}" ${p.active?"checked":""} aria-label="${esc(n)} active"></td><td>${isCounted(n)?'<span class="counted">Counted</span>':'<span class="skip">Not counted</span>'}</td></tr>`}).join("")}
+  </tbody></table></div>
+  <datalist id="roles"><option value="Business Development Associate"><option value="Sales Manager"><option value="Account Manager"><option value="Team Lead"></datalist>
+  <div class="foot"><span class="note" id="teamNote"></span><button class="btn" value="cancel">Cancel</button><button class="btn primary" type="button" id="saveTeam">Save team</button></div>`;
+  F.querySelector("#saveTeam").addEventListener("click",async()=>{
+    const people={};
+    F.querySelectorAll("input[type=text][data-n]").forEach(el=>{people[el.dataset.n]={role:el.value.trim(),active:true}});
+    F.querySelectorAll("input[type=checkbox][data-n]").forEach(el=>{people[el.dataset.n].active=el.checked});
+    try{await saveRoster(people);$("#teamDlg").close();toast("Team saved.")}
+    catch(err){$("#teamNote").textContent=err&&err.code==="invalid_argument"?"You don't have permission to change the team.":"Couldn't save: "+(err&&err.message||err)}
+  });
+  $("#teamDlg").showModal();
+}
+
+/* ---------- shared store ---------- */
+function rebuild(){
+  if(dbRoster){const r={};dbRoster.forEach(p=>r[p.name]={role:p.role,active:p.active});}
+  if(dbMeta){
+    const got=dbChunks.filter(c=>c.importId===dbMeta.importId).sort((a,b)=>a.i-b.i);
+    if(got.length<dbMeta.chunks){if(S.mode==="sample"){S.mode="loading";render()}return}
+    let arr=[];try{for(const c of got)arr=arr.concat(JSON.parse(c.data))}catch(e){return}
+    S.rows=decorate(arr.map(a=>({n:a[0],o:a[1],st:a[2],src:a[3],lc:a[4],r:a.slice(5,11)})));
+    S.meta=dbMeta;S.mode="kylas";
+    S.roster={};(dbRoster||[]).forEach(p=>S.roster[p.name]={role:p.role,active:p.active});
+  }else{
+    S.rows=SAMPLE.rows;S.roster=SAMPLE.roster;S.mode="sample";S.meta=null;
+  }
+  render();
+}
+(async()=>{
+  const c=window.claude;
+  if(!c||!c.use)return;
+  try{db=await c.use("db")}catch(e){db=null}
+  if(!db)return;
+  let ready={meta:false,chunks:false,roster:false};
+  const tick=()=>{if(ready.meta&&ready.chunks&&ready.roster)rebuild()};
+  db.doc("meta/info").onSnapshot(s=>{dbMeta=s.exists?s.data():null;ready.meta=true;tick()},()=>{});
+  db.collection("accounts").limit(1000).onSnapshot(s=>{dbChunks=s.docs.map(d=>d.data());ready.chunks=true;tick()},()=>{});
+  db.doc("meta/roster").onSnapshot(s=>{dbRoster=s.exists?(s.data().people||[]):null;ready.roster=true;tick()},()=>{});
+})();
+
+render();
+})();
+</script>

@@ -454,7 +454,42 @@
         CACHE.readSource = held.readSource || "";
         CACHE.syncedAt = held.syncedAt || "";
       }
+      /* The report and the RCA list, restored the same way the companies are.
+         Both were memory-only, so every reopen of the console paid for them
+         again from cold — and they are the two most expensive reads there are:
+         the report walks the whole Call Log, the Rollup, every transition and
+         every contact; the RCA list walks every contact and every RCA row.
+         A dashboard that takes four seconds to show numbers it showed a minute
+         ago is the thing being fixed. */
+      const rep = await Store.getSetting("reportCache");
+      if (rep && typeof rep === "object") for (const [k, v] of Object.entries(rep)) DISK.report[k] = v;
+      const rca = await Store.getSetting("rcaCache");
+      if (rca && typeof rca === "object") for (const [k, v] of Object.entries(rca)) DISK.rca[k] = v;
     } catch { /* storage is a convenience here, never a dependency */ }
+  }
+
+  /* ── stale while revalidate ───────────────────────────────────────────
+     Airtable's trick, and it is not a longer timer: show what you have the
+     instant you have it, ask again in the background, repaint only if the
+     answer changed. The cost of being a minute stale is nothing; the cost of
+     an empty screen is that nobody waits.
+
+     Two entries per key, at most: the answer and when it arrived. Kept small
+     and written back on every success, because the value of this is entirely
+     in surviving the reload. */
+  const DISK = { report: {}, rca: {} };
+  const SWR_TTL = 5 * 60 * 1000;
+
+  async function persist(which) {
+    try {
+      /* Only the most recent few keys. The report is keyed by level, owner and
+         window, so drilling around a year would otherwise grow this without
+         bound until the storage quota threw and took the whole cache with it. */
+      const src = DISK[which];
+      const keys = Object.keys(src).sort((a, b) => (src[b].at || 0) - (src[a].at || 0)).slice(0, 8);
+      await Store.setSetting(which === "report" ? "reportCache" : "rcaCache",
+        Object.fromEntries(keys.map((k) => [k, src[k]])));
+    } catch { /* over quota is survivable — it is only a head start */ }
   }
 
   /* Returns true while a fetch is outstanding. `force` is the Refresh button —
@@ -770,12 +805,30 @@
     const key = `${period}|${owner}|${from}|${to}`;
     if (REP.key === key && (REP.data || REP.error)) return false;
     if (REP.loading) return true;
+
+    /* WHAT WE ALREADY HAVE, NOW. Painted before the request is even made, so
+       switching level or reopening the console is instant on anything looked at
+       in the last little while. `stale` is only about whether to ask again — it
+       never withholds what is in hand. */
+    const held = DISK.report[key];
+    if (held) { REP.data = held.data; REP.error = ""; REP.key = key; REP.at = held.at; }
+    const stale = !held || Date.now() - (held.at || 0) > SWR_TTL;
+    if (!stale) return false;
+
     REP.loading = true; REP.key = key; REP.period = period; REP.owner = owner;
     API.report(period, owner, from, to)
-      .then((r) => { REP.data = r; REP.error = r?.error || ""; })
-      .catch((e) => { REP.data = null; REP.error = e.message; })
+      .then((r) => {
+        REP.data = r; REP.error = r?.error || ""; REP.at = Date.now();
+        if (!r?.error) { DISK.report[key] = { at: REP.at, data: r }; persist("report"); }
+      })
+      /* A failed revalidate must not throw away a good answer. Offline, the
+         dashboard keeps showing last night's numbers and says how old they are,
+         which is worth more than an error where a table was. */
+      .catch((e) => { if (!held) { REP.data = null; REP.error = e.message; } })
       .finally(() => { REP.loading = false; onReady(); });
-    return true;
+    /* Held something? Then nothing is "loading" as far as the view is
+       concerned — there is a table on screen. */
+    return !held;
   }
 
   const REPORT_METRICS = [
@@ -1069,15 +1122,28 @@
      switched the selector. */
   function ensureRca(sel, repaint) {
     const owner = rcaOwner(sel);
-    const fresh = RCA.owner === owner && RCA.at && Date.now() - RCA.at < 300000;
+    const fresh = RCA.owner === owner && RCA.at && Date.now() - RCA.at < SWR_TTL;
     if (RCA.loading || fresh) return RCA.loading;
+
+    /* Same as the report: show the stored answer at once, then revalidate. */
+    const held = DISK.rca[owner];
+    if (held && RCA.owner !== owner) {
+      RCA.due = held.data.due || []; RCA.gates = held.data.gates || [];
+      RCA.error = ""; RCA.at = held.at; RCA.owner = owner;
+      if (Date.now() - (held.at || 0) <= SWR_TTL) return false;
+    }
     RCA.loading = true;
     RCA.owner = owner;
     API.rca(owner)
-      .then((r) => { RCA.due = r.due || []; RCA.gates = r.gates || []; RCA.error = ""; })
+      .then((r) => {
+        RCA.due = r.due || []; RCA.gates = r.gates || []; RCA.error = "";
+        DISK.rca[owner] = { at: Date.now(), data: { due: RCA.due, gates: RCA.gates } };
+        persist("rca");
+      })
       /* A failure here must not take the view with it. The dashboard's job is
          the funnel; this is an addition to it. */
-      .catch((e) => { RCA.error = e.message; RCA.due = []; })
+      /* Keep what we had rather than blanking the strip on a failed refresh. */
+      .catch((e) => { if (!held) { RCA.error = e.message; RCA.due = []; } })
       .finally(() => { RCA.loading = false; RCA.at = Date.now(); repaint?.(); });
     return true;
   }
