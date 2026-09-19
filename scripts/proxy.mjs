@@ -22,6 +22,7 @@ import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant } from "./airtable.mjs";
 import { report, withDeltas, mergeCalls } from "./report.mjs";
+import { createJournal } from "./journal.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
    The proxy is a long-lived process an associate starts by hand, and the
@@ -66,6 +67,11 @@ const kylas = createClient(KEY, {
     catch { /* unwritable is survivable — it only costs the probe again */ }
   },
 });
+
+/* Which saves have already created a contact. Beside the shape hint and for the
+   same reason: it is per-machine state that must outlive the process, because
+   the process dying is the very thing it defends against. */
+const journal = createJournal(new URL("../.save-journal.json", import.meta.url), { log });
 
 /* Airtable is optional: without a PAT the proxy still reads and writes Kylas,
    and each save reports that the Airtable half was skipped rather than failing.
@@ -127,6 +133,32 @@ async function fromAirtable(what, fn) {
     log(`! ${what}: Airtable read failed (${why}) — asking Kylas`);
     return null;
   }
+}
+
+/* DID AN INTERRUPTED ATTEMPT ALREADY CREATE THIS CONTACT?
+   Asked only when the journal holds an unfinished entry — a save that started
+   and whose reply never got home. Kylas either holds the contact or it does
+   not, and it is the only side that can say.
+
+   By company roster, not by phone number. Searching contacts by phone would be
+   the direct question, but the query builder's accepted field list is not
+   documented and this account 500s on shapes it dislikes — a lookup that throws
+   here would push us back to creating a duplicate. contactsForCompany is the
+   call the console already makes on every company open, so it is known to work
+   on this account, and a newly invented POC always has the company it was
+   created under. Matching is on the dialable digits, which is what makes two
+   records the same person. */
+async function findExisting(c) {
+  if (!c.companyId) return null;
+  const digits = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+  const want = new Set((c.phones || []).map((p) => digits(p.value)).filter(Boolean));
+  if (!want.size) return null;
+  const roster = await kylas.contactsForCompany(c.companyId);
+  for (const k of roster || []) {
+    for (const p of k.phoneNumbers || [])
+      if (want.has(digits(p.value))) return k;
+  }
+  return null;
 }
 
 /* Most records carry their own owner name in metaData.idNameStore, so this is
@@ -769,6 +801,26 @@ const routes = {
     const raw = body.contact;
     if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
 
+    /* THE KEY THAT MAKES A RETRY SAFE. Only a contact with no Kylas id can be
+       duplicated, so only that case needs one.
+
+       `lid` is the console's own local id for a contact it invented: stable
+       across every retry of that save, different for two different POCs. The
+       fallback is for a job queued by an older build, which has no lid — name
+       and number together identify one person closely enough to be worth far
+       more than nothing, and a genuine second POC on a shared landline has a
+       different name.
+
+       A save that already HAS a kid needs no key: repeating a PUT writes the
+       same record twice, which is the same record. */
+    const idemKey = raw.kid ? "" :
+      (raw.lid ? `lid:${raw.lid}`
+               : `poc:${(raw.pocName || "").trim().toLowerCase()}|` +
+                 `${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`);
+    /* Serialised per key: a double-click, or a drain racing a save, must not
+       have two creates in the air at once — both would find the journal empty. */
+    return journal.once(idemKey, async () => {
+
     /* VALIDATE BEFORE WRITING. Kylas answers a bad field with a 400 that names
        neither the field nor the rule, and the associate loses the whole save
        over it. The same rules run in the console, so this is the backstop for
@@ -803,11 +855,59 @@ const routes = {
     const payload = toKylasContact(c, { remarks });
 
     if (!c.kid) {
-      const made = await kylas.createContact(payload);
-      result.kid = String(made?.id ?? "");
-      result.created = true;
-      result.wrote.push("created contact");
-      log(`created contact ${result.kid} (${c.pocName})`);
+      /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
+         reply was lost still carries no Kylas id, and without this it POSTs a
+         second contact. */
+      const known = journal.lookup(idemKey);
+      if (known.state === "done") {
+        c.kid = known.kid;
+        result.kid = known.kid;
+        result.deduped = true;
+        await kylas.updateContact(c.kid, payload);
+        result.wrote.push("updated contact (already created by an earlier attempt)");
+        log(`deduped: ${c.pocName} was already created as ${c.kid} — updated instead`);
+      } else {
+        /* An attempt that started and never finished. Kylas may or may not hold
+           the contact; the only way to find out is to look. The company roster
+           is the search the console already uses, so this leans on a proven
+           call rather than a phone-number query this account may not accept. */
+        let found = null;
+        if (known.state === "open" && c.companyId) {
+          log(`an earlier attempt to create ${c.pocName} never finished — checking Kylas first`);
+          found = await findExisting(c).catch((e) => {
+            log(`  could not check (${e.message}) — creating, a duplicate is possible`);
+            return null;
+          });
+        }
+        if (found) {
+          c.kid = String(found.id);
+          result.kid = c.kid;
+          result.deduped = true;
+          journal.done(idemKey, c.kid);
+          await kylas.updateContact(c.kid, payload);
+          result.wrote.push("adopted the contact an interrupted attempt had created");
+          log(`recovered: ${c.pocName} already existed as ${c.kid} — updated instead of duplicating`);
+        } else {
+          /* Written BEFORE the POST. If this process dies during it, the next
+             attempt finds an open entry and looks before it leaps. */
+          journal.open(idemKey);
+          let made;
+          try {
+            made = await kylas.createContact(payload);
+          } catch (e) {
+            /* Refused means nothing was made, so the key goes back to unused —
+               otherwise every later retry pays for a lookup of a contact that
+               does not exist. */
+            journal.forget(idemKey);
+            throw e;
+          }
+          result.kid = String(made?.id ?? "");
+          result.created = true;
+          journal.done(idemKey, result.kid);
+          result.wrote.push("created contact");
+          log(`created contact ${result.kid} (${c.pocName})`);
+        }
+      }
     } else {
       await kylas.updateContact(c.kid, payload);
       result.wrote.push("updated contact");
@@ -850,6 +950,7 @@ const routes = {
       }
     }
     return result;
+    });
   },
 
   /* Whether each half of the write is configured, so the console can say so

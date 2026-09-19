@@ -318,6 +318,17 @@ in Kylas yet:
   time; the proxy overwrites it with what really happened, because
   `snapshot.mjs` counts *Contacts Added* straight off it.
 
+The queue's hardest case is not on this side at all. A request that never
+arrived and one whose **reply** was lost look identical to the browser, and only
+one of them has already made a contact in Kylas — which has no idempotency
+header and no unique constraint, so it accepts the duplicate happily. The proxy
+therefore keeps a small journal of which saves have already created what,
+written before the `POST` and keyed on the console's `lid`. A repeat of a key it
+has finished is answered with the id from last time; a key it started and never
+finished sends it to look at the company's roster in Kylas before it creates
+anything. See `scripts/journal.mjs`, and `scripts/test-idempotency.mjs`, which
+reproduces the lost reply for real rather than describing it.
+
 A **4xx is not an outage.** It is a verdict on the data, so it is never queued —
 retrying it would earn the same rejection for ever while hiding the one thing
 the associate could fix. The console names the field instead.

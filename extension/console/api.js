@@ -182,7 +182,9 @@
         }
         try {
           const res = await API.save(contact, job.call);
-          if (res?.created && res?.kid && lid) learned.set(lid, String(res.kid));
+          /* Any id, not only a create's — the proxy answers a recognised retry
+             with the id it made the first time and created:false. */
+          if (res?.kid && lid) learned.set(lid, String(res.kid));
           box.shift();
           sent++;
           onEach?.(job, res);

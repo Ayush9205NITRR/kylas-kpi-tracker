@@ -36,6 +36,15 @@ const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Bool
    companies list read "Company 1776620" instead of a name. The proxy must
    resolve the name by id rather than depend on this. */
 const NO_CO_NAMES = process.env.MOCK_NO_COMPANY_NAMES === "1";
+/* Mutable, because POST /__hang toggles it without a restart — a restart would
+   throw away the contacts the test needs the recovery path to find. */
+let hangCreate = process.env.MOCK_HANG_CREATE === "1";
+/* POST /__refuse?name=<substring> makes Kylas turn down a create by name. The
+   phone rules below cannot express this: the console normalises every number
+   before it gets here, so nothing that reaches Kylas fails them, and the branch
+   where a create is REFUSED — and the journal must forget the key rather than
+   leave an unfinished attempt behind — was otherwise unreachable. */
+let refuseName = "";
 
 const withMeta = (c) => ({
   ...c,
@@ -344,9 +353,23 @@ createServer(async (req, res) => {
     const body = JSON.parse(await text(req));
     if (badPhone(body))
       return json(res, 400, { code: "002008", message: "Invalid Mobile Number.", errorDetails: [] });
+    if (refuseName && `${body.firstName || ""} ${body.lastName || ""}`.includes(refuseName))
+      return json(res, 400, { code: "002099", message: "Refused by the test hook.", errorDetails: [] });
     const made = { id: nextId++, ...body, createdAt: new Date().toISOString() };
     CONTACTS.push(made);
     WRITES.push({ kind: "create", id: made.id, body });
+    /* Creates the contact and never answers — MOCK_HANG_CREATE=1, or switched
+       on mid-run with POST /__hang?on=1 so a test can arrange it without
+       restarting this process and losing the contacts it is holding.
+       This is THE failure the save journal exists for and it cannot be faked
+       from the client side: a request that times out and a request that was
+       never received look identical to the browser, and only one of them has
+       already made a contact. Kill the proxy while it waits here and the next
+       attempt meets exactly the state a crashed create leaves behind. */
+    if (hangCreate) {
+      console.log(`  created ${made.id} and HANGING — the reply will never arrive`);
+      return true;
+    }
     return json(res, 200, made);
   }
 
@@ -372,6 +395,8 @@ createServer(async (req, res) => {
 
   /* Test hook: what has actually been written, so a test can assert on it. */
   if (p === "/__writes") return json(res, 200, { writes: WRITES, callLogs: CALL_LOGS });
+  if (p === "/__refuse") { refuseName = url.searchParams.get("name") || ""; return json(res, 200, { refuseName }); }
+  if (p === "/__hang") { hangCreate = url.searchParams.get("on") === "1"; return json(res, 200, { hangCreate }); }
   if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }
 
   json(res, 404, { message: "not mocked", path: p, method: req.method });

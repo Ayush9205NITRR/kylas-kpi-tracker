@@ -1289,7 +1289,7 @@ async function flushOutbox(){
   const n=await API.drain(
     (job,res)=>{
       const a=find(job);if(!a)return;
-      if(res?.ok!==false&&res?.created&&res?.kid){a.kid=String(res.kid);a.pendingCreate=false;}
+      if(res?.kid&&!a.kid){a.kid=String(res.kid);a.pendingCreate=false;}
       a.syncError=res?.rejected
         ?"rejected: "+((res.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||res.error)
         :null;
@@ -1308,7 +1308,13 @@ async function syncToKylas(a,call){
   const res=await API.queueSave(a,call);
   a.syncing=false;
   if(res.ok){
-    if(res.created&&res.kid){a.kid=res.kid;a.pendingCreate=false;}
+    /* ANY id coming back, not only one from a create. When the proxy recognises
+       a retry of a save it already carried out, it answers with the id it made
+       last time and `created:false` — and a record that took that answer as
+       "no id for you" stayed pending and offered itself for creation again on
+       the next save. The question is whether this record has an id, not which
+       request earned it. */
+    if(res.kid&&!a.kid){a.kid=String(res.kid);a.pendingCreate=false;}
     a.syncedAt=new Date().toISOString();
     /* Airtable is where the KPIs come from, so its failure has to surface even
        though Kylas took the write. */
