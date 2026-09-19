@@ -786,18 +786,23 @@ function renderBasic(){
   grid.appendChild(fLi);
   grid.appendChild(companyField(a));
   grid.appendChild(field("Role","f-dg",false,input("f-dg",a.designation,"What do they do?",v=>{a.designation=v;renderCallbar();})));
-  W.appendChild(group("Who you're calling",[grid]));
 
-  /* Source */
-  const srcRow=el("div","g2");
+  /* SOURCE AND OWNER LIVE HERE NOW, not under a header band of their own.
+     "Where they came from" was a whole card — header, border, its own block of
+     vertical space — for two selects that are read on every call and changed on
+     almost none. On a screen an associate looks at 200 times a day, a card is
+     the most expensive thing you can spend on a field, and the left column is
+     the half that must stay short: the 85% case is a stage and a call-back
+     date, and every band above those is scrolling. They are identity, same as
+     the company and the role beside them, so they sit with them. */
   /* Say so when the account's list has not arrived, rather than showing one
      bare "Choose" that reads as "this account has no sources". */
-  srcRow.appendChild(field("Came from","f-src",false,
+  grid.appendChild(field("Came from","f-src",false,
     SOURCES.filter(Boolean).length||a.source
       ? select("f-src",SOURCES,a.source,v=>a.source=v)
       : el("div","locked",`<b>waiting</b><span>Source of Data comes from Kylas — connect the proxy to load it.</span>`)));
-  srcRow.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
-  W.appendChild(group("Where they came from",[srcRow]));
+  grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
+  W.appendChild(group("Who you're calling",[grid]));
 
   /* Stage & follow-up */
   const ncd=el("div","f");ncd.id="f-next";
@@ -832,7 +837,11 @@ function renderBasic(){
 
   const rRow=el("div","g2");
   rRow.appendChild(field("Notes from the call","f-rm",false,textarea("f-rm",a.remarks,"Whatever they said",v=>a.remarks=v)));
-  rRow.appendChild(field("Offsite timeline","f-ot",false,select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
+  /* Offsite timeline moved to "Before you hang up" on the right. It is not
+     where the account STANDS — it is something the prospect tells you, like
+     who handles this for them today and whether the pitch got in, and those
+     are already over there. Sitting next to the call notes it was also on
+     screen for every no-answer call, which is the 65% that never gets near it. */
 
   W.appendChild(group("Where this stands",[sRow,rRow]));
 }
@@ -857,6 +866,8 @@ function renderRight(){
   const g3=el("div","cardB grp");g3c.appendChild(g3);
   g3.appendChild(field("Who handles this for them today?","f-vi",isReq(a,"f-vi"),
     select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
+  g3.appendChild(field("Offsite timeline","f-ot",false,
+    select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
 
   const lab=el("label","cb1"+(a.serviceOffering?" on":""));
   lab.style.marginBottom="0";
@@ -1116,7 +1127,11 @@ function validate(){
 }
 function jump(anc){
   const t=document.getElementById(anc);if(!t)return;
-  if(matchMedia("(max-width:920px)").matches)setTab(anc==="s-events"||anc==="f-vi"||anc==="f-mm"?"more":"basic");
+  /* Below 920px the card is two tabs, so jumping to a field has to open the
+     one it is actually on — f-ot moved right with the other things a prospect
+     tells you, and a jump that opens the wrong tab scrolls to nothing. */
+  if(matchMedia("(max-width:920px)").matches)
+    setTab(anc==="s-events"||anc==="f-vi"||anc==="f-mm"||anc==="f-ot"?"more":"basic");
   t.scrollIntoView({behavior:"smooth",block:"center"});
   const f=t.querySelector("input,textarea,select,button");
   if(f&&!f.disabled)setTimeout(()=>f.focus({preventScroll:true}),260);
