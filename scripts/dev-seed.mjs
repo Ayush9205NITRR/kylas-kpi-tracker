@@ -102,8 +102,15 @@ async function companies() {
 
 async function rca() {
   const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  /* First Worked At / First Picked At are what the ladder's bottom two rungs
+     count. Without them every fixture contact sits outside the funnel and the
+     ladder reads zero all the way down, which is how the first version of this
+     seeder made a working ladder look broken. */
   const c = (Name, kid, extra) => ({ Name, "Kylas Contact ID": kid, Owner: "Enout Super Admin",
-    "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD", ...extra });
+    "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD",
+    "First Worked At": ago((extra["KPI Rank At"] ? 5 : 0) + 120),
+    "First Picked At": ago(115),
+    ...extra });
   const rows = [
     /* due */
     c("Stalled Right A", "70001", { "KPI Rank": 14, "KPI Rank At": ago(40), "Has Signal": 1, "Has Complete Row": 0 }),
@@ -122,6 +129,32 @@ async function rca() {
 }
 
 async function history() {
+  /* Contacts carrying the two milestone dates spread across the window, so the
+     ladder's bottom rungs have arrivals in more than one period and the
+     "carried in" case can actually be seen. */
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  const people = [];
+  for (let i = 0; i < 24; i++) {
+    const worked = 30 + i * 16;
+    people.push({ Name: `Hist Contact ${i + 1}`, "Kylas Contact ID": String(71000 + i),
+      Owner: i % 3 === 0 ? "Priya Deshmukh" : "Enout Super Admin",
+      "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD",
+      "First Worked At": ago(worked),
+      /* Not everyone picks up, and those who do, do it later — which is the
+         whole shape the funnel is meant to show. */
+      ...(i % 4 === 0 ? {} : { "First Picked At": ago(worked - 4) }),
+      /* Is Right POC / Is Discovery, not Has Signal: those are the FORMULA
+         fields the proxy's report actually reads, and the mock does not compute
+         formulas — it stores what it is given. Seeding the inputs and not the
+         outputs left the top five rungs at zero while the bottom two worked. */
+      ...(i % 3 === 0 ? { "KPI Rank": 14, "KPI Rank At": ago(worked - 9),
+                          "Has Signal": 1, "Is Right POC": 1 } : {}),
+      ...(i % 6 === 0 ? { "KPI Rank": 16, "Has Complete Row": 1, "Is Discovery": 1 } : {}),
+    });
+  }
+  await post("Contacts", people);
+  console.log(`           ${people.length} contacts with milestone dates across the window`);
+
   const calls = [], trans = [];
   const OUT = ["No answer", "No answer", "No answer", "Wrong POC", "Right POC", "Discovery"];
   let n = 0;

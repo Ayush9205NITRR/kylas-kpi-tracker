@@ -241,6 +241,21 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     "Exit Reason": EXIT_STAGES.includes(c.stage) ? c.stage : "",
   };
   if (rankRose) fields["KPI Rank At"] = new Date().toISOString();
+
+  /* FIRST WORKED, FIRST PICKED — written once and then left alone for ever.
+     These are what the funnel's bottom two rungs are counted from, so a later
+     save moving them would move a company between periods retrospectively and
+     change a month that had already been reported.
+
+     Dated from the CALL, not from now: a queued save that drains tomorrow
+     belongs to the day the call happened, which is the whole reason the outbox
+     carries `call.at`. */
+  const firstAt = call?.at || new Date().toISOString();
+  if (!prev?.fields?.["First Worked At"] && call) fields["First Worked At"] = firstAt;
+  /* Picked is the same test Ever Picked uses — not a no-answer stage — so the
+     two can never disagree about whether somebody spoke to this contact. */
+  if (!prev?.fields?.["First Picked At"] && !!c.stage && !NOT_CONNECTED.includes(c.stage))
+    fields["First Picked At"] = firstAt;
   if (companyRec) fields.Company = [companyRec.id];
   /* Dropping blanks protects USER-ENTERED fields: a value absent from this
      save is not an instruction to wipe what somebody typed last time. */

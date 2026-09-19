@@ -879,16 +879,21 @@
 
   /* The columns. `of` names the metric the rate is measured against, so the
      table and its header can never disagree about what a percentage means. */
+  /* THE SAME RUNGS AS THE LADDER, so the two tables cannot disagree about a
+     period. Calls stays as the first column because "how many dials went out"
+     is a real question and the only one here that is not a company count; it
+     sits outside the conversion band for that reason. */
   const COUNT_COLS = [
     { key: "calls", label: "Calls" },
-    { key: "connects", label: "Connected" },
+    { key: "worked", label: "Worked" },
+    { key: "picked", label: "Picked" },
     { key: "right", label: "Right POC" },
     { key: "discovery", label: "Discovery" },
     { key: "booked", label: "SQL booked" },
   ];
   const RATE_COLS = [
-    { key: "connects", of: "calls", label: "Connect" },
-    { key: "right", of: "connects", label: "→ Right POC" },
+    { key: "picked", of: "worked", label: "→ Picked" },
+    { key: "right", of: "picked", label: "→ Right POC" },
     { key: "discovery", of: "right", label: "→ Discovery" },
     { key: "booked", of: "discovery", label: "→ Booked" },
   ];
@@ -934,27 +939,30 @@
      period: currentByOwner comes back with the report rather than from a second
      request, so this costs nothing and cannot disagree with the row it sits
      above. */
-  /* THE RUNGS THE PERIOD REPORT CAN ACTUALLY CARRY.
-     The reference design opens on "Companies reached", and this cannot: the
-     ladder counts what happened INSIDE a period, and rollup-calls.mjs
-     aggregates old days to day|owner|outcome and deletes the raw rows — the
-     contact, and with it the company, is gone for every period past the
-     retention window. A first rung that is right for four weeks and silently
-     wrong for the year above it is worse than a different first rung.
+  /* THE LADDER COUNTS COMPANIES AT EVERY RUNG.
+     It used to open on "Calls logged" and "Connected", which are per-CALL flows
+     off the Call Log's outcome field, while the five rungs above them are
+     per-COMPANY first arrivals. Two units in one column, so the thing could not
+     be monotonic and wasn't: four calls all logged as no-answer gave Connected
+     0 sitting directly under Right POC 2, which is impossible — you cannot
+     reach the right person at a company nobody ever spoke to.
 
-     Calls and Connected are flows the rollup preserves exactly; the five above
-     them are "first reached in this period", from the stage history. The same
-     seven the Progress table below is built from, so the two cannot disagree.
-     The all-time "companies reached" still has a home: the Accounts view, where
-     it is a count of the book rather than of a period. */
+     The bottom two rungs are now Companies worked and Companies picked, counted
+     from First Worked At / First Picked At, which the writer sets once per
+     contact and never updates. That matters: the obvious source is the call
+     log, and rollup-calls.mjs deletes old call rows, so anything derived from
+     it drifts forward as history is compacted.
+
+     "Picked", not "Connected" — Ayush's word, and the better one. A call is
+     picked up or it is not; "connected" reads like a line status. */
   const RUNGS = [
-    { key: "calls",     name: "Calls logged",            short: "calls" },
-    { key: "connects",  name: "Connected",               short: "connected" },
-    { key: "right",     name: "Right POC connected",     short: "right POC" },
-    { key: "discovery", name: "Successful discovery call", short: "discovery" },
-    { key: "booked",    name: "SQL meeting booked",      short: "SQL booked" },
-    { key: "done",      name: "SQL meeting done",        short: "SQL booked" },
-    { key: "sql",       name: "SQL",                     short: "SQL done" },
+    { key: "worked",    name: "Companies worked" },
+    { key: "picked",    name: "Companies picked" },
+    { key: "right",     name: "Right POC connected" },
+    { key: "discovery", name: "Successful discovery call" },
+    { key: "booked",    name: "SQL meeting booked" },
+    { key: "done",      name: "SQL meeting done" },
+    { key: "sql",       name: "SQL" },
   ];
   const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "—";
   const initials = (n) => {
@@ -991,22 +999,38 @@
               <span>${esc(firstName(p.owner))}</span></span></th>`).join("")}
           </tr></thead>
           <tbody>
-            ${RUNGS.map((rg, i) => `<tr>
+            ${RUNGS.map((rg, i) => {
+              /* A RUNG CAN EXCEED THE ONE BELOW IT, legitimately. These count
+                 ARRIVALS IN THIS PERIOD, and a company worked in January can
+                 become a Right POC in March — March then shows 0 worked and 1
+                 right POC. That is the correct answer to "what moved this
+                 month", and it is also exactly what a broken funnel looks like,
+                 so it is marked and explained rather than left to be guessed
+                 at. Without this the table invites the reading Ayush gave it:
+                 "I don't know why there is a mismatch." */
+              const over = i > 0 && (cur[rg.key] || 0) > (cur[RUNGS[i - 1].key] || 0);
+              return `<tr${over ? ' class="carried"' : ""}>
               <td class="rung"><span class="rungname">
                 <i class="step r${Math.min(i, 5)}">${i + 1}</i>${esc(rg.name)}</span></td>
               <td class="teamcol"><b class="tnum">${cur[rg.key] || 0}</b>${
                 prev ? deltaHTML(cur.delta ? cur.delta[rg.key] : null) : ""}</td>
               <td class="conv">${i === 0 ? "—"
                 : `<b class="tnum">${pc(cur[rg.key] || 0, cur[RUNGS[i - 1].key] || 0)}</b>
-                   <span>of ${esc(RUNGS[i - 1].short)}</span>`}</td>
+                   <span>of ${esc(RUNGS[i - 1].name)}</span>${
+                     over ? ` <i class="carry" title="More companies reached this rung than reached the one above it inside this period. They were worked earlier and moved up now \u2014 it is not a miscount.">carried in</i>` : ""}`}</td>
               ${people.map((p) => {
                 const v = p[rg.key] || 0;
                 return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
                   <div class="lbar"><i class="r${Math.min(Math.max(i, 2), 5)}" style="width:${v / rowMax[i] * 100}%"></i></div></td>`;
               }).join("")}
-            </tr>`).join("")}
+            </tr>`;}).join("")}
           </tbody>
         </table></div>
+        <p class="vnote">Every rung counts <b>companies</b>, and each one the companies that
+          reached it <b>inside this period</b> — so a company worked in January and qualified in
+          March counts under worked in January and under Right POC in March. A rung marked
+          <i class="carry">carried in</i> has more companies than the rung above it for that
+          reason, not because a number is wrong.</p>
         ${people.length > 1 ? "" : `<p class="vnote">One associate is in this period, so the
           per-person columns say the same thing as the team column. They separate as soon as more
           than one person logs a call inside it.</p>`}
@@ -1069,7 +1093,7 @@
           <thead>
             <tr class="band">
               <th></th>
-              <th colspan="${COUNT_COLS.length}">How many</th>
+              <th colspan="${COUNT_COLS.length}">How many — calls, then companies</th>
               <th colspan="${RATE_COLS.length}" class="rt">Conversion, each from the one before</th>
             </tr>
             <tr>

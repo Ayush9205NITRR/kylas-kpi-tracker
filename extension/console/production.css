@@ -358,6 +358,9 @@ table.ladder td.conv b{font-size:var(--t-label);color:var(--text)}
 .cellv.zero{color:var(--text3);font-weight:var(--w-body)}
 /* .lbar, not .bar: .bar is the app's top bar and carries min-height:48px, so
    every cell in this table grew a 48px grey slab under its number. */
+i.carry{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);
+  background:var(--amberSoft);border-radius:4px;padding:1px 6px;margin-left:4px;white-space:nowrap;cursor:help}
+table.ladder tr.carried td.conv{color:var(--text2)}
 table.ladder .lbar{height:3px;border-radius:2px;background:var(--panel3);margin-top:5px;overflow:hidden}
 table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 

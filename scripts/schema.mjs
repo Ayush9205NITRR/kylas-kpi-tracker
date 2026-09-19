@@ -115,6 +115,23 @@ export const TABLES = [
         description: "Highest rung ever reached. Written as MAX(existing, computed). Never decreases." },
       { name: "KPI Rank At", type: "dateTime", options: dateTime,
         description: "When KPI Rank last increased — the last qualitative update." },
+      /* WHEN THIS CONTACT WAS FIRST WORKED, AND FIRST PICKED UP.
+         Written once by the proxy and never overwritten, which is the whole
+         point: "First Call At" beside them is a rollup of the Call Log, and
+         rollup-calls.mjs DELETES raw call rows once they are past the retention
+         window — so that field silently moves forward as history is compacted,
+         and a company's first touch drifts to whatever is left. These two are
+         values, not derivations, so nothing can erase them.
+
+         They are what makes the funnel count COMPANIES at every rung. Without
+         them the first two rungs had to be counted from the call log, which
+         counts CALLS — and a ladder whose bottom two rungs are a different unit
+         from its top five cannot be monotonic. It showed 0 connected above 2
+         right POC. */
+      { name: "First Worked At", type: "dateTime", options: dateTime,
+        description: "First call ever logged against this contact. Written once, never updated." },
+      { name: "First Picked At", type: "dateTime", options: dateTime,
+        description: "First time this contact reached a stage that is not a no-answer — the moment somebody actually spoke to them. Written once, never updated." },
       { name: "Pending Create", type: "checkbox", options: check,
         description: "Captured in the console but not yet in Kylas. Tells the writer POST rather than PUT." },
       { name: "Exit Reason", type: "singleSelect", options: sel(...EXIT_STAGES),
@@ -343,6 +360,11 @@ export const FOLLOWUPS = [
   rollup("Companies", "Last Call At", "Contacts", "Last Call At", "MAX(values)",
     "Companies Reached is the count of rows where this is not blank."),
   rollup("Companies", "First Call At", "Contacts", "First Call At", "MIN(values)"),
+  /* The company is worked the moment its FIRST contact is, and picked the
+     moment its first contact picks up. MIN, so a company counts on the period
+     it entered the rung rather than the period its latest POC did. */
+  rollup("Companies", "First Worked At", "Contacts", "First Worked At", "MIN(values)"),
+  rollup("Companies", "First Picked At", "Contacts", "First Picked At", "MIN(values)"),
   rollup("Companies", "Call Count", "Contacts", "Call Count", "SUM(values)"),
   rollup("Companies", "Talk Seconds", "Contacts", "Talk Seconds", "SUM(values)"),
   rollup("Companies", "Ever Picked", "Contacts", "Ever Picked", "MAX(values)"),

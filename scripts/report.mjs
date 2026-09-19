@@ -134,8 +134,16 @@ const FLOORS = [
 ];
 
 export const METRICS = [
+  /* FLOWS — one per call. Activity, not funnel. The Progress table shows them
+     because "how many dials went out" is a real question, but they are NOT
+     rungs: a rung counts companies, and mixing the two units is what let the
+     ladder show 0 connected above 2 right POC. */
   { key: "calls", label: "Calls logged", kind: "flow" },
-  { key: "connects", label: "Connected", kind: "flow" },
+  { key: "connects", label: "Calls picked", kind: "flow" },
+  /* FIRST — one per company, the period it first reached that rung. These seven
+     are the ladder, in order, and every one counts the same thing. */
+  { key: "worked", label: "Companies worked", kind: "first" },
+  { key: "picked", label: "Companies picked", kind: "first" },
   { key: "right", label: "Right POC", kind: "first" },
   { key: "discovery", label: "Discovery", kind: "first" },
   { key: "booked", label: "SQL meeting booked", kind: "first" },

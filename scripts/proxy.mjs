@@ -792,7 +792,8 @@ const routes = {
          they have no transition row. The closest honest timestamp is when the
          contact's rank last rose — the save that filled the fields. */
       listTolerant(airtable, "Contacts", {
-        fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company"] }),
+        fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
+                 "First Worked At", "First Picked At"] }),
     ]);
 
     const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
@@ -809,11 +810,21 @@ const routes = {
                                                 company: (r.fields.Contact || [])[0] || "" }));
     const signals = [];
     for (const r of contactRows) {
+      const co = (r.fields.Company || [])[0] || r.id;
+      const owner = r.fields.Owner;
+      /* THE BOTTOM TWO RUNGS, per company. Written once by the writer and never
+         updated, so unlike the call log they survive rollup-calls.mjs deleting
+         old rows — a company's first touch cannot drift forward as history is
+         compacted. report() dedupes to the FIRST arrival per company, so the
+         earliest contact at a company is the one that dates it. */
+      if (r.fields["First Worked At"])
+        signals.push({ at: r.fields["First Worked At"], owner, company: co, metric: "worked" });
+      if (r.fields["First Picked At"])
+        signals.push({ at: r.fields["First Picked At"], owner, company: co, metric: "picked" });
       const at = r.fields["KPI Rank At"];
       if (!at) continue;
-      const co = (r.fields.Company || [])[0] || r.id;
-      if (r.fields["Is Right POC"]) signals.push({ at, owner: r.fields.Owner, company: co, metric: "right" });
-      if (r.fields["Is Discovery"]) signals.push({ at, owner: r.fields.Owner, company: co, metric: "discovery" });
+      if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
+      if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
     }
 
     const pick = (list) => (owner && owner !== "all"
