@@ -1,7 +1,16 @@
 # Enout BD Call Console
 
 Claude Code reads this file automatically at the start of every session in this repo. It is the
-short version. `UI-SPEC.md` has the full design system, `HANDOFF.md` has the product rules.
+short version — the **rules**.
+
+> **Starting fresh? Read `docs/STATE.md` next, before touching anything.**
+> It is the only file that says what is true *right now*: what is built, what is deployed (almost
+> nothing), how to get a working stack with no credentials in about thirty seconds, the bugs that
+> have already been made here and will be made again, and what is waiting on Ayush. It is short
+> and it is maintained; these other docs are design history.
+
+`docs/UI-SPEC.md` has the full design system, `docs/HANDOFF-v2.md` the product rules,
+`docs/architecture.md` the shape, `docs/kpi-spec.md` the KPI definitions.
 
 ## What this is
 
