@@ -102,7 +102,26 @@
   async function openCompany(id, label) {
     const had = showCompany(id, label);
     const before = DATA[cur];
-    setLink("busy", "Loading from Kylas…");
+
+    /* PAINT WHAT WE ALREADY KNOW, THEN GO ASK.
+       Ayush, 2026-09-19: "when I click an account, there seems to be a lag
+       while the account and its specific information load... even when the
+       account shows I have already reached out and the KPI status is Discovery,
+       the specific call information is not visible immediately."
+
+       That was the whole of it: this awaited a live round trip with nothing on
+       screen. But the roster of a company opened before is already in DATA —
+       merged, with its notes and event rows — so there is something to show
+       instantly on every account except a genuinely new one. The fetch still
+       runs and still merges; it just stops being the thing the associate waits
+       behind. Same rule as the report and the RCA list. */
+    const held = DATA.filter((a) => String(a.companyId) === String(id) && a.kid).length;
+    if (held) {
+      setLink("busy", `${held} contact${held === 1 ? "" : "s"} from your last visit — refreshing`);
+      render();
+    } else {
+      setLink("busy", "Loading from Kylas…");
+    }
 
     let res;
     try {

@@ -479,6 +479,26 @@ function renderQueue(){
     const due=mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()
       ?'<span class="due">due</span>'
       :mode==="session"?`<span class="pri">#${priority(a)}</span>`:"";
+    /* WHO, AND WHERE THEY STAND. Ayush, 2026-09-19: "I can see all the POCs
+       but I cannot clearly identify which POC I actually interacted with...
+       showing Who -> Where they stand would make the information much clearer."
+
+       Everything below is already on the record — event rows carry the type,
+       the budget, the timeline and the pax, past and current — it was just
+       never shown anywhere except inside the open card. So a roster of ten
+       POCs looked identical whether you had spoken to nine of them or none.
+
+       Four facts, in the order somebody scanning a roster wants them:
+         spoken to?      a tick and the stage, or "not spoken to" in grey
+         when            last call, relative, because "12d ago" is the question
+         what event      the types they have mentioned, past and current
+         what was asked  which of budget/timeline/pax came back */
+    const evs=[...new Set(rowsOf(a).map(r=>r.eventType).filter(Boolean))];
+    const past=(a.past||[]).map(r=>r.eventType).filter(Boolean);
+    const sig=["budget","timeline","pax"].filter(k=>rowsOf(a).some(r=>filled(r[k])));
+    const spoke=connected(a);
+    const last=a.lastCallAt?since(a.lastCallAt):"";
+
     b.innerHTML=`<span class="n">${esc(a.pocName)}${sync}</span>
       <span class="c">${esc([a.company,a.designation].filter(Boolean).join(" · "))}</span>
       <span class="row">
@@ -490,6 +510,16 @@ function renderQueue(){
           ${a.done?'<span class="ok" title="Logged today">✓</span>':""}
         </span>
         ${due}
+      </span>
+      <span class="told">
+        <i class="spoke${spoke?"":" no"}">${spoke?"spoken to":"not spoken to"}</i>
+        ${last?`<i class="when" title="Last call ${esc(String(a.lastCallAt).slice(0,10))}">${esc(last)}</i>`:""}
+        ${evs.length?evs.slice(0,2).map(e=>
+            `<i class="ev${past.includes(e)?" past":""}" title="${
+              past.includes(e)?"Ran this before":"On the table now"}">${esc(label(e))}</i>`).join(""):""}
+        ${evs.length>2?`<i class="ev more" title="${esc(evs.slice(2).map(label).join(", "))}">+${evs.length-2}</i>`:""}
+        ${sig.length?`<i class="asked" title="Asked and answered: ${esc(sig.join(", "))}">${
+            esc(sig.join(" · "))}</i>`:""}
       </span>`;
     b.onclick=()=>{cur=i;isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
@@ -521,6 +551,15 @@ function renderPace(){
 
 /* ── form ────────────────────────────────── */
 const rowsOf=c=>[...(c.past||[]),...(c.current||[])];
+/* "3d ago". Relative, because on a roster the question is always how long it
+   has been, never what the date was — the date is in the title attribute for
+   the one time somebody needs it. */
+function since(iso){
+  const t=Date.parse(iso||"");
+  if(!Number.isFinite(t))return "";
+  const d=Math.floor((Date.now()-t)/86400000);
+  return d<=0?"today":d===1?"yesterday":d<30?`${d}d ago`:d<365?`${Math.floor(d/30)}mo ago`:`${Math.floor(d/365)}y ago`;
+}
 function isComplete(a){
   return rowsOf(a).some(r=>filled(r.budget)&&filled(r.timeline)&&filled(r.pax));
 }

@@ -330,6 +330,28 @@ body.framed .ovOnly{display:inline-block}
   padding:9px 11px;font:inherit;font-size:var(--t-label);resize:vertical}
 .rcaNote textarea:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
 
+/* ── what a POC row tells you before you open it ─────────────────────── */
+/* A second line under the stage. The roster used to look identical whether
+   you had spoken to nine of ten POCs or none of them; these four facts are
+   what makes one row different from the next. */
+.qi .told{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:5px}
+.qi .told i{font-style:normal;font-size:var(--t-meta);line-height:1.5;border-radius:4px;
+  padding:1px 6px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* Spoken to is the one thing worth a colour — it is the difference between an
+   account somebody has worked and one nobody has. */
+.qi .told .spoke{background:var(--blueSoft);color:var(--blue);font-weight:var(--w-med)}
+.qi .told .spoke.no{background:transparent;color:var(--text3);padding-left:0;font-weight:var(--w-body)}
+.qi .told .when{color:var(--text3);padding-left:0}
+/* An event they have ALREADY run reads differently from one on the table now.
+   Violet is gone from the accent, so past is the neutral and current is the
+   one that stands out — which is the right way round on a roster. */
+.qi .told .ev{background:var(--panel3);color:var(--text2);font-weight:var(--w-med)}
+.qi .told .ev.past{background:transparent;color:var(--text3);border:1px dashed var(--line2)}
+.qi .told .ev.more{background:transparent;color:var(--text3);cursor:help}
+/* Which of budget, timeline, pax actually came back. */
+.qi .told .asked{background:var(--f-fresh);color:#fff;font-weight:var(--w-med);opacity:.9}
+.qi[aria-current="true"] .told .asked{opacity:1}
+
 /* ── the ladder ──────────────────────────────────────────────────────── */
 .card.scroll{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   overflow-x:auto}
