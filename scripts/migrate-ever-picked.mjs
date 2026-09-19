@@ -40,7 +40,7 @@
  * for everything, so nothing can be wrongly false. That also makes this safe to
  * run twice: it is derived from evidence, not incremented.
  */
-import { createAirtable } from "./airtable.mjs";
+import { createAirtable, listTolerant } from "./airtable.mjs";
 import { NOT_CONNECTED } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
@@ -56,11 +56,15 @@ console.log(APPLY ? "Ever Picked repair" : "Ever Picked repair — DRY RUN, noth
 console.log(`base ${BASE}\n`);
 
 const [contacts, transitions] = await Promise.all([
-  at.listAll("Contacts", {
+  /* listTolerant: Airtable rejects a whole projection for one unknown name,
+     and this script exists to repair a base that may be a repair-base behind —
+     dying with a raw 422 on exactly the base it was written for would be a
+     poor joke. It names the field and reads everything instead. */
+  listTolerant(at, "Contacts", {
     fields: ["Kylas Contact ID", "Name", "Current Stage", "Previous Stage", "Ever Picked", "KPI Rank"],
     pageSize: 100, maxPages: 400,
   }),
-  at.listAll("Stage Transitions", { fields: ["To Stage", "Contact"], pageSize: 100, maxPages: 400 })
+  listTolerant(at, "Stage Transitions", { fields: ["To Stage", "Contact"], pageSize: 100, maxPages: 400 })
     .catch(() => []),
 ]);
 

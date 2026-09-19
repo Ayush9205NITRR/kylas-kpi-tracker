@@ -354,6 +354,20 @@ function renderCallbar(){
 const fmtSecs=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
 function startTimer(mode){
   if(timer)clearInterval(timer);
+  /* THE MODE WAS TAKEN AND THROWN AWAY. tmode stayed "idle" for the life of
+     the console, and three things quietly depended on it:
+       durationSource = secs ? (tmode==="est" ? "estimated" : "dialed") : "none"
+         -> "idle" is not "est", so EVERY call with a duration was labelled
+            "dialed". Measured Seconds counts only "dialed", so once the field
+            started reaching Airtable it would have counted keypress estimates
+            as measured talk time — worse than the zero it replaced.
+       paintTimer's "~" prefix and its title
+         -> an estimate looked identical to a measured call on screen.
+       setOutcome's `if(tmode==="dial"&&ringing)stopTimer()`
+         -> never true, so pressing an outcome after a real dial RESTARTED the
+            timer as an estimate and discarded the measured duration.
+     One dropped assignment, three faults. */
+  tmode=mode||"dial";
   secs=0;ringing=true;
   timer=setInterval(()=>{secs++;const t=document.getElementById("tm");if(t)t.textContent=fmtSecs(secs);},1000);
   const t=document.getElementById("tm");if(t)t.className="tm run";
@@ -1126,7 +1140,21 @@ function saveNext(){
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
-  syncToKylas(a,{outcome:outcome?outcome.t:null,duration,at:new Date().toISOString(),
+  /* durationSource AND createdHere travel too. They were logged to the local
+     store above and then dropped from the payload that actually leaves the
+     browser, so Airtable received undefined for both on every save:
+
+       Duration Source -> "none"  on every row, whatever really happened
+       Created Here    -> false   on every row
+
+     Duration Source is not cosmetic. Call Log.Measured Seconds is
+     IF({Duration Source} = "dialed", {Duration}, 0), which feeds Contacts.Talk
+     Seconds, Measured Calls and Avg Call Seconds, and Companies.Talk Seconds
+     above those. With the field never arriving, every one of them was pinned
+     to zero for ever — the dashboard's talk-time tile read 0m because the
+     provenance never made the trip, not because nobody dialled. */
+  syncToKylas(a,{outcome:outcome?outcome.t:null,duration,durationSource,createdHere:wasNew,
+                 at:new Date().toISOString(),
                  note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});
   const rows=visible().filter(r=>r.i!==from);
   const nxt=rows.length?rows[0].i:cur;
@@ -1207,7 +1235,7 @@ document.addEventListener("keydown",e=>{
   const k=e.key.toLowerCase();
   if(k==="c"){const a=rec(),p=a.phones.find(x=>x.primary)||a.phones[0];
     if(p&&p.value){
-      startTimer();
+      startTimer("dial");   /* the keyboard shortcut IS a dial, like the button */
       /* window.location.href="tel:…" navigated the whole console frame away.
          Third of three tel: navigations; all now go through the host page. */
       const num=(p.cc+p.value).replace(/\s/g,"");

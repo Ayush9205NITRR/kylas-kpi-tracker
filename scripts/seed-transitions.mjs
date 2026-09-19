@@ -42,7 +42,7 @@
  * the console already wrote are updated in place rather than duplicated, and
  * re-running changes nothing.
  */
-import { createAirtable } from "./airtable.mjs";
+import { createAirtable, listTolerant } from "./airtable.mjs";
 import { STAGES } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
@@ -59,10 +59,12 @@ console.log(APPLY ? "Seed Stage Transitions from Call Log"
 console.log(`base ${BASE}\n`);
 
 const [calls, contacts, existing] = await Promise.all([
-  at.listAll("Call Log", { fields: ["Called At", "Stage Set", "Owner", "Contact"],
-                           pageSize: 100, maxPages: 400 }),
-  at.listAll("Contacts", { fields: ["Kylas Contact ID", "Name"], pageSize: 100, maxPages: 400 }),
-  at.listAll("Stage Transitions", { fields: ["Key"], pageSize: 100, maxPages: 400 }).catch(() => []),
+  /* Tolerant of a missing column for the same reason the repair script is:
+     this runs on bases that are behind, by definition. */
+  listTolerant(at, "Call Log", { fields: ["Called At", "Stage Set", "Owner", "Contact"],
+                                 pageSize: 100, maxPages: 400 }),
+  listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name"], pageSize: 100, maxPages: 400 }),
+  listTolerant(at, "Stage Transitions", { fields: ["Key"], pageSize: 100, maxPages: 400 }).catch(() => []),
 ]);
 
 const kidOf = new Map(contacts.map((r) => [r.id, String(r.fields?.["Kylas Contact ID"] || "")]));
