@@ -281,7 +281,8 @@
                      correct prefix, not the account. Never inferred — the
                      proxy says so explicitly. */
                   truncated: false, crawled: 0,
-                  reportedTotal: null, short: 0, hitTheirCeiling: false };
+                  reportedTotal: null, short: 0, hitTheirCeiling: false,
+                  readSource: "", syncedAt: "" };
   const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
   let inflight = false;
   let restored = false;
@@ -379,6 +380,17 @@
   const truncWarn = () => {
     if (!CACHE.truncated) return "";
     const got = esc(String(CACHE.crawled));
+    /* READ FROM THE MIRROR, the shortfall is the SYNC's, and the fix is to run
+       the sync — not to re-ask Kylas, which is what the wording below would
+       send somebody off to do. A message that names the wrong action is worse
+       than one that names none. */
+    if (CACHE.readSource === "airtable" && CACHE.reportedTotal != null)
+      return `<p class="vwarn">This list is the Airtable mirror: ${got} companies,
+        and Kylas reports <strong>${esc(String(CACHE.reportedTotal))}</strong> —
+        ${esc(String(CACHE.short))} are not here. The last sync could not reach them,
+        so every count below is short by that many.
+        Run <code>node scripts/sync-kylas.mjs --apply</code>; if it still stops short,
+        its log says why.</p>`;
     if (CACHE.hitTheirCeiling && CACHE.reportedTotal != null)
       return `<p class="vwarn">Kylas says this account has
         <strong>${esc(String(CACHE.reportedTotal))}</strong> companies and served
@@ -432,6 +444,8 @@
         CACHE.reportedTotal = held.reportedTotal ?? null;
         CACHE.short = held.short || 0;
         CACHE.hitTheirCeiling = !!held.hitTheirCeiling;
+        CACHE.readSource = held.readSource || "";
+        CACHE.syncedAt = held.syncedAt || "";
       }
     } catch { /* storage is a convenience here, never a dependency */ }
   }
@@ -466,6 +480,8 @@
         CACHE.reportedTotal = r.reportedTotal ?? null;
         CACHE.short = r.short || 0;
         CACHE.hitTheirCeiling = !!r.hitTheirCeiling;
+        CACHE.readSource = r.source || "";
+        CACHE.syncedAt = r.syncedAt || "";
         if (r.picklists) adoptPicklists(r.picklists);
         try {
           await Store.setSetting("companyCache",
@@ -474,7 +490,8 @@
               kpiMatched: CACHE.kpiMatched,
               truncated: CACHE.truncated, crawled: CACHE.crawled,
               reportedTotal: CACHE.reportedTotal, short: CACHE.short,
-              hitTheirCeiling: CACHE.hitTheirCeiling });
+              hitTheirCeiling: CACHE.hitTheirCeiling,
+              readSource: CACHE.readSource, syncedAt: CACHE.syncedAt });
         } catch { /* over quota is survivable — it is only a head start */ }
       })
       .catch((e) => {

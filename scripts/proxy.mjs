@@ -19,7 +19,8 @@ import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
-         readContact, readCompany, readQueue } from "./airtable.mjs";
+         readContact, readCompany, readQueue,
+         readCompanies, readSyncState } from "./airtable.mjs";
 import { report, withDeltas } from "./report.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
@@ -359,6 +360,45 @@ const routes = {
       const companies = ownedBy(hit.body.companies);
       log(`companies for ${all ? "all owners" : owner} — ${companies.length} (cached ${age}s)`);
       return { ...hit.body, companies, owner: all ? "all" : String(owner), cachedSeconds: age };
+    }
+
+    /* THE MIRROR FIRST. Read from Airtable there is no join to fail: the
+       company row and its KPI formulas are the same record, so the "no company
+       matched Airtable" fault cannot arise rather than being reported better.
+       ?keys=1 is a Kylas diagnostic and deliberately skips this. */
+    if (!url.searchParams.get("keys")) {
+      const mirror = await fromAirtable("companies", async () => {
+        const list = await readCompanies(airtable);
+        return list.length ? list : null;
+      });
+      if (mirror) {
+        for (const co of mirror) {
+          if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
+          if (co.id && co.name) companyNames.set(String(co.id), co.name);
+        }
+        const sync = await readSyncState(airtable);
+        const matched = mirror.filter((c) => c.kpi).length;
+        /* The mirror cannot see the crawl that filled it, so the sync's own
+           record of what it managed is what the truncation warning now rests
+           on. Without this a short mirror reads as a complete account, which
+           is the fault this whole thread has been about. */
+        const short = sync?.kylas?.short || 0;
+        const body = { owner: "all", companies: mirror, owners: ownerList(),
+                       picklists: (await meta()).picklists,
+                       kpiSource: "airtable", kpiError: "", kpiMatched: matched,
+                       source: "airtable",
+                       syncedAt: sync?.at || "",
+                       truncated: short > 0, crawled: mirror.length,
+                       pages: 0,
+                       reportedTotal: sync?.kylas?.reportedTotal ?? null,
+                       short,
+                       hitOurCap: false, hitTheirCeiling: short > 0 };
+        companyCache.set("all", { at: Date.now(), body });
+        log(`companies — ${mirror.length} from Airtable, ${matched} with KPIs` +
+            (sync?.at ? `, synced ${sync.at}` : ", NO sync record") +
+            (short ? `, mirror is ${short} SHORT of Kylas' count` : ""));
+        return { ...body, companies: ownedBy(mirror), owner: all ? "all" : String(owner) };
+      }
     }
 
     const raw = await kylas.companies();

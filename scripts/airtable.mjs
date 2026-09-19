@@ -553,3 +553,60 @@ export async function readQueue(at, owner) {
     events: events.get(r.id) || [],
   }));
 }
+
+/* ── THE DASHBOARD'S COMPANY LIST, WITHOUT A JOIN ───────────────────────
+ * /companies used to crawl every company out of Kylas and then join each one
+ * to an Airtable row by Kylas company id. That join is where the funnel kept
+ * reading zero: the crawl stopped at a result window, so the ids it held and
+ * the ids Airtable held did not overlap, and the dashboard said "no company
+ * matched Airtable" without being able to say why.
+ *
+ * Read from here and there is nothing to join. The company row and its KPI
+ * formulas are the same record — a company cannot fail to match itself. The
+ * whole class of fault disappears rather than being diagnosed better.
+ */
+const COMPANY_READ_FIELDS = [
+  "Kylas Company ID", "Name", "Owner", "Kylas Owner ID", "Kylas Stage",
+  "Source of Data", "Batch", "Account Health", "Website", "Last Called At",
+  "Kylas Updated At",
+];
+
+export async function readCompanies(at) {
+  /* Two projections rather than one: KPI_FIELDS is checked against the schema
+     by test-kpi-fields, and the mirror columns are new. Asking for them
+     together would mean one missing name costs both halves. */
+  const [base, kpis] = await Promise.all([
+    listTolerant(at, "Companies", { fields: COMPANY_READ_FIELDS, pageSize: 100, maxPages: 200 }),
+    readCompanyKpis(at).catch(() => new Map()),
+  ]);
+  return base.map((r) => {
+    const f = r.fields || {};
+    const id = String(f["Kylas Company ID"] || "");
+    return {
+      id,
+      name: f.Name || (id ? `Company ${id}` : ""),
+      stage: f["Kylas Stage"] || "",
+      lastCalledAt: f["Last Called At"] || null,
+      accountHealth: f["Account Health"] || null,
+      source: f["Source of Data"] || "",
+      batch: f.Batch || null,
+      website: f.Website || null,
+      owner: f.Owner || "",
+      ownerId: String(f["Kylas Owner ID"] || ""),
+      /* Attached, not joined. */
+      kpi: kpis.get(id) || null,
+      _airtable: { updatedAt: f["Kylas Updated At"] || "" },
+    };
+  });
+}
+
+/* What the last sync managed, so the console can say how complete this mirror
+   is instead of implying it is the whole account. */
+export async function readSyncState(at) {
+  try {
+    const r = await at.find("Schema Migrations", `{Key} = 'last-sync'`);
+    if (!r) return null;
+    const note = JSON.parse(r.fields?.Note || "{}");
+    return { at: r.fields?.["Applied At"] || note.at || "", ...note };
+  } catch { return null; }
+}

@@ -34,7 +34,7 @@
  * "Kylas sync" so the period report counts it and can tell it apart from a
  * stage an associate set on a call.
  */
-import { createClient, toConsoleContact, idOf } from "./kylas.mjs";
+import { createClient, toConsoleContact, toConsoleCompany, idOf } from "./kylas.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG } from "./stages.mjs";
 
@@ -55,7 +55,9 @@ const at = createAirtable(PAT, BASE, { log: (m) => log("  airtable:", m) });
 
 /* The identity columns, and nothing else. See the header. */
 const KYLAS_OWNED = {
-  Companies: ["Kylas Company ID", "Name", "Owner", "Kylas Updated At"],
+  Companies: ["Kylas Company ID", "Name", "Owner", "Kylas Updated At",
+              "Kylas Owner ID", "Kylas Stage", "Source of Data", "Batch",
+              "Account Health", "Website", "Last Called At"],
   Contacts: ["Kylas Contact ID", "Name", "Designation", "LinkedIn", "Owner",
              "Current Stage", "Previous Stage", "KPI Rank", "KPI Rank At",
              "Company", "Kylas Updated At",
@@ -113,12 +115,24 @@ async function syncCompanies() {
         `Companies missing from it will not reach Airtable.`);
 
   const changed = all.filter((c) => !since || iso(c.updatedAt) > since);
-  const rows = (LIMIT ? changed.slice(0, LIMIT) : changed).map((c) => ({
-    "Kylas Company ID": String(c.id),
-    Name: c.name || c.companyName || `Company ${c.id}`,
-    Owner: c.metaData?.idNameStore?.ownerId?.[String(c.ownerId)] || "",
-    "Kylas Updated At": iso(c.updatedAt) || undefined,
-  })).map((f) => onlyOwned("Companies", f));
+  const rows = (LIMIT ? changed.slice(0, LIMIT) : changed).map((c) => {
+    /* The same mapper the console path uses, so the mirror cannot disagree
+       with a live read about what a company's stage or source IS. */
+    const m = toConsoleCompany(c);
+    return {
+      "Kylas Company ID": String(c.id),
+      Name: m.name || `Company ${c.id}`,
+      Owner: c.metaData?.idNameStore?.ownerId?.[String(c.ownerId)] || "",
+      "Kylas Owner ID": String(c.ownerId ?? ""),
+      "Kylas Stage": m.stage || "",
+      "Source of Data": m.source || "",
+      Batch: m.batch || "",
+      "Account Health": m.accountHealth || "",
+      Website: m.website || "",
+      "Last Called At": m.lastCalledAt || "",
+      "Kylas Updated At": iso(c.updatedAt) || undefined,
+    };
+  }).map((f) => onlyOwned("Companies", f));
 
   log(`  ${all.length} in Kylas · ${changed.length} changed · ${rows.length} to write`);
   if (!rows.length) return { seen: all.length, written: 0 };
@@ -267,9 +281,44 @@ const started = Date.now();
 log(APPLY ? "Kylas -> Airtable sync" : "Kylas -> Airtable sync — DRY RUN, nothing will be written");
 log(`base ${BASE}${FULL ? " · FULL" : ""}${LIMIT ? ` · limit ${LIMIT}` : ""}`);
 
+/* WHAT THE MIRROR IS WORTH, recorded in the mirror.
+   Once the dashboard reads companies from Airtable it can no longer see
+   whether the crawl that filled it was complete — and a short mirror with
+   nothing saying so is the same silent-incompleteness fault as the 10,000-row
+   list that claimed to be an account. The run writes down what it managed, in
+   the table that already exists for exactly this kind of note, and the proxy
+   passes it to the console. */
+async function recordRun(co, ct) {
+  const search = kylas.lastCompanySearch?.() || {};
+  const note = {
+    at: new Date().toISOString(),
+    companies: { seen: co.seen, written: co.written },
+    contacts: { seen: ct.seen, written: ct.written, moves: ct.moved },
+    kylas: {
+      reportedTotal: search.reportedTotal ?? null,
+      served: search.total ?? null,
+      short: search.short || 0,
+      truncated: !!search.truncated,
+    },
+    full: FULL, limit: LIMIT || null,
+  };
+  if (!APPLY) { log(`\nwould record: ${JSON.stringify(note.kylas)}`); return; }
+  try {
+    await at.upsert("Schema Migrations", "Key", {
+      Key: "last-sync", "Applied At": note.at, Note: JSON.stringify(note),
+    });
+  } catch (e) {
+    /* Not fatal: the data is synced either way. But say it, because the
+       dashboard will now be reporting a freshness it cannot verify. */
+    log(`! could not record the run (${e.message.slice(0, 80)}) — the dashboard ` +
+        `will not know how complete this mirror is`);
+  }
+}
+
 try {
   const co = await syncCompanies();
   const ct = await syncContacts();
+  await recordRun(co, ct);
   log(`\n${APPLY ? "done" : "dry run done"} in ${((Date.now() - started) / 1000).toFixed(1)}s — ` +
       `companies ${co.written}/${co.seen}, contacts ${ct.written}/${ct.seen}, moves ${ct.moved}`);
   if (!APPLY) log("Nothing was written. Re-run with --apply.");

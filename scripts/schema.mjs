@@ -48,6 +48,19 @@ export const TABLES = [
          changed since the newest value here. No local cursor file, so the cron
          can move between machines and a lost disk costs nothing. */
       { name: "Kylas Updated At", type: "dateTime", options: dateTime },
+      /* Added 2026-09-19 so the dashboard's company list can be read from here
+         rather than from a Kylas crawl that stops at a result window. These are
+         Kylas' own company fields — the Companies view filters on source, batch
+         and health, so a mirror without them is not a mirror.
+         "Kylas Stage" and not "Stage": KPI Stage below is DERIVED from the
+         ladder and means something else entirely. */
+      { name: "Kylas Owner ID", type: "singleLineText" },
+      { name: "Kylas Stage", type: "singleLineText" },
+      { name: "Source of Data", type: "singleLineText" },
+      { name: "Batch", type: "singleLineText" },
+      { name: "Account Health", type: "singleLineText" },
+      { name: "Website", type: "singleLineText" },
+      { name: "Last Called At", type: "singleLineText" },
     ],
   },
   {
