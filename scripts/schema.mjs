@@ -21,6 +21,14 @@ import { STAGES, LADDER, EXIT_STAGES, MILESTONE } from "./stages.mjs";
    console offers and the base has never heard of is a rejected write. */
 import { RCA_REASON_CODES, RCA_GATE_KEYS } from "./rca.mjs";
 
+/* ONE list, used by the contact's own field and by the transition that records
+   which meeting it was. These are singleSelect choices, so a value the column
+   has never seen is a rejected write, not a blank cell — two copies of this
+   list that drift by one word cost a whole save. The console holds a third
+   copy in MODE_OF_MEETING (console.js); it is hand-written and not generated
+   from here, so changing these means changing that too. */
+const MEETING_MODES = ["In Person", "Virtual", "Calls", "Text"];
+
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(
     (acc, [n, label]) => `IF({${rankField}} = ${n}, "${label}", ${acc})`,
@@ -107,7 +115,7 @@ export const TABLES = [
       { name: "Current Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Previous Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Vendor Info", type: "singleSelect", options: sel("Internal", "Vendor Exists", "First Event", "No Info") },
-      { name: "Mode of Meeting", type: "singleSelect", options: sel("In Person", "Virtual", "Calls", "Text") },
+      { name: "Mode of Meeting", type: "singleSelect", options: sel(...MEETING_MODES) },
       { name: "Service Offering", type: "checkbox", options: check },
       { name: "Ever Picked", type: "checkbox", options: check,
         description: "Set true the first time a non-CNC stage is seen, never unset. This is what makes Phone Picked monotonic." },
@@ -181,6 +189,18 @@ export const TABLES = [
          distinguishable from one an associate set on a call. */
       { name: "Source", type: "singleSelect",
         options: sel("Console", "Kylas webhook", "Backfill", "Kylas sync") },
+      /* HOW THE MEETING HAPPENED, stamped at the moment the rung was crossed.
+         Ayush, 2026-09-19: mode is captured on the contact and rolls up to the
+         company. The contact carries only the LAST mode entered, though, and
+         the funnel charts discovery calls and SQL meetings separately — one
+         field per contact cannot say which meeting a mode belonged to. Stamped
+         here it is per-meeting and dated for free, so "discovery calls by
+         mode" is the transitions into the discovery floor and "SQL meetings by
+         mode" the transitions into the booked floor.
+         Blank is normal and means nobody logged one: a move detected by
+         sync-kylas.mjs has no mode, because Kylas does not carry it. */
+      { name: "Mode", type: "singleSelect", options: sel(...MEETING_MODES),
+        description: "Mode of Meeting as it stood when this stage was set. Blank for a move Kylas reported." },
     ],
   },
   {

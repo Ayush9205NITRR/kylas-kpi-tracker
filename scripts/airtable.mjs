@@ -378,6 +378,10 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       "Changed At": at_,
       Owner: c.owner || "",
       Source: "Console",
+      /* The mode as it stands on this save, frozen onto the move. The contact
+         keeps only the latest one, so without this the discovery call and the
+         SQL meeting are indistinguishable the moment a second mode is entered. */
+      Mode: c.modeOfMeeting || "",
       Contact: [contactRec.id],
     });
     wrote.push(`transition ${STAGE_LABEL[from] || from || "new"} -> ${STAGE_LABEL[c.stage] || c.stage}`);

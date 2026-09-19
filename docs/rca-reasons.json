@@ -1,7 +1,6 @@
 {
   "_": "DRAFT. These reasons are placeholders written to get the mechanism working — Ayush said he would rewrite them. Edit ONLY here, then run: node scripts/gen-rca.mjs",
-  "note": "A gate is a step in the funnel that an account can sit at without moving. `from` is the rung it has reached, `to` is what it has not done, `days` is how long it may sit there before somebody owes an explanation. `code` is stored in Airtable and never shown; `label` is what the associate picks. Changing a label is free. Changing a CODE orphans every answer already recorded under the old one, so add a new code instead and retire the old.",
-
+  "note": "A gate is a step in the funnel that an account can sit at without moving. `from` is the rung it has reached, `to` is what it has not done, `days` is how long it may sit there before somebody owes an explanation. `code` is stored in Airtable and never shown; `label` is what the associate picks. Changing a label is free. Changing a CODE orphans every answer already recorded under the old one, so add a new code instead and retire the old. doneNoSql added 2026-09-19 for the prototype's second RCA chart, \"After the SQL meeting\". 14 days is a starting number, not a measured one — it is shorter than the two gates before it because the funnel narrows: an account that has had the meeting is the one worth chasing soonest.",
   "gates": [
     {
       "key": "rightNoDiscovery",
@@ -11,15 +10,42 @@
       "title": "Right POC, no discovery call",
       "ask": "You reached the right person here a month ago and the discovery call has not happened. What is holding it up?",
       "reasons": [
-        { "code": "NO_SLOT", "label": "Cannot get a slot in their diary" },
-        { "code": "GHOSTING", "label": "Stopped replying after the first call" },
-        { "code": "NO_EVENT_PLANNED", "label": "No event planned yet — too early" },
-        { "code": "BUDGET_NOT_SIGNED_OFF", "label": "Budget not signed off" },
-        { "code": "NEEDS_SENIOR_BUY_IN", "label": "Waiting on somebody more senior" },
-        { "code": "INCUMBENT_VENDOR", "label": "Happy with their current vendor" },
-        { "code": "WRONG_FIT", "label": "Not a fit for what we do" },
-        { "code": "MY_FOLLOW_UP_SLIPPED", "label": "My own follow-up slipped" },
-        { "code": "OTHER", "label": "Something else" }
+        {
+          "code": "NO_SLOT",
+          "label": "Cannot get a slot in their diary"
+        },
+        {
+          "code": "GHOSTING",
+          "label": "Stopped replying after the first call"
+        },
+        {
+          "code": "NO_EVENT_PLANNED",
+          "label": "No event planned yet — too early"
+        },
+        {
+          "code": "BUDGET_NOT_SIGNED_OFF",
+          "label": "Budget not signed off"
+        },
+        {
+          "code": "NEEDS_SENIOR_BUY_IN",
+          "label": "Waiting on somebody more senior"
+        },
+        {
+          "code": "INCUMBENT_VENDOR",
+          "label": "Happy with their current vendor"
+        },
+        {
+          "code": "WRONG_FIT",
+          "label": "Not a fit for what we do"
+        },
+        {
+          "code": "MY_FOLLOW_UP_SLIPPED",
+          "label": "My own follow-up slipped"
+        },
+        {
+          "code": "OTHER",
+          "label": "Something else"
+        }
       ]
     },
     {
@@ -30,15 +56,96 @@
       "title": "Discovery done, no SQL meeting booked",
       "ask": "The discovery call happened and nothing is in the diary since. Why has it not converted?",
       "reasons": [
-        { "code": "AWAITING_CLIENT_INPUTS", "label": "Waiting on inputs they promised" },
-        { "code": "DATES_NOT_FIXED", "label": "Their dates are not fixed yet" },
-        { "code": "BUDGET_TOO_LOW", "label": "Budget too low for the ask" },
-        { "code": "COMPARING_VENDORS", "label": "Comparing us against other vendors" },
-        { "code": "DECISION_DEFERRED", "label": "Decision pushed to a later quarter" },
-        { "code": "LOST_INTERNAL_CHAMPION", "label": "Lost the person championing it" },
-        { "code": "PROPOSAL_PENDING_OUR_SIDE", "label": "Proposal still pending at our end" },
-        { "code": "MY_FOLLOW_UP_SLIPPED", "label": "My own follow-up slipped" },
-        { "code": "OTHER", "label": "Something else" }
+        {
+          "code": "AWAITING_CLIENT_INPUTS",
+          "label": "Waiting on inputs they promised"
+        },
+        {
+          "code": "DATES_NOT_FIXED",
+          "label": "Their dates are not fixed yet"
+        },
+        {
+          "code": "BUDGET_TOO_LOW",
+          "label": "Budget too low for the ask"
+        },
+        {
+          "code": "COMPARING_VENDORS",
+          "label": "Comparing us against other vendors"
+        },
+        {
+          "code": "DECISION_DEFERRED",
+          "label": "Decision pushed to a later quarter"
+        },
+        {
+          "code": "LOST_INTERNAL_CHAMPION",
+          "label": "Lost the person championing it"
+        },
+        {
+          "code": "PROPOSAL_PENDING_OUR_SIDE",
+          "label": "Proposal still pending at our end"
+        },
+        {
+          "code": "MY_FOLLOW_UP_SLIPPED",
+          "label": "My own follow-up slipped"
+        },
+        {
+          "code": "OTHER",
+          "label": "Something else"
+        }
+      ]
+    },
+    {
+      "key": "doneNoSql",
+      "from": "done",
+      "to": "sql",
+      "days": 14,
+      "title": "SQL meeting held, still not qualified",
+      "ask": "The Active Requirement call happened and the account has not qualified since. What is standing in the way?",
+      "reasons": [
+        {
+          "code": "AWAITING_CLIENT_INPUTS",
+          "label": "Waiting on inputs they promised"
+        },
+        {
+          "code": "SCOPE_MISMATCH",
+          "label": "Wants something we do not do"
+        },
+        {
+          "code": "BUDGET_TOO_LOW",
+          "label": "Budget too low for the ask"
+        },
+        {
+          "code": "LOST_TO_COMPETITOR",
+          "label": "Went with another agency"
+        },
+        {
+          "code": "EVENT_POSTPONED",
+          "label": "Event postponed or cancelled"
+        },
+        {
+          "code": "DECISION_DEFERRED",
+          "label": "Decision pushed to a later quarter"
+        },
+        {
+          "code": "NO_DECISION_MAKER",
+          "label": "The decision maker was not in the room"
+        },
+        {
+          "code": "PROPOSAL_PENDING_OUR_SIDE",
+          "label": "Proposal still pending at our end"
+        },
+        {
+          "code": "WENT_SILENT",
+          "label": "Stopped replying after the meeting"
+        },
+        {
+          "code": "MY_FOLLOW_UP_SLIPPED",
+          "label": "My own follow-up slipped"
+        },
+        {
+          "code": "OTHER",
+          "label": "Something else"
+        }
       ]
     }
   ]

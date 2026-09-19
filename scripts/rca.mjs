@@ -37,6 +37,25 @@ export const RCA_GATES = [
       { code: "OTHER", label: "Something else" },
     ],
   },
+  {
+    key: "doneNoSql",
+    from: "done", to: "sql", days: 14,
+    title: "SQL meeting held, still not qualified",
+    ask: "The Active Requirement call happened and the account has not qualified since. What is standing in the way?",
+    reasons: [
+      { code: "AWAITING_CLIENT_INPUTS", label: "Waiting on inputs they promised" },
+      { code: "SCOPE_MISMATCH", label: "Wants something we do not do" },
+      { code: "BUDGET_TOO_LOW", label: "Budget too low for the ask" },
+      { code: "LOST_TO_COMPETITOR", label: "Went with another agency" },
+      { code: "EVENT_POSTPONED", label: "Event postponed or cancelled" },
+      { code: "DECISION_DEFERRED", label: "Decision pushed to a later quarter" },
+      { code: "NO_DECISION_MAKER", label: "The decision maker was not in the room" },
+      { code: "PROPOSAL_PENDING_OUR_SIDE", label: "Proposal still pending at our end" },
+      { code: "WENT_SILENT", label: "Stopped replying after the meeting" },
+      { code: "MY_FOLLOW_UP_SLIPPED", label: "My own follow-up slipped" },
+      { code: "OTHER", label: "Something else" },
+    ],
+  },
 ];
 
 export const RCA_LABEL = {
@@ -56,13 +75,18 @@ export const RCA_LABEL = {
   DECISION_DEFERRED:             "Decision pushed to a later quarter",
   LOST_INTERNAL_CHAMPION:        "Lost the person championing it",
   PROPOSAL_PENDING_OUR_SIDE:     "Proposal still pending at our end",
+  SCOPE_MISMATCH:                "Wants something we do not do",
+  LOST_TO_COMPETITOR:            "Went with another agency",
+  EVENT_POSTPONED:               "Event postponed or cancelled",
+  NO_DECISION_MAKER:             "The decision maker was not in the room",
+  WENT_SILENT:                   "Stopped replying after the meeting",
 };
 
 export const RCA_GATE = Object.fromEntries(RCA_GATES.map((g) => [g.key, g]));
 
 /* What the Airtable Reason column offers. */
-export const RCA_REASON_CODES = ["NO_SLOT","GHOSTING","NO_EVENT_PLANNED","BUDGET_NOT_SIGNED_OFF","NEEDS_SENIOR_BUY_IN","INCUMBENT_VENDOR","WRONG_FIT","MY_FOLLOW_UP_SLIPPED","OTHER","AWAITING_CLIENT_INPUTS","DATES_NOT_FIXED","BUDGET_TOO_LOW","COMPARING_VENDORS","DECISION_DEFERRED","LOST_INTERNAL_CHAMPION","PROPOSAL_PENDING_OUR_SIDE"];
-export const RCA_GATE_KEYS = ["rightNoDiscovery","discoveryNoBooking"];
+export const RCA_REASON_CODES = ["NO_SLOT","GHOSTING","NO_EVENT_PLANNED","BUDGET_NOT_SIGNED_OFF","NEEDS_SENIOR_BUY_IN","INCUMBENT_VENDOR","WRONG_FIT","MY_FOLLOW_UP_SLIPPED","OTHER","AWAITING_CLIENT_INPUTS","DATES_NOT_FIXED","BUDGET_TOO_LOW","COMPARING_VENDORS","DECISION_DEFERRED","LOST_INTERNAL_CHAMPION","PROPOSAL_PENDING_OUR_SIDE","SCOPE_MISMATCH","LOST_TO_COMPETITOR","EVENT_POSTPONED","NO_DECISION_MAKER","WENT_SILENT"];
+export const RCA_GATE_KEYS = ["rightNoDiscovery","discoveryNoBooking","doneNoSql"];
 
 /* ── WHO OWES AN EXPLANATION ──────────────────────────────────────────
    One definition, used by the proxy to build the list and by nothing else, so
