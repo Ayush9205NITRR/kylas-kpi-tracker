@@ -207,6 +207,25 @@ export const TABLES = [
      So the base records its own migrations, and migrate-ladder.mjs refuses to
      repeat one. Three fields; it earns them. */
   {
+    name: "Call Rollup",
+    description: "One row per day per owner per outcome, replacing the raw Call Log rows for days past the retention window. Written by rollup-calls.mjs. The period report reads this for old days and the raw log for recent ones.",
+    fields: [
+      { name: "Key", type: "singleLineText",
+        description: "day|owner|outcome. The upsert key, so re-running a day overwrites rather than adds." },
+      /* TEXT, not a date field. An Airtable date carries a timezone and this is
+         a calendar day that has already been decided — storing it as a date
+         invites the day to shift by one under a different viewer's zone, which
+         would move calls between weeks and quietly change a report that is
+         supposed to be frozen. */
+      { name: "Day", type: "singleLineText" },
+      { name: "Owner", type: "singleLineText" },
+      { name: "Outcome", type: "singleLineText" },
+      { name: "Calls", type: "number", options: num },
+      { name: "Talk Seconds", type: "number", options: num },
+      { name: "Rolled At", type: "dateTime", options: dateTime },
+    ],
+  },
+  {
     name: "Schema Migrations",
     description: "One row per migration applied to this base. Written by the migration scripts, read by them to refuse a second run. Do not delete a row unless you intend the migration to run again.",
     fields: [

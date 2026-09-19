@@ -127,10 +127,15 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
 
   for (const c of calls) {
     if (!inWindow(c.at)) continue;
-    bump(key(c.at), c.owner, "calls");
+    /* `n` is how many calls this entry STANDS FOR. One raw Call Log row is one
+       call; a rolled-up row is a whole day's worth for one owner and outcome,
+       and expanding it back into hundreds of objects just to count them again
+       would make a year of history a million allocations. */
+    const n = Number(c.n) > 0 ? Number(c.n) : 1;
+    bump(key(c.at), c.owner, "calls", n);
     /* "Connected" is any outcome that is not a no-answer. A dial that nobody
        picked up is work, but it is not a conversation. */
-    if (c.outcome && c.outcome !== "No answer") bump(key(c.at), c.owner, "connects");
+    if (c.outcome && c.outcome !== "No answer") bump(key(c.at), c.owner, "connects", n);
   }
 
   /* FIRST arrival only, per company per milestone. A company that moves from
@@ -167,6 +172,23 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
 
   return { period, from: start, to: end, periods, totals,
            byOwner: [...owners.values()].sort((a, b) => b.calls - a.calls) };
+}
+
+/* ── raw rows and rolled-up days, together ──────────────────────────
+   Call Log rows are deleted once they are rolled up, because at 1,200 calls a
+   day they fill an Airtable base in six weeks. The report therefore reads two
+   tables, and for a short moment during a rollup a day can exist in BOTH: the
+   aggregate is written first and the raw rows deleted after, so a crash in
+   between leaves a duplicate. Counting both would double that day.
+
+   RAW WINS, always. It is the finer record, it is the one the rollup is
+   derived from, and preferring it means an interrupted rollup reads correctly
+   and simply re-runs. Preferring the aggregate would mean the same crash
+   silently dropped whatever the raw rows held beyond it. */
+export function mergeCalls(raw = [], rolled = []) {
+  const rawDays = new Set(raw.map((c) => dayKey(c.at)).filter(Boolean));
+  const kept = rolled.filter((c) => !rawDays.has(dayKey(c.at)));
+  return [...raw, ...kept];
 }
 
 /* ── the part that is meant to motivate ────────────────────────────── */

@@ -21,7 +21,7 @@ import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState } from "./airtable.mjs";
-import { report, withDeltas } from "./report.mjs";
+import { report, withDeltas, mergeCalls } from "./report.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
    The proxy is a long-lived process an associate starts by hand, and the
@@ -674,8 +674,16 @@ const routes = {
     const owner = askedId === "all" ? "all"
       : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await kylas.me()) || "");
 
-    const [callRows, transRows, contactRows] = await Promise.all([
+    const [callRows, rolledRows, transRows, contactRows] = await Promise.all([
       airtable.listAll("Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
+      /* Days past the retention window live in Call Rollup, one row per day per
+         owner per outcome, because the raw log fills an Airtable base in about
+         six weeks at this call volume. Missing this read would make every month
+         older than the window read zero — history silently deleted rather than
+         compacted. Tolerated when absent so a base without the table still
+         reports, just without the old days. */
+      airtable.listAll("Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
+        .catch(() => []),
       airtable.listAll("Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
       /* Right POC and discovery are DATA becoming true, not a stage move, so
          they have no transition row. The closest honest timestamp is when the
@@ -684,8 +692,15 @@ const routes = {
         fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company"] }),
     ]);
 
-    const calls = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
-                                         outcome: r.fields.Outcome }));
+    const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
+                                       outcome: r.fields.Outcome }));
+    const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
+                                            outcome: r.fields.Outcome,
+                                            n: Number(r.fields.Calls || 0) }));
+    /* A day can briefly exist in both tables — the rollup writes before it
+       deletes. mergeCalls prefers the raw rows for any such day, so an
+       interrupted rollup reads correctly instead of double. */
+    const calls = mergeCalls(raw, rolled);
     const transitions = transRows.map((r) => ({ at: r.fields["Changed At"], owner: r.fields.Owner,
                                                 to: r.fields["To Stage"],
                                                 company: (r.fields.Contact || [])[0] || "" }));

@@ -3,7 +3,7 @@
  *
  *   node scripts/test-report.mjs
  */
-import { report, withDeltas, weekKey, monthKey, periodsBetween, periodLabel } from "./report.mjs";
+import { report, withDeltas, weekKey, monthKey, periodsBetween, periodLabel, mergeCalls } from "./report.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -133,6 +133,52 @@ console.log("\nan explicit window clips the data");
   /* The 14th is outside, so its right-POC does not appear — but it still
      consumed the once-only slot, so the 16th must not claim it either. */
   eq("an earlier first-arrival is not re-counted inside the window", r.totals.right, 0);
+}
+
+console.log("\nrolled-up days count the same as raw ones");
+{
+  /* The same four calls, once as raw rows and once as a single rolled row. */
+  const rawDay = [
+    { at: "2026-09-14T09:00:00Z", owner: "Ayush", outcome: "No answer" },
+    { at: "2026-09-14T09:05:00Z", owner: "Ayush", outcome: "No answer" },
+    { at: "2026-09-14T10:00:00Z", owner: "Ayush", outcome: "Right POC" },
+    { at: "2026-09-14T11:00:00Z", owner: "Ayush", outcome: "Right POC" },
+  ];
+  const rolled = [
+    { at: "2026-09-14", owner: "Ayush", outcome: "No answer", n: 2 },
+    { at: "2026-09-14", owner: "Ayush", outcome: "Right POC", n: 2 },
+  ];
+  const a = report("day", { calls: rawDay });
+  const b = report("day", { calls: rolled });
+  eq("calls match", b.totals.calls, a.totals.calls);
+  eq("connects match", b.totals.connects, a.totals.connects);
+  eq("and are the real numbers", [b.totals.calls, b.totals.connects], [4, 2]);
+  /* n is a COUNT, not a flag: a missing or silly one must not erase the call. */
+  eq("no n means one", report("day", { calls: [{ at: "2026-09-14", owner: "A", outcome: "x" }] }).totals.calls, 1);
+  eq("zero n means one", report("day", { calls: [{ at: "2026-09-14", owner: "A", outcome: "x", n: 0 }] }).totals.calls, 1);
+}
+
+console.log("\na day held by both sources is counted once, from the raw rows");
+{
+  const raw = [
+    { at: "2026-09-14T09:00:00Z", owner: "Ayush", outcome: "No answer" },
+    { at: "2026-09-14T10:00:00Z", owner: "Ayush", outcome: "Right POC" },
+  ];
+  /* What a crashed rollup leaves behind: the aggregate written, the raw rows
+     not yet deleted. Both describe the same day. */
+  const rolled = [
+    { at: "2026-09-14", owner: "Ayush", outcome: "No answer", n: 1 },
+    { at: "2026-09-14", owner: "Ayush", outcome: "Right POC", n: 1 },
+    /* an older day that only the rollup has */
+    { at: "2026-09-10", owner: "Ayush", outcome: "No answer", n: 7 },
+  ];
+  const merged = mergeCalls(raw, rolled);
+  const r = report("day", { calls: merged });
+  eq("the duplicated day is not doubled", r.periods.find((p) => p.key === "2026-09-14").calls, 2);
+  eq("the rolled-only day still counts", r.periods.find((p) => p.key === "2026-09-10").calls, 7);
+  eq("totals", r.totals.calls, 9);
+  eq("nothing raw is ever dropped", mergeCalls(raw, []).length, 2);
+  eq("no raw at all means the rollup stands", mergeCalls([], rolled).length, 3);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
