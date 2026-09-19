@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Privacy policy — Enout BD Call Console</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Privacy policy for the Enout BD Call Console Chrome extension.">
+<!-- Self-contained on purpose. A privacy policy that 404s because a CDN moved,
+     or that a reviewer opens on a slow connection and gives up on, is a
+     rejected submission. No fonts, no scripts, no external anything. -->
+<style>
+:root{
+  --bg:#F5F5F8; --surface:#FFFFFF; --ink:#1C1B2E; --muted:#6B6A80; --faint:#9C9BAF;
+  --line:#E4E3EC; --accent:#4338CA;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#12111B; --surface:#1B1A27; --ink:#ECEBF5; --muted:#A3A2B8; --faint:#77768C;
+  --line:#2D2B3E; --accent:#A7A2F7;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);padding:0 18px 72px;
+  font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;padding:40px 44px;margin-top:40px}
+h1{font-size:28px;line-height:1.25;letter-spacing:-.02em;margin:0 0 4px}
+h2{font-size:19px;letter-spacing:-.01em;margin:34px 0 10px}
+.up{color:var(--faint);font-size:14px;margin:0 0 28px}
+p,li{color:var(--ink)}
+ul{padding-left:22px}
+li{margin:5px 0}
+a{color:var(--accent)}
+strong{font-weight:600}
+.lede{font-size:17px;color:var(--muted)}
+footer{max-width:46rem;margin:22px auto 0;color:var(--faint);font-size:13px;text-align:center}
+@media(max-width:560px){main{padding:26px 22px;margin-top:22px}h1{font-size:23px}}
+</style>
+
+<main>
+<h1>Privacy policy — Enout BD Call Console</h1>
+<p class="up">Last updated 19 September 2026</p>
+
+<p class="lede">This is the privacy policy for the <strong>Enout BD Call Console</strong> Chrome
+extension, published by Enout for use by its own business development team.</p>
+
+<h2>The short version</h2>
+<p>The extension sends nothing to us. It has no analytics, no telemetry, no crash reporting and no
+account system. Its only network destination is a helper process running on the user's own
+computer, at <code>http://127.0.0.1</code>.</p>
+
+<h2>What the extension handles</h2>
+<p>While an associate is logging a call, the console holds the details of the CRM contact they are
+calling. That includes <strong>personally identifiable information</strong> belonging to the
+prospect:</p>
+<ul>
+  <li>name, salutation and job title</li>
+  <li>phone numbers and email addresses</li>
+  <li>the company they work for, and its LinkedIn URL</li>
+  <li>notes typed during the call, the call's outcome and its duration</li>
+</ul>
+<p>This data originates in the organisation's own Kylas CRM. The extension does not obtain it from
+any other source and does not enrich it from anywhere.</p>
+<p>It also reads two things from the Kylas page it is open on: the <strong>URL path</strong>, to
+know which CRM record is showing, and the <strong>text of the record's heading</strong>, to label
+that record in the console. It reads no other page content, and it reads nothing at all on any
+site other than <code>app.kylas.io</code>.</p>
+
+<h2>What it does not handle</h2>
+<p>No health information. No financial or payment information. No passwords or credentials — the
+organisation's Kylas API key and Airtable token are held by the local helper process and are never
+placed in the browser. No location. No personal communications. No browsing history: the extension
+is inert on every site except the CRM, and it does not record which pages a user visits.</p>
+
+<h2>Where the data goes</h2>
+<p>One place: a helper process the organisation runs on the associate's own machine, or on a
+machine inside its own network. From there it is written to the organisation's own
+<strong>Kylas CRM</strong> and its own <strong>Airtable</strong> base, which are the systems the
+data came from and belongs to.</p>
+<p>No data is transmitted to Enout as the extension's publisher, to any server we operate, or to
+any third party. There is no advertising, no profiling and no resale of any kind.</p>
+
+<h2>What is stored in the browser</h2>
+<p><code>chrome.storage</code> holds the associate's working state: the contacts currently being
+worked, notes typed but not yet saved, a local log of calls made, and preferences such as the
+chosen grouping and density. This exists so a refresh or a closed tab does not lose notes taken
+during a live call, and so that saves made while the helper is unreachable can be queued and sent
+when it returns.</p>
+<p>This data stays on the associate's own device. It can be cleared at any time by removing the
+extension, or from the console's own Data panel.</p>
+
+<h2>Retention</h2>
+<p>The extension keeps its browser-side copy only as long as the associate is working those
+records; it is replaced as the queue moves on and is deleted with the extension. Retention of the
+CRM data itself is governed by the organisation's own Kylas and Airtable retention settings, not by
+this extension.</p>
+
+<h2>Who this is for</h2>
+<p>The extension is an internal tool for Enout's business development team. It is not a consumer
+product and is not intended for use outside the organisation.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: <a href="mailto:ayush@enout.in">ayush@enout.in</a></p>
+</main>
+<footer>Enout BD Call Console</footer>
+</html>
