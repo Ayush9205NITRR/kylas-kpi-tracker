@@ -154,6 +154,7 @@ export const MILESTONE = {
   sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },
   sqlMeetingDone:      { floor: 21, stage: "CLOSING_LOOPS_LOW_VALUE", label: "SQL Meeting Done" },
   sql:                 { floor: 23, stage: "SQL_SALES_QUALIFIED_LEAD", label: "SQL" },
+  engaged:             { floor: 13, stage: "ACTIVATION", label: "Engaged" },
 };
 
 /* Stages removed from the pipeline, and where their records go. The live base

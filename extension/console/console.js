@@ -1026,7 +1026,16 @@ function missing(){
   /* Dedupe by label: two rules can want the same field — mode of meeting is
      required both at a meeting stage and once a row is complete — and listing
      it twice reads as a bug to the person trying to save. */
-  const need=(cond,lbl,anc)=>{ if(cond&&!m.some(([l])=>l===lbl))m.push([lbl,anc]); };
+  /* Deduped by ANCHOR as well as label. Two rules can want the same BOX under
+     different names — at Activation the engaged rule says "A day to call back"
+     and the meeting rule says "Meeting date", both pointing at f-next — and
+     "Still needed: A day to call back, Offsite timeline, Meeting date" reads as
+     three jobs when it is two. First rule to claim a field names it. */
+  const need=(cond,lbl,anc)=>{
+    if(!cond)return;
+    if(m.some(([l,a])=>l===lbl||a===anc))return;
+    m.push([lbl,anc]);
+  };
 
   need(!a.pocName.trim(),"Name","f-poc");
   need(!a.phones.some(p=>p.value.trim()),"Phone number","f-poc");
@@ -1083,6 +1092,23 @@ function missing(){
   if(MEETING_STAGES.includes(a.stage)){
     need(!a.nextCallDate,"Meeting date","f-next");
     need(!a.modeOfMeeting,"Mode of meeting","f-mm");
+  }
+
+  /* ONCE THE ACCOUNT IS LIVE, THE FOLLOW-UP IS NOT OPTIONAL.
+     Ayush, 2026-09-19: "whenever someone selects a stage at or above
+     Activation, Next Call Date must be filled... otherwise we cannot properly
+     fix the next follow-up." The same for the offsite timeline — those are the
+     two things that decide when this account is worth touching again, and an
+     account at MQL with neither is one nobody will pick back up.
+
+     EXIT STAGES ARE EXCLUDED even though they sit above the floor. Closing
+     Loops - Low Value is rung 21 and Not Interested is a dead end; demanding a
+     call-back date to record that somebody said no would make the gate
+     something to be worked around, and a gate people work around stops
+     collecting anything. */
+  if (rung(a) >= MILESTONE.engaged.floor && !EXIT_STAGES.includes(a.stage)) {
+    need(!a.nextCallDate, "A day to call back", "f-next");
+    need(!a.offsiteTimeline, "Offsite timeline", "f-ot");
   }
   return m;
 }

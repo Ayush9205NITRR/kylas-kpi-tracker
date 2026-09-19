@@ -416,9 +416,19 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .chip .k{font-variant-numeric:tabular-nums;color:var(--text3)}
 .chip[aria-pressed="true"] .k{color:var(--onBlue);opacity:.8}
 .chip .sw{width:9px;height:9px;border-radius:2px;flex:none}
-.kpi{display:inline-block;font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);
-  border-radius:11px;padding:2px 9px;white-space:nowrap}
-.kpi.r3,.kpi.r4,.kpi.r5{color:#fff}
+/* THE NAME CARRIES IT, NOT THE FILL. Ayush, 2026-09-19: "show the KPI
+   status/name, not colour coding, as colour coding is not feasible." Six filled
+   chips down a column is a colour-matching exercise against a legend nobody has
+   open; the words are the answer. The rung shade survives as a dot, so the
+   ladder, the chips and the board still agree at a glance, but nothing depends
+   on reading it. */
+.kpi{display:inline-flex;align-items:center;gap:6px;font-style:normal;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--text2);white-space:nowrap;background:none;padding:0}
+.kpi::before{content:"";width:7px;height:7px;border-radius:50%;flex:none;background:currentColor}
+.kpi.r0::before{background:var(--r0)} .kpi.r1::before{background:var(--r1)}
+.kpi.r2::before{background:var(--r2)} .kpi.r3::before{background:var(--r3)}
+.kpi.r4::before{background:var(--r4)} .kpi.r5::before{background:var(--r5)}
+.kpi.rn::before{background:var(--rn)}
 .kpi.rn{color:var(--text3)}
 .acctable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   overflow:clip;margin-top:12px}

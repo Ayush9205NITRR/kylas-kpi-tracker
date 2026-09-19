@@ -155,6 +155,11 @@
     "sql": {
       "floor": "SQL_SALES_QUALIFIED_LEAD",
       "label": "SQL"
+    },
+    "engaged": {
+      "floor": "ACTIVATION",
+      "label": "Engaged",
+      "note": "Activation and above. From here on the account is a live conversation, so a next call date and an offsite timeline stop being optional - Ayush, 2026-09-19: 'whenever someone selects a stage at or above Activation, Next Call Date must be filled... otherwise we cannot properly fix the next follow-up'. Exit stages are excluded at the call site: Closing Loops and Not Interested sit above this floor and nobody is calling them back."
     }
   },
   "cncLadder": [

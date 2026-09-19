@@ -1715,7 +1715,9 @@
     try { GROUP_BY = (await Store.getSetting("companiesGroupBy")) || "state"; }
     catch { /* default */ }
     if (!AXES.some((a) => a.key === GROUP_BY)) GROUP_BY = "state";
-    if (!["accounts", "board", "table"].includes(VIEW_MODE)) VIEW_MODE = "accounts";
+    /* One view. A stored preference from before the board was removed would
+       otherwise render a mode with no control to leave it by. */
+    VIEW_MODE = "accounts";
   }
 
   /* The company's stage: its POCs' best rung where contacts are loaded, its own
@@ -2063,12 +2065,13 @@
         ${VIEW_MODE === "board" ? `<label>Group by<select id="fGroup">
           ${AXES.map((a) => `<option value="${a.key}"${GROUP_BY === a.key ? " selected" : ""}>${esc(a.label)}</option>`).join("")}
         </select></label>` : ""}
-        <span class="vseg" id="fMode">${[
-          ["accounts", "Accounts", "Stage families, then filter down"],
-          ["board", "Board", "Columns by state, stage or source"],
-          ["table", "Table", "Every column, sortable"],
-        ].map(([k, l, t]) => `<button type="button" data-mode="${k}" aria-pressed="${VIEW_MODE === k}"
-          title="${esc(t)}">${esc(l)}</button>`).join("")}</span>
+        ${/* BOARD AND TABLE ARE GONE — Ayush, 2026-09-19: "we can remove the Board
+             and Table views. Instead, we can keep it as Accounts." They were
+             three answers to one question, and the explorer does what both did:
+             the families are the board's columns with counts, and the table is
+             under them with every filter the grid had. boardHTML, laneHTML and
+             the COLS table are still in this file and unreferenced, so either
+             comes back as one line if it turns out to be missed. */""}
         ${VIEW_MODE === "board" ? "" : `<button class="gbtn" id="fDensity" type="button"
           title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
         >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>`}
