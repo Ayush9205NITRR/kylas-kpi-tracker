@@ -783,10 +783,20 @@ function renderBasic(){
   const ncd=el("div","f");ncd.id="f-next";
   ncd.innerHTML=`<label>Call them back on${isReq(a,"f-next")?' <span class="req">*</span>':""}</label>`;
   const ncr=el("div","mrow");
+  /* validate() ON INPUT, like input() and select() do. These two were
+     hand-rolled and updated the record without re-running the gate, and
+     nextCallDate is REQUIRED by two rules — so after booking a meeting and
+     typing the date, the footer still read "Still needed: Meeting date" and
+     Save stayed disabled. The associate is told to enter the date they have
+     just entered, on the most valuable call of the day.
+     It survived testing because the Tomorrow / +3 days / Next week chips below
+     call render(), so anyone using those never saw it. validate() and not
+     render(): re-rendering the form on each keystroke would take the focus out
+     of the field being typed into. */
   const d1=el("input","in dt");d1.type="date";d1.value=a.nextCallDate;d1.setAttribute("aria-label","Next call date");
-  d1.oninput=e=>a.nextCallDate=e.target.value;ncr.appendChild(d1);
+  d1.oninput=e=>{a.nextCallDate=e.target.value;validate();};ncr.appendChild(d1);
   const t1=el("input","in dt");t1.type="time";t1.value=a.nextCallTime;t1.setAttribute("aria-label","Next call time");
-  t1.oninput=e=>a.nextCallTime=e.target.value;ncr.appendChild(t1);
+  t1.oninput=e=>{a.nextCallTime=e.target.value;validate();};ncr.appendChild(t1);
   ncd.appendChild(ncr);
   const qc=el("div","qchips");
   [["Tomorrow",1],["+3 days",3],["Next week",7]].forEach(([l,n])=>{

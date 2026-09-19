@@ -20,7 +20,7 @@ import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
-         readCompanies, readSyncState } from "./airtable.mjs";
+         readCompanies, readSyncState, listTolerant } from "./airtable.mjs";
 import { report, withDeltas, mergeCalls } from "./report.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
@@ -674,21 +674,27 @@ const routes = {
     const owner = askedId === "all" ? "all"
       : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await kylas.me()) || "");
 
+    /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
+       fields, so a base one repair-base behind does not have them — and
+       Airtable rejects the whole projection for one unknown name, which took
+       the ENTIRE report down with a raw 422 rather than costing the two
+       metrics those fields feed. The dashboard should lose a column, not the
+       page. */
     const [callRows, rolledRows, transRows, contactRows] = await Promise.all([
-      airtable.listAll("Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
          six weeks at this call volume. Missing this read would make every month
          older than the window read zero — history silently deleted rather than
          compacted. Tolerated when absent so a base without the table still
          reports, just without the old days. */
-      airtable.listAll("Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
+      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
         .catch(() => []),
-      airtable.listAll("Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
+      listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
       /* Right POC and discovery are DATA becoming true, not a stage move, so
          they have no transition row. The closest honest timestamp is when the
          contact's rank last rose — the save that filled the fields. */
-      airtable.listAll("Contacts", {
+      listTolerant(airtable, "Contacts", {
         fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company"] }),
     ]);
 

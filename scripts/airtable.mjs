@@ -7,7 +7,7 @@
  * Everything goes through one queue. Airtable allows 5 requests a second per
  * base, and a save touches up to five tables.
  */
-import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES } from "./stages.mjs";
+import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, CNC_LADDER } from "./stages.mjs";
 
 /* Overridable so the mock can stand in during tests. */
 const API = process.env.AIRTABLE_BASE_URL || "https://api.airtable.com/v0";
@@ -190,8 +190,17 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     "Vendor Info": c.vendorInfo || "",
     "Mode of Meeting": c.modeOfMeeting || "",
     "Service Offering": !!c.serviceOffering,
-    /* Set once and never unset, so Phone Picked cannot regress. */
-    "Ever Picked": !!prev?.fields?.["Ever Picked"] || computed > 0,
+    /* NOT `computed > 0`. Every stage has a rung above zero — Could Not Connect
+       is 6 — so that set Ever Picked for a contact nobody ever spoke to, and
+       Companies.Phone Picked is IF({Ever Picked} = 1, 1, 0). The result was a
+       headline funnel rung reading 100%: every company ever DIALLED counted as
+       having answered.
+       docs/kpi-spec.md §4 is explicit — "picked when the pipeline stage is not
+       Could Not Connect", and the summary table row reads "stage ever != CNC".
+       Set once and never unset, so a contact who answered and was later
+       disqualified does not stop having answered. */
+    "Ever Picked": !!prev?.fields?.["Ever Picked"]
+      || (!!c.stage && !CNC_LADDER.includes(c.stage)),
     "KPI Rank": rank,
     "Pending Create": !!c.pendingCreate,
     Flagged: !!c.flagged,
@@ -432,7 +441,7 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
    degrades to Kylas because of the fallback, which means the flip silently
    does not happen and the only trace is a truncated line in a log.
    Ask again without the projection instead: more bytes, still an answer. */
-async function listTolerant(at, table, opts) {
+export async function listTolerant(at, table, opts) {
   try {
     return await at.listAll(table, opts);
   } catch (e) {
