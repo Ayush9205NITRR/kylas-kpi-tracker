@@ -7,7 +7,7 @@
  * Everything goes through one queue. Airtable allows 5 requests a second per
  * base, and a save touches up to five tables.
  */
-import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, CNC_LADDER } from "./stages.mjs";
+import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED } from "./stages.mjs";
 
 /* Overridable so the mock can stand in during tests. */
 const API = process.env.AIRTABLE_BASE_URL || "https://api.airtable.com/v0";
@@ -197,10 +197,14 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
        having answered.
        docs/kpi-spec.md §4 is explicit — "picked when the pipeline stage is not
        Could Not Connect", and the summary table row reads "stage ever != CNC".
+       NOT_CONNECTED, not CNC_LADDER: the console's own copy of this rule also
+       excludes the never-touched stage, and two implementations of one rule
+       that disagree on an edge is how this got wrong in the first place. One
+       generated definition, used by both.
        Set once and never unset, so a contact who answered and was later
        disqualified does not stop having answered. */
     "Ever Picked": !!prev?.fields?.["Ever Picked"]
-      || (!!c.stage && !CNC_LADDER.includes(c.stage)),
+      || (!!c.stage && !NOT_CONNECTED.includes(c.stage)),
     "KPI Rank": rank,
     "Pending Create": !!c.pendingCreate,
     Flagged: !!c.flagged,

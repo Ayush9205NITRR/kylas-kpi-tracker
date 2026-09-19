@@ -139,6 +139,13 @@ export const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED"
 export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
 export const UNTOUCHED = ["YET_TO_BE_MINED"];
 
+/* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
+   is the inverse of this, so the two runtimes MUST agree on it. console.js
+   composed its own [...UNTOUCHED, ...CNC_LADDER] while airtable.mjs used a
+   different test entirely, and the authoritative one — the writer — was the
+   wrong one. Generated here so there is exactly one definition. */
+export const NOT_CONNECTED = ["YET_TO_BE_MINED","CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
+
 /* Funnel milestones, as a floor rung each. See docs/stages.json. */
 export const MILESTONE = {
   sqlMeetingBooked:    { floor: 19, stage: "DISCOVERY_CALL_BOOKED", label: "SQL Meeting Booked" },

@@ -50,7 +50,8 @@ const label=v=>LABEL[v]||v;
 const priority=a=>STAGE_PRIORITY[a.stage]??99;
 const rung=a=>STAGE_RUNG[a.stage]||0;
 const rungLabel=r=>label(STAGES.find(c=>STAGE_RUNG[c]===r))||"Not reached";
-const NOT_CONNECTED=[...UNTOUCHED,...CNC_LADDER];
+/* NOT_CONNECTED now comes from stages.js, generated from docs/stages.json,
+   so this rule cannot drift from the writer's copy again. */
 const EVENT_TYPES=["","Employee offsites","Product launch","Sales conference / dealer meet","Marketing events","Team-building activities","Other engagements"];
 const VENDOR_INFO=["","Internal","Vendor Exists","First Event","No Info"];
 const MODE_OF_MEETING=["","In Person","Virtual","Calls","Text"];

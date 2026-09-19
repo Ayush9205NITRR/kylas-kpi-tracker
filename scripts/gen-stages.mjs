@@ -127,6 +127,13 @@ const EXIT_STAGES = ${q(src.exitStages)};
 const MEETING_STAGES = ${q(src.meetingStages)};
 const UNTOUCHED = ${q(src.untouched)};
 
+/* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
+   is the inverse of this, so the two runtimes MUST agree on it. console.js
+   composed its own [...UNTOUCHED, ...CNC_LADDER] while airtable.mjs used a
+   different test entirely, and the authoritative one — the writer — was the
+   wrong one. Generated here so there is exactly one definition. */
+const NOT_CONNECTED = ${q([...src.untouched, ...src.cncLadder])};
+
 /* Funnel milestones, as a floor rung each. Rank only rises, so "ever reached"
    and "is at or past" are one question. */
 const MILESTONE = {
@@ -168,6 +175,13 @@ export const CNC_LADDER = ${q(src.cncLadder)};
 export const EXIT_STAGES = ${q(src.exitStages)};
 export const MEETING_STAGES = ${q(src.meetingStages)};
 export const UNTOUCHED = ${q(src.untouched)};
+
+/* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
+   is the inverse of this, so the two runtimes MUST agree on it. console.js
+   composed its own [...UNTOUCHED, ...CNC_LADDER] while airtable.mjs used a
+   different test entirely, and the authoritative one — the writer — was the
+   wrong one. Generated here so there is exactly one definition. */
+export const NOT_CONNECTED = ${q([...src.untouched, ...src.cncLadder])};
 
 /* Funnel milestones, as a floor rung each. See docs/stages.json. */
 export const MILESTONE = {
