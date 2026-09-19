@@ -3,3 +3,4 @@ node_modules/
 *.local.json
 .env.local
 .company-shape
+logs/

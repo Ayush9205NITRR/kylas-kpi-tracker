@@ -200,6 +200,66 @@ level. That is the thing this whole design is for.
 
 ---
 
+## 8 · Schedule the background jobs
+
+Three jobs keep the base current and bounded. They run on whichever machine
+holds `.env.local` — the same one that runs the proxy, or a small server if you
+would rather it not depend on somebody's laptop being open.
+
+```bash
+scripts/cron.sh sync          # run each one by hand FIRST
+scripts/cron.sh snapshot
+scripts/cron.sh rollup
+cat logs/sync.log             # everything they print lands here
+```
+
+Then install the schedule. It prints what it would do and changes nothing until
+you add `--apply`:
+
+```bash
+scripts/install-cron.sh
+scripts/install-cron.sh --apply
+```
+
+| when (local time) | job | what it does |
+|---|---|---|
+| 00:30 daily | `snapshot` | freezes yesterday for the trend chart |
+| 01:00 daily | `sync` | Kylas → Airtable |
+| 13:00 daily | `sync` | again, so afternoon CRM edits reach the console |
+| 02:00 Sunday | `rollup` | Call Log retention, after that night's sync |
+
+`--remove` takes it back out. It edits only its own marked block, so other
+entries in your crontab are left alone.
+
+**Retention is 30 days of raw calls, not the script's own default of 90.** At
+1,200 calls a day, 90 days is ~54,000 rows and Airtable counts records across
+the whole base — over a Team base before a single contact. Change it with
+`export CALL_RETAIN_DAYS=45` in `.env.local`; `scripts/rollup-calls.mjs` prints
+the projected steady state every run, so you can see whether the window still
+fits as the team grows.
+
+### If a job stops running
+
+The dashboard shows how old the mirror is, and the companies list says when it
+is short — a sync that has quietly died shows up there rather than as numbers
+that are subtly out of date. For the detail:
+
+```bash
+tail -40 logs/sync.log
+```
+
+Three failures worth knowing, because they are the ones that happen:
+
+- **`node not found`** — cron's PATH is not your shell's. `install-cron.sh`
+  pins `NODE_BIN` into `.env.local` when it spots this, but if you installed
+  node afterwards, add `export NODE_BIN=$(which node)` yourself.
+- **`already running (lock held)`** — a previous run overran its slot. Normal
+  once; every night means the sync is taking longer than twelve hours and
+  wants looking at.
+- **`.env.local is missing: …`** — the file is there but a key is not.
+
+---
+
 ## Updating
 
 ```bash
