@@ -586,12 +586,23 @@ export async function readCompany(at, companyKid) {
   const { byKid } = await companyIndex(at);
   const co = byKid.get(String(companyKid));
   if (!co) return null;
-  const recs = await listTolerant(at, "Contacts",
-    { formula: `{Kylas Company ID (from Company)} = '${esc(companyKid)}'`,
-      fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 20 });
-  /* The lookup field above may not exist on every base, so fall back to
-     filtering on the link we already resolved rather than failing the read. */
-  const rows = recs.length ? recs
+  /* Server-side when the base has the rollup, in memory when it does not.
+     THE FALLBACK HAS TO CATCH, NOT CHECK FOR EMPTY. This was written to fall
+     back "if the field does not exist", but tested `recs.length` — and Airtable
+     does not answer a formula naming a missing field with zero rows, it answers
+     with INVALID_FILTER_BY_FORMULA. The fallback was unreachable, the whole
+     read threw, and every company open fell through to Kylas after paying for
+     the failed request. Run repair-base to get the fast path. */
+  let recs = null;
+  try {
+    recs = await listTolerant(at, "Contacts",
+      { formula: `{Company Kylas ID} = '${esc(companyKid)}'`,
+        fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 20 });
+  } catch (e) {
+    if (!/INVALID_FILTER_BY_FORMULA|UNKNOWN_FIELD_NAME|422/i.test(e.message)) throw e;
+    at.log?.(`  Contacts has no "Company Kylas ID" rollup — scanning instead. Run repair-base.`);
+  }
+  const rows = recs?.length ? recs
     : (await listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }))
         .filter((r) => (r.fields?.Company || [])[0] === co.recordId);
   const events = await eventsFor(at, rows.map((r) => r.id));

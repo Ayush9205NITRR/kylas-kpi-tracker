@@ -131,7 +131,15 @@ async function fromAirtable(what, fn) {
        twenty fields is hundreds of characters — slicing the FRONT of it threw
        away the only part that says what went wrong and left a log line nobody
        could act on. Take the reason, not the request. */
-    const why = /UNKNOWN_FIELD_NAME|RATE_LIMIT|NOT_FOUND|INVALID|unauthorized/i.exec(e.message)?.[0]
+    /* THE WHOLE ERROR TYPE, not the first word of it. This matched /INVALID/
+       and logged exactly "INVALID", which is true of
+       INVALID_FILTER_BY_FORMULA, INVALID_REQUEST_UNKNOWN and a dozen others —
+       and the one that was actually happening could only be found by reading
+       the source. Airtable puts the type in `"type":"..."`, so take that; fall
+       back to a whole recognised token, then to the tail of the message. */
+    const typed = /"type"\s*:\s*"([A-Z_]+)"/.exec(e.message)?.[1];
+    const why = typed
+      || /[A-Z][A-Z_]{4,}/.exec(e.message)?.[0]
       || e.message.slice(-120);
     log(`! ${what}: Airtable read failed (${why}) — asking Kylas`);
     return null;

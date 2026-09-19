@@ -120,6 +120,27 @@ createServer(async (req, res) => {
   if (req.method === "GET") {
     const formula = url.searchParams.get("filterByFormula");
     const all = Object.values(TABLES).flat();
+
+    /* A FORMULA NAMING A FIELD THIS TABLE DOES NOT HAVE IS A 422, not an empty
+       result. This stand-in used to resolve `{X (from Link)}` by hand, which
+       made it MORE capable than Airtable and hid a real bug for weeks:
+       readCompany filtered on a lookup field nothing ever created, so on every
+       real base the read threw and every company open fell back to Kylas. Here
+       it quietly worked.
+       Only checked where there are rows — a table created on first touch has no
+       fields to know about yet. */
+    if (formula && rows.length) {
+      const named = [...formula.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+      const known = new Set(rows.flatMap((r) => Object.keys(r.fields)));
+      const bad = named.find((f) => !known.has(f) && !/ \(from .+\)$/.test(f));
+      if (bad) return json(res, 422, { error: { type: "INVALID_FILTER_BY_FORMULA",
+        message: `Unknown field names: ${bad}` } });
+      /* A lookup is only resolvable if the LINK it travels is real. */
+      const lk = named.map((f) => / \(from (.+)\)$/.exec(f)?.[1]).filter(Boolean)
+        .find((via) => !known.has(via));
+      if (lk) return json(res, 422, { error: { type: "INVALID_FILTER_BY_FORMULA",
+        message: `Unknown field names: ${lk}` } });
+    }
     const hits = formula ? rows.filter((r) => matches(r, formula, all)) : rows;
 
     /* HONOUR pageSize AND offset. Returning everything in one response left the

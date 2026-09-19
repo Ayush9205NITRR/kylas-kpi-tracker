@@ -116,6 +116,19 @@ probes must too.
 compared against a stale expectation. If a check fails, confirm the check is
 right before touching the code.
 
+**A fallback that checks for empty when the failure throws.** readCompany
+filtered contacts on `{Kylas Company ID (from Company)}` — a lookup field
+nothing ever created — and fell back "if the field does not exist" by testing
+`recs.length`. Airtable answers a formula naming a missing field with
+INVALID_FILTER_BY_FORMULA, not zero rows, so the fallback was unreachable and
+every company open on every base threw and went to Kylas. Ask what the failure
+actually looks like before writing the branch that handles it.
+
+**A mock more capable than the thing it stands in for.** The same bug hid for
+weeks because mock-airtable resolved `{X (from Link)}` by hand. A stand-in that
+is kinder than production does not test production. It now returns 422 for a
+formula naming a field the table does not have.
+
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's
 code and answers everything cheerfully. **Restart the proxy after editing

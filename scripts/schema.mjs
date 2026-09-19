@@ -358,6 +358,17 @@ export const FOLLOWUPS = [
   formula("Call Log", "Measured Seconds", `IF({Duration Source} = "dialed", {Duration}, 0)`,
     "Duration when it was actually measured, 0 otherwise."),
 
+  /* THE COMPANY'S KYLAS ID, ON THE CONTACT, AS TEXT.
+     readCompany filters contacts by their company and was written against
+     `{Kylas Company ID (from Company)}` — a lookup field nothing has ever
+     created. Airtable answers a formula naming a field that does not exist with
+     INVALID_FILTER_BY_FORMULA, so that read failed on EVERY base and every
+     company open silently fell back to Kylas, paying for a doomed round trip
+     first. A rollup, not a lookup, because ARRAYJOIN is the same machinery the
+     name rollups already use and is known to work here. */
+  rollup("Contacts", "Company Kylas ID", "Company", "Kylas Company ID", "ARRAYJOIN(values)",
+    "The company's Kylas id as text, so contacts can be filtered by company server-side."),
+
   rollup("Contacts", "Has Signal", "Event Rows", "Has Any Signal", "MAX(values)"),
   rollup("Contacts", "Has Complete Row", "Event Rows", "Is Complete", "MAX(values)"),
 
