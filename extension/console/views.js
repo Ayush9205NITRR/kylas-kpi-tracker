@@ -138,11 +138,18 @@
       if (!by.has(id)) by.set(id, {
         id, name: "", contacts: [],
         source: "", owner: "", ownerId: "", batch: "", health: "", lastCalledAt: null,
-        rung: 0, stage: "", lastQualityAt: null, modes: {},
+        rung: 0, stage: "", kylasStage: "", lastQualityAt: null, modes: {},
         pocs: { right: [], discovery: [], sql: [] },
       });
       const co = by.get(id);
-      if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch", "health", "lastCalledAt"])
+      /* kylasStage is the COMPANY's own stage field, kept apart from co.stage,
+         which is the highest rung any of its POCs reached. On the companies
+         list no contacts are loaded at all, so co.stage is empty for every row
+         and anything reading it alone describes the whole account as "not
+         reached". Two different facts, two fields — merging them would make the
+         Stage filter match rows whose POCs are somewhere else entirely. */
+      if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch",
+                                 "health", "lastCalledAt", "kylasStage"])
         if (!co[k] && seed[k]) co[k] = seed[k];
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       return co;
@@ -155,7 +162,7 @@
       if (!co?.id) continue;
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
-                           lastCalledAt: co.lastCalledAt, kpi: co.kpi });
+                           lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi });
     }
 
     for (const c of data) {
@@ -929,6 +936,78 @@
     try { DENSITY = (await Store.getSetting("density")) || "comfortable"; } catch { /* default */ }
   }
 
+  /* ── the board ─────────────────────────────────────────────────────────
+     A COMPANY IS IN YOUR LOOP UNTIL IT LEAVES IT, and the question the list has
+     to answer is which ones are still in it and which have gone quiet. The
+     table answers "what do I have"; it takes a sort and two filters to answer
+     "what do I do next", and that is the question 200 times a day.
+
+     COLUMNS ARE THE LOOP STATE, NOT THE SOURCE. Source says where a name came
+     from, which is how you pick today's pile — a filter. It says nothing about
+     what to do with the account, so a board keyed on it shows six piles that
+     all need the same unknown amount of work. The state is the thing that
+     changes, so the state is the axis.
+
+     Assignment reuses bucketOf, the same exclusive buckets the dashboard's
+     stacked bar is built from, so the board and the chart cannot come to
+     different conclusions about where a company stopped. Two ends collapse:
+     everything past a booked meeting is one column, because the loop this is
+     for ends when the meeting is in the diary, and everything with no call yet
+     is one column, because bucketOf has nothing to say about it. */
+  const LANES = [
+    { key: "untouched", label: "Untouched", hint: "allotted, never called" },
+    { key: "working",   label: "Working",   hint: "called, no signal yet" },
+    { key: "right",     label: "Right POC", hint: "budget, timeline or pax" },
+    { key: "discovery", label: "Discovery", hint: "one complete row" },
+    { key: "booked",    label: "SQL booked", hint: "meeting in the diary" },
+    { key: "closed",    label: "Closed",    hint: "every POC on a dead end" },
+  ];
+
+  /* EXHAUSTION IS A PROPERTY OF EVERY POC, NOT OF THE HIGHEST ONE.
+     co.stage is the HIGHEST rung any POC reached, and the dead ends sit low on
+     the ladder — so a company whose only contact is Not Interested still shows
+     MQL, and testing that would leave it in the working column for ever. It has
+     left the loop when there is nobody left to call.
+
+     The second clause is not a nicety. On the companies list NO contacts are
+     loaded — the view reads the Airtable mirror, not the console's roster — so
+     the first clause is false for every row on the page it matters most on, and
+     the Closed column sat empty while three companies that belonged in it were
+     filed under Working. The company's own stage is the only evidence available
+     there, and it is real evidence. */
+  const exhausted = (co) =>
+    (co.contacts.length > 0 && co.contacts.every((c) => EXIT_STAGES.includes(c.stage)))
+    || (co.contacts.length === 0 && EXIT_STAGES.includes(co.kylasStage));
+
+  function laneOf(co) {
+    if (exhausted(co)) return "closed";
+    const b = bucketOf(co);                 /* null when never reached */
+    if (!b) return "untouched";
+    if (b === "sql" || b === "done" || b === "booked") return "booked";
+    if (b === "reached") return "working";
+    return b;                               /* right | discovery */
+  }
+
+  /* Days since the last call — the whole prioritisation signal. Null for a
+     company nobody has called, which is not "infinitely stale", it is a
+     different state with its own column. */
+  const daysSince = (iso) => {
+    const t = Date.parse(iso || "");
+    if (!Number.isFinite(t)) return null;
+    return Math.floor((Date.now() - t) / 86400000);
+  };
+  /* Amber is the flag colour and this is a flag: an account in the loop that
+     nobody has touched in a fortnight is the thing the board exists to surface.
+     One threshold, not a gradient — a scale of five ambers is a heat map, and a
+     heat map is read as decoration. */
+  const STALE_DAYS = 14;
+
+  let VIEW_MODE = "board";
+  async function restoreViewMode() {
+    try { VIEW_MODE = (await Store.getSetting("companiesView")) || "board"; }
+    catch { /* default */ }
+  }
+
   /* KPI is a set of booleans on the row, not one value, so "is any of" asks
      whether the company sits at ANY of the ticked rungs. */
   const matchesSet = (state, have) => {
@@ -1041,6 +1120,7 @@
        first — the filters are local and must not wait on a search. */
     await restore();
     await restoreDensity();
+    await restoreViewMode();
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
     /* An owner is selected unless the filter is cleared, and "all" is still a
@@ -1112,6 +1192,71 @@
             <span class="c9${c.batch ? "" : " no"}">${esc(c.batch || "—")}</span>
           </div>`;
 
+    /* ── the board ───────────────────────────────────────────────────────
+       WHAT A CARD HAS TO ANSWER, and nothing else: which company, how cold,
+       and — once there is one — which human. Everything the table shows that
+       does not serve "do I call this next" is left to the table: batch, POC
+       counts, owner (the filter already says whose list this is), the account
+       health tag nobody maintains. Four lines, so a column of them is scannable
+       at a glance rather than read.
+
+       The named POC is on the card because it is the question a manager
+       actually asks — not how many right POCs, which person — and because on
+       this board it is also the reason the card has stopped moving. */
+    const cardHTML = (c) => {
+      const d = daysSince(c.lastCalledAt);
+      const stale = d !== null && d >= STALE_DAYS;
+      const who = c.pocs.discovery[0] || c.pocs.right[0] || "";
+      const more = (c.pocs.discovery.length || c.pocs.right.length) - 1;
+      return `
+        <button class="vcard${stale ? " stale" : ""}" type="button" data-id="${esc(c.id)}">
+          <b>${esc(c.name)}</b>
+          <em>${esc(label(c.stage) || label(c.kylasStage) || c.kpiStage || "Not reached")}</em>
+          ${who ? `<span class="who" title="${esc([...c.pocs.discovery, ...c.pocs.right].join(", "))}"
+            >${esc(who)}${more > 0 ? ` +${more}` : ""}</span>` : ""}
+          <span class="foot">
+            <i class="src">${esc(c.source || "no source")}</i>
+            <i class="age">${d === null ? "never called"
+              : d === 0 ? "today" : d === 1 ? "yesterday" : `${d}d ago`}</i>
+          </span>
+        </button>`;
+    };
+
+    /* Cards per column before the rest are held back. A board is only lighter
+       than the table if it does not build 250 cards to show you nine. */
+    const PER_LANE = 12;
+    const openLanes = new Set();
+
+    /* COLDEST FIRST, always. This is the one ordering the board exists for, so
+       it is not a sort control: a column sorted any other way answers a
+       question you can already ask the table. A company never called has no
+       date, and sorts to the top of Untouched, where it belongs. */
+    const byColdest = (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || ""));
+
+    const laneHTML = (lane, list) => {
+      const cap = openLanes.has(lane.key) ? list.length : PER_LANE;
+      return `
+        <section class="vcol" data-lane="${lane.key}">
+          <header><b>${esc(lane.label)}</b><span>${list.length}</span>
+            <em>${esc(lane.hint)}</em></header>
+          <div class="vcards">
+            ${list.length ? list.slice(0, cap).map(cardHTML).join("")
+                          : `<p class="vnone">Nothing here.</p>`}
+            ${list.length > cap
+              ? `<button class="vmorec" type="button" data-lane="${lane.key}">${
+                   list.length - cap} more…</button>` : ""}
+          </div>
+        </section>`;
+    };
+
+    const boardHTML = (list) => {
+      const by = new Map(LANES.map((l) => [l.key, []]));
+      for (const c of list) by.get(laneOf(c))?.push(c);
+      for (const arr of by.values()) arr.sort(byColdest);
+      return `<div class="vboard">${
+        LANES.map((l) => laneHTML(l, by.get(l.key) || [])).join("")}</div>`;
+    };
+
     host.innerHTML = `
       <div class="vhead">
         <h2>Companies</h2>
@@ -1129,21 +1274,29 @@
           countBy(all, (c) => (c.source ? [c.source] : [])))}</label>
         <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label,
           countBy(all, (c) => (c.stage ? [c.stage] : [])))}</label>
-        <label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
+        ${/* The funnel filter IS the board's columns, so on the board it is a
+             second control for one thing — and two controls for one thing
+             disagree the moment somebody uses both. */
+          VIEW_MODE === "board" ? "" :
+        `<label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
           (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k,
-          countBy(all, (c) => FUNNEL.filter((f) => c[f.key]).map((f) => f.key)))}</label>
+          countBy(all, (c) => FUNNEL.filter((f) => c[f.key]).map((f) => f.key)))}</label>`}
         <label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
-        <button class="gbtn" id="fDensity" type="button"
+        <button class="gbtn" id="fMode" type="button"
+          title="${VIEW_MODE === "board" ? "Every column, sortable" : "Group by where each account stopped"}"
+        >${VIEW_MODE === "board" ? "Table" : "Board"}</button>
+        ${VIEW_MODE === "board" ? "" : `<button class="gbtn" id="fDensity" type="button"
           title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
-        >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>
+        >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>`}
         <span class="vage">${CACHE.at ? esc(ageText())
           : ""}</span>
         ${kpiNote(all, { repaint: () => companies(host) })}
       </div>
       ${chipStrip(rows, all)}
+      ${VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
           SORT.key === col.sort ? " on" : ""}" data-sort="${col.sort}"
@@ -1153,14 +1306,24 @@
         </div>
         <!-- rows painted by paint(), so the window applies to the first
              render as well as to every filter change -->
-      </div>
+      </div>`}
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         This is only what the browser holds, not everything allotted to you.</p>` : ""}
       ${truncWarn()}
-      <p class="vnote">Named POCs answer the question a manager actually asks — not how many right
+      ${VIEW_MODE === "board"
+        ? `<p class="vnote">Columns are where each account stopped, so every company sits in exactly
+        one. Inside a column the coldest is first — the top of each is what has gone quiet longest,
+        and anything untouched for ${STALE_DAYS} days or more is marked. <b>Closed</b> is a company
+        with nobody left to call: every POC on it has reached a dead end. Source and stage are
+        filters here rather than columns, because where a name came from does not tell you what to
+        do with it.</p>`
+        : `<p class="vnote">Named POCs answer the question a manager actually asks — not how many right
         POCs, but which person. Stage is the highest any POC at that company has reached. A company
         with no POCs yet is one allotted to you that nobody has opened.
-        <b>Batch</b> is Kylas' own <code>Batch</code> field on the company, shown as it is stored.</p>`;
+        <b>Batch</b> is Kylas' own <code>Batch</code> field on the company, shown as it is stored.</p>`}`;
+
+    /* The board needs the page, not the reading measure. */
+    host.closest(".vwrap")?.classList.toggle("board", VIEW_MODE === "board");
 
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
@@ -1181,6 +1344,15 @@
 
     /* Density. Stored then re-rendered, so the class and the button label can
        never disagree about which state we are in. */
+    /* Board or table. A MODE, not a preference — it changes what the view is
+       for — but remembered all the same, because being put back in the other
+       one every morning is its own kind of broken. */
+    on("fMode", "click", async () => {
+      VIEW_MODE = VIEW_MODE === "board" ? "table" : "board";
+      try { await Store.setSetting("companiesView", VIEW_MODE); } catch { /* preference only */ }
+      companies(host);
+    });
+
     on("fDensity", "click", async () => {
       DENSITY = DENSITY === "compact" ? "comfortable" : "compact";
       try { await Store.setSetting("density", DENSITY); } catch { /* preference only */ }
@@ -1240,9 +1412,14 @@
     }
     wireChips();
 
-    /* A row is a way into the company, not a dead end. */
-    const bindRows = () => host.querySelectorAll(".vr[data-id]").forEach((r) =>
-      r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
+    /* A row is a way into the company, not a dead end. So is a card — the board
+       would be a picture rather than a tool if its cards did not open. */
+    const bindRows = () => {
+      host.querySelectorAll(".vr[data-id], .vcard[data-id]").forEach((r) =>
+        r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
+      host.querySelectorAll(".vmorec[data-lane]").forEach((b) =>
+        b.addEventListener("click", () => { openLanes.add(b.dataset.lane); paint(); }));
+    };
 
     /* The rows also carry the count in the chip strip, so a repaint that
        changes what matches has to update it. */
@@ -1264,6 +1441,20 @@
 
     function paint() {
       const next = matching();
+      /* The board rebuilds whole. It is bounded by PER_LANE per column rather
+         than by a scroll window, so the work is proportional to what is on
+         screen either way — which is the same reason the table windows. */
+      const board = host.querySelector(".vboard");
+      if (board) {
+        board.outerHTML = boardHTML(next);
+        bindRows();
+        const sub = host.querySelector(".vhead .vsub");
+        if (sub) sub.textContent = loading ? "loading…" : `${next.length} of ${all.length}`;
+        const cnt = host.querySelector(".vchips .vcount");
+        if (cnt) cnt.textContent = `${next.length} of ${all.length}`;
+        syncSummaries();
+        return;
+      }
       const body = host.querySelector(".vtable");
       const head = body?.querySelector(".vr.vh");
       if (body && head) {
