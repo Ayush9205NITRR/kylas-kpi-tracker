@@ -7,7 +7,8 @@
  * Everything goes through one queue. Airtable allows 5 requests a second per
  * base, and a save touches up to five tables.
  */
-import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED } from "./stages.mjs";
+import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED, MILESTONE } from "./stages.mjs";
+import { gateFor } from "./rca.mjs";
 
 /* Overridable so the mock can stand in during tests. */
 const API = process.env.AIRTABLE_BASE_URL || "https://api.airtable.com/v0";
@@ -649,6 +650,87 @@ export async function readCompanies(at) {
       _airtable: { updatedAt: f["Kylas Updated At"] || "" },
     };
   });
+}
+
+/* ── RCA: which accounts owe an explanation ────────────────────────────
+   The whole computation is here rather than in the console, because it decides
+   what somebody is asked to account for and that must not depend on which
+   browser tab is open. The console is told; it does not work it out.
+
+   Two reads: every contact's rung and arrival date, and every RCA row already
+   written. A contact that has answered is not asked again — but one whose
+   answer is stale because it has since moved on is not asked either, because
+   gateFor only fires while it is still stuck. */
+const RCA_READ_FIELDS = [
+  "Kylas Contact ID", "Name", "Owner", "KPI Rank", "KPI Rank At",
+  "Has Signal", "Has Complete Row", "Current Stage", "Company",
+];
+
+export async function readRcaDue(at, { owner = "", now = Date.now(), log = () => {} } = {}) {
+  const [contacts, asked] = await Promise.all([
+    listTolerant(at, "Contacts", { fields: RCA_READ_FIELDS, pageSize: 100, maxPages: 400 }),
+    listTolerant(at, "RCA", { fields: ["Key", "Gate", "Reason", "Answered At"],
+                              pageSize: 100, maxPages: 200 }).catch(() => []),
+  ]);
+  /* Answered, by key. An unanswered row is one we asked and nobody replied to,
+     which is still due — the question does not go away because it was posed. */
+  const answered = new Set(asked.filter((r) => r.fields?.Reason)
+                                .map((r) => String(r.fields?.Key || "")));
+
+  const out = [];
+  for (const r of contacts) {
+    const f = r.fields || {};
+    const kid = String(f["Kylas Contact ID"] || "");
+    if (!kid) continue;
+    if (owner && String(f.Owner || "") !== owner) continue;
+    /* The same rungs the funnel uses, read from the base's own formulas rather
+       than recomputed here — Has Signal IS Right POC, Has Complete Row IS a
+       successful discovery. Booked is a stage floor. */
+    const rank = Number(f["KPI Rank"] || 0);
+    const hit = gateFor({
+      rankAt: f["KPI Rank At"] || "",
+      right: Number(f["Has Signal"] || 0) === 1,
+      discovery: Number(f["Has Complete Row"] || 0) === 1,
+      booked: rank >= MILESTONE.sqlMeetingBooked.floor,
+      done: rank >= MILESTONE.sqlMeetingDone.floor,
+      sql: rank >= MILESTONE.sql.floor,
+      reached: rank > 0,
+      picked: rank > 0,
+    }, now);
+    if (!hit) continue;
+    const key = `${kid}|${hit.gate}`;
+    if (answered.has(key)) continue;
+    out.push({ key, kid, recordId: r.id, name: f.Name || kid, owner: f.Owner || "",
+               gate: hit.gate, days: hit.days, since: hit.since,
+               stage: f["Current Stage"] || "" });
+  }
+  /* Longest stuck first. The oldest stall is both the least likely to be
+     remembered and the most likely to be dead, so it is the one worth asking
+     about before the answer is lost entirely. */
+  out.sort((a, b) => b.days - a.days);
+  log(`rca: ${out.length} contact(s) owe a reason`);
+  return out;
+}
+
+/* Recording an answer. Upserted on the key, so a revised answer replaces the
+   first rather than adding a second — and a row is never deleted, because
+   "asked, never answered" is itself worth being able to count. */
+export async function writeRcaAnswer(at, { key, kid, recordId, gate, reason, note,
+                                           since, days, owner, by }) {
+  const fields = {
+    Key: key,
+    Gate: gate,
+    "Asked At": new Date().toISOString(),
+    Reason: reason,
+    Note: note || "",
+    "Answered At": new Date().toISOString(),
+    "Answered By": by || "",
+    Owner: owner || "",
+  };
+  if (since) fields["Stuck Since"] = since;
+  if (Number.isFinite(days)) fields["Stuck Days"] = days;
+  if (recordId) fields.Contact = [recordId];
+  return at.upsert("RCA", "Key", fields);
 }
 
 /* What the last sync managed, so the console can say how complete this mirror

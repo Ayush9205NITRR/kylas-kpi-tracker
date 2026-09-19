@@ -16,6 +16,10 @@ export const check = { icon: "check", color: "greenBright" };
 /* Stage tables are generated from docs/stages.json — see gen-stages.mjs. */
 export { STAGES, STAGE_ID, STAGE_RUNG, LADDER, EXIT_STAGES } from "./stages.mjs";
 import { STAGES, LADDER, EXIT_STAGES, MILESTONE } from "./stages.mjs";
+/* Reason codes are generated from docs/rca-reasons.json — see gen-rca.mjs. The
+   RCA table's Reason column is a singleSelect built from them, so a reason the
+   console offers and the base has never heard of is a rejected write. */
+import { RCA_REASON_CODES, RCA_GATE_KEYS } from "./rca.mjs";
 
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(
@@ -225,6 +229,43 @@ export const TABLES = [
       { name: "Rolled At", type: "dateTime", options: dateTime },
     ],
   },
+  /* WHY AN ACCOUNT STOPPED MOVING, in the associate's own words, at the moment
+     it is still fresh enough to remember.
+
+     The funnel already says WHERE accounts are lost — Right POC → Discovery is
+     the step with the drop. It cannot say why, and a conversion rate nobody can
+     explain is a number that gets reported and never acted on. This is the
+     other half: when a contact has sat at one rung past the gate's patience, it
+     is listed, and the associate picks a reason.
+
+     One row per contact per gate, keyed so the same stall cannot be asked twice
+     and an answer can be revised rather than duplicated. Append in spirit: a
+     row is written when the question is asked and updated when it is answered,
+     never deleted, because "we asked and nobody said" is itself a finding. */
+  {
+    name: "RCA",
+    description: "One row per stalled contact per gate. Asked by the console when a contact has sat at a rung past the gate's patience; answered by the associate. Reason codes come from docs/rca-reasons.json — see gen-rca.mjs.",
+    fields: [
+      { name: "Key", type: "singleLineText",
+        description: "<kylas contact id>|<gate key>. The upsert key: one open question per contact per gate, for ever." },
+      { name: "Gate", type: "singleSelect", options: sel(...RCA_GATE_KEYS),
+        description: "Which stall this is — see docs/rca-reasons.json." },
+      { name: "Asked At", type: "dateTime", options: dateTime,
+        description: "When the console first listed it. Not when it became stuck." },
+      { name: "Stuck Since", type: "dateTime", options: dateTime,
+        description: "The contact's KPI Rank At — when it arrived at the rung it is stuck on." },
+      { name: "Stuck Days", type: "number", options: num,
+        description: "Days between Stuck Since and the answer. Frozen at answer time, so a row read months later still says how long it had been when somebody looked." },
+      { name: "Reason", type: "singleSelect", options: sel(...RCA_REASON_CODES),
+        description: "Blank until answered. Codes, not labels — a label can be reworded without orphaning the history." },
+      { name: "Note", type: "multilineText",
+        description: "Free text. Optional, and the only place the specifics of one account can live." },
+      { name: "Answered At", type: "dateTime", options: dateTime },
+      { name: "Answered By", type: "singleLineText" },
+      { name: "Owner", type: "singleLineText",
+        description: "Whose account it was when the question was asked." },
+    ],
+  },
   {
     name: "Schema Migrations",
     description: "One row per migration applied to this base. Written by the migration scripts, read by them to refuse a second run. Do not delete a row unless you intend the migration to run again.",
@@ -258,6 +299,7 @@ export const FOLLOWUPS = [
   link("Event Rows", "Contact", "Contacts", "Event Rows"),
   link("Call Log", "Contact", "Contacts", "Call Log"),
   link("Stage Transitions", "Contact", "Contacts", "Stage Transitions"),
+  link("RCA", "Contact", "Contacts", "RCA"),
 
   /* Remarks is excluded from both on purpose — see kpi-spec.md §5. */
   formula("Event Rows", "Has Any Signal", `IF(OR(${anyFilled}), 1, 0)`,

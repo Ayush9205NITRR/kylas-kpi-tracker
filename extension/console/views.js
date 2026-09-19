@@ -536,6 +536,39 @@
     }));
   }
 
+  /* THE FOUR NUMBERS, before any table.
+     The dashboard opened straight into a six-row funnel, a step-conversion
+     table, a stacked bar and a period report — all correct, all requiring you
+     to read a table before knowing whether today is going well. Ayush's ask was
+     that the team stays constantly aware of where the KPIs stand, and a number
+     you have to find is not one you are aware of.
+
+     These are not new measurements. Every one is lifted from funnelRows, so the
+     headline and the table below it cannot disagree — a summary computed a
+     second way is a second answer waiting to happen.
+
+     FOUR, not six. The last two rungs are the rarest events in the funnel and
+     would show 0 most days, and four zeroes teach people to stop looking. The
+     table underneath still has all six. */
+  function headlineHTML(cos) {
+    const rows = funnelRows(cos);
+    const at = (key) => rows.find((r) => r.key === key) || { n: 0, fromPrev: null };
+    const tiles = [
+      { k: "reached",   label: "Companies reached", sub: "at least one call logged" },
+      { k: "right",     label: "Right POC",         sub: "of reached" },
+      { k: "discovery", label: "Discovery",         sub: "of right POC" },
+      { k: "booked",    label: "SQL booked",        sub: "of discovery" },
+    ];
+    return `<div class="vgrid vhead4">${tiles.map((t, i) => {
+      const r = at(t.k);
+      return `<div class="vt${i ? " v2" : ""}">
+        <b class="tnum">${r.n}</b>
+        <span>${esc(t.label)}</span>
+        <i>${i === 0 ? esc(t.sub) : `${r.fromPrev || "—"} ${esc(t.sub)}`}</i>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
   function funnelHTML(cos) {
     const rows = funnelRows(cos);
     const grew = rows.filter((r) => r.widened);
@@ -831,6 +864,139 @@
         FIRST reached a rung — moving on, or back and forth, never counts twice.</p>`;
   }
 
+  /* ── RCA: why an account stopped moving ────────────────────────────────
+     The funnel already says WHERE accounts are lost. It cannot say why, and a
+     conversion rate nobody can explain gets reported and never acted on.
+
+     Asked here rather than on the contact card because it is a question about
+     an account nobody has opened in a month — the one place it will never come
+     up is the record itself. It rides above both views as a strip, not a modal:
+     a dialog on load is dismissed by reflex, and this has to survive being
+     ignored today and answered on Friday.
+
+     WHO IS DUE IS THE PROXY'S ANSWER, not this file's. The rule is a management
+     policy; six browsers deciding it independently is six policies. */
+  const RCA = { due: [], gates: [], at: 0, loading: false, error: "", owner: null };
+
+  /* WHOSE STALLED ACCOUNTS, resolved from whichever view is asking. Both views
+     carry their own owner selection and they are different variables, so the
+     strip has to be told rather than guess — asking for "" got the whole team's
+     stalls onto one associate's screen, including accounts that were never
+     theirs to explain.
+
+     "" from the selector means me, "all" means the team and therefore no
+     filter, and an id is somebody else, whose NAME is what the base stores. */
+  function rcaOwner(sel) {
+    if (sel === "all") return "";
+    if (!sel) return API.state.user?.name || "";
+    return CACHE.owners.find((o) => String(o.id) === String(sel))?.name || "";
+  }
+
+  /* Keyed on the resolved owner: the cache must not answer for one person with
+     another's list, which a plain 5-minute timer would do the moment an admin
+     switched the selector. */
+  function ensureRca(sel, repaint) {
+    const owner = rcaOwner(sel);
+    const fresh = RCA.owner === owner && RCA.at && Date.now() - RCA.at < 300000;
+    if (RCA.loading || fresh) return RCA.loading;
+    RCA.loading = true;
+    RCA.owner = owner;
+    API.rca(owner)
+      .then((r) => { RCA.due = r.due || []; RCA.gates = r.gates || []; RCA.error = ""; })
+      /* A failure here must not take the view with it. The dashboard's job is
+         the funnel; this is an addition to it. */
+      .catch((e) => { RCA.error = e.message; RCA.due = []; })
+      .finally(() => { RCA.loading = false; RCA.at = Date.now(); repaint?.(); });
+    return true;
+  }
+
+  const rcaGate = (key) => RCA.gates.find((g) => g.key === key) || null;
+
+  function rcaStrip() {
+    if (RCA.error) return "";
+    const n = RCA.due.length;
+    if (!n) return "";
+    /* One line. The count is the message; the detail is one click away, because
+       a strip that lists nine accounts is a view, and this sits on top of one. */
+    const worst = RCA.due[0];
+    return `<div class="vrca">
+      <b>${n}</b>
+      <span>account${n === 1 ? "" : "s"} stalled with no reason recorded${
+        worst ? ` — longest is <b>${esc(worst.name)}</b>, ${worst.days} days` : ""}</span>
+      <button class="gbtn sm" id="rcaOpen" type="button">Give reasons</button>
+    </div>`;
+  }
+
+  /* One account at a time, largest stall first, with the reasons as chips.
+     Typing is optional and the note is the only free text — the whole point is
+     that an answer costs one click, or it will not be given. */
+  function openRcaSheet(repaint) {
+    const s = document.createElement("div");
+    s.className = "scrim";
+    let i = 0;
+    const draw = () => {
+      const item = RCA.due[i];
+      if (!item) {
+        s.innerHTML = `<div class="sheet"><div class="h"><h3>Done</h3>
+          <button class="gbtn" id="rx" type="button">Close</button></div>
+          <div class="b"><p class="dnote">Every stalled account has a reason recorded.</p></div></div>`;
+        s.querySelector("#rx").onclick = () => { s.remove(); repaint?.(); };
+        return;
+      }
+      const g = rcaGate(item.gate);
+      s.innerHTML = `<div class="sheet wide">
+        <div class="h"><h3>${esc(g?.title || "Why has this stalled?")}</h3>
+          <span class="vsub">${i + 1} of ${RCA.due.length}</span>
+          <button class="gbtn" id="rx" type="button">Close</button></div>
+        <div class="b">
+          <div class="rcaWho"><b>${esc(item.name)}</b>
+            <em>stuck ${item.days} days · since ${esc(String(item.since).slice(0, 10))}</em></div>
+          <p class="dnote">${esc(g?.ask || "")}</p>
+          <div class="rcaReasons">${(g?.reasons || []).map((r) =>
+            `<button class="rchip" type="button" data-code="${esc(r.code)}">${esc(r.label)}</button>`).join("")}</div>
+          <label class="rcaNote">Anything worth remembering (optional)
+            <textarea id="rcaNote" rows="2" placeholder="e.g. asked us to call back after their AGM"></textarea></label>
+          <div class="dactions">
+            <button class="gbtn" id="rcaSkip" type="button">Skip for now</button>
+            <span class="vsub" id="rcaMsg"></span>
+          </div>
+        </div></div>`;
+      s.querySelector("#rx").onclick = () => { s.remove(); repaint?.(); };
+      s.querySelector("#rcaSkip").onclick = () => { i++; draw(); };
+      s.querySelectorAll(".rchip").forEach((b) => b.onclick = async () => {
+        const msg = s.querySelector("#rcaMsg");
+        s.querySelectorAll(".rchip").forEach((x) => { x.disabled = true; });
+        b.classList.add("on");
+        msg.textContent = "saving…";
+        try {
+          await API.rcaAnswer({
+            kid: item.kid, recordId: item.recordId, gate: item.gate,
+            reason: b.dataset.code, note: s.querySelector("#rcaNote").value.trim(),
+            since: item.since, days: item.days, owner: item.owner,
+            by: API.state.user?.name || item.owner,
+          });
+          /* Removed from the list here rather than re-fetching: the proxy would
+             give the same answer, and a round trip between two clicks is how a
+             nine-account queue stops being worth finishing. */
+          RCA.due.splice(i, 1);
+          draw();
+        } catch (e) {
+          s.querySelectorAll(".rchip").forEach((x) => { x.disabled = false; });
+          b.classList.remove("on");
+          msg.textContent = `not saved — ${e.message}`.slice(0, 120);
+        }
+      });
+    };
+    draw();
+    document.body.appendChild(s);
+    s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); repaint?.(); } });
+  }
+
+  function wireRca(host, repaint) {
+    const b = host.querySelector("#rcaOpen");
+    if (b) b.addEventListener("click", () => openRcaSheet(repaint));
+  }
+
   /* ── dashboard ─────────────────────────────────────────────────────── */
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
   let DASH_PERIOD = "week";
@@ -870,6 +1036,8 @@
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
       ${truncWarn()}
+      ${headlineHTML(cos)}
+      ${rcaStrip()}
       ${funnelHTML(cos)}
       <div class="vsec">${stepTable(cos, (c) => c.owner)}</div>
       <div class="vsec">${stackedByOwner(cos, (c) => c.owner)}</div>
@@ -886,6 +1054,8 @@
     });
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
+    ensureRca(DASH_OWNER, () => dashboard(host));
+    wireRca(host, () => dashboard(host));
   }
 
   /* paintDays() and the "Last 14 days" list are gone. That data is frozen into
@@ -1296,6 +1466,7 @@
         ${kpiNote(all, { repaint: () => companies(host) })}
       </div>
       ${chipStrip(rows, all)}
+      ${rcaStrip()}
       ${VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
@@ -1324,6 +1495,10 @@
 
     /* The board needs the page, not the reading measure. */
     host.closest(".vwrap")?.classList.toggle("board", VIEW_MODE === "board");
+    /* The companies view has its own owner selector, and it is not the
+       dashboard's. */
+    ensureRca(FILTERS.owner, () => companies(host));
+    wireRca(host, () => companies(host));
 
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });

@@ -20,7 +20,9 @@ import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
-         readCompanies, readSyncState, listTolerant } from "./airtable.mjs";
+         readCompanies, readSyncState, listTolerant,
+         readRcaDue, writeRcaAnswer } from "./airtable.mjs";
+import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 
@@ -1014,6 +1016,46 @@ const routes = {
     }
     return result;
     });
+  },
+
+  /* ── RCA ────────────────────────────────────────────────────────────
+     WHICH ACCOUNTS OWE AN EXPLANATION, and the reasons on offer, in one
+     response. The console renders what it is given rather than deciding who is
+     overdue: the rule is a management policy, and a policy that lives in six
+     browsers is six policies.
+
+     Airtable only. There is no Kylas fallback because there is nothing in Kylas
+     to fall back to — it holds no rung history, which is the whole reason the
+     mirror exists. An unconfigured base answers "nothing due", which is honest:
+     without the data, nothing is known to be overdue. */
+  "/rca": async (url) => {
+    if (!airtable) return { due: [], gates: RCA_GATES, configured: false };
+    const owner = url.searchParams.get("owner") || "";
+    const due = await readRcaDue(airtable, { owner, log });
+    return { due, gates: RCA_GATES, configured: true, owner };
+  },
+
+  "/rca-answer": async (url, req) => {
+    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    const body = JSON.parse(await readBody(req));
+    const gate = RCA_GATE[body.gate];
+    /* A gate or a reason this build has never heard of is a console running
+       older code than the proxy. Taking it would write a value the Airtable
+       column cannot hold, and the 422 would name the field rather than the
+       cause. */
+    if (!gate) throw Object.assign(new Error(`unknown gate: ${body.gate}`), { status: 400 });
+    if (!gate.reasons.some((r) => r.code === body.reason))
+      throw Object.assign(new Error(`${body.reason} is not a reason offered for ${gate.key}`), { status: 400 });
+    if (!body.kid) throw Object.assign(new Error("kid is required"), { status: 400 });
+    const rec = await writeRcaAnswer(airtable, {
+      key: `${body.kid}|${gate.key}`,
+      kid: String(body.kid), recordId: body.recordId || "", gate: gate.key,
+      reason: body.reason, note: body.note || "",
+      since: body.since || "", days: Number(body.days),
+      owner: body.owner || "", by: body.by || body.owner || "",
+    });
+    log(`rca: ${body.kid} ${gate.key} -> ${body.reason}`);
+    return { ok: true, id: rec?.id || null };
   },
 
   /* Whether each half of the write is configured, so the console can say so

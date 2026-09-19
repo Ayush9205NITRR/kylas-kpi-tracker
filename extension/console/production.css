@@ -266,6 +266,44 @@ body.framed .ovOnly{display:inline-block}
 .vtable.dense .vr .c1 b{font-size:var(--t-label)}
 .vtable.dense .vr .c1 em{display:none}
 
+/* ── the four headline numbers ───────────────────────────────────────── */
+/* Bigger than a tile elsewhere in the app, because this is the one thing on the
+   page meant to be read from across a desk. */
+.vhead4{margin-bottom:16px}
+.vhead4 .vt b{font-size:32px;letter-spacing:-.034em}
+.vhead4 .vt i{margin-top:4px}
+@media(max-width:620px){.vhead4{grid-template-columns:repeat(2,1fr)}}
+
+/* ── stalled accounts: the strip and the sheet ───────────────────────── */
+/* Amber, because this is a flag and nothing else on these views is one. A
+   strip rather than a dialog: a modal on load is dismissed by reflex, and this
+   has to survive being ignored today and answered on Friday. */
+.vrca{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;
+  border:1px solid var(--amberLine);background:var(--amberSoft);border-radius:var(--r);
+  padding:9px 13px;font-size:var(--t-label);color:var(--amber)}
+.vrca>b{font-size:var(--t-sec);font-weight:var(--w-max);font-variant-numeric:tabular-nums}
+.vrca span{flex:1;min-width:0}
+.vrca span b{font-weight:var(--w-strong)}
+.vrca .gbtn{margin-left:auto;border-color:var(--amber);color:var(--amber)}
+.vrca .gbtn:hover{background:var(--amber);color:var(--panel)}
+
+.rcaWho{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.rcaWho b{font-size:var(--t-body);font-weight:var(--w-strong)}
+.rcaWho em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+/* Chips, not a dropdown. An answer has to cost one click or it will not be
+   given, and a select costs three. */
+.rcaReasons{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 14px}
+.rchip{border:1px solid var(--line2);background:var(--panel);border-radius:14px;
+  padding:7px 13px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer}
+.rchip:hover:not([disabled]){border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
+.rchip.on{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.rchip[disabled]{opacity:.5;cursor:default}
+.rcaNote{display:flex;flex-direction:column;gap:5px;font-size:var(--t-meta);color:var(--text2)}
+.rcaNote textarea{border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
+  padding:9px 11px;font:inherit;font-size:var(--t-label);resize:vertical}
+.rcaNote textarea:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
+
 /* ── the board ───────────────────────────────────────────────────────── */
 /* Columns scroll SIDEWAYS, and each column scrolls on its own. A board whose
    columns grow the page makes the tall one set the height of all six and pushes

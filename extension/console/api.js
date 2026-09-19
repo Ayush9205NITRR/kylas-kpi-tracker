@@ -125,6 +125,11 @@
     /* Frozen daily rows from Airtable, for the trend chart. */
     snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),
+    /* Which accounts owe an explanation, and the reasons on offer. The proxy
+       decides both — the rule is a management policy and the console is told
+       what it is, so six browsers cannot hold six versions of it. */
+    rca: (owner) => req(`/rca${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
+    rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
   };
 
