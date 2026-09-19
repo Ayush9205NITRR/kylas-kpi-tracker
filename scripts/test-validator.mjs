@@ -45,10 +45,29 @@ const mine = (f) => join(HERE, f);
 const src = readFileSync(mine("schema.mjs"), "utf8");
 const dir = mkdtempSync(join(tmpdir(), "schema-"));
 copyFileSync(mine("validate-schema.mjs"), join(dir, "validate-schema.mjs"));
-/* schema.mjs imports the generated stage tables, so they have to travel with
-   it. Without this every run dies on a missing module and each fault looks
-   "caught" when nothing was actually validated. */
-copyFileSync(mine("stages.mjs"), join(dir, "stages.mjs"));
+/* EVERY LOCAL MODULE schema.mjs REACHES, found by reading its imports rather
+   than by listing them here. The list used to be one line — stages.mjs — and
+   the day schema.mjs also imported the generated RCA tables, every mutation
+   died on a missing module and the run reported 0 of 10 faults caught. That is
+   the right answer to give (a crash is not a catch) but the wrong reason, and
+   the next import would have broken it again.
+
+   Walked transitively, because a dependency can have dependencies, and copied
+   flat because they all sit in this one directory. */
+function localDeps(file, seen = new Set()) {
+  const text = readFileSync(mine(file), "utf8");
+  for (const m of text.matchAll(/from\s+"\.\/([A-Za-z0-9._-]+)"/g)) {
+    const dep = m[1];
+    if (seen.has(dep)) continue;
+    seen.add(dep);
+    localDeps(dep, seen);
+  }
+  return seen;
+}
+const deps = localDeps("schema.mjs");
+if (!deps.size) throw new Error("schema.mjs imports nothing local — has the import syntax changed?");
+for (const dep of deps) copyFileSync(mine(dep), join(dir, dep));
+console.log(`  (carrying ${[...deps].join(", ")})`);
 
 let pass = 0;
 for (const [name, mutate] of FAULTS) {
