@@ -327,6 +327,134 @@ body.framed .ovOnly{display:inline-block}
   padding:9px 11px;font:inherit;font-size:var(--t-label);resize:vertical}
 .rcaNote textarea:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
 
+/* ── the ladder ──────────────────────────────────────────────────────── */
+.card.scroll{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  overflow-x:auto}
+table.ladder{width:100%;border-collapse:collapse;font-size:var(--t-label)}
+table.ladder th,table.ladder td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);
+  vertical-align:middle}
+table.ladder tr:last-child td{border-bottom:0}
+table.ladder thead th{font-size:var(--t-meta);color:var(--text3);text-transform:uppercase;
+  letter-spacing:.04em;font-weight:var(--w-med);white-space:nowrap}
+table.ladder th.rung,table.ladder td.rung{text-align:left;min-width:220px}
+table.ladder td.teamcol,table.ladder th.teamcol{text-align:left;white-space:nowrap}
+table.ladder td.teamcol b{font-size:var(--t-sec);font-weight:var(--w-max);margin-right:6px}
+table.ladder td.conv,table.ladder th.conv{text-align:left;white-space:nowrap;color:var(--text2);
+  font-size:var(--t-meta)}
+table.ladder td.conv b{font-size:var(--t-label);color:var(--text)}
+.rungname{display:inline-flex;align-items:center;gap:9px}
+/* The step number carries the rung's own shade, which is the only thing tying
+   the ladder, the KPI chips and the board together. */
+.step{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;font-style:normal;
+  font-size:var(--t-meta);font-weight:var(--w-max);color:#fff;flex:none}
+.step.r0,.step.r1{color:var(--text)}
+.bdh{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.av{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;
+  font-size:10px;font-weight:var(--w-max);letter-spacing:.02em;flex:none}
+.cellv{font-variant-numeric:tabular-nums;font-weight:var(--w-strong)}
+.cellv.zero{color:var(--text3);font-weight:var(--w-body)}
+/* .lbar, not .bar: .bar is the app's top bar and carries min-height:48px, so
+   every cell in this table grew a 48px grey slab under its number. */
+table.ladder .lbar{height:3px;border-radius:2px;background:var(--panel3);margin-top:5px;overflow:hidden}
+table.ladder .lbar i{display:block;height:100%;border-radius:2px}
+
+/* ── accounts: families, tiles, explorer ─────────────────────────────── */
+/* Laid out after Ayush's reference design, drawn with THIS project's tokens.
+   The reference carries six violet rung colours and two typefaces; both would
+   be a second accent and a sixth type size here, which CLAUDE.md rules out. The
+   rung scale is one hue stepped in lightness, and the freshness scale is the
+   only place a second hue is earned — it encodes time, not category, and a
+   single-hue ramp cannot say "recent" and "stale" at opposite ends. */
+:root{
+  --r0:#DCE6FB; --r1:#BBCDF7; --r2:#93B0F1; --r3:#6A91E8; --r4:#3F6FD8; --r5:#2550B4; --rn:#E4E6EA;
+  --f-fresh:#1F8A5B; --f-warm:#6E9A2E; --f-cool:#C98404; --f-cold:#C2413A; --f-never:#B9B8C8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --r0:#1E2A47; --r1:#27395F; --r2:#32497A; --r3:#41609C; --r4:#5A80C4; --r5:#7FA5E8; --rn:#2A2C33;
+  --f-fresh:#4CC38A; --f-warm:#A4CC5C; --f-cool:#E0A64E; --f-cold:#F0736B; --f-never:#55536B;
+}}
+:root[data-theme="dark"]{
+  --r0:#1E2A47; --r1:#27395F; --r2:#32497A; --r3:#41609C; --r4:#5A80C4; --r5:#7FA5E8; --rn:#2A2C33;
+  --f-fresh:#4CC38A; --f-warm:#A4CC5C; --f-cool:#E0A64E; --f-cold:#F0736B; --f-never:#55536B;
+}
+.f-fresh{background:var(--f-fresh)} .f-warm{background:var(--f-warm)}
+.f-cool{background:var(--f-cool)} .f-cold{background:var(--f-cold)} .f-never{background:var(--f-never)}
+.r0{background:var(--r0)} .r1{background:var(--r1)} .r2{background:var(--r2)}
+.r3{background:var(--r3)} .r4{background:var(--r4)} .r5{background:var(--r5)} .rn{background:var(--rn)}
+
+.fams{display:grid;gap:14px;margin-bottom:12px}
+.fam h3{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin:0 0 7px;font-size:var(--t-label)}
+.fam h3 button{border:0;background:none;padding:0;font:inherit;font-weight:var(--w-strong);
+  color:var(--text);cursor:pointer}
+.fam h3 button:hover{color:var(--blue)}
+.fam h3 .c{font-weight:var(--w-max);color:var(--text2);font-variant-numeric:tabular-nums}
+.fam h3 .h{font-size:var(--t-meta);color:var(--text3)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px}
+.tile{display:grid;gap:5px;text-align:left;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:9px 11px;font:inherit;cursor:pointer}
+.tile:hover{border-color:var(--line2)}
+.tile[aria-pressed="true"]{border-color:var(--blue);background:var(--blueSoft)}
+.tile .nm{font-size:var(--t-meta);color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .ct{font-size:var(--t-sec);font-weight:var(--w-max);line-height:1;font-variant-numeric:tabular-nums}
+/* The bar is the reason a tile beats a number: 40 companies means nothing
+   until you know whether they were called last week or last year. */
+.tile .fresh{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--panel3)}
+.tile .fresh i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font-size:var(--t-meta);
+  color:var(--text3);margin:0 0 18px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+
+.explorer{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.exhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.exhead h2{margin:0;font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.012em}
+.exhead .exn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
+.exhead p{flex:1 0 100%;margin:2px 0 0;font-size:var(--t-meta);color:var(--text3)}
+.extools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.extools select{border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
+  padding:7px 10px;font-size:var(--t-label);font-weight:var(--w-med)}
+.frow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:7px}
+.frow .lbl{font-size:var(--t-meta);color:var(--text3);min-width:74px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--panel);
+  border-radius:13px;padding:4px 10px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer}
+.chip:hover{border-color:var(--blueLine)}
+.chip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.chip.zero{opacity:.45}
+.chip .k{font-variant-numeric:tabular-nums;color:var(--text3)}
+.chip[aria-pressed="true"] .k{color:var(--onBlue);opacity:.8}
+.chip .sw{width:9px;height:9px;border-radius:2px;flex:none}
+.kpi{display:inline-block;font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);
+  border-radius:11px;padding:2px 9px;white-space:nowrap}
+.kpi.r3,.kpi.r4,.kpi.r5{color:#fff}
+.kpi.rn{color:var(--text3)}
+.acctable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  overflow:clip;margin-top:12px}
+.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .95fr .9fr;gap:14px;
+  padding:8px 14px;border-bottom:1px solid var(--line);align-items:center;font-size:var(--t-label);
+  cursor:pointer}
+.acctable .vr:last-child{border-bottom:0}
+.acctable .vr:not(.vh):hover{background:var(--panel2)}
+.acctable .vr.vh{position:sticky;top:0;z-index:2;background:var(--panel2);cursor:default;
+  font-size:var(--t-meta);color:var(--text3);text-transform:uppercase;letter-spacing:.04em}
+.acctable .vr>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.acctable .co{font-weight:var(--w-strong)}
+.acctable .lc{display:inline-flex;align-items:center;gap:6px}
+.acctable .lc i{width:8px;height:8px;border-radius:2px;flex:none}
+#accMore{margin-top:12px;width:100%}
+@media(max-width:860px){
+  .acctable .vr{grid-template-columns:1.6fr 1fr .9fr}
+  .acctable .vr>span:nth-child(n+4){display:none}
+}
+
+/* three-way view switch */
+.vseg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;
+  background:var(--panel)}
+.vseg button{border:0;background:none;padding:8px 13px;font:inherit;font-size:var(--t-label);
+  font-weight:var(--w-med);color:var(--text2);cursor:pointer}
+.vseg button+button{border-left:1px solid var(--line)}
+.vseg button[aria-pressed="true"]{background:var(--blueSoft);color:var(--blue)}
+
 /* ── the board ───────────────────────────────────────────────────────── */
 /* Columns scroll SIDEWAYS, and each column scrolls on its own. A board whose
    columns grow the page makes the tall one set the height of all six and pushes

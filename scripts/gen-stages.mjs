@@ -26,6 +26,28 @@ for (const list of ["cncLadder", "exitStages", "meetingStages", "untouched"])
   for (const code of src[list])
     if (!S.some((s) => s.code === code)) throw new Error(`${list} names an unknown stage: ${code}`);
 
+/* FAMILIES MUST COVER EVERY STAGE, EXACTLY ONCE.
+   The design this came from sorted stages into families with regular expressions
+   over the stage NAME, which is right for sample data and wrong for a known
+   picklist — "Followup - CNC" matches both the follow-up rule and the CNC rule,
+   and whichever is listed first silently wins. Every stage is placed by hand in
+   docs/stages.json instead, and a stage left out is refused here rather than
+   landing in an "Other" pile nobody ever looks at. */
+const FAMS = src.families || [];
+if (!FAMS.length) throw new Error("no families defined");
+const placed = new Map();
+for (const f of FAMS) {
+  for (const k of ["key", "label", "hint"]) if (!f[k]) throw new Error(`family ${f.key || "?"} has no ${k}`);
+  if (!f.stages?.length) throw new Error(`family ${f.key} holds no stages`);
+  for (const code of f.stages) {
+    if (!S.some((s) => s.code === code)) throw new Error(`family ${f.key} names an unknown stage: ${code}`);
+    if (placed.has(code)) throw new Error(`${code} is in two families: ${placed.get(code)} and ${f.key}`);
+    placed.set(code, f.key);
+  }
+}
+const unplaced = S.filter((s) => !placed.has(s.code)).map((s) => s.code);
+if (unplaced.length) throw new Error(`stages in no family: ${unplaced.join(", ")}`);
+
 /* A milestone is a floor, so it must name a real stage. Emitting a rung of
    `undefined` would make every comparison false and read as "nobody ever got
    there" rather than as a broken table. */
@@ -127,6 +149,14 @@ const EXIT_STAGES = ${q(src.exitStages)};
 const MEETING_STAGES = ${q(src.meetingStages)};
 const UNTOUCHED = ${q(src.untouched)};
 
+/* Pipeline families: how the Accounts view groups the stage tiles. Ordered as
+   the board reads top to bottom. */
+const STAGE_FAMILIES = ${q(FAMS.map((f) => ({ key: f.key, label: f.label, hint: f.hint, stages: f.stages })))};
+
+/* stage code -> family key. Every stage has one; see docs/stages.json. */
+const FAMILY_OF = ${q(Object.fromEntries(placed))};
+
+
 /* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
    is the inverse of this, so the two runtimes MUST agree on it. console.js
    composed its own [...UNTOUCHED, ...CNC_LADDER] while airtable.mjs used a
@@ -175,6 +205,9 @@ export const CNC_LADDER = ${q(src.cncLadder)};
 export const EXIT_STAGES = ${q(src.exitStages)};
 export const MEETING_STAGES = ${q(src.meetingStages)};
 export const UNTOUCHED = ${q(src.untouched)};
+
+export const STAGE_FAMILIES = ${q(FAMS.map((f) => ({ key: f.key, label: f.label, hint: f.hint, stages: f.stages })))};
+export const FAMILY_OF = ${q(Object.fromEntries(placed))};
 
 /* NOT CONNECTED: never touched, or touched and nobody answered. Phone Picked
    is the inverse of this, so the two runtimes MUST agree on it. console.js

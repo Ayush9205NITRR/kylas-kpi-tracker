@@ -870,6 +870,96 @@
     return [key, key];
   }
 
+  /* ── the ladder ───────────────────────────────────────────────────────
+     From Ayush's reference design: the six rungs down the side, the team's
+     number and its step conversion, then one column per associate with a bar
+     scaled across that row. It answers the two questions the old dashboard
+     needed four blocks for — where is the funnel leaking, and who is leaking it
+     — in one grid you read left to right.
+
+     The numbers are the SAME ones the Progress table below shows, for the same
+     period: currentByOwner comes back with the report rather than from a second
+     request, so this costs nothing and cannot disagree with the row it sits
+     above. */
+  /* THE RUNGS THE PERIOD REPORT CAN ACTUALLY CARRY.
+     The reference design opens on "Companies reached", and this cannot: the
+     ladder counts what happened INSIDE a period, and rollup-calls.mjs
+     aggregates old days to day|owner|outcome and deletes the raw rows — the
+     contact, and with it the company, is gone for every period past the
+     retention window. A first rung that is right for four weeks and silently
+     wrong for the year above it is worse than a different first rung.
+
+     Calls and Connected are flows the rollup preserves exactly; the five above
+     them are "first reached in this period", from the stage history. The same
+     seven the Progress table below is built from, so the two cannot disagree.
+     The all-time "companies reached" still has a home: the Accounts view, where
+     it is a count of the book rather than of a period. */
+  const RUNGS = [
+    { key: "calls",     name: "Calls logged",            short: "calls" },
+    { key: "connects",  name: "Connected",               short: "connected" },
+    { key: "right",     name: "Right POC connected",     short: "right POC" },
+    { key: "discovery", name: "Successful discovery call", short: "discovery" },
+    { key: "booked",    name: "SQL meeting booked",      short: "SQL booked" },
+    { key: "done",      name: "SQL meeting done",        short: "SQL booked" },
+    { key: "sql",       name: "SQL",                     short: "SQL done" },
+  ];
+  const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "—";
+  const initials = (n) => {
+    const p = String(n || "?").trim().split(/\s+/);
+    return ((p[0] || "?")[0] + (p[1] ? p[1][0] : "")).toUpperCase();
+  };
+  /* A stable colour per person, so the same associate is the same swatch on
+     every screen. Hue only — it is an identifier, not a judgement, so it never
+     borrows the accent or the flag colours. */
+  const hueOf = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+
+  function ladderHTML(r) {
+    if (!r || !r.current) return "";
+    const cur = r.current, prev = r.previous;
+    const people = (r.currentByOwner || []).slice()
+      .sort((a, b) => b.sql - a.sql || b.calls - a.calls || String(a.owner).localeCompare(String(b.owner)));
+    const prevOf = Object.fromEntries((r.previousByOwner || []).map((o) => [o.owner, o]));
+    const pc = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "—");
+
+    /* Bars are scaled across THE ROW, not the table: rung 1 is always the
+       biggest number and a single scale would flatten every rung below it into
+       an invisible sliver. */
+    const rowMax = RUNGS.map((rg) => Math.max(1, ...people.map((p) => p[rg.key] || 0)));
+
+    return `
+      <div class="vsec">
+        <div class="vhead sm"><h2>The ladder</h2>
+          <span class="vsub">${esc(cur.label)} · every number counts companies, not contacts</span></div>
+        <div class="card scroll"><table class="ladder">
+          <thead><tr>
+            <th class="rung">Rung</th><th class="teamcol">Team</th><th class="conv">Step conv.</th>
+            ${people.map((p) => `<th><span class="bdh" title="${esc(p.owner)}">
+              <span class="av" style="background:hsl(${hueOf(p.owner)} 42% 44%)">${esc(initials(p.owner))}</span>
+              <span>${esc(firstName(p.owner))}</span></span></th>`).join("")}
+          </tr></thead>
+          <tbody>
+            ${RUNGS.map((rg, i) => `<tr>
+              <td class="rung"><span class="rungname">
+                <i class="step r${Math.min(i, 5)}">${i + 1}</i>${esc(rg.name)}</span></td>
+              <td class="teamcol"><b class="tnum">${cur[rg.key] || 0}</b>${
+                prev ? deltaHTML(cur.delta ? cur.delta[rg.key] : null) : ""}</td>
+              <td class="conv">${i === 0 ? "—"
+                : `<b class="tnum">${pc(cur[rg.key] || 0, cur[RUNGS[i - 1].key] || 0)}</b>
+                   <span>of ${esc(RUNGS[i - 1].short)}</span>`}</td>
+              ${people.map((p) => {
+                const v = p[rg.key] || 0;
+                return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
+                  <div class="lbar"><i class="r${Math.min(Math.max(i, 2), 5)}" style="width:${v / rowMax[i] * 100}%"></i></div></td>`;
+              }).join("")}
+            </tr>`).join("")}
+          </tbody>
+        </table></div>
+        ${people.length > 1 ? "" : `<p class="vnote">One associate is in this period, so the
+          per-person columns say the same thing as the team column. They separate as soon as more
+          than one person logs a call inside it.</p>`}
+      </div>`;
+  }
+
   function reportSection(owner) {
     const loading = ensureReport(DASH_LEVEL, owner,
       () => dashboard(document.getElementById("vwrap")), DASH_FROM, DASH_TO);
@@ -1117,8 +1207,20 @@
       ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
         Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
       ${truncWarn()}
-      ${headlineHTML(cos)}
+      ${/* THE FOUR TILES ARE GONE, and the ladder is why. They counted companies
+           sitting at a rung RIGHT NOW, all time; the ladder counts companies
+           that FIRST reached it inside the period. Both are useful and they are
+           not the same question — but under the same six words, on one screen,
+           "Companies reached 34" above "Companies reached 0" reads as a bug.
+           The ladder is the one Ayush's design asks for and the one with the
+           conversions in it, so it keeps the labels. headlineHTML is still in
+           this file if the all-time view is wanted back somewhere it cannot be
+           mistaken for this one. */""}
       ${rcaStrip()}
+      ${/* THE LADDER FIRST, then the period table under it. The ladder is this
+           period across the team and each associate; the table is every period.
+           Same numbers, same report, one request. */
+        ladderHTML(REP.data)}
       <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
            something. On your own numbers it is one row saying what the four
@@ -1307,6 +1409,202 @@
      heat map is read as decoration. */
   const STALE_DAYS = 14;
 
+  /* ── ACCOUNTS: the stage families, and the explorer under them ─────────
+     From Ayush's reference design. Two halves that answer different halves of
+     one question: the FAMILIES say what shape the book is in — how much has
+     never been touched, how much is stuck trying to connect, how much is
+     actually being talked to — and the EXPLORER is where you go once a tile
+     tells you which pile to look at.
+
+     Families come from docs/stages.json, where every stage is placed by hand.
+     The reference sorted them with regular expressions over the stage name,
+     which is right for sample data and wrong for a picklist we know: "Followup
+     - CNC" matches both the follow-up rule and the CNC rule and whichever is
+     written first silently wins. gen-stages refuses a stage in no family or in
+     two.
+
+     EVERYTHING IS COMPUTED FROM THE LIST ALREADY IN MEMORY. The companies are
+     fetched once for the board and the dashboard; the families, the tiles, the
+     freshness bars, every chip count and the table are all passes over that
+     same array. No request is made for any of it. */
+  const FRESH = [
+    { k: "fresh", label: "Called ≤ 7 days", max: 7 },
+    { k: "warm",  label: "8–30 days",      max: 30 },
+    { k: "cool",  label: "31–90 days",     max: 90 },
+    { k: "cold",  label: "90+ days",            max: Infinity },
+    { k: "never", label: "Never called",        max: null },
+  ];
+  const freshOf = (co) => {
+    const d = daysSince(co.lastCalledAt);
+    if (d === null) return "never";
+    return FRESH.find((f) => f.max !== null && d <= f.max).k;
+  };
+
+  /* The rung a company has reached, as an index into KPI_LABELS. -1 is "not
+     reached". Read off the same booleans the board and the funnel use, highest
+     first, so a company cannot be one rung here and another there. */
+  const KPI_LABELS = ["Not reached", "Reached", "Right POC", "Discovery", "SQL booked", "SQL done", "SQL"];
+  const KPI_ORDER = ["reached", "right", "discovery", "booked", "done", "sql"];
+  const kpiOf = (co) => {
+    for (let i = KPI_ORDER.length - 1; i >= 0; i--) if (co[KPI_ORDER[i]]) return i;
+    return -1;
+  };
+
+  /* Filter state for the explorer. A SET per dimension, same as the board's
+     filters — "Apollo and LinkedIn but not Referral" is an ordinary question. */
+  const ACC = { stage: null, stageLabel: "", sources: new Set(), kpis: new Set(),
+                fresh: new Set(), owner: "", sort: "recent", limit: 100 };
+
+  /* `skip` leaves one dimension out, so a chip row can show what its own
+     options WOULD give rather than counting only what is already selected —
+     otherwise every unticked chip reads 0 and the filter cannot be widened. */
+  function accMatch(co, skip) {
+    if (skip !== "stage" && ACC.stage && stageOf(co) !== ACC.stage) return false;
+    if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
+    if (skip !== "source" && ACC.sources.size && !ACC.sources.has(co.source || "—")) return false;
+    if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
+    if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
+    return true;
+  }
+
+  /* ── the families strip ───────────────────────────────────────────── */
+  /* One block per family, one tile per stage inside it, and under each tile a
+     bar showing WHEN those accounts were last called. The bar is the whole
+     point: a stage with 40 companies in it means nothing until you know
+     whether they were called last week or last year. */
+  function famsHTML(all) {
+    /* Counted with every filter EXCEPT stage, so clicking a tile narrows the
+       table without the tiles around it collapsing to zero. */
+    const pool = all.filter((c) => accMatch(c, "stage"));
+    const byStage = new Map();
+    for (const c of pool) {
+      const k = stageOf(c) || "";
+      if (!byStage.has(k)) byStage.set(k, []);
+      byStage.get(k).push(c);
+    }
+    let h = "";
+    for (const f of STAGE_FAMILIES) {
+      const stages = f.stages.filter((code) => (byStage.get(code) || []).length)
+        .sort((a, b) => (byStage.get(b) || []).length - (byStage.get(a) || []).length);
+      if (!stages.length) continue;
+      const tot = stages.reduce((t, code) => t + byStage.get(code).length, 0);
+      h += `<div class="fam"><h3>
+          <button type="button" data-fam="${esc(f.key)}" title="Every stage in ${esc(f.label)}">${esc(f.label)}</button>
+          <span class="c tnum">${tot}</span><span class="h">${esc(f.hint)}</span></h3><div class="tiles">`;
+      for (const code of stages) {
+        const rs = byStage.get(code);
+        const fc = Object.fromEntries(FRESH.map((z) => [z.k, 0]));
+        for (const c of rs) fc[freshOf(c)]++;
+        h += `<button class="tile" type="button" data-stage="${esc(code)}"
+            aria-pressed="${ACC.stage === code}">
+            <span class="nm">${esc(label(code) || code)}</span>
+            <span class="ct tnum">${rs.length}</span>
+            <span class="fresh" title="When these were last called">${
+              FRESH.map((z) => fc[z.k] ? `<i class="f-${z.k}" style="width:${fc[z.k] / rs.length * 100}%"></i>` : "").join("")
+            }</span></button>`;
+      }
+      h += `</div></div>`;
+    }
+    /* A company with no stage at all belongs to no family, and dropping it
+       silently would make the tiles disagree with the table below them. */
+    const none = (byStage.get("") || []).length;
+    return `<div class="fams">${h || `<p class="vnote">No stages on these companies yet.</p>`}</div>
+      <p class="legend">Bar under each stage is when its accounts were last called: ${
+        FRESH.map((z) => `<span><i class="f-${z.k}"></i>${esc(z.label)}</span>`).join("")}${
+        none ? ` · ${none} with no stage are not in any family.` : ""}</p>`;
+  }
+
+  /* ── the explorer ─────────────────────────────────────────────────── */
+  const chipRow = (all, lbl, key, values, labelOf, set, swatch) => {
+    const pool = all.filter((c) => accMatch(c, key));
+    const cnt = new Map();
+    for (const c of pool) {
+      const v = key === "source" ? (c.source || "—") : key === "kpi" ? kpiOf(c) : freshOf(c);
+      cnt.set(v, (cnt.get(v) || 0) + 1);
+    }
+    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${values.map((v) => {
+      const n = cnt.get(v) || 0;
+      return `<button class="chip${n ? "" : " zero"}" type="button" data-f="${key}" data-v="${esc(String(v))}"
+        aria-pressed="${set.has(v)}">${swatch ? swatch(v) : ""}${esc(labelOf(v))}<span class="k tnum">${n}</span></button>`;
+    }).join("")}</div>`;
+  };
+
+  function explorerHTML(all, owners) {
+    const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
+    const SORTS = { recent: "Last call, newest", stale: "Last call, oldest",
+                    kpi: "Furthest along", az: "A–Z" };
+    const cmp = {
+      recent: (a, b) => String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
+      stale: (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || "")),
+      kpi: (a, b) => kpiOf(b) - kpiOf(a) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
+      az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
+    }[ACC.sort];
+    const rows = all.filter((c) => accMatch(c)).sort(cmp);
+    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size;
+
+    /* A sentence about what is on screen, so the number at the top is not the
+       only thing the header says. Only the parts that are true. */
+    const parts = [];
+    if (rows.length) {
+      const bySrc = {}, byOwn = {};
+      for (const c of rows) { bySrc[c.source || "—"] = (bySrc[c.source || "—"] || 0) + 1;
+                              byOwn[c.owner || "—"] = (byOwn[c.owner || "—"] || 0) + 1; }
+      const topSrc = Object.entries(bySrc).sort((a, b) => b[1] - a[1])[0];
+      const topOwn = Object.entries(byOwn).sort((a, b) => b[1] - a[1])[0];
+      const coldN = rows.filter((c) => ["cool", "cold"].includes(freshOf(c))).length;
+      const never = rows.filter((c) => freshOf(c) === "never").length;
+      if (topSrc && Object.keys(bySrc).length > 1) parts.push(`Most came from ${esc(topSrc[0])} (${topSrc[1]})`);
+      if (topOwn && Object.keys(byOwn).length > 1 && !ACC.owner)
+        parts.push(`${esc(String(topOwn[0]).split(/\s+/)[0])} owns the most (${topOwn[1]})`);
+      if (coldN) parts.push(`${coldN} have not had a call in over a month`);
+      if (never) parts.push(`${never} never called`);
+    }
+    const shown = rows.slice(0, ACC.limit);
+
+    return `
+      <div class="card explorer">
+        <div class="exhead">
+          <h2>${esc(ACC.stage ? (label(ACC.stage) || ACC.stage) : "All accounts")}</h2>
+          <span class="exn tnum">${rows.length} ${rows.length === 1 ? "company" : "companies"}</span>
+          ${any ? `<button class="gbtn sm" id="accClear" type="button">Clear filters</button>` : ""}
+          <p>${parts.length ? esc(parts.join(" · ")) + "." : (rows.length ? "" : "Nothing matches these filters.")}</p>
+        </div>
+        <div class="extools">
+          <select id="accOwner" aria-label="Owner">
+            <option value="">All owners</option>
+            ${owners.map((o) => `<option value="${esc(o)}"${ACC.owner === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
+          </select>
+          <select id="accSort" aria-label="Sort">
+            ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
+          </select>
+        </div>
+        ${chipRow(all, "Source", "source", sources, (v) => v, ACC.sources)}
+        ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
+          (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
+        ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
+          (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
+        <div class="acctable">
+          <div class="vr vh"><span>Company</span><span>Pipeline stage</span><span>Owner</span>
+            <span>Source</span><span>KPI status</span><span>Last call</span></div>
+          ${shown.length ? shown.map((c) => {
+            const d = daysSince(c.lastCalledAt), k = kpiOf(c);
+            return `<div class="vr" data-id="${esc(c.id)}">
+              <span class="co">${esc(c.name)}</span>
+              <span>${esc(label(stageOf(c)) || "—")}</span>
+              <span>${esc(c.owner || "—")}</span>
+              <span>${esc(c.source || "—")}</span>
+              <span><i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i></span>
+              <span class="lc"><i class="f-${freshOf(c)}"></i>${
+                d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}</span>
+            </div>`;
+          }).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
+        </div>
+        ${rows.length > ACC.limit
+          ? `<button class="gbtn" id="accMore" type="button">Show ${
+              Math.min(100, rows.length - ACC.limit)} more of ${rows.length - ACC.limit}</button>` : ""}
+      </div>`;
+  }
+
   let VIEW_MODE = "board";
   /* WHAT THE COLUMNS MEAN is now a choice, not a decision taken for you.
      Three axes, because there are three questions and they are asked on
@@ -1327,6 +1625,7 @@
     try { GROUP_BY = (await Store.getSetting("companiesGroupBy")) || "state"; }
     catch { /* default */ }
     if (!AXES.some((a) => a.key === GROUP_BY)) GROUP_BY = "state";
+    if (!["accounts", "board", "table"].includes(VIEW_MODE)) VIEW_MODE = "accounts";
   }
 
   /* The company's stage: its POCs' best rung where contacts are loaded, its own
@@ -1536,6 +1835,9 @@
       });
     };
     const rows = ordered(all.filter(keep));
+    /* Owner names as the mirror stores them — the explorer filters on the name,
+       not the Kylas id the "Allotted to" select above uses. */
+    const ownerNames = [...new Set(all.map((c) => c.owner).filter(Boolean))].sort();
 
 
     /* One definition, used by the first paint and by every filter tick. */
@@ -1631,7 +1933,9 @@
     host.innerHTML = `
       <div class="vhead">
         <h2>Companies</h2>
-        <span class="vsub">${loading ? "loading…" : `${rows.length} of ${all.length}`}</span>
+        <span class="vsub">${loading ? "loading…"
+          : VIEW_MODE === "accounts" ? `${all.length} allotted`
+          : `${rows.length} of ${all.length}`}</span>
       </div>
       <div class="vfilters">
         <label>Allotted to<select id="fOwner"${API.isAdmin ? "" : " disabled"}>
@@ -1641,27 +1945,40 @@
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}` : ""}
         </select></label>
+        ${/* THE EXPLORER HAS ITS OWN, AND BETTER. In Accounts mode these four
+             are a second set of controls for source, stage, funnel rung and
+             last-call — the chips below carry live counts and the tiles ARE the
+             stage filter. Two controls for one dimension disagree the moment
+             somebody uses both, which is the complaint that started this
+             rewrite. "Allotted to" stays, because it decides which companies
+             are fetched rather than which are shown. */
+          VIEW_MODE === "accounts" ? "" : `
         <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label,
           countBy(all, (c) => (c.source ? [c.source] : [])))}</label>
         <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label,
-          countBy(all, (c) => (c.stage ? [c.stage] : [])))}</label>
+          countBy(all, (c) => (c.stage ? [c.stage] : [])))}</label>`}
         ${/* The funnel filter IS the board's columns, so on the board it is a
              second control for one thing — and two controls for one thing
-             disagree the moment somebody uses both. */
-          VIEW_MODE === "board" ? "" :
+             disagree the moment somebody uses both. In Accounts it is the KPI
+             status chip row. */
+          VIEW_MODE !== "table" ? "" :
         `<label>KPI${multiFilter("fKpi", "Funnel rung", FUNNEL.map((f) => f.key), FILTERS.kpi,
           (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k,
           countBy(all, (c) => FUNNEL.filter((f) => c[f.key]).map((f) => f.key)))}</label>`}
-        <label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
-        <button class="gbtn" id="fClear" type="button">Clear</button>
+        ${VIEW_MODE === "accounts" ? "" :
+        `<label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
+        <button class="gbtn" id="fClear" type="button">Clear</button>`}
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
         ${VIEW_MODE === "board" ? `<label>Group by<select id="fGroup">
           ${AXES.map((a) => `<option value="${a.key}"${GROUP_BY === a.key ? " selected" : ""}>${esc(a.label)}</option>`).join("")}
         </select></label>` : ""}
-        <button class="gbtn" id="fMode" type="button"
-          title="${VIEW_MODE === "board" ? "Every column, sortable" : "Group by where each account stopped"}"
-        >${VIEW_MODE === "board" ? "Table" : "Board"}</button>
+        <span class="vseg" id="fMode">${[
+          ["accounts", "Accounts", "Stage families, then filter down"],
+          ["board", "Board", "Columns by state, stage or source"],
+          ["table", "Table", "Every column, sortable"],
+        ].map(([k, l, t]) => `<button type="button" data-mode="${k}" aria-pressed="${VIEW_MODE === k}"
+          title="${esc(t)}">${esc(l)}</button>`).join("")}</span>
         ${VIEW_MODE === "board" ? "" : `<button class="gbtn" id="fDensity" type="button"
           title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
         >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>`}
@@ -1671,7 +1988,8 @@
       </div>
       ${chipStrip(rows, all)}
       ${rcaStrip()}
-      ${VIEW_MODE === "board" ? boardHTML(rows) : `
+      ${VIEW_MODE === "accounts" ? famsHTML(all) + explorerHTML(all, ownerNames)
+        : VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
           SORT.key === col.sort ? " on" : ""}" data-sort="${col.sort}"
@@ -1737,10 +2055,41 @@
       companies(host);
     });
 
-    on("fMode", "click", async () => {
-      VIEW_MODE = VIEW_MODE === "board" ? "table" : "board";
+    host.querySelectorAll("#fMode button").forEach((b) => b.addEventListener("click", async () => {
+      VIEW_MODE = b.dataset.mode;
       try { await Store.setSetting("companiesView", VIEW_MODE); } catch { /* preference only */ }
       companies(host);
+    }));
+
+    /* ── explorer wiring ──────────────────────────────────────────────
+       Every one of these is a pure re-render over the list already in memory.
+       Nothing here goes to the network, which is the whole reason the tiles and
+       the chips can carry live counts at all. */
+    const redraw = () => companies(host);
+    host.querySelectorAll(".tile[data-stage]").forEach((b) => b.addEventListener("click", () => {
+      /* Clicking the lit tile clears it — same rule as the event chips on the
+         call card, so one gesture means one thing everywhere. */
+      ACC.stage = ACC.stage === b.dataset.stage ? null : b.dataset.stage;
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fam]").forEach((b) => b.addEventListener("click", () => {
+      /* A family heading is not a filter of its own: it clears the stage so the
+         table widens back to everything the other filters allow. */
+      ACC.stage = null; ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
+      const { f, v } = b.dataset;
+      const set = f === "source" ? ACC.sources : f === "kpi" ? ACC.kpis : ACC.fresh;
+      const val = f === "kpi" ? Number(v) : v;
+      if (set.has(val)) set.delete(val); else set.add(val);
+      ACC.limit = 100; redraw();
+    }));
+    on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
+    on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
+    on("accMore", "click", () => { ACC.limit += 100; redraw(); });
+    on("accClear", "click", () => {
+      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.limit = 100; redraw();
     });
 
     on("fDensity", "click", async () => {
@@ -1830,6 +2179,12 @@
     const matching = () => ordered(all.filter(keep));
 
     function paint() {
+      /* THE ACCOUNTS VIEW PAINTS ITSELF, in one pass, from the same array.
+         paint() exists for the board and the table; it used to fall through to
+         `host.querySelector(".vtable")`, which matched the explorer's own table
+         and refilled it with board rows — the header said "14 companies" while
+         the grid below showed all 43 in the wrong columns. */
+      if (VIEW_MODE === "accounts") return;
       const next = matching();
       /* The board rebuilds whole. It is bounded by PER_LANE per column rather
          than by a scroll window, so the work is proportional to what is on

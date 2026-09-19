@@ -167,12 +167,23 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
   const keys = periodsBetween(period, start, end);
   const rows = new Map(keys.map((k) => [k, { key: k, label: periodLabel(period, k), ...blank() }]));
   const owners = new Map();
+  /* PER OWNER PER PERIOD, keyed "<period>|<owner>". The ladder table needs one
+     column per associate for the period on screen, and `owners` above is the
+     whole window — over a year of months that is an associate's year, not their
+     September. Kept here rather than fetched separately because a second
+     request for the same numbers is the thing that makes a dashboard feel slow,
+     and only the current and previous periods are handed back, so the payload
+     does not grow with the length of the window. */
+  const ownerPeriods = new Map();
   const bump = (k, owner, metric, n = 1) => {
     const row = rows.get(k);
     if (row) row[metric] += n;
     if (!owner) return;
     if (!owners.has(owner)) owners.set(owner, { owner, ...blank() });
     owners.get(owner)[metric] += n;
+    const pk = `${k}|${owner}`;
+    if (!ownerPeriods.has(pk)) ownerPeriods.set(pk, { owner, ...blank() });
+    ownerPeriods.get(pk)[metric] += n;
   };
 
   const inWindow = (at) => dayKey(at) >= start && dayKey(at) <= end;
@@ -223,7 +234,12 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
   }, blank());
 
   return { period, from: start, to: end, periods, totals,
-           byOwner: [...owners.values()].sort((a, b) => b.calls - a.calls) };
+           byOwner: [...owners.values()].sort((a, b) => b.calls - a.calls),
+           /* Internal: withDeltas slices the two periods the ladder needs out
+              of this and drops it, so the whole cross-product never goes over
+              the wire. */
+           ownerPeriods: Object.fromEntries(ownerPeriods),
+           ownerNames: [...owners.keys()] };
 }
 
 /* ── raw rows and rolled-up days, together ──────────────────────────
@@ -277,5 +293,22 @@ export function withDeltas(rep) {
   const current = periods[periods.length - 1] || null;
   const previous = periods[periods.length - 2] || null;
 
-  return { ...rep, periods, best, streak, current, previous };
+  /* Every owner seen anywhere in the window, so an associate who logged nothing
+     this period still gets a column of zeros rather than vanishing from the
+     table — "Neha did nothing in September" is the finding, and a missing
+     column hides it. */
+  const names = rep.ownerNames || [];
+  const cross = rep.ownerPeriods || {};
+  const forPeriod = (p) => (!p ? [] : names.map((o) =>
+    cross[`${p.key}|${o}`] || { owner: o, ...Object.fromEntries(METRICS.map((m) => [m.key, 0])) }));
+  const currentByOwner = forPeriod(current);
+  const previousByOwner = forPeriod(previous);
+
+  /* The cross-product is working state, not an answer. Dropped here so the
+     payload is the two periods somebody is looking at rather than every owner
+     times every period in the window. */
+  const { ownerPeriods: _drop, ownerNames: _drop2, ...rest } = rep;
+
+  return { ...rest, periods, best, streak, current, previous,
+           currentByOwner, previousByOwner, ownerNames: names };
 }
