@@ -129,6 +129,129 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
      alongside the rows rather than as an exception. */
   let lastSearch = { pages: 0, total: 0, truncated: false };
 
+  /* ── past the result window, by updatedAt ──────────────────────────────
+     Offset paging cannot reach beyond the endpoint's result window: ask for
+     page 50 and it returns a short page while still reporting a larger total.
+     No number of pages helps, because the limit is on the OFFSET.
+
+     Timestamps have no such limit. The search is already sorted updatedAt
+     descending, so once the offset crawl runs out we take the oldest record we
+     hold and ask for the ones older than that. Each window starts again at
+     offset 0, so the ceiling is never approached. This is keyset pagination:
+     the cursor is a value in the data, not a position in a list.
+
+     Which rule expresses "updatedAt < X" is not documented for this endpoint,
+     so it is discovered the same way the search shape was. */
+  const boundRule = (iso, { field = "updatedAt", type = "date", operator = "less", value = iso } = {}) =>
+    ({ condition: "AND", valid: true,
+       rules: [{ id: field, field, type, input: "text", operator, value }] });
+
+  const BOUND_SHAPES = [
+    { name: "updatedAt/date less", body: (iso) => boundRule(iso) },
+    { name: "updatedAt/datetime less", body: (iso) => boundRule(iso, { type: "datetime" }) },
+    { name: "updatedAt/string less", body: (iso) => boundRule(iso, { type: "string" }) },
+    { name: "updatedAt/long less (epoch ms)",
+      body: (iso) => boundRule(iso, { type: "long", value: String(Date.parse(iso)) }) },
+  ];
+  let boundShape = null;
+
+  const stamp = (c) => Date.parse(c?.updatedAt ?? c?.updatedAt ?? 0) || 0;
+
+  /* THE DANGEROUS FAILURE IS NOT REJECTION, IT IS INDIFFERENCE.
+     A rule the server does not understand may come back 400 — fine, try the
+     next. But it may equally come back 200 having ignored the rule, and then
+     every window returns the same newest rows forever: an infinite loop that
+     looks like progress, or a "complete" list that is the first page repeated.
+     So a shape only counts as working when the rows it returns are ACTUALLY
+     older than the bound. Accepting a 200 as proof would have been the bug. */
+  async function findBoundShape(iso, ownerId, fields) {
+    const cut = Date.parse(iso);
+    for (const s of BOUND_SHAPES) {
+      try {
+        const body = await call("POST", page(0), { fields, jsonRule: s.body(iso) });
+        const got = rows(body);
+        if (!got.length) {           /* nothing older: honoured, and we are done */
+          log(`company window: "${s.name}" works (empty beyond the bound)`);
+          return s;
+        }
+        const newest = Math.max(...got.map(stamp));
+        if (newest >= cut) {
+          log(`company window: "${s.name}" returned 200 but IGNORED the bound ` +
+              `(newest row is not older) — not usable`);
+          continue;
+        }
+        log(`company window: "${s.name}" works`);
+        return s;
+      } catch (e) {
+        if (![400, 404, 500].includes(e.status)) throw e;
+        log(`company window: "${s.name}" -> ${e.status}, trying the next`);
+      }
+    }
+    return null;
+  }
+
+  /* Walk backwards from `fromISO`, newest-first, a window at a time. Returns
+     the extra rows; the caller owns de-duplication. */
+  async function crawlOlderThan(fromISO, ownerId, fields, haveIds) {
+    const MAX_WINDOWS = Number(process.env.KYLAS_MAX_WINDOWS || 200);
+    boundShape = boundShape || await findBoundShape(fromISO, ownerId, fields);
+    if (!boundShape) {
+      log(`! company window: no rule expresses "updatedAt <" on this account — ` +
+          `the list stays short. The rest must be fetched by id.`);
+      return { extra: [], windows: 0, stalled: false, usable: false };
+    }
+
+    const extra = [];
+    /* INCLUSIVE OF THE BOUNDARY, deliberately. The obvious cursor is "older
+       than the oldest row I hold", and it is wrong: every record sharing that
+       exact timestamp is then excluded for ever. On a mock where 600 companies
+       carried one timestamp it dropped 300 of them outright.
+       Asking for < (oldest + 1ms) is the same as <= oldest without needing a
+       second operator the endpoint may not have. The boundary row comes back
+       once more per window and de-duplication drops it — one redundant row,
+       against silently losing every tie. */
+    const after = (ms) => new Date(ms + 1).toISOString();
+    let cursorMs = Date.parse(fromISO), windows = 0, stalled = false;
+    while (windows < MAX_WINDOWS) {
+      let got;
+      try {
+        got = rows(await call("POST", page(0),
+                              { fields, jsonRule: boundShape.body(after(cursorMs)) }));
+      } catch (e) {
+        log(`! company window: ${e.message} — stopping with ${extra.length} extra`);
+        break;
+      }
+      windows++;
+      if (!got.length) break;                       /* reached the far end */
+
+      const fresh = got.filter((c) => !haveIds.has(String(c.id)));
+      for (const c of fresh) { extra.push(c); haveIds.add(String(c.id)); }
+
+      const stamps = got.map(stamp).filter(Boolean);
+      const oldest = stamps.length ? Math.min(...stamps) : 0;
+
+      /* NO PROGRESS IS A STOP, NOT A RETRY. Either every row was already held,
+         or the cursor did not move: both mean the next request returns this
+         same page, for ever. The cause is more records sharing one updatedAt
+         than a page can carry, and no cursor of this kind can walk past it —
+         so say so and leave the shortfall reported rather than spinning. */
+      if (!fresh.length || !oldest || oldest >= cursorMs) {
+        stalled = true;
+        log(`! company window: no progress at ${new Date(cursorMs).toISOString()} — ` +
+            `${got.length} row(s), ${fresh.length} new. More records share one ` +
+            `updatedAt than a page holds; they cannot be walked this way.`);
+        break;
+      }
+      cursorMs = oldest;
+      /* A window shorter than a page is the end of the data, not of a page. */
+      if (got.length < PAGE) break;
+    }
+    if (windows >= MAX_WINDOWS)
+      log(`! company window: stopped at KYLAS_MAX_WINDOWS (${MAX_WINDOWS})`);
+    if (extra.length) log(`company window: +${extra.length} across ${windows} window(s)`);
+    return { extra, windows, stalled, usable: true };
+  }
+
   async function searchCompany(size, ownerId) {
     const mine = (list) => (ownerId == null ? list
       : list.filter((c) => Number(c.ownerId ?? c.owner?.id) === Number(ownerId)));
@@ -193,13 +316,38 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
                      `full` goes false: our own truncation check CANNOT see it.
          neither    — we really did reach the end
        totalElements settles it without another request. */
-    const shortBy = reportedTotal != null ? reportedTotal - all.length : 0;
-    lastSearch = { pages, total: all.length,
+    let shortBy = reportedTotal != null ? reportedTotal - all.length : 0;
+
+    /* SHORT, AND KYLAS SAYS SO. Continue by timestamp from the oldest record
+       the offset crawl reached. Nothing is re-fetched — the offset pass already
+       holds the newest `all.length`, and this picks up strictly older ones — so
+       an account that fits under the window pays for none of this. */
+    let windows = 0, windowStalled = false, windowUsable = null;
+    if (shortBy > 0 && all.length) {
+      const seenIds = new Set(all.map((c) => String(c.id)));
+      const oldest = Math.min(...all.map(stamp).filter(Boolean));
+      if (oldest) {
+        log(`company search: ${shortBy} short of Kylas' own count — continuing by ` +
+            `updatedAt from ${new Date(oldest).toISOString()}`);
+        const r = await crawlOlderThan(new Date(oldest).toISOString(), ownerId,
+                                       shape.body(ownerId).fields, seenIds);
+        all.push(...r.extra);
+        windows = r.windows; windowStalled = r.stalled; windowUsable = r.usable;
+        shortBy = reportedTotal - all.length;
+      } else {
+        /* No usable timestamps means no cursor. Say so rather than looping. */
+        log(`! company search: rows carry no updatedAt, so the window crawl has ` +
+            `no cursor. The list stays ${shortBy} short.`);
+      }
+    }
+
+    lastSearch = { pages, total: all.length, windows, windowStalled, windowUsable,
                    reportedTotal,
                    short: shortBy > 0 ? shortBy : 0,
                    hitOurCap: full && pages >= MAX_PAGES,
-                   /* Their ceiling: we stopped of our own accord, yet Kylas
-                      says there are more. */
+                   /* Their ceiling, AFTER the window crawl has had its go. A
+                      shortfall that the windows closed is not a truncation —
+                      reporting one would put a warning on a complete list. */
                    hitTheirCeiling: shortBy > 0 && !(full && pages >= MAX_PAGES),
                    truncated: (full && pages >= MAX_PAGES) || shortBy > 0 };
     if (lastSearch.hitOurCap)
@@ -209,7 +357,9 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
       log(`! company search: Kylas reports ${reportedTotal} companies but served only ` +
           `${all.length} — it stopped ${shortBy} short of its own count on a short page. ` +
           `A paged search cannot reach the rest; fetch them by id or by updatedAt window.`);
-    if (all.length >= PAGE) log(`company search: ${all.length} across ${pages} page(s)`);
+    if (all.length >= PAGE)
+      log(`company search: ${all.length} across ${pages} page(s)` +
+          (windows ? ` + ${windows} updatedAt window(s)` : ""));
 
     /* Server-side filtering is only trustworthy when the shape claims it. */
     const out = shape.filtered && ownerId != null ? all : mine(all);

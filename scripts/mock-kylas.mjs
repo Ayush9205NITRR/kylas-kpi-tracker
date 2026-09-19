@@ -79,8 +79,20 @@ if (process.env.MOCK_MANY) {
   const HOW_MANY = process.env.MOCK_MANY === "1" ? 260 : Number(process.env.MOCK_MANY) || 260;
   for (let i = 0; i < HOW_MANY; i++) {
     const id = 200000 + i;
+    /* A DISTINCT updatedAt each, one minute apart, because the window crawl
+       walks backwards through this field. Identical timestamps across more
+       than one page would stall it, and that case deserves its own fixture
+       rather than being the accidental default here. */
     COMPANIES[id] = { id, name: `bulk-${String(i).padStart(3, "0")}`,
       ownerId: i % 2 ? 74726 : 74725,
+      /* MOCK_SAME_STAMP=1 gives every bulk company ONE timestamp, which is the
+         case that stalls a keyset cursor: more rows share the cursor value
+         than a page can return, so asking for "older than X" hands back the
+         same page for ever. A guard against that is only worth having if it
+         has been made to fire. */
+      updatedAt: process.env.MOCK_SAME_STAMP === "1"
+        ? new Date(Date.UTC(2026, 8, 18, 12, 0)).toISOString()
+        : new Date(Date.UTC(2026, 8, 18, 12, 0) - i * 60_000).toISOString(),
       customFieldValues: { cfSourceOfData: i % 3 ? "Round-Robin" : "Apollo",
                            cfBatch: `Batch${(i % 2) + 1}` } };
   }
@@ -204,6 +216,27 @@ createServer(async (req, res) => {
     let out = Object.values(COMPANIES);
     for (const r of rules)
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
+
+    /* An updatedAt UPPER BOUND, which is how a client walks past the result
+       window: page by offset until the window runs out, then ask for the next
+       slice by timestamp instead. Only the "less" operator is honoured here —
+       a client must not assume a rule it sent was understood, and the one on
+       the other side of this checks that the rows really are older.
+         MOCK_IGNORE_BOUND=1 accepts the rule and ignores it, which is the
+       dangerous case: a silently ignored bound returns the same page forever. */
+    const ignore = process.env.MOCK_IGNORE_BOUND === "1";
+    for (const r of rules) {
+      if (r.field !== "updatedAt" || ignore) continue;
+      const cut = Date.parse(r.value);
+      if (!Number.isFinite(cut)) return json(res, 400, { message: "Invalid date" });
+      if (r.operator === "less") out = out.filter((c) => Date.parse(c.updatedAt || 0) < cut);
+      else return json(res, 400, { message: `Unsupported operator ${r.operator}` });
+    }
+
+    /* Newest first, as the sort parameter asks. Without this the window crawl
+       would be walking an arbitrary order and its "oldest seen" cursor would
+       mean nothing. */
+    out = [...out].sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
     /* A company carries its owner's name in its own idNameStore, same as a
        contact does. Company 903 deliberately has no custom fields at all. */
     const withOwner = (c) => ({ ...c, metaData: { idNameStore: {
