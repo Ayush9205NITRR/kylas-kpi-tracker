@@ -18,7 +18,8 @@ import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
-import { createAirtable, syncContact, readCompanyKpis } from "./airtable.mjs";
+import { createAirtable, syncContact, readCompanyKpis,
+         readContact, readCompany, readQueue } from "./airtable.mjs";
 import { report, withDeltas } from "./report.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
@@ -75,6 +76,57 @@ const airtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, { log }) : 
    signal anyone can act on — it reads the same as a line that never printed. */
 if (airtable) log(`airtable: ${AT_BASE}`);
 else log("airtable: not configured (set AIRTABLE_PAT and AIRTABLE_BASE) — KPIs will not be written");
+
+/* ── WHICH SIDE ANSWERS A READ ──────────────────────────────────────────
+   Kylas is the system of record and stays the write target, but reading the
+   console out of it is what made the console slow: a rate-limited, undocumented
+   search endpoint that stops at a result window. Airtable, kept current by
+   scripts/sync-kylas.mjs, answers the same questions in one fast query.
+
+     READ_SOURCE=airtable   prefer Airtable, fall back to Kylas when it has
+                            nothing for this request (the default when Airtable
+                            is configured)
+     READ_SOURCE=kylas      the old path, unchanged
+     READ_SOURCE=strict     Airtable only — an empty answer stays empty
+
+   THE FALLBACK IS THE WHOLE SAFETY MARGIN. A base that has not been synced yet
+   holds nothing, and "nothing" rendered as a queue is indistinguishable from
+   "you have no contacts today" — the same fault as the blank contact card and
+   the 10,000-row list that claimed to be an account. So an empty Airtable
+   answer is not an answer: it falls through to Kylas and says which side
+   replied, on every response, so nobody has to guess. `strict` exists to test
+   the Airtable path honestly, and for the day the sync is trusted. */
+const READ_SOURCE = String(process.env.READ_SOURCE || (AT_PAT && AT_BASE ? "airtable" : "kylas")).toLowerCase();
+const READS_AIRTABLE = airtable && READ_SOURCE !== "kylas";
+const STRICT_AIRTABLE = airtable && READ_SOURCE === "strict";
+if (READS_AIRTABLE) log(`reads: Airtable first${STRICT_AIRTABLE ? " (STRICT — no Kylas fallback)" : ", Kylas as fallback"}`);
+else log("reads: Kylas");
+
+/* Runs the Airtable reader, and says plainly whether it produced anything.
+   A thrown error is NOT a reason to show an empty console either — it falls
+   back the same way, loudly. */
+async function fromAirtable(what, fn) {
+  if (!READS_AIRTABLE) return null;
+  try {
+    const out = await fn();
+    const empty = out == null || (Array.isArray(out) && !out.length);
+    if (empty && !STRICT_AIRTABLE) {
+      log(`  ${what}: Airtable had nothing — asking Kylas`);
+      return null;
+    }
+    return out;
+  } catch (e) {
+    if (STRICT_AIRTABLE) throw e;
+    /* The message begins with the request URL, which for a projection of
+       twenty fields is hundreds of characters — slicing the FRONT of it threw
+       away the only part that says what went wrong and left a log line nobody
+       could act on. Take the reason, not the request. */
+    const why = /UNKNOWN_FIELD_NAME|RATE_LIMIT|NOT_FOUND|INVALID|unauthorized/i.exec(e.message)?.[0]
+      || e.message.slice(-120);
+    log(`! ${what}: Airtable read failed (${why}) — asking Kylas`);
+    return null;
+  }
+}
 
 /* Most records carry their own owner name in metaData.idNameStore, so this is
    a fallback for the ones that do not — and every avoided request is one fewer
@@ -255,11 +307,22 @@ const routes = {
   "/company": async (url) => {
     const id = url.searchParams.get("id");
     if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+    /* A company with no contacts in Airtable is indistinguishable from a
+       company Airtable has not seen, so both fall through. An allotted company
+       nobody has worked yet is exactly the case that must not read as empty. */
+    const held = await fromAirtable("company " + id,
+      async () => { const r = await readCompany(airtable, id); return r?.contacts?.length ? r : null; });
+    if (held) {
+      log(`company ${id} — ${held.contacts.length} contact(s) from Airtable`);
+      return { company: held.company, contacts: held.contacts, owners: ownerList(),
+               picklists: (await meta()).picklists, source: "airtable" };
+    }
     const [co, raw] = [await kylas.company(id), await kylas.contactsForCompany(id)];
     const company = toConsoleCompany(co);
     const contacts = await mapContacts(raw, company);
-    log(`company ${id} — ${contacts.length} contact(s)`);
-    return { company, contacts, owners: ownerList(), picklists: (await meta()).picklists };
+    log(`company ${id} — ${contacts.length} contact(s) from Kylas`);
+    return { company, contacts, owners: ownerList(),
+             picklists: (await meta()).picklists, source: "kylas" };
   },
 
   /* The companies list and the dashboards. Companies allotted to an owner are
@@ -624,9 +687,17 @@ const routes = {
   "/queue": async (url) => {
     const me = await kylas.me();
     const owner = url.searchParams.get("owner") || me?.id;
+    /* Airtable stores the owner's NAME, Kylas answers by id — the same trap
+       that made /report show an associate an empty week labelled as theirs. */
+    const name = owners.get(String(owner)) || (await ownerName(owner)) || userName(me) || "";
+    const held = await fromAirtable("queue", () => readQueue(airtable, name));
+    if (held) {
+      log(`queue for ${name || owner} — ${held.length} contact(s) from Airtable`);
+      return { owner: String(owner), contacts: held, owners: ownerList(), source: "airtable" };
+    }
     const contacts = await mapContacts(await kylas.contactsForOwner(owner));
-    log(`queue for owner ${owner} — ${contacts.length} contact(s)`);
-    return { owner: String(owner), contacts, owners: ownerList() };
+    log(`queue for owner ${owner} — ${contacts.length} contact(s) from Kylas`);
+    return { owner: String(owner), contacts, owners: ownerList(), source: "kylas" };
   },
 
   /* One save from the console becomes up to three Kylas calls. Ordered so that
@@ -717,8 +788,12 @@ const routes = {
   "/contact": async (url) => {
     const id = url.searchParams.get("id");
     if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+    const held = await fromAirtable("contact " + id, () => readContact(airtable, id));
+    if (held) { log(`contact ${id} from Airtable`); return { contact: held, source: "airtable" }; }
     const c = await kylas.contact(id);
-    return { contact: toConsoleContact(c, { ownerName: await ownerName(c?.ownerId) }), raw: c };
+    log(`contact ${id} from Kylas`);
+    return { contact: toConsoleContact(c, { ownerName: await ownerName(c?.ownerId) }),
+             raw: c, source: "kylas" };
   },
 };
 

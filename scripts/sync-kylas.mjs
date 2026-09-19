@@ -58,7 +58,9 @@ const KYLAS_OWNED = {
   Companies: ["Kylas Company ID", "Name", "Owner", "Kylas Updated At"],
   Contacts: ["Kylas Contact ID", "Name", "Designation", "LinkedIn", "Owner",
              "Current Stage", "Previous Stage", "KPI Rank", "KPI Rank At",
-             "Company", "Kylas Updated At"],
+             "Company", "Kylas Updated At",
+             "Phone", "Phones", "Email", "Emails",
+             "Kylas Owner ID", "Salutation", "Source of Data", "Remarks"],
 };
 
 /* ENFORCED, not just documented. KYLAS_OWNED started out as a comment listing
@@ -176,6 +178,17 @@ async function syncContacts() {
       Designation: c.designation || "",
       LinkedIn: c.linkedin ? (/^https?:/i.test(c.linkedin) ? c.linkedin : "https://" + c.linkedin) : "",
       Owner: c.owner || "",
+      /* JSON for the console, a plain string for whoever opens the base.
+         Both from the same mapped value, written together, every time. */
+      Phones: c.phones?.length ? JSON.stringify(c.phones) : "",
+      Phone: c.phones?.length
+        ? `${c.phones[0].cc || ""} ${c.phones[0].value || ""}`.trim() : "",
+      Emails: c.emails?.length ? JSON.stringify(c.emails) : "",
+      Email: c.emails?.[0]?.value || "",
+      "Kylas Owner ID": String(c.ownerId || raw.ownerId || ""),
+      Salutation: c.salutation || "",
+      "Source of Data": c.source || "",
+      Remarks: c.remarks || "",
       "Current Stage": c.stage || "",
       "KPI Rank": rank,
       "Kylas Updated At": iso(raw.updatedAt) || undefined,

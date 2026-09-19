@@ -51,6 +51,9 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
 
   return {
     call,
+    /* So callers outside this factory can say something in the same voice —
+       listTolerant needs to report a missing column and had nowhere to say it. */
+    log,
 
     /* Airtable's own upsert: match on a field, update if found, create if not.
        Cheaper and race-free compared with select-then-write. */
@@ -350,4 +353,203 @@ export async function readCompanyKpis(at, { log = () => {} } = {}) {
   log(`airtable kpis: ${byKylasId.size} compan${byKylasId.size === 1 ? "y" : "ies"}`
       + (skipped ? ` (${skipped} with no Kylas id, skipped)` : ""));
   return byKylasId;
+}
+
+/* ── READING THE CONSOLE OUT OF AIRTABLE ────────────────────────────────
+ * The console used to fetch every contact and company from Kylas on the way
+ * in. That path is slow, rate limited, and stops at a result window that hid a
+ * third of Ayush's account without saying so. Once the nightly sync keeps
+ * Airtable current, the same questions are far better answered here.
+ *
+ * These build the SAME shape scripts/kylas.mjs builds, field for field — the
+ * console must not be able to tell which side answered, or every consumer
+ * grows a branch and the two drift. Where Airtable holds more than Kylas does
+ * (the event rows, the flags an associate set) that is carried too, so a fresh
+ * browser on a new machine opens a contact fully populated instead of blank.
+ *
+ * NOTHING HERE FALLS BACK ON ITS OWN. A caller that gets nothing decides what
+ * that means; an empty answer dressed up as a real one is the fault this whole
+ * project keeps running into.
+ */
+const jsonOr = (v, dflt) => {
+  if (!v) return dflt;
+  try { const p = JSON.parse(v); return Array.isArray(p) ? p : dflt; }
+  catch { return dflt; }
+};
+
+/* Event Rows -> the console's past/current arrays. */
+function eventRows(rows) {
+  const past = [], current = [];
+  for (const r of rows) {
+    const f = r.fields || {};
+    const row = { rowKey: f["Row Key"] || "", eventType: f["Event Type"] || "",
+                  budget: f.Budget || "", timeline: f.Timeline || "",
+                  pax: f.Pax || "", remarks: f.Remarks || "" };
+    (f.Period === "Past" ? past : current).push(row);
+  }
+  return { past, current };
+}
+
+export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
+  const f = rec?.fields || {};
+  const { past, current } = eventRows(events || []);
+  return {
+    kid: String(f["Kylas Contact ID"] || ""),
+    salutation: f.Salutation || "",
+    pocName: f.Name || "",
+    company: company?.name || "",
+    companyId: company?.id ? String(company.id) : "",
+    linkedin: f.LinkedIn || "",
+    designation: f.Designation || "",
+    emails: jsonOr(f.Emails, f.Email ? [{ type: "OFFICE", value: f.Email, primary: true }] : []),
+    phones: jsonOr(f.Phones, []),
+    stage: f["Current Stage"] || "",
+    stageLabel: STAGE_LABEL[f["Current Stage"]] || "",
+    source: f["Source of Data"] || "",
+    nextCallDate: "", nextCallTime: "",
+    remarks: f.Remarks || "",
+    offsiteTimeline: "",
+    owner: f.Owner || "",
+    ownerId: String(f["Kylas Owner ID"] || ""),
+    /* Airtable HAS these, unlike Kylas. A first load on a new machine gets the
+       associate's own work back instead of an empty card. */
+    past, current,
+    vendorInfo: f["Vendor Info"] || "",
+    serviceOffering: !!f["Service Offering"],
+    modeOfMeeting: f["Mode of Meeting"] || "",
+    done: false,
+    flagged: !!f.Flagged,
+    exitReason: f["Exit Reason"] || "",
+    _airtable: { recordId: rec.id, rank: Number(f["KPI Rank"] || 0),
+                 updatedAt: f["Kylas Updated At"] || "" },
+  };
+}
+
+/* ONE MISSING COLUMN MUST NOT FAIL THE WHOLE READ.
+   Airtable rejects a projection naming any field the table does not have, and
+   it rejects the entire request rather than the one name — so a base that is
+   one repair-base behind makes the console's queue read fail outright. It
+   degrades to Kylas because of the fallback, which means the flip silently
+   does not happen and the only trace is a truncated line in a log.
+   Ask again without the projection instead: more bytes, still an answer. */
+async function listTolerant(at, table, opts) {
+  try {
+    return await at.listAll(table, opts);
+  } catch (e) {
+    if (!/UNKNOWN_FIELD_NAME/.test(e.message)) throw e;
+    const which = /Unknown field name:\s*\\?"([^"\\]+)/.exec(e.message)?.[1] || "one it asked for";
+    at.log?.(`! ${table} has no field "${which}" — reading every field instead. Run repair-base.`);
+    const { fields, ...rest } = opts || {};
+    return at.listAll(table, rest);
+  }
+}
+
+const CONTACT_READ_FIELDS = [
+  "Kylas Contact ID", "Name", "Salutation", "Designation", "LinkedIn", "Owner",
+  "Kylas Owner ID",
+  "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks",
+  "Current Stage", "KPI Rank", "Kylas Updated At",
+  "Vendor Info", "Mode of Meeting", "Service Offering", "Flagged", "Exit Reason",
+  "Company",
+];
+
+/* Event rows for a set of contacts, in ONE read rather than one per contact.
+   A company of 30 contacts would otherwise be 30 requests behind the rate
+   limit gap before the console could paint anything. */
+async function eventsFor(at, recordIds) {
+  if (!recordIds.length) return new Map();
+  const all = await listTolerant(at, "Event Rows", {
+    fields: ["Row Key", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks", "Contact"],
+    pageSize: 100, maxPages: 60,
+  });
+  const want = new Set(recordIds);
+  const by = new Map();
+  for (const r of all) {
+    const owner = (r.fields?.Contact || [])[0];
+    if (!owner || !want.has(owner)) continue;
+    if (!by.has(owner)) by.set(owner, []);
+    by.get(owner).push(r);
+  }
+  return by;
+}
+
+/* CACHED, because it was being rebuilt per request. Reading ONE contact was
+   scanning the whole Companies table plus the whole Event Rows table — three
+   full scans to answer a question about one row, which made the Airtable path
+   measurably SLOWER than the Kylas path it was meant to replace (1140ms vs
+   918ms on the queue, 677 vs 461 on a contact). The company list only changes
+   when the sync runs, so it is worth holding. */
+const IDX = { at: 0, byRec: null, byKid: null };
+const IDX_TTL = Number(process.env.AIRTABLE_INDEX_TTL_MS || 60_000);
+
+async function companyIndex(at, fresh) {
+  if (!fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
+    return { byRec: IDX.byRec, byKid: IDX.byKid };
+  const rows = await at.listAll("Companies",
+    { fields: ["Kylas Company ID", "Name", "Owner"], pageSize: 100, maxPages: 200 });
+  const byRec = new Map(), byKid = new Map();
+  for (const r of rows) {
+    const co = { id: String(r.fields?.["Kylas Company ID"] || ""),
+                 name: r.fields?.Name || "", owner: r.fields?.Owner || "", recordId: r.id };
+    byRec.set(r.id, co);
+    if (co.id) byKid.set(co.id, co);
+  }
+  IDX.at = Date.now(); IDX.byRec = byRec; IDX.byKid = byKid;
+  return { byRec, byKid };
+}
+
+/* One contact by its Kylas id. Returns null when Airtable does not hold it —
+   never a blank contact carrying only the id, which is what made a contact
+   page look like a real empty record. */
+export async function readContact(at, kid) {
+  const rec = await at.find("Contacts", `{Kylas Contact ID} = '${esc(kid)}'`);
+  if (!rec) return null;
+  /* This contact's rows only — the same filter syncContact already uses. The
+     bulk scan below is for a whole queue and is the wrong tool for one card. */
+  const [{ byRec }, events] = await Promise.all([
+    companyIndex(at),
+    at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(kid)}'`, 50).catch(() => []),
+  ]);
+  const co = byRec.get((rec.fields?.Company || [])[0]) || null;
+  return toConsoleContactFromAirtable(rec, { company: co, events });
+}
+
+/* Every contact at one company, plus the company itself. */
+export async function readCompany(at, companyKid) {
+  const { byKid } = await companyIndex(at);
+  const co = byKid.get(String(companyKid));
+  if (!co) return null;
+  const recs = await listTolerant(at, "Contacts",
+    { formula: `{Kylas Company ID (from Company)} = '${esc(companyKid)}'`,
+      fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 20 });
+  /* The lookup field above may not exist on every base, so fall back to
+     filtering on the link we already resolved rather than failing the read. */
+  const rows = recs.length ? recs
+    : (await listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }))
+        .filter((r) => (r.fields?.Company || [])[0] === co.recordId);
+  const events = await eventsFor(at, rows.map((r) => r.id));
+  return {
+    company: { id: co.id, name: co.name, owner: co.owner },
+    contacts: rows.map((r) => toConsoleContactFromAirtable(r,
+      { company: co, events: events.get(r.id) || [] })),
+  };
+}
+
+/* The dialling queue: every contact, optionally narrowed to one owner. */
+export async function readQueue(at, owner) {
+  /* The contact scan and the company index do not depend on each other, and
+     the client serialises requests behind its rate-limit gap anyway — but
+     asking for them together lets it pipeline instead of waiting out a full
+     round trip before even starting the second. */
+  const [rows, { byRec }] = await Promise.all([
+    listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }),
+    companyIndex(at),
+  ]);
+  const mine = owner && owner !== "all"
+    ? rows.filter((r) => String(r.fields?.Owner || "") === String(owner)) : rows;
+  const events = await eventsFor(at, mine.map((r) => r.id));
+  return mine.map((r) => toConsoleContactFromAirtable(r, {
+    company: byRec.get((r.fields?.Company || [])[0]) || null,
+    events: events.get(r.id) || [],
+  }));
 }

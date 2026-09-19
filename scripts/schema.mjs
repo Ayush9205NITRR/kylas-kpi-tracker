@@ -64,6 +64,28 @@ export const TABLES = [
       { name: "Kylas Updated At", type: "dateTime", options: dateTime },
       { name: "Designation", type: "singleLineText" },
       { name: "LinkedIn", type: "url" },
+      /* Added 2026-09-19, so the console can be READ from here rather than from
+         Kylas. Without a number there is nothing to dial and the whole idea
+         fails on the first call of the day.
+
+         Two columns per channel on purpose. The JSON one is what the console
+         reads: a contact can carry several numbers with a type and a country
+         code each, and flattening that to one string loses the ones that are
+         not primary. The plain one is for a person looking at the base, which
+         is most of why the base exists. Both are written from the same value
+         on every sync, so they cannot drift apart. */
+      { name: "Phone", type: "singleLineText" },
+      { name: "Phones", type: "multilineText" },
+      { name: "Email", type: "singleLineText" },
+      { name: "Emails", type: "multilineText" },
+      /* The NAME is what the reports group by, but the id is what the console
+         filters companies on — carrying only one of them made a contact read
+         from Airtable subtly different from the same contact read from Kylas,
+         and "subtly different" is how a consumer grows a branch. */
+      { name: "Kylas Owner ID", type: "singleLineText" },
+      { name: "Salutation", type: "singleLineText" },
+      { name: "Source of Data", type: "singleLineText" },
+      { name: "Remarks", type: "multilineText" },
       { name: "Owner", type: "singleLineText" },
       { name: "Current Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Previous Stage", type: "singleSelect", options: sel(...STAGES) },

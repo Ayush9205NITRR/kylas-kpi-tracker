@@ -131,6 +131,28 @@ const CONTACTS = [
     updatedAt: "2026-09-01T00:00:00.000Z" },
 ];
 
+/* MOCK_CONTACTS=<n> adds n more, spread across the bulk companies. Four
+   contacts cannot tell a fast read path from a slow one — the whole argument
+   for reading out of Airtable is about what happens at thousands of rows, and
+   that has to be measurable rather than asserted. */
+if (process.env.MOCK_CONTACTS) {
+  const N = Number(process.env.MOCK_CONTACTS) || 0;
+  const coIds = Object.keys(COMPANIES).map(Number);
+  for (let i = 0; i < N; i++) {
+    CONTACTS.push({
+      id: 500000 + i,
+      firstName: "Bulk", lastName: `Contact ${i}`,
+      ownerId: i % 2 ? 74726 : 74725,
+      company: coIds[i % coIds.length],
+      designation: "Manager",
+      emails: [{ type: "OFFICE", value: `bulk${i}@example.com`, primary: true }],
+      phoneNumbers: [{ type: "MOBILE", dialCode: "+91", value: String(9000000000 + i), primary: true }],
+      customFieldValues: { cfPipelineStageBd: id("MQL_MARKETING_QUALIFIED_LEAD") },
+      updatedAt: new Date(Date.UTC(2026, 8, 17, 12, 0) - i * 1000).toISOString(),
+    });
+  }
+}
+
 let nextId = 900001;
 const WRITES = [];
 const CALL_LOGS = [];

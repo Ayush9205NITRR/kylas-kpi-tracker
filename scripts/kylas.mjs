@@ -481,10 +481,21 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
                complete: reachedWatermark || windows > 0 || !stalled };
     },
 
+    /* ONE PAGE. This has always fetched page 0 and stopped, so an associate
+       with more than `size` allotted contacts saw the newest `size` of them and
+       nothing said otherwise — 100 of 402 in the fixture that caught it. The
+       queue is moving to Airtable, which pages properly, so this is now the
+       FALLBACK path; a fallback that is quietly short is worse than no
+       fallback, so it says so. */
     async contactsForOwner(ownerId, size = 100) {
       const r = await call("POST", `/v1/search/contact?sort=updatedAt,desc&page=0&size=${size}`,
         { fields: CONTACT_FIELDS, jsonRule: rule("ownerId", Number(ownerId)) });
-      return rows(r);
+      const out = rows(r);
+      const total = Number(r?.totalElements ?? NaN);
+      if (Number.isFinite(total) && total > out.length)
+        log(`! queue from Kylas is ONE PAGE: ${out.length} of ${total} for owner ${ownerId}. ` +
+            `The rest are not in it. Sync Airtable and read the queue from there.`);
+      return out;
     },
 
     /* "Companies allotted to me" is the company's OWN owner field, not "a
@@ -722,6 +733,10 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
     past: [], current: [],
     vendorInfo: "", serviceOffering: false, modeOfMeeting: "",
     done: false, flagged: false,
+    /* Present and empty rather than absent: the Airtable reader returns it, and
+       a key that exists on one source and not the other is a difference the
+       console can see. */
+    exitReason: "",
 
     _kylas: { updatedAt: c.updatedAt, createdAt: c.createdAt },
   };
