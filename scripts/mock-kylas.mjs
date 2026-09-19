@@ -355,7 +355,12 @@ createServer(async (req, res) => {
       return json(res, 400, { code: "002008", message: "Invalid Mobile Number.", errorDetails: [] });
     if (refuseName && `${body.firstName || ""} ${body.lastName || ""}`.includes(refuseName))
       return json(res, 400, { code: "002099", message: "Refused by the test hook.", errorDetails: [] });
-    const made = { id: nextId++, ...body, createdAt: new Date().toISOString() };
+    /* updatedAt as well as createdAt. Without it a just-created contact looked
+       older than any watermark, so a delta search could never find one — and
+       the recovery that leans on a delta was passing only because the company
+       roster answered first. */
+    const now = new Date().toISOString();
+    const made = { id: nextId++, ...body, createdAt: now, updatedAt: now };
     CONTACTS.push(made);
     WRITES.push({ kind: "create", id: made.id, body });
     /* Creates the contact and never answers — MOCK_HANG_CREATE=1, or switched

@@ -325,9 +325,14 @@ header and no unique constraint, so it accepts the duplicate happily. The proxy
 therefore keeps a small journal of which saves have already created what,
 written before the `POST` and keyed on the console's `lid`. A repeat of a key it
 has finished is answered with the id from last time; a key it started and never
-finished sends it to look at the company's roster in Kylas before it creates
-anything. See `scripts/journal.mjs`, and `scripts/test-idempotency.mjs`, which
-reproduces the lost reply for real rather than describing it.
+finished sends it to look in Kylas before it creates anything — the company's
+roster, then the owner's newest contacts, then everything changed since the
+attempt, so a POC invented from the queue with no company is covered as well as
+one created on a company page. A match needs the name **and** the number: a
+reception line is on twenty records, and folding a real second POC into the
+first is worse than a duplicate, which a human can see and delete. See
+`scripts/journal.mjs`, and `scripts/test-idempotency.mjs`, which reproduces the
+lost reply for real rather than describing it.
 
 A **4xx is not an outage.** It is a verdict on the data, so it is never queued —
 retrying it would earn the same rejection for ever while hiding the one thing

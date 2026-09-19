@@ -36,10 +36,10 @@ async function down(){ try{ proc?.kill('SIGKILL'); }catch{} proc=null; await sle
 /* ONE mock process for the whole run. Restarting it would empty the contacts
    it holds, and step 3 turns on exactly whether a contact Kylas kept can be
    found again. */
+let mockProc = null;
 async function mock() {
-  try{ execSync('lsof -t -iTCP:9900 | xargs -r kill'); }catch{}
-  await sleep(400);
-  spawn('node',['scripts/mock-kylas.mjs'],{cwd:REPO,env:{...process.env,MOCK_MANY:'4'},stdio:'ignore'});
+  await sleep(200);
+  mockProc = spawn('node',['scripts/mock-kylas.mjs'],{cwd:REPO,env:{...process.env,MOCK_MANY:'4'},stdio:'ignore'});
   for(let i=0;i<50;i++){ try{ await fetch('http://127.0.0.1:9900/__writes',{headers:{'api-key':'x'}}); return; }catch{} await sleep(300); }
   throw new Error('mock never came up');
 }
@@ -76,8 +76,8 @@ const writes = async () => {
 const creates = async (name) => (await writes()).filter(w=>w.kind==='create'
   && `${w.body.firstName||''} ${w.body.lastName||''}`.trim()===name);
 
-const contact = (name, lid, phone) => ({
-  lid, kid:'', pendingCreate:true, pocName:name, companyId:'1776620', company:'seats',
+const contact = (name, lid, phone, companyId = '1776620') => ({
+  lid, kid:'', pendingCreate:true, pocName:name, companyId, company: companyId ? 'seats' : '',
   owner:'Enout Super Admin', ownerId:74725, designation:'Ops',
   phones:[{type:'MOBILE',cc:'+91',value:phone,primary:true}], emails:[],
   stage:'MQL_MARKETING_QUALIFIED_LEAD', past:[], current:[],
@@ -169,8 +169,76 @@ console.log('\n6. an ordinary new contact still gets created');
 const r6 = await save(contact('Esha Pillai','lid-esha','9800000004'), callOf('2026-09-19T10:30:00.000Z'));
 check('created, with an id', r6.created === true && !!r6.kid, `kid=${r6.kid}`);
 
+
+/* ── 7 · the same, for a contact with NO company ─────────────────────── */
+/* The roster lookup cannot be asked about a POC invented from the queue rather
+   than a company page — there is no company to ask about. That contact was the
+   one case a crashed create could still duplicate. */
+console.log('\n7. an interrupted create on a contact with no company');
+await down();
+await hang(true);
+await up();
+const hung2 = save(contact('Farah Sheikh','lid-farah','9800000005',''), callOf('2026-09-19T10:40:00.000Z'), 6000)
+  .then(()=>'answered').catch(e=>e.name==='AbortError'?'timed out':'error: '+e.message);
+await sleep(3500);
+await down();
+await hung2;
+const madeF = await creates('Farah Sheikh');
+console.log(`   Kylas made it anyway: ${madeF.length} (id ${madeF[0]?.id})`);
+await hang(false);
+await up();
+const r7 = await save(contact('Farah Sheikh','lid-farah','9800000005',''), callOf('2026-09-19T10:40:00.000Z'));
+console.log(`   retry : created=${r7.created} kid=${r7.kid} deduped=${!!r7.deduped}`);
+check('no company, and still not duplicated', (await creates('Farah Sheikh')).length === 1,
+      `${(await creates('Farah Sheikh')).length} create(s) in total`);
+check('it found the one Kylas kept', String(r7.kid) === String(madeF[0]?.id));
+
+/* ── 8 · a different person on the same line is NOT adopted ──────────── */
+/* Reception numbers are shared. Folding a real second POC into the first is
+   worse than a duplicate: one a human can delete, the other loses a record
+   nobody knows is missing. */
+console.log('\n8. a different POC reachable on the same number');
+await down();
+await hang(true);
+await up();
+const hung3 = save(contact('Gauri Shah','lid-gauri','9800000006'), callOf('2026-09-19T10:50:00.000Z'), 6000)
+  .then(()=>'answered').catch(()=>'gone');
+await sleep(3500); await down(); await hung3;
+await hang(false);
+await up();
+/* the retry that arrives is for SOMEBODY ELSE on that number */
+const r8 = await save(contact('Harsh Patel','lid-gauri','9800000006'), callOf('2026-09-19T10:51:00.000Z'));
+console.log(`   retry as a different name: created=${r8.created} kid=${r8.kid}`);
+check('a different name on the same number is created, not merged',
+      r8.created === true && String(r8.kid) !== String((await creates('Gauri Shah'))[0]?.id));
+
+
+/* ── 9 · no company AND no owner: the last resort on its own ─────────── */
+/* Both targeted lookups are unavailable here, so this is the account-wide
+   delta answering by itself. It is the route that stops the gap being merely
+   narrowed. */
+console.log('\n9. an interrupted create with neither a company nor an owner');
+await down();
+await hang(true);
+await up();
+const bare = (name, lid, phone) => { const x = contact(name, lid, phone, ''); delete x.ownerId; return x; };
+const hung4 = save(bare('Imran Qureshi','lid-imran','9800000007'), callOf('2026-09-19T11:00:00.000Z'), 6000)
+  .then(()=>'answered').catch(()=>'gone');
+await sleep(3500); await down(); await hung4;
+const madeI = await creates('Imran Qureshi');
+console.log(`   Kylas made it anyway: ${madeI.length} (id ${madeI[0]?.id})`);
+await hang(false);
+await up();
+const r9 = await save(bare('Imran Qureshi','lid-imran','9800000007'), callOf('2026-09-19T11:00:00.000Z'));
+console.log(`   retry : created=${r9.created} kid=${r9.kid} deduped=${!!r9.deduped}`);
+check('the account-wide delta found it unaided', (await creates('Imran Qureshi')).length === 1
+      && String(r9.kid) === String(madeI[0]?.id),
+      `${(await creates('Imran Qureshi')).length} create(s) in total`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await down();
-try{ execSync('lsof -t -iTCP:9900 | xargs -r kill'); }catch{}
+/* kill the children directly: execSync on a pipeline blocks on stdio the
+   spawned processes still hold open. */
+try{ mockProc?.kill('SIGKILL'); }catch{}
 try{ atProc?.kill('SIGKILL'); }catch{}
 process.exit(fail ? 1 : 0);

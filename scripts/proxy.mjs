@@ -140,25 +140,88 @@ async function fromAirtable(what, fn) {
    and whose reply never got home. Kylas either holds the contact or it does
    not, and it is the only side that can say.
 
-   By company roster, not by phone number. Searching contacts by phone would be
-   the direct question, but the query builder's accepted field list is not
-   documented and this account 500s on shapes it dislikes — a lookup that throws
-   here would push us back to creating a duplicate. contactsForCompany is the
-   call the console already makes on every company open, so it is known to work
-   on this account, and a newly invented POC always has the company it was
-   created under. Matching is on the dialable digits, which is what makes two
-   records the same person. */
-async function findExisting(c) {
-  if (!c.companyId) return null;
-  const digits = (p) => String(p || "").replace(/\D/g, "").slice(-10);
-  const want = new Set((c.phones || []).map((p) => digits(p.value)).filter(Boolean));
-  if (!want.size) return null;
-  const roster = await kylas.contactsForCompany(c.companyId);
-  for (const k of roster || []) {
+   NOT by a phone-number query, which would be the direct question. The query
+   builder's accepted field list is not documented, this account 500s on shapes
+   it dislikes, and a lookup that throws here would push us straight back to
+   creating the duplicate. Both routes below are calls the proxy already relies
+   on elsewhere, so they are known to work on this account:
+
+     the company's roster   one request, and a POC invented inside a company
+                            scope has that company. The cheap first try.
+     the owner's contacts   for a contact with NO company — created from the
+                            queue rather than a company page, where the roster
+                            cannot be asked. The console requires an owner
+                            before it will save, so there is always one. One
+                            page, newest first, and a contact made moments ago
+                            is at the front of it.
+     everything changed     the backstop, when the owner's newest page is not
+       since the attempt    enough — a busy day can push a contact created last
+                            night past it. The contact was made at the moment
+                            the journal wrote the entry down, so a delta from
+                            just before then contains it and stops at the
+                            watermark a page or two in.
+
+   The roster is tried first and the window is still tried after it, because
+   "the roster did not have it" is not the same as "Kylas does not have it" —
+   the create may have landed with a different company than the retry is
+   carrying, and that is exactly when a wrong answer costs a duplicate.
+
+   A MATCH IS PHONE *AND* NAME. The question is not "does Kylas hold this
+   number" — a switchboard is on twenty records — it is "did my own interrupted
+   attempt make this". That attempt sent precisely the name and number the retry
+   is sending now. Adopting on the number alone would fold a real second POC at
+   the same company into the first; between that and a duplicate, the duplicate
+   is the one a human can fix. */
+const digits10 = (v) => String(v || "").replace(/\D/g, "").slice(-10);
+const sameName = (k, c) =>
+  `${k?.firstName || ""} ${k?.lastName || ""}`.trim().toLowerCase().replace(/\s+/g, " ") ===
+  String(c.pocName || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+function pickMatch(list, c, want) {
+  for (const k of list || []) {
+    if (!sameName(k, c)) continue;
     for (const p of k.phoneNumbers || [])
-      if (want.has(digits(p.value))) return k;
+      if (want.has(digits10(p.value))) return k;
   }
   return null;
+}
+
+async function findExisting(c, since) {
+  const want = new Set((c.phones || []).map((p) => digits10(p.value)).filter(Boolean));
+  if (!want.size) return null;
+
+  if (c.companyId) {
+    const hit = pickMatch(await kylas.contactsForCompany(c.companyId), c, want);
+    if (hit) return hit;
+  }
+
+  /* Filtered by owner rather than by time, which matters more than it looks:
+     the delta below decides what is recent from `updatedAt`, and whether Kylas
+     sets that field on a record it has only ever created is not something this
+     code should bet a duplicate on. A row with no updatedAt sorts to the back
+     of this page but is still IN it. */
+  if (c.ownerId) {
+    const hit = pickMatch(await kylas.contactsForOwner(c.ownerId, 200), c, want);
+    if (hit) return hit;
+  }
+
+  /* Ten minutes of slack: the attempt's timestamp is this machine's clock and
+     updatedAt is Kylas's, and a watermark a minute the wrong side of the record
+     would miss the very thing being looked for. Two days when the journal has
+     no time to offer, rather than paging the whole account. */
+  const from = Date.parse(since || "");
+  const watermark = new Date(Number.isFinite(from) ? from - 600000
+                                                   : Date.now() - 2 * 86400000).toISOString();
+  const delta = await kylas.contactsChangedSince(watermark);
+  const hit = pickMatch(delta.contacts, c, want);
+  /* A search that stalled did not finish looking, so "not found" in it is not
+     an answer. Creating anyway is still the right move — refusing the save
+     would lose the associate's call over a maybe — but it is the one case where
+     a duplicate can survive all of this, so it does not pass in silence. */
+  if (!hit && !delta.complete)
+    log(`! the contact search did not complete, so it cannot rule out that ` +
+        `${c.pocName} was already created. Creating; check for a duplicate.`);
+  return hit;
 }
 
 /* Most records carry their own owner name in metaData.idNameStore, so this is
@@ -868,13 +931,13 @@ const routes = {
         log(`deduped: ${c.pocName} was already created as ${c.kid} — updated instead`);
       } else {
         /* An attempt that started and never finished. Kylas may or may not hold
-           the contact; the only way to find out is to look. The company roster
-           is the search the console already uses, so this leans on a proven
-           call rather than a phone-number query this account may not accept. */
+           the contact; the only way to find out is to look. findExisting knows
+           where: it needs no company, so a POC invented from the queue rather
+           than a company page is covered too. */
         let found = null;
-        if (known.state === "open" && c.companyId) {
+        if (known.state === "open") {
           log(`an earlier attempt to create ${c.pocName} never finished — checking Kylas first`);
-          found = await findExisting(c).catch((e) => {
+          found = await findExisting(c, known.at).catch((e) => {
             log(`  could not check (${e.message}) — creating, a duplicate is possible`);
             return null;
           });
