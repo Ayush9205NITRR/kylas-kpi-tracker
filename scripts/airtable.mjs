@@ -63,6 +63,24 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
       return r?.records?.[0] || null;
     },
 
+    /* The same upsert, ten records per request. One-at-a-time is right for a
+       console save (one contact) and wrong for a sync: a first backfill of
+       5,000 contacts at one request each, with the rate-limit gap between
+       them, is well over an hour of sleeping. Ten per call is Airtable's
+       documented batch size. Returns the records, in request order. */
+    async upsertMany(table, mergeOn, list) {
+      const out = [];
+      for (let i = 0; i < list.length; i += 10) {
+        const r = await call("PATCH", t(table), {
+          performUpsert: { fieldsToMergeOn: [mergeOn] },
+          records: list.slice(i, i + 10).map((fields) => ({ fields })),
+          typecast: true,
+        });
+        (r?.records || []).forEach((x) => out.push(x));
+      }
+      return out;
+    },
+
     async find(table, formula) {
       const r = await call("GET", `${t(table)}?maxRecords=1&filterByFormula=${encodeURIComponent(formula)}`);
       return r?.records?.[0] || null;

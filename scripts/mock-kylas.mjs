@@ -188,7 +188,18 @@ createServer(async (req, res) => {
         out = out.filter((c) => Number(c.company?.id ?? c.company) === Number(r.value));
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
     }
-    return json(res, 200, { content: out.map(withMeta), totalElements: out.length });
+    /* HONOUR THE SORT, and page. Neither was modelled here, so a client that
+       walks contacts newest-first and stops at a watermark was being tested
+       against a server that returned them in insertion order — it stopped at
+       the first old row and silently dropped everything after it.
+         MOCK_IGNORE_SORT=1 returns them unsorted on purpose, because a client
+       must not take the sort parameter on trust either. */
+    if (process.env.MOCK_IGNORE_SORT !== "1")
+      out = [...out].sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+    const csize = Math.max(1, Number(url.searchParams.get("size") || 200));
+    const cpage = Math.max(0, Number(url.searchParams.get("page") || 0));
+    return json(res, 200, { content: out.slice(cpage * csize, cpage * csize + csize).map(withMeta),
+                            totalElements: out.length, page: cpage, size: csize });
   }
 
   if (p === "/v1/search/company" && req.method === "POST") {

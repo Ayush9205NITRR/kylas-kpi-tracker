@@ -42,6 +42,12 @@ export const TABLES = [
          owner here, Airtable can answer the dashboard on its own. */
       { name: "Owner", type: "singleLineText",
         description: "The Kylas owner's name, copied on every save so this table can attribute a company without calling Kylas." },
+      /* Added 2026-09-19 for the nightly Kylas -> Airtable sync. It holds the
+         record's updatedAt AS KYLAS REPORTED IT, which makes the watermark
+         derivable from the base itself: the next run asks Kylas for everything
+         changed since the newest value here. No local cursor file, so the cron
+         can move between machines and a lost disk costs nothing. */
+      { name: "Kylas Updated At", type: "dateTime", options: dateTime },
     ],
   },
   {
@@ -50,6 +56,12 @@ export const TABLES = [
     fields: [
       { name: "Name", type: "singleLineText" },
       { name: "Kylas Contact ID", type: "singleLineText" },
+      /* Added 2026-09-19 for the nightly Kylas -> Airtable sync. It holds the
+         record's updatedAt AS KYLAS REPORTED IT, which makes the watermark
+         derivable from the base itself: the next run asks Kylas for everything
+         changed since the newest value here. No local cursor file, so the cron
+         can move between machines and a lost disk costs nothing. */
+      { name: "Kylas Updated At", type: "dateTime", options: dateTime },
       { name: "Designation", type: "singleLineText" },
       { name: "LinkedIn", type: "url" },
       { name: "Owner", type: "singleLineText" },
@@ -108,7 +120,11 @@ export const TABLES = [
       { name: "To Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Changed At", type: "dateTime", options: dateTime },
       { name: "Owner", type: "singleLineText" },
-      { name: "Source", type: "singleSelect", options: sel("Console", "Kylas webhook", "Backfill") },
+      /* "Kylas sync" added 2026-09-19: a stage that moved in Kylas rather than
+         in the console still has to reach the report, and it must be
+         distinguishable from one an associate set on a call. */
+      { name: "Source", type: "singleSelect",
+        options: sel("Console", "Kylas webhook", "Backfill", "Kylas sync") },
     ],
   },
   {

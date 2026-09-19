@@ -153,7 +153,7 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
     { name: "updatedAt/long less (epoch ms)",
       body: (iso) => boundRule(iso, { type: "long", value: String(Date.parse(iso)) }) },
   ];
-  let boundShape = null;
+  const boundShapeFor = new Map();   /* entity -> shape, discovered once each */
 
   const stamp = (c) => Date.parse(c?.updatedAt ?? c?.updatedAt ?? 0) || 0;
 
@@ -164,27 +164,27 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
      looks like progress, or a "complete" list that is the first page repeated.
      So a shape only counts as working when the rows it returns are ACTUALLY
      older than the bound. Accepting a 200 as proof would have been the bug. */
-  async function findBoundShape(iso, ownerId, fields) {
+  async function findBoundShape(iso, ownerId, fields, entity = "company") {
     const cut = Date.parse(iso);
     for (const s of BOUND_SHAPES) {
       try {
-        const body = await call("POST", page(0), { fields, jsonRule: s.body(iso) });
+        const body = await call("POST", page(0, entity), { fields, jsonRule: s.body(iso) });
         const got = rows(body);
         if (!got.length) {           /* nothing older: honoured, and we are done */
-          log(`company window: "${s.name}" works (empty beyond the bound)`);
+          log(`${entity} window: "${s.name}" works (empty beyond the bound)`);
           return s;
         }
         const newest = Math.max(...got.map(stamp));
         if (newest >= cut) {
-          log(`company window: "${s.name}" returned 200 but IGNORED the bound ` +
+          log(`${entity} window: "${s.name}" returned 200 but IGNORED the bound ` +
               `(newest row is not older) — not usable`);
           continue;
         }
-        log(`company window: "${s.name}" works`);
+        log(`${entity} window: "${s.name}" works`);
         return s;
       } catch (e) {
         if (![400, 404, 500].includes(e.status)) throw e;
-        log(`company window: "${s.name}" -> ${e.status}, trying the next`);
+        log(`${entity} window: "${s.name}" -> ${e.status}, trying the next`);
       }
     }
     return null;
@@ -192,11 +192,15 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
 
   /* Walk backwards from `fromISO`, newest-first, a window at a time. Returns
      the extra rows; the caller owns de-duplication. */
-  async function crawlOlderThan(fromISO, ownerId, fields, haveIds) {
+  async function crawlOlderThan(fromISO, ownerId, fields, haveIds, entity = "company") {
     const MAX_WINDOWS = Number(process.env.KYLAS_MAX_WINDOWS || 200);
-    boundShape = boundShape || await findBoundShape(fromISO, ownerId, fields);
+    let boundShape = boundShapeFor.get(entity);
+    if (boundShape === undefined) {
+      boundShape = await findBoundShape(fromISO, ownerId, fields, entity);
+      boundShapeFor.set(entity, boundShape);
+    }
     if (!boundShape) {
-      log(`! company window: no rule expresses "updatedAt <" on this account — ` +
+      log(`! ${entity} window: no rule expresses "updatedAt <" on this account — ` +
           `the list stays short. The rest must be fetched by id.`);
       return { extra: [], windows: 0, stalled: false, usable: false };
     }
@@ -215,10 +219,10 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
     while (windows < MAX_WINDOWS) {
       let got;
       try {
-        got = rows(await call("POST", page(0),
+        got = rows(await call("POST", page(0, entity),
                               { fields, jsonRule: boundShape.body(after(cursorMs)) }));
       } catch (e) {
-        log(`! company window: ${e.message} — stopping with ${extra.length} extra`);
+        log(`! ${entity} window: ${e.message} — stopping with ${extra.length} extra`);
         break;
       }
       windows++;
@@ -237,7 +241,7 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
          so say so and leave the shortfall reported rather than spinning. */
       if (!fresh.length || !oldest || oldest >= cursorMs) {
         stalled = true;
-        log(`! company window: no progress at ${new Date(cursorMs).toISOString()} — ` +
+        log(`! ${entity} window: no progress at ${new Date(cursorMs).toISOString()} — ` +
             `${got.length} row(s), ${fresh.length} new. More records share one ` +
             `updatedAt than a page holds; they cannot be walked this way.`);
         break;
@@ -247,8 +251,8 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
       if (got.length < PAGE) break;
     }
     if (windows >= MAX_WINDOWS)
-      log(`! company window: stopped at KYLAS_MAX_WINDOWS (${MAX_WINDOWS})`);
-    if (extra.length) log(`company window: +${extra.length} across ${windows} window(s)`);
+      log(`! ${entity} window: stopped at KYLAS_MAX_WINDOWS (${MAX_WINDOWS})`);
+    if (extra.length) log(`${entity} window: +${extra.length} across ${windows} window(s)`);
     return { extra, windows, stalled, usable: true };
   }
 
@@ -369,7 +373,10 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
     return out.filter((c) => { const k = String(c.id); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
-  const page = (n) => `/v1/search/company?sort=updatedAt,desc&page=${n}&size=${PAGE}`;
+  /* Both searches page the same way and both meet the same result window, so
+     the entity is a parameter rather than a second copy of the crawl. */
+  const page = (n, entity = "company") =>
+    `/v1/search/${entity}?sort=updatedAt,desc&page=${n}&size=${PAGE}`;
 
   return {
     raw: call,
@@ -381,6 +388,97 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
       const r = await call("POST", `/v1/search/contact?sort=updatedAt,desc&page=0&size=${size}`,
         { fields: CONTACT_FIELDS, jsonRule: rule("company", Number(companyId)) });
       return rows(r);
+    },
+
+    /* EVERY CONTACT CHANGED SINCE A MOMENT, newest first.
+       The nightly sync wants a delta, and a delta needs no clever filter: the
+       search is already sorted updatedAt descending, so page from the newest
+       and stop at the first row older than the watermark. A normal night is a
+       few hundred rows and never comes near the result window.
+
+       The FIRST run has no watermark and therefore pages the lot, which does
+       meet the window — so it continues by timestamp exactly as the company
+       crawl does. Same code, different entity. */
+    async contactsChangedSince(sinceISO, { onPage = () => {} } = {}) {
+      const sinceMs = sinceISO ? Date.parse(sinceISO) : 0;
+      const all = [];
+      const seen = new Set();
+      const older = (c) => sinceMs && (Date.parse(c?.updatedAt || 0) || 0) < sinceMs;
+
+      let pages = 0, full = true, reportedTotal = null, reachedWatermark = false, scanned = 0;
+      /* STOPPING EARLY IS ONLY SAFE IF THE SORT WAS HONOURED.
+         "Page newest-first and stop at the first old row" is correct when the
+         server sorts as asked, and silently lossy when it does not: one
+         out-of-order row ends the scan and every changed record behind it is
+         dropped. sort= is a request, not a guarantee — this endpoint has
+         already been caught ignoring a filter it accepted — so the order is
+         CHECKED on the rows as they arrive, and the early stop is given up the
+         moment it does not hold. Slower, and it cannot lose anybody. */
+      let sorted = true, prevStamp = Infinity;
+      for (let p = 0; full && p < MAX_PAGES && !reachedWatermark; p++) {
+        const body = await call("POST", page(p, "contact"),
+                                { fields: CONTACT_FIELDS, jsonRule: freeText("") });
+        const got = rows(body);
+        if (p === 0) {
+          const t = Number(body?.totalElements ?? body?.total ?? NaN);
+          reportedTotal = Number.isFinite(t) ? t : null;
+        }
+        pages++;
+
+        /* NEVER BREAK MID-PAGE. Checking the order as rows go by does not
+           protect anything: the early stop fires on the FIRST old row, which
+           on an unsorted list can be row one — before any disorder has been
+           seen. A page is cheap and already paid for, so take all of it, and
+           stop only when a WHOLE page turned out to be old. Local disorder
+           then costs nothing, and a delta still stops after a page or two. */
+        let kept = 0;
+        scanned += got.length;
+        for (const c of got) {
+          const ts = stamp(c);
+          if (ts > prevStamp) {
+            if (sorted) log(`! contact search: results are NOT in updatedAt order — ` +
+                            `scanning every page rather than trusting the sort`);
+            sorted = false;
+          }
+          prevStamp = ts;
+          if (older(c)) continue;
+          kept++;
+          const k = String(c.id);
+          if (!seen.has(k)) { seen.add(k); all.push(c); }
+        }
+        onPage(all.length);
+        full = got.length === PAGE;
+        /* An entire page older than the watermark means the delta is behind us
+           — but only if the order can be relied on at all. */
+        if (sorted && sinceMs && got.length && kept === 0) reachedWatermark = true;
+      }
+
+      /* Only a FULL pull can be cut short by the window — a delta stops at the
+         watermark long before it. */
+      let windows = 0, stalled = false;
+      /* SHORT BECAUSE THE SERVER RAN OUT, not because we filtered.
+         The test used to be `all.length < reportedTotal`, and all.length is
+         what survived the WATERMARK — so a delta of one contact out of four
+         looked like a 3-record shortfall and set the window crawl off chasing
+         records it had already decided it did not want. Rows SCANNED is the
+         honest measure of what the endpoint actually served. */
+      if (!reachedWatermark && reportedTotal != null && scanned < reportedTotal && all.length) {
+        const oldest = Math.min(...all.map(stamp).filter(Boolean));
+        if (oldest) {
+          log(`contact search: ${reportedTotal - all.length} short — continuing by updatedAt`);
+          const r = await crawlOlderThan(new Date(oldest).toISOString(), null,
+                                         CONTACT_FIELDS, seen, "contact");
+          /* A window may reach past the watermark; the caller asked for a
+             delta, so honour it here too. */
+          for (const c of r.extra) if (!older(c)) all.push(c);
+          windows = r.windows; stalled = r.stalled;
+        }
+      }
+      log(`contact search: ${all.length} changed` +
+          (sinceISO ? ` since ${sinceISO}` : " (full)") +
+          ` across ${pages} page(s)` + (windows ? ` + ${windows} window(s)` : ""));
+      return { contacts: all, pages, windows, stalled, reportedTotal,
+               complete: reachedWatermark || windows > 0 || !stalled };
     },
 
     async contactsForOwner(ownerId, size = 100) {
