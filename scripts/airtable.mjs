@@ -226,7 +226,16 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     "Ever Picked": !!prev?.fields?.["Ever Picked"]
       || (!!c.stage && !NOT_CONNECTED.includes(c.stage)),
     "KPI Rank": rank,
-    "Pending Create": !!c.pendingCreate,
+    /* DERIVED, not copied. The console sets pendingCreate when it invents a
+       contact offline and never clears it on the object it sends — the proxy
+       creates the contact in Kylas and calls this with `{ ...c, kid }`, so the
+       flag arrived true alongside a real Kylas id. The row then read "not in
+       Kylas yet" for a contact that plainly was, for ever, because nothing
+       downstream ever unsets it. Having the id IS the answer to the question
+       this field asks, so ask it rather than trusting the caller's stale
+       memory of it. Same failure as Exit Reason: a transient flag that could
+       be set and not cleared. */
+    "Pending Create": !!c.pendingCreate && !c.kid,
     Flagged: !!c.flagged,
     "Exit Reason": EXIT_STAGES.includes(c.stage) ? c.stage : "",
   };

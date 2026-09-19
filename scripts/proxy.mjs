@@ -819,7 +819,17 @@ const routes = {
        did not land, even though Kylas did. */
     if (airtable) {
       try {
-        result.airtable = await syncContact(airtable, { ...c, kid: result.kid }, body.call, { log });
+        /* createdHere comes from THIS side, not the console's. The console sets
+           it when it believes the contact is new, and while the proxy is down it
+           believes that on every save of the same contact — two offline calls
+           then drain as two Call Log rows both claiming the create, and
+           snapshot.mjs counts "Contacts Added" straight off that flag, so one
+           new POC read as two. Only one of those saves actually POSTed to Kylas,
+           and only this side knows which. */
+        result.airtable = await syncContact(
+          airtable, { ...c, kid: result.kid },
+          body.call ? { ...body.call, createdHere: result.created } : body.call,
+          { log });
       } catch (e) {
         result.airtableError = e.message;
         log(`! airtable for ${result.kid}: ${e.message}`);

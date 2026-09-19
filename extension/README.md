@@ -300,9 +300,27 @@ numbers come from Airtable.
 
 ### When the proxy is down
 
-The save is kept in an outbox in the browser and retried on the next save. The
-queue row shows `queued`, and the associate carries on dialling. Nothing is
-lost to an outage.
+The save is kept in an outbox in the browser and drained on the next save **and
+on the next boot** — so a queue left behind at the end of an afternoon goes out
+when the console is next opened, without the associate having to save something
+else to trigger it. The queue row shows `queued`, and the associate carries on
+dialling. Nothing is lost to an outage.
+
+Two things the drain has to get right, both about a contact that does not exist
+in Kylas yet:
+
+- **It must not create it twice.** Every locally-invented contact carries an
+  `lid`, a local id, and the drain remembers the Kylas id the first send earns
+  for it. Three offline calls on one new POC drain as one `POST` and two `PUT`s,
+  not three `POST`s.
+- **Only the send that actually created it is `Created Here`.** The console sets
+  that flag whenever it believes the contact is new, which offline is every
+  time; the proxy overwrites it with what really happened, because
+  `snapshot.mjs` counts *Contacts Added* straight off it.
+
+A **4xx is not an outage.** It is a verdict on the data, so it is never queued —
+retrying it would earn the same rejection for ever while hiding the one thing
+the associate could fix. The console names the field instead.
 
 ### Ordering: Past above Current
 

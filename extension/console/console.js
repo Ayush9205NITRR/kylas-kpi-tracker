@@ -77,7 +77,12 @@ const QUICK={
    row and keep counting toward Right POC twice. */
 const rowKey=()=>(crypto?.randomUUID?crypto.randomUUID():"r"+Date.now()+Math.random().toString(36).slice(2,8));
 const emptyRow=()=>({rowKey:rowKey(),eventType:"",budget:"",timeline:"",pax:"",remarks:""});
-const blank=()=>({kid:"",salutation:"",pocName:"",company:"",linkedin:"",designation:"",
+/* `lid` is a LOCAL id, minted here and never sent anywhere as an identity — it
+   exists so the outbox can tell two queued saves of the SAME not-yet-created
+   contact apart from two different new contacts. Without it, dialling the same
+   new POC twice during an outage drains as two POSTs and Kylas ends up with the
+   contact twice. kid is the real identity the moment there is one. */
+const blank=()=>({lid:rowKey(),kid:"",salutation:"",pocName:"",company:"",linkedin:"",designation:"",
   emails:[{type:"OFFICE",value:"",primary:true}],
   phones:[{type:"MOBILE",cc:"+91",value:"",primary:true}],
   stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
@@ -1268,8 +1273,38 @@ document.addEventListener("input",()=>{
 document.addEventListener("change",persist,true);
 
 /* ── sync ─────────────────────────────────── */
+/* THE OUTBOX ONLY WORKS IF SOMETHING EMPTIES IT.
+   queueSave held a failed save and told the associate it was "queued", and
+   nothing in the extension ever called API.drain — not on the next save, not on
+   boot, not when the proxy came back. The queue was a place saves went to be
+   forgotten, with a toast promising the opposite. This is the missing half.
+
+   It runs before the save that triggers it, so an outage's calls reach Kylas in
+   the order they were made, and it hands back the kid a create earned so the
+   live record stops being "pending" and the NEXT save updates it. */
+async function flushOutbox(){
+  if(!(await API.outboxSize()))return 0;
+  const find=(job)=>DATA.find(a=>(job.lid&&a.lid===job.lid))
+    ||DATA.find(a=>job.contact.kid&&String(a.kid)===String(job.contact.kid));
+  const n=await API.drain(
+    (job,res)=>{
+      const a=find(job);if(!a)return;
+      if(res?.ok!==false&&res?.created&&res?.kid){a.kid=String(res.kid);a.pendingCreate=false;}
+      a.syncError=res?.rejected
+        ?"rejected: "+((res.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||res.error)
+        :null;
+      if(!res?.rejected)a.syncedAt=new Date().toISOString();
+    },
+    /* Answers "was this contact created after the job was queued?" — the record
+       is still on screen and carries the id the earlier save brought back. */
+    (lid)=>DATA.find(a=>a.lid===lid&&a.kid)?.kid||"");
+  if(n){persist();renderQueue();toast(`${n} queued save${n>1?"s":""} sent to Kylas`);}
+  return n;
+}
+
 async function syncToKylas(a,call){
   a.syncing=true;renderQueue();
+  await flushOutbox().catch(()=>{});
   const res=await API.queueSave(a,call);
   a.syncing=false;
   if(res.ok){
@@ -1309,5 +1344,9 @@ async function boot(){
   DATA.forEach(a=>{a.done=loggedToday.has(a.kid);});
   addOwners(DATA.map(a=>a.owner));
   renderFilters();render();
+  /* Yesterday's outage is this morning's queue. Draining on boot is what makes
+     "keep dialling, it will go when the link is back" true without the
+     associate having to save something else to trigger it. */
+  flushOutbox().catch(()=>{});
 }
 boot();

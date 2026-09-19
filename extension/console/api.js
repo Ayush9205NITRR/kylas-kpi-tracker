@@ -135,7 +135,8 @@
   let draining = false;
 
   API.queueSave = async function (contact, call) {
-    const job = { id: `${Date.now()}-${contact.kid || contact.pocName}`, contact, call,
+    const job = { id: `${Date.now()}-${contact.kid || contact.pocName}`,
+                  lid: contact.lid || "", contact, call,
                   at: new Date().toISOString(), tries: 0 };
     try {
       const res = await API.save(contact, call);
@@ -155,16 +156,33 @@
 
   API.outboxSize = async () => ((await Store.getSetting("outbox")) || []).length;
 
-  API.drain = async function (onEach) {
+  /* onEach(job, res)   told about every job that left the queue, sent or
+                        rejected, so the caller can write the new kid back onto
+                        the live record and clear its error.
+     resolveKid(lid)    asked, for a job that still has no Kylas id, whether one
+                        has been learned since it was queued. */
+  API.drain = async function (onEach, resolveKid) {
     if (draining) return 0;
     draining = true;
     let sent = 0;
     try {
       let box = (await Store.getSetting("outbox")) || [];
+      /* Ids learned DURING this drain. Two queued saves of one new contact hold
+         two copies of a record with no kid; sending both as-is POSTs twice and
+         Kylas keeps both. The first send returns the id, and from then on the
+         same local contact is an UPDATE. */
+      const learned = new Map();
       while (box.length) {
         const job = box[0];
+        let contact = job.contact;
+        const lid = job.lid || contact.lid || "";
+        if (!contact.kid && lid) {
+          const kid = learned.get(lid) || (resolveKid ? resolveKid(lid) : "") || "";
+          if (kid) contact = { ...contact, kid: String(kid), pendingCreate: false };
+        }
         try {
-          const res = await API.save(job.contact, job.call);
+          const res = await API.save(contact, job.call);
+          if (res?.created && res?.kid && lid) learned.set(lid, String(res.kid));
           box.shift();
           sent++;
           onEach?.(job, res);
