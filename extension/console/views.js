@@ -2264,6 +2264,14 @@
        Nothing here goes to the network, which is the whole reason the tiles and
        the chips can carry live counts at all. */
     const redraw = () => companies(host);
+
+    /* A COMPANY ROW HAS TO OPEN THE COMPANY. bindRows lives inside paint(), and
+       paint() returns immediately in this mode — so the explorer's rows were
+       the only table in the app with no click handler, and clicking an account
+       did nothing at all. Bound here, where the rest of this view is wired. */
+    host.querySelectorAll(".acctable .vr[data-id]").forEach((r) =>
+      r.addEventListener("click", () =>
+        global.openCompanyFromView?.(r.dataset.id, r.querySelector(".co")?.textContent || "")));
     host.querySelectorAll(".tile[data-stage]").forEach((b) => b.addEventListener("click", () => {
       /* Clicking the lit tile clears it — same rule as the event chips on the
          call card, so one gesture means one thing everywhere. */

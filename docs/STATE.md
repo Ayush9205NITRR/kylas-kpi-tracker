@@ -64,6 +64,8 @@ node scripts/test-report.mjs             # 56 · period maths, deltas, rollup me
 node scripts/test-kpi-fields.mjs         # the KPI projection matches the schema
 node scripts/test-ladder-migration.mjs   # 33 · stage ladder remaps
 node scripts/test-idempotency.mjs        # 17 · starts its own stack. The template to copy.
+node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: the save
+                                         #      survives it, and the backfill repairs it
 ```
 
 `test-idempotency.mjs` is the one to imitate for anything new: it spawns its own
@@ -124,6 +126,28 @@ INVALID_FILTER_BY_FORMULA, not zero rows, so the fallback was unreachable and
 every company open on every base threw and went to Kylas. Ask what the failure
 actually looks like before writing the branch that handles it.
 
+**One missing column losing the whole write.** Airtable rejects an entire
+record for one field name the table does not have. The day `Phones` was added
+to `syncContact`, every save against an un-repaired base died at step 3 — no
+event rows, no call log, no transition — and the outbox correctly refused to
+retry a 4xx, so an afternoon of dialling was simply gone. A read that fails
+shows stale numbers; a write that fails loses the call. `upsertTolerant` now
+drops the name Airtable objected to, sends the record again, and reports what
+it gave up; `MOCK_AIRTABLE_NOFIELD=Table.Field` reproduces the rejection.
+
+**A field written only going forward is a funnel that reads zero.**
+`First Worked At` / `First Picked At` are written once, on a save, so every
+contact worked before they existed had neither — and the ladder showed
+"Companies worked 0" under "Right POC 2", which is not a funnel. A new column
+that something is counted from needs a backfill in the same breath:
+`migrate-first-worked.mjs`.
+
+**Asking the same question on every request.** `/v1/users/me` cannot change
+while the process runs, and it was being fetched on every `/health` poll and
+twice per `/companies`, each behind the 450ms Kylas gap. A `/companies` served
+entirely from a warm cache took 917ms, and 900 of those were that. Look for
+the fixed cost before optimising the variable one.
+
 **A mock more capable than the thing it stands in for.** The same bug hid for
 weeks because mock-airtable resolved `{X (from Link)}` by hand. A stand-in that
 is kinder than production does not test production. It now returns 422 for a
@@ -154,6 +178,25 @@ code and answers everything cheerfully. **Restart the proxy after editing
   Hence the keyset crawl, with a `+1ms` cursor so ties are not dropped.
 - **The save journal** (`.save-journal.json`) is what stops a lost reply
   creating a contact twice. It is written *before* the POST.
+- **A save is synchronous, everything else is cached.** Pressing save POSTs to
+  the proxy, which writes Kylas and Airtable before it answers; the browser
+  copy is a working cache and an outage queue, never the store. Reads are the
+  opposite — held and served stale while they refresh, because every Airtable
+  request queues behind a 220ms gap and the same rows answer every period and
+  every owner. What is held, and for how long:
+
+  | | where | fresh for | dropped by |
+  |---|---|---|---|
+  | `/v1/users/me` | `whoami()`, proxy | 10 min | restart |
+  | company crawl | `companyCache`, proxy | 5 min | `?fresh=1` |
+  | dashboard's four tables | `reportData`, proxy | 60 s | a save, `?fresh=1` |
+  | Companies index | `IDX`, airtable.mjs | 60 s | a save |
+  | Contacts scan (no-rollup fallback) | `SCAN`, airtable.mjs | 30 s | a save |
+
+  Every one of them is dropped by a save, so an associate never reads back a
+  version from before their own call. Past the fresh window the held value is
+  still served and the refresh runs behind it, so only the first request of a
+  process ever waits.
 
 ---
 
@@ -186,10 +229,15 @@ code and answers everything cheerfully. **Restart the proxy after editing
 
 - **Rotate the Airtable PAT** — `pat7TsKhwZPyqTMG5…` was pasted in plain text in
   a chat. Never committed (verified), but treat it as burned.
-- **Run `repair-base.mjs`** on the live base. Until then saves lose their KPI
-  rows with a 422 on `Phones`, and the `RCA` table does not exist.
-- Then `seed-transitions.mjs`, then `migrate-ever-picked.mjs`. **That order** —
-  the second reads what the first writes.
+- **Run `repair-base.mjs`** on the live base. A save no longer dies without it
+  — it drops the column it cannot write and says so — but until it is run,
+  `Phones` is not stored, the `RCA` and `Team` tables do not exist, and every
+  company open scans the whole Contacts table because the `Company Kylas ID`
+  rollup is missing. That scan is most of the "opening an account is slow".
+- Then `seed-transitions.mjs`, then `migrate-ever-picked.mjs`, then
+  `migrate-first-worked.mjs`. **That order** — each reads what the one before
+  it writes. The last is what makes the funnel's bottom two rungs stop reading
+  zero; without it "Companies worked" is 0 under a non-zero "Right POC".
 - Enable GitHub Pages, or host `docs/privacy.html` on enout.in, for the store's
   privacy policy URL.
 

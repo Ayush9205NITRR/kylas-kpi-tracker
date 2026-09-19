@@ -1388,6 +1388,7 @@ async function flushOutbox(){
   return n;
 }
 
+let warnedMissing=false;
 async function syncToKylas(a,call){
   a.syncing=true;renderQueue();
   await flushOutbox().catch(()=>{});
@@ -1406,6 +1407,15 @@ async function syncToKylas(a,call){
        though Kylas took the write. */
     a.syncError=res.airtableError?("airtable: "+res.airtableError)
       :res.callLogError?("call log: "+res.callLogError):null;
+    /* The save went through WITHOUT a column the base does not have. Not an
+       error — the call is safe — but the field it dropped is one the console
+       shows, so silence would leave somebody hunting for a value that was never
+       stored. Said ONCE a session: at 200 calls a day a per-save toast is
+       noise, and the fix (run repair-base) is the same every time. */
+    if(res.airtable?.missing?.length&&!warnedMissing){
+      warnedMissing=true;
+      toast(`Airtable is missing ${res.airtable.missing.join(", ")} — saved without it. Run repair-base.mjs.`);
+    }
   }else{
     a.syncError=res.error||"not sent";
   }

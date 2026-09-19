@@ -69,10 +69,16 @@
   }
 
   /* Clicking a company in the list should take you into it. */
-  window.openCompanyFromView = (id) => {
+  /* `label` comes from the row that was clicked. Without it the name had to be
+     found among the contacts already held — and the whole point of the
+     companies list is that it shows companies NOBODY has contacts for yet, so
+     the one case that needs a name is the one case that had none. The account
+     opened as "Company 500009" while the row the associate clicked said
+     "working-co-01". */
+  window.openCompanyFromView = (id, label) => {
     showView(null);
     const co = DATA.find((a) => String(a.companyId) === String(id));
-    openCompany(String(id), co?.company);
+    openCompany(String(id), label || co?.company);
   };
 
   /* ── loading a company ───────────────────── */

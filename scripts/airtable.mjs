@@ -138,6 +138,50 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
   };
 }
 
+/* ── writing to a base that is one repair behind ─────────────────────── */
+/* THE SAME RULE AS listTolerant, FOR THE WRITE SIDE, and it matters more here.
+   A read that fails shows stale numbers; a WRITE that fails loses the call.
+   Airtable rejects a whole record for one field name the table does not have,
+   so the day `Phones` was added to syncContact, every save against a base that
+   had not been repaired died at step 3 — before the event rows, before the call
+   log, before the transition. The associate's afternoon of dialling went into
+   the outbox as a 422, which the outbox correctly refuses to retry, and the
+   only visible symptom was a contact card that came back empty.
+
+   A column this base has never had cannot hold anything worth losing the rest
+   of the save over. Drop the name Airtable objected to and send the record
+   again. Airtable names ONE field per rejection, hence the loop; the merge key
+   is never droppable, because without it the upsert has nothing to match on and
+   would create a duplicate rather than update.
+
+   Returns { rec, dropped } so the caller can say what it gave up — silently
+   writing less than it was asked to is how a missing column survives for
+   months. */
+const unknownField = (e) =>
+  /UNKNOWN_FIELD_NAME/.test(e?.message || "")
+    ? (/Unknown field name:\s*\\?"([^"\\]+)/.exec(e.message)?.[1] || "")
+    : "";
+
+export async function upsertTolerant(at, table, mergeOn, fields) {
+  let send = fields;
+  const dropped = [];
+  for (let i = 0; i <= Object.keys(fields).length; i++) {
+    try {
+      return { rec: await at.upsert(table, mergeOn, send), dropped };
+    } catch (e) {
+      const which = unknownField(e);
+      /* Not a missing column, or one we did not send (so dropping it would
+         loop for ever), or the key the upsert matches on — all of those are
+         real failures and belong to the caller. */
+      if (!which || which === mergeOn || !(which in send)) throw e;
+      const { [which]: _gone, ...rest } = send;
+      send = rest;
+      dropped.push(which);
+    }
+  }
+  throw new Error(`${table}: gave up dropping unknown fields (${dropped.join(", ")})`);
+}
+
 /* ── the rules, stated once ─────────────────────────────────────────── */
 const filled = (v) => String(v || "").trim() !== "";
 const rowsOf = (c) => [
@@ -156,11 +200,19 @@ const esc = (v) => String(v || "").replace(/'/g, "\\'");
 export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   const c = contact;
   const wrote = [];
+  /* Columns this base does not have, collected across every table so the save
+     reports them once instead of per write. */
+  const missing = new Set();
+  const put = async (table, mergeOn, fields) => {
+    const { rec, dropped } = await upsertTolerant(at, table, mergeOn, fields);
+    dropped.forEach((f) => missing.add(`${table}.${f}`));
+    return rec;
+  };
 
   /* 1 · company */
   let companyRec = null;
   if (c.companyId) {
-    companyRec = await at.upsert("Companies", "Kylas Company ID", {
+    companyRec = await put("Companies", "Kylas Company ID", {
       "Kylas Company ID": String(c.companyId),
       Name: c.company || `Company ${c.companyId}`,
       /* Carried so the dashboard can attribute this company without going back
@@ -270,14 +322,14 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   fields["Kylas Contact ID"] = String(c.kid || "");
 
   /* 3 · the contact */
-  const contactRec = await at.upsert("Contacts", "Kylas Contact ID", fields);
+  const contactRec = await put("Contacts", "Kylas Contact ID", fields);
   wrote.push("contact");
   if (!contactRec) throw new Error("Airtable did not return the contact record");
 
   /* 4 · event rows, matched on the key the overlay assigns */
   const rows = rowsOf(c).filter((r) => r.rowKey);
   for (const r of rows) {
-    await at.upsert("Event Rows", "Row Key", {
+    await put("Event Rows", "Row Key", {
       "Row Key": r.rowKey,
       Period: r.period,
       "Event Type": r.eventType || "",
@@ -301,7 +353,7 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   /* 5 · the call, append-only and idempotent on its key */
   if (call) {
     const key = `${call.at}-${c.kid || c.pocName}`;
-    await at.upsert("Call Log", "Key", {
+    await put("Call Log", "Key", {
       Key: key,
       "Called At": call.at,
       Outcome: call.outcome || "",
@@ -319,7 +371,7 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   const from = prev?.fields?.["Current Stage"] || "";
   if (from !== c.stage && c.stage) {
     const at_ = call?.at || new Date().toISOString();
-    await at.upsert("Stage Transitions", "Key", {
+    await put("Stage Transitions", "Key", {
       Key: `${c.kid || c.pocName}-${at_}`,
       "From Stage": from,
       "To Stage": c.stage,
@@ -331,8 +383,22 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     wrote.push(`transition ${STAGE_LABEL[from] || from || "new"} -> ${STAGE_LABEL[c.stage] || c.stage}`);
   }
 
+  /* Said EVERY save, not once at startup: this is the line that tells whoever
+     is watching the proxy why a field they can see in the console is not in the
+     base. It is also the only trace, because the save itself succeeded. */
+  if (missing.size)
+    log(`! this base has no ${[...missing].join(", ")} — saved without ${missing.size === 1 ? "it" : "them"}. Run repair-base.mjs.`);
+
+  /* THIS SAVE JUST INVALIDATED THE READ CACHES BELOW. Held caches are what
+     make opening an account fast; a save that does not clear them is what
+     makes an associate reopen the company they just saved and be shown it
+     without their own call. The write side has to know about them — nobody
+     else can, because nobody else knows a write happened. */
+  dropReadCaches();
+
   log(`airtable: ${wrote.join(", ")}`);
-  return { recordId: contactRec.id, rank, rankRose, rightPOC: hasSignal(c), discovery: isComplete(c), wrote };
+  return { recordId: contactRec.id, rank, rankRose, rightPOC: hasSignal(c), discovery: isComplete(c),
+           wrote, missing: [...missing] };
 }
 
 /* ── the read ───────────────────────────────────────────────────────── */
@@ -581,6 +647,38 @@ export async function readContact(at, kid) {
   return toConsoleContactFromAirtable(rec, { company: co, events });
 }
 
+/* Whether this base has the rollup that makes a company's contacts findable
+   server-side. Learned from the first rejection and remembered. */
+let noCompanyRollup = false;
+
+/* THE WHOLE CONTACTS TABLE, briefly held.
+   Only the fallback above uses it, and only on a base without the rollup — but
+   that is the base Ayush is actually running, and without this, opening five
+   accounts in a row scanned every contact five times. Every one of those scans
+   returns the same rows: the table changes when somebody saves, not between
+   two clicks a second apart.
+
+   Short, because the queue beside it is live data and an associate who saves a
+   contact and reopens its company should not be shown the version from before.
+   Thirty seconds is longer than a double-click and shorter than a call. */
+const SCAN = { at: 0, rows: null };
+const SCAN_TTL = Number(process.env.AIRTABLE_SCAN_TTL_MS || 30_000);
+
+/* Called by syncContact, which is the only thing in this module that writes.
+   Both caches are of rows a save can change — the contact itself, and the
+   company it may have just created. */
+export function dropReadCaches() {
+  SCAN.at = 0; SCAN.rows = null;
+  IDX.at = 0; IDX.byRec = null; IDX.byKid = null;
+}
+async function allContacts(at) {
+  if (SCAN.rows && Date.now() - SCAN.at < SCAN_TTL) return SCAN.rows;
+  const rows = await listTolerant(at, "Contacts",
+    { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 });
+  SCAN.at = Date.now(); SCAN.rows = rows;
+  return rows;
+}
+
 /* Every contact at one company, plus the company itself. */
 export async function readCompany(at, companyKid) {
   const { byKid } = await companyIndex(at);
@@ -594,17 +692,25 @@ export async function readCompany(at, companyKid) {
      read threw, and every company open fell through to Kylas after paying for
      the failed request. Run repair-base to get the fast path. */
   let recs = null;
-  try {
-    recs = await listTolerant(at, "Contacts",
-      { formula: `{Company Kylas ID} = '${esc(companyKid)}'`,
-        fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 20 });
-  } catch (e) {
-    if (!/INVALID_FILTER_BY_FORMULA|UNKNOWN_FIELD_NAME|422/i.test(e.message)) throw e;
-    at.log?.(`  Contacts has no "Company Kylas ID" rollup — scanning instead. Run repair-base.`);
+  /* ASKED ONCE PER PROCESS, not once per company. A base either has the rollup
+     or it does not, and that does not change between two clicks — but this was
+     paying for the rejection again on every single account opened, which on a
+     rate-limited API is a full round trip of pure waiting before the slow path
+     even starts. Ayush's log shows the same "asking Kylas" line three times in
+     two minutes for exactly this. */
+  if (!noCompanyRollup) {
+    try {
+      recs = await listTolerant(at, "Contacts",
+        { formula: `{Company Kylas ID} = '${esc(companyKid)}'`,
+          fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 20 });
+    } catch (e) {
+      if (!/INVALID_FILTER_BY_FORMULA|UNKNOWN_FIELD_NAME|422/i.test(e.message)) throw e;
+      noCompanyRollup = true;
+      at.log?.(`  Contacts has no "Company Kylas ID" rollup — scanning instead, for the rest of this session. Run repair-base.`);
+    }
   }
   const rows = recs?.length ? recs
-    : (await listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }))
-        .filter((r) => (r.fields?.Company || [])[0] === co.recordId);
+    : (await allContacts(at)).filter((r) => (r.fields?.Company || [])[0] === co.recordId);
   const events = await eventsFor(at, rows.map((r) => r.id));
   return {
     company: { id: co.id, name: co.name, owner: co.owner },

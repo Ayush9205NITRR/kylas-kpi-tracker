@@ -115,6 +115,23 @@ createServer(async (req, res) => {
   if (absent.includes(name))
     return json(res, 404, { error: { type: "TABLE_NOT_FOUND", message: `Table "${name}" not found` } });
 
+  /* MOCK_AIRTABLE_NOFIELD=Contacts.Phones[,Companies.Batch] makes those columns
+     absent from the WRITE path.
+     This stand-in stores whatever it is given, which is convenient and is also
+     exactly the way it was kinder than production: a real base rejects the
+     WHOLE record for one field name it does not have, and that is how a base
+     one repair-base behind lost a whole afternoon of saves — syncContact died
+     at the contact, before the event rows, the call log and the transition.
+     A stand-in that accepts any name cannot test the writer's recovery from
+     that, so this reproduces the rejection, one field at a time, exactly as
+     Airtable reports it. */
+  const noField = (process.env.MOCK_AIRTABLE_NOFIELD || "").split(",")
+    .map((x) => x.trim()).filter(Boolean);
+  const absentField = (fields) => {
+    if (!noField.length) return "";
+    return Object.keys(fields || {}).find((f) => noField.includes(`${name}.${f}`)) || "";
+  };
+
   const rows = table(name);
 
   if (req.method === "GET") {
@@ -191,6 +208,14 @@ createServer(async (req, res) => {
   }
 
   const body = JSON.parse(await text(req) || "{}");
+
+  /* Checked before any of the write branches, because Airtable checks the
+     names before it does anything: a rejected record is not half-written. */
+  for (const r of body.records || []) {
+    const bad = absentField(r.fields);
+    if (bad) return json(res, 422,
+      { error: { type: "UNKNOWN_FIELD_NAME", message: `Unknown field name: "${bad}"` } });
+  }
 
   /* PATCH by record id — how a migration updates existing rows, as opposed to
      the writer's upsert-on-a-key below. Unsupported here until now, so

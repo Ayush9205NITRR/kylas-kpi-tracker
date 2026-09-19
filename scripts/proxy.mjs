@@ -303,7 +303,7 @@ function roleOf(me) {
 /* An associate may only ask about themselves. Returns the owner the caller is
    ALLOWED to see, which is their own id unless they are an admin. */
 async function scopeOwner(requested) {
-  const me = await kylas.me();
+  const me = await whoami();
   if (roleOf(me) === "admin") return requested;
   const mine = String(me?.id ?? "");
   if (requested && requested !== "all" && String(requested) !== mine)
@@ -356,6 +356,178 @@ async function mapContacts(raw, company) {
    Everyone seen so far, so a fetched owner is always selectable. */
 const ownerList = () => [...owners.entries()].map(([id, name]) => ({ id, name }));
 
+/* WHO THIS PROXY IS, asked once rather than four times a request.
+   The proxy holds exactly ONE Kylas key and Kylas answers /v1/users/me with
+   the person it belongs to — an answer that cannot change while the process
+   runs, short of somebody editing roles in the CRM. It was being fetched on
+   every /health poll and TWICE on every /companies (scopeOwner asks, then the
+   route asks again), each one behind the 450ms rate-limit gap that every other
+   Kylas request also queues on.
+
+   That was the whole of the "why is this so slow": a /companies served
+   entirely from a warm cache still took 917ms, and 900 of those were two
+   round trips to ask a question whose answer had not changed since boot. The
+   dashboard makes several such calls to paint, and they are serialised behind
+   the same gap, so it compounds.
+
+   Ten minutes, not for ever: a role changed in Kylas should take effect
+   without restarting the proxy, and the scope filter is built on this answer.
+   Only a SUCCESS is cached — a failure here means Kylas is unreachable, and
+   remembering that would keep the console logged out long after it came
+   back. */
+let meCache = null;
+const ME_TTL = Number(process.env.ME_TTL_MS || 10 * 60 * 1000);
+async function whoami() {
+  if (meCache && Date.now() - meCache.at < ME_TTL) return meCache.me;
+  const me = await kylas.me();
+  meCache = { at: Date.now(), me };
+  return me;
+}
+
+/* ── ANSWER NOW, REFRESH BEHIND IT ───────────────────────────────────────
+   A read that Airtable has already answered once should not be paid for
+   again while the associate waits. Every Airtable request queues behind the
+   same 220ms rate-limit gap, so a table of 20,000 call rows is 200 pages and
+   three quarters of a minute — and the dashboard re-read all four of its
+   tables every time somebody changed the period from Week to Month, for data
+   that had not moved.
+
+   Stale-while-revalidate, then: inside the TTL the cached value is returned
+   outright; past it the cached value is STILL returned, and the refresh runs
+   behind it, so the slow path is paid by nobody. Only the very first call of
+   the process waits.
+
+   One flight at a time. Without that, four browser tabs opening the dashboard
+   at once start four identical crawls, and Airtable's rate limiter turns them
+   into four SLOW identical crawls.
+
+   `stale` is how long a value may be served while being refreshed. Past it
+   the value is too old to hand out — a proxy left running over a weekend
+   would otherwise serve Friday's numbers instantly and refresh them into a
+   cache nobody reads. */
+function memo(name, { ttl, stale = 30 * 60 * 1000 }, fn) {
+  let entry = null;          /* { at, value } */
+  let inflight = null;
+  const run = () => {
+    if (!inflight) {
+      const started = Date.now();
+      inflight = fn()
+        .then((value) => { entry = { at: Date.now(), value }; return value; })
+        .finally(() => { inflight = null; log(`  ${name}: read in ${Date.now() - started}ms`); });
+    }
+    return inflight;
+  };
+  const f = async ({ fresh = false } = {}) => {
+    const age = entry ? Date.now() - entry.at : Infinity;
+    if (entry && !fresh && age < ttl) return entry.value;
+    /* Serve what we have and refresh behind it — but never swallow the error
+       of a background refresh, or a base that has started refusing reads looks
+       exactly like one that has not changed. */
+    if (entry && !fresh && age < stale) {
+      run().catch((e) => log(`! ${name}: background refresh failed — ${e.message.slice(0, 120)}`));
+      return entry.value;
+    }
+    return run();
+  };
+  /* Something was written, so what is held here predates it. The value is
+     dropped unconditionally — serving rows from before the write is how a
+     dashboard tells an associate the call they just logged did not land — and
+     the rebuild is started at once, so the reader who follows the save finds
+     it done or joins a flight already in progress rather than beginning one.
+
+     THROTTLED, because a save is not rare. At 200 calls a day, rebuilding
+     eagerly on every one of them would spend the whole Airtable rate limit on
+     a dashboard nobody has open, and the thing it would slow down is the next
+     SAVE. Past the throttle the value is still dropped; it is only the eager
+     rebuild that is skipped, and the next reader does it instead. The window
+     matters for one case in particular: an outbox draining thirty queued saves
+     in a row must trigger one rebuild, not thirty. */
+  let lastRefresh = 0;
+  f.refresh = ({ atMostEvery = 30 * 1000 } = {}) => {
+    entry = null;
+    if (Date.now() - lastRefresh < atMostEvery) return;
+    lastRefresh = Date.now();
+    run().catch((e) => log(`! ${name}: refresh failed — ${e.message.slice(0, 120)}`));
+  };
+  return f;
+}
+
+/* EVERYTHING THE DASHBOARD IS COMPUTED FROM, in one read.
+   Four whole tables, none of which depends on the period, the date window or
+   who is asking — those are filters applied over these rows afterwards. Held
+   together so that switching Week to Month, or Everyone to one associate,
+   costs arithmetic rather than another crawl of the call log.
+
+   THE TTL IS SHORT AND THE STALE WINDOW IS LONG on purpose: a save drops this
+   cache outright (see /save), so the freshness that matters — the call just
+   logged — does not wait on a timer. The TTL is only for rows another
+   associate's proxy wrote. */
+const REPORT_TTL = Number(process.env.REPORT_TTL_MS || 60 * 1000);
+const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
+  /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
+     fields, so a base one repair-base behind does not have them — and Airtable
+     rejects the whole projection for one unknown name, which took the ENTIRE
+     report down with a raw 422 rather than costing the two metrics those
+     fields feed. The dashboard should lose a column, not the page. */
+  const [callRows, rolledRows, transRows, contactRows, team] = await Promise.all([
+    listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
+    /* Days past the retention window live in Call Rollup, one row per day per
+       owner per outcome, because the raw log fills an Airtable base in about
+       six weeks at this call volume. Missing this read would make every month
+       older than the window read zero — history silently deleted rather than
+       compacted. Tolerated when absent so a base without the table still
+       reports, just without the old days. */
+    listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
+      .catch(() => []),
+    listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
+    /* Right POC and discovery are DATA becoming true, not a stage move, so
+       they have no transition row. The closest honest timestamp is when the
+       contact's rank last rose — the save that filled the fields. */
+    listTolerant(airtable, "Contacts", {
+      fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
+               "First Worked At", "First Picked At"] }),
+    /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
+       Dropping non-team people in the view would leave the Team column summing
+       everybody while the per-person columns beside it summed the team — two
+       numbers on one row that do not add up, which is the exact class of bug
+       the ladder was just fixed for. It happens in the route, once, so every
+       total on the page is of the same population. */
+    readTeam(airtable).catch(() => []),
+  ]);
+
+  const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
+                                     outcome: r.fields.Outcome }));
+  const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
+                                          outcome: r.fields.Outcome,
+                                          n: Number(r.fields.Calls || 0) }));
+  /* A day can briefly exist in both tables — the rollup writes before it
+     deletes. mergeCalls prefers the raw rows for any such day, so an
+     interrupted rollup reads correctly instead of double. */
+  const calls = mergeCalls(raw, rolled);
+  const transitions = transRows.map((r) => ({ at: r.fields["Changed At"], owner: r.fields.Owner,
+                                              to: r.fields["To Stage"],
+                                              company: (r.fields.Contact || [])[0] || "" }));
+  const signals = [];
+  for (const r of contactRows) {
+    const co = (r.fields.Company || [])[0] || r.id;
+    const owner = r.fields.Owner;
+    /* THE BOTTOM TWO RUNGS, per company. Written once by the writer and never
+       updated, so unlike the call log they survive rollup-calls.mjs deleting
+       old rows — a company's first touch cannot drift forward as history is
+       compacted. report() dedupes to the FIRST arrival per company, so the
+       earliest contact at a company is the one that dates it. */
+    if (r.fields["First Worked At"])
+      signals.push({ at: r.fields["First Worked At"], owner, company: co, metric: "worked" });
+    if (r.fields["First Picked At"])
+      signals.push({ at: r.fields["First Picked At"], owner, company: co, metric: "picked" });
+    const at = r.fields["KPI Rank At"];
+    if (!at) continue;
+    if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
+    if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
+  }
+  return { calls, transitions, signals, team };
+});
+
 /* Picklists, read once. The console cannot know what an account's custom
    fields offer, and a hardcoded list quietly renders real values as blank. */
 let metaCache = null;
@@ -403,7 +575,7 @@ const routes = {
   "/meta": async () => meta(),
 
   "/health": async () => {
-    const me = await kylas.me();
+    const me = await whoami();
     return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "" },
              role: roleOf(me), admins: ADMINS.length,
              version: VERSION, startedAt: STARTED };
@@ -440,7 +612,7 @@ const routes = {
      ?owner= for one person, ?owner=all for the team view. */
   "/companies": async (url) => {
     const want = await scopeOwner(url.searchParams.get("owner"));
-    const me = await kylas.me();
+    const me = await whoami();
     const all = want === "all";
     const owner = all ? null : (want || me?.id);
 
@@ -778,75 +950,17 @@ const routes = {
        an associate an empty report while telling them it was theirs. */
     const askedId = await scopeOwner(url.searchParams.get("owner"));
     const owner = askedId === "all" ? "all"
-      : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await kylas.me()) || "");
+      : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await whoami()) || "");
 
-    /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
-       fields, so a base one repair-base behind does not have them — and
-       Airtable rejects the whole projection for one unknown name, which took
-       the ENTIRE report down with a raw 422 rather than costing the two
-       metrics those fields feed. The dashboard should lose a column, not the
-       page. */
-    const [callRows, rolledRows, transRows, contactRows] = await Promise.all([
-      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
-      /* Days past the retention window live in Call Rollup, one row per day per
-         owner per outcome, because the raw log fills an Airtable base in about
-         six weeks at this call volume. Missing this read would make every month
-         older than the window read zero — history silently deleted rather than
-         compacted. Tolerated when absent so a base without the table still
-         reports, just without the old days. */
-      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
-        .catch(() => []),
-      listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
-      /* Right POC and discovery are DATA becoming true, not a stage move, so
-         they have no transition row. The closest honest timestamp is when the
-         contact's rank last rose — the save that filled the fields. */
-      listTolerant(airtable, "Contacts", {
-        fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
-                 "First Worked At", "First Picked At"] }),
-    ]);
-
-    const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
-                                       outcome: r.fields.Outcome }));
-    const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
-                                            outcome: r.fields.Outcome,
-                                            n: Number(r.fields.Calls || 0) }));
-    /* A day can briefly exist in both tables — the rollup writes before it
-       deletes. mergeCalls prefers the raw rows for any such day, so an
-       interrupted rollup reads correctly instead of double. */
-    const calls = mergeCalls(raw, rolled);
-    const transitions = transRows.map((r) => ({ at: r.fields["Changed At"], owner: r.fields.Owner,
-                                                to: r.fields["To Stage"],
-                                                company: (r.fields.Contact || [])[0] || "" }));
-    const signals = [];
-    for (const r of contactRows) {
-      const co = (r.fields.Company || [])[0] || r.id;
-      const owner = r.fields.Owner;
-      /* THE BOTTOM TWO RUNGS, per company. Written once by the writer and never
-         updated, so unlike the call log they survive rollup-calls.mjs deleting
-         old rows — a company's first touch cannot drift forward as history is
-         compacted. report() dedupes to the FIRST arrival per company, so the
-         earliest contact at a company is the one that dates it. */
-      if (r.fields["First Worked At"])
-        signals.push({ at: r.fields["First Worked At"], owner, company: co, metric: "worked" });
-      if (r.fields["First Picked At"])
-        signals.push({ at: r.fields["First Picked At"], owner, company: co, metric: "picked" });
-      const at = r.fields["KPI Rank At"];
-      if (!at) continue;
-      if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
-      if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
-    }
-
-    /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
-       Dropping non-team people in the view would leave the Team column summing
-       everybody while the per-person columns beside it summed the team — two
-       numbers on one row that do not add up, which is the exact class of bug
-       the ladder was just fixed for. It happens here, once, so every total on
-       the page is of the same population.
-
-       Skipped entirely when looking at one person: you asked for that person,
-       and hiding their numbers because somebody forgot to tick them is a blank
-       screen with no explanation. */
-    const team = airtable ? await readTeam(airtable).catch(() => []) : [];
+    /* THE FOUR TABLES, READ ONCE FOR EVERY PERIOD AND EVERY OWNER.
+       None of this depends on the period, the date window or who is asking —
+       those are all filters applied below, in memory, over the same rows. It
+       was being re-read on every request anyway, so switching Week to Month
+       re-paid a crawl of the whole call log for numbers already in hand.
+       ?fresh=1 is the Refresh button; a save drops the cache, so the next
+       dashboard open sees the call just logged. */
+    const { calls, transitions, signals, team } =
+      await reportData({ fresh: !!url.searchParams.get("fresh") });
     const counts = counter(team);
     /* Filled below, once calls/transitions/signals all exist — an earlier
        version declared it here and read it before anything had been pushed
@@ -894,7 +1008,7 @@ const routes = {
 
   /* Session mode: everything this owner holds, ordered in the browser. */
   "/queue": async (url) => {
-    const me = await kylas.me();
+    const me = await whoami();
     const owner = url.searchParams.get("owner") || me?.id;
     /* Airtable stores the owner's NAME, Kylas answers by id — the same trap
        that made /report show an associate an empty week labelled as theirs. */
@@ -1046,6 +1160,15 @@ const routes = {
           airtable, { ...c, kid: result.kid },
           body.call ? { ...body.call, createdHere: result.created } : body.call,
           { log });
+        /* THE DASHBOARD MUST SEE THE CALL THAT WAS JUST LOGGED.
+           Its four tables are cached, and a minute of staleness is fine for
+           another associate's rows and not fine for your own: an associate who
+           logs a call and opens the dashboard to check it landed is the exact
+           reader this whole store exists for. Dropped rather than patched —
+           rebuilt rather than patched — rebuilding is one background crawl, and
+           a cache patched by hand is a second implementation of the read that
+           can disagree with it. */
+        reportData.refresh();
       } catch (e) {
         result.airtableError = e.message;
         log(`! airtable for ${result.kid}: ${e.message}`);
