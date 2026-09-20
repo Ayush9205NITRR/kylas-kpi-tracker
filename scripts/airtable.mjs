@@ -916,6 +916,33 @@ export async function writeTeam(at, people) {
   return at.upsertMany("Team", "Name", rows);
 }
 
+/* The reasons a BD may give for dropping an account, and the research fields,
+   declared once and sent to whatever is drawing the form. A console shipping a
+   reason this base has never heard of is a rejected write, so the list travels
+   with the API rather than being copied into the UI. From
+   reference/enout-bd-ladder.html. */
+export const DEPRI_REASONS = ["No event budget this year", "Too small / not a fit",
+  "Events handled in-house", "Locked in with another agency",
+  "Can't reach the right POC", "Timing — revisit next quarter", "Other"];
+
+export const RESEARCH_FIELDS = [
+  { k: "industry", l: "Industry" },
+  { k: "size", l: "Employees", o: ["", "1–50", "51–200", "201–500", "501–1,000", "1,001–5,000", "5,000+"] },
+  { k: "hq", l: "HQ city" },
+  { k: "offices", l: "Other offices", ph: "Cities / plants / regional offices" },
+  { k: "funding", l: "Funding / ownership", ph: "Series C, Mar 2026 · listed · family-owned" },
+  { k: "revenue", l: "Revenue band", ph: "₹100–500 Cr" },
+  { k: "events", l: "Known events", ph: "Annual offsite in Goa, dealer meet in Jaipur…", long: 1 },
+  { k: "season", l: "Event season", ph: "Q3 FY27 / Oct–Dec" },
+  { k: "decides", l: "Who decides events", ph: "CHRO, Admin head, Marketing" },
+  { k: "vendor", l: "Current agency", ph: "Name, or 'none found'" },
+  { k: "trigger", l: "Recent trigger", ph: "Funding, new office, hiring spree, award", long: 1 },
+  { k: "links", l: "Website / LinkedIn" },
+  { k: "v", l: "V-score", half: 1 },
+  { k: "w", l: "W-score", half: 1 },
+  { k: "notes", l: "Research notes", long: 1 },
+];
+
 /* ── the ladder app's own two tables ──────────────────────────────────
    Focus and Research are the only things in this base that Kylas knows nothing
    about: one is what a BD decided to chase, the other is what they found out

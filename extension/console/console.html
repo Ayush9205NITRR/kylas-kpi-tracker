@@ -40,6 +40,12 @@
     <aside class="queue">
       <div class="qmode" id="qmode"></div>
       <div class="qscope" id="qscope" hidden></div>
+      <!-- The account's own decisions: is it on somebody's focus list, and what
+           did we find out before calling. Owned entirely by overlay.js — kept
+           out of #qscope because console.js rewrites that band's innerHTML on
+           every render, which would take a half-typed deprioritise reason with
+           it. -->
+      <div class="qacct" id="qacct" hidden></div>
       <!-- The search box is gone. It promised "name, company, phone" and could
            not deliver any of the three: visible() narrows to the open company
            BEFORE the query runs, so searching a contact at another company, or

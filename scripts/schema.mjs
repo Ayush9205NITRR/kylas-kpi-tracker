@@ -20,6 +20,7 @@ import { STAGES, LADDER, EXIT_STAGES, MILESTONE } from "./stages.mjs";
    RCA table's Reason column is a singleSelect built from them, so a reason the
    console offers and the base has never heard of is a rejected write. */
 import { RCA_REASON_CODES, RCA_GATE_KEYS } from "./rca.mjs";
+import { DEPRI_REASONS } from "./airtable.mjs";
 
 /* ONE list, used by the contact's own field and by the transition that records
    which meeting it was. These are singleSelect choices, so a value the column
@@ -29,12 +30,9 @@ import { RCA_REASON_CODES, RCA_GATE_KEYS } from "./rca.mjs";
    from here, so changing these means changing that too. */
 const MEETING_MODES = ["In Person", "Virtual", "Calls", "Text"];
 
-/* Why a BD took an account off their list. From the reference's DEPRI_REASONS,
-   and a singleSelect for the same reason the modes are: a value the column has
-   never seen is a rejected write, not a blank cell. */
-const DEPRI_REASONS = ["No event budget this year", "Too small / not a fit",
-  "Events handled in-house", "Locked in with another agency",
-  "Can't reach the right POC", "Timing — revisit next quarter", "Other"];
+/* Why a BD took an account off their list — imported, not restated. The list
+   is a singleSelect's choices here and the options on a form there, and two
+   copies drifting by one word is a rejected write rather than a blank cell. */
 
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(

@@ -37,7 +37,10 @@
       return;
     }
 
-    if (m.type === "dashboard" || m.type === "companies") { showView(m.type); return; }
+    /* "focuslist", not "focus" — the host already sends a bare "focus" from
+       handoff() meaning "put the keyboard in the iframe", and a view answering
+       to the same name would swallow it on every open. */
+    if (m.type === "dashboard" || m.type === "companies" || m.type === "focuslist") { showView(m.type); return; }
     if (m.type === "company" && m.kylasId) {
       showView(null);
       openCompany(String(m.kylasId), m.label);
@@ -72,7 +75,7 @@
        rejection here must show as a message rather than an empty panel and an
        unhandled rejection in the console. */
     wrap.innerHTML = `<p class="vnote">Loading…</p>`;
-    (which === "dashboard" ? Views.dashboard : Views.companies)(wrap)
+    ({ dashboard: Views.dashboard, companies: Views.companies, focuslist: Views.focusList }[which])(wrap)
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
   }
 
@@ -373,6 +376,327 @@
     if (document.activeElement && document.activeElement.matches("input,textarea,select")) return;
     post("close");
   }, true);
+
+  /* ── the account's own decisions ─────────── */
+  /* Two things about a company that Kylas does not hold and never will: whether
+     a BD has put it on their list, and what they found out before calling. Both
+     live in Airtable, both are keyed on the Kylas company id, and both belong
+     on the company page because that is where the person deciding is standing.
+
+     The focus row is Views' cache, not a second one — see the note on the
+     Views export. The research row is fetched per company, because the whole
+     table is fifteen columns wide and nobody needs another account's. */
+  const ACC = {
+    research: null,      /* companyId -> values, null until read */
+    fields: null,        /* the field list, served with the data */
+    researchError: "",
+    dropping: false,     /* the reason form is open */
+    draft: { reason: "", note: "" },
+    busy: false,
+  };
+
+  /* Who did it. The proxy already told us on /whoami, so the identity gap the
+     README flags is only open where there is no proxy — an empty string, which
+     Airtable stores as blank rather than as a guess. */
+  const who = () => API.state.user?.email || API.state.user?.name || "";
+
+  const focusOf = (id) => Views.FOCUS.rows?.[String(id)] || null;
+  const statusOf = (id) => focusOf(id)?.status || "normal";
+
+  const STATUSES = [
+    { k: "focus", label: "★ Focus", title: "Put this account on the focus list" },
+    { k: "normal", label: "Not picked", title: "Neither picked nor dropped — the default" },
+    { k: "depri", label: "Deprioritize", title: "Take it off the list, with a reason" },
+  ];
+
+  function paintAccount() {
+    const w = document.getElementById("qacct");
+    if (!w) return;
+    if (!scope?.id) { w.hidden = true; w.innerHTML = ""; ACC.dropping = false; return; }
+    w.hidden = false;
+
+    /* DO NOT REDRAW UNDER SOMEBODY'S CURSOR. This repaints on every render(),
+       and render() runs whenever the stage changes or a callback date button
+       is pressed — either of which a person can do while half-way through
+       typing a reason. Rebuilding the strip then would take the focus out of
+       the field mid-sentence, the same hazard console.js calls out where it
+       chose validate() over render() on keystrokes. The strip is stale for as
+       long as the form is being used and correct the moment it is not.
+
+       Both halves are load-bearing. Scoped to the form and not to the strip,
+       because the click that OPENS the form leaves the focus on the
+       Deprioritize button, which is in the strip — guarding the whole band
+       meant the form never appeared. And conditioned on the form still being
+       wanted, because after a save the focus is on the Save button inside a
+       form that is now supposed to go away: without ACC.dropping the repaint
+       that removes it is the one repaint this skips, and the strip sits there
+       showing the old state with the form still open. */
+    if (ACC.dropping && document.getElementById("accDrop")?.contains(document.activeElement)) return;
+
+    const id = String(scope.id);
+    const f = focusOf(id);
+    const now = statusOf(id);
+    /* Primed on the first company opened, not at boot: a console nobody scopes
+       to an account never needs the table, and this runs on every render, so
+       the guard is the whole of the rate limiting. */
+    if (ACC.research === null && !ACC.researchLoading) {
+      ACC.researchLoading = true;
+      loadResearch().then(paintAccount, (e) => {
+        /* Latch the failure. Leaving it null would retry on the next render,
+           and render runs on every keystroke that validates — a dead proxy
+           would become a fetch storm. The sheet retries when it is opened. */
+        ACC.research = {};
+        ACC.researchError = `Could not read the research table — ${e.message}`;
+        paintAccount();
+      }).finally(() => { ACC.researchLoading = false; });
+    }
+
+    const r = ACC.research?.[id];
+    const filled = r ? (ACC.fields || []).filter((x) => String(r[x.k] || "").trim()).length : 0;
+
+    /* WHO AND WHEN, not just what. A dropped account is a decision somebody
+       made; the strip that reports it has to say whose, or the next BD to open
+       it has an unexplained state and no one to ask. */
+    const stamp = f?.setAt
+      ? `${f.status === "depri" ? "Dropped" : "Picked"} ${when(f.setAt)}${
+          f.setByEmail ? ` by ${esc(f.setByEmail)}` : ""}`
+      : "";
+
+    w.innerHTML = `
+      <div class="aseg" role="group" aria-label="Focus">
+        ${STATUSES.map((s) => `<button type="button" data-fs="${s.k}" title="${esc(s.title)}"
+          aria-pressed="${now === s.k ? "true" : "false"}"${ACC.busy ? " disabled" : ""}
+          >${s.label}</button>`).join("")}
+      </div>
+      <button class="gbtn sm" id="accRes" type="button"
+        title="What we know about this company before we call it">Research${
+        ACC.research ? ` <i>${filled}/${(ACC.fields || []).length}</i>` : ""}</button>
+      ${Views.FOCUS.error ? `<span class="awarn">${esc(Views.FOCUS.error)}</span>`
+        : stamp ? `<span class="astamp">${stamp}</span>` : ""}
+      ${f?.reason ? `<span class="areason" title="${esc(f.note || "")}">${esc(f.reason)}${
+        f.note ? ` — ${esc(f.note)}` : ""}</span>` : ""}
+      ${ACC.dropping ? `
+      <!-- novalidate deliberately: with the required attribute the browser
+           blocks submit before onsubmit runs, so the message explaining WHY a
+           reason matters never appeared and a native bubble said "Please
+           select an item" instead. The check below is that check, with the
+           sentence. -->
+      <form class="adrop" id="accDrop" novalidate>
+        <select id="accReason" aria-label="Reason for dropping this account">
+          <option value="">Why are we dropping it?</option>
+          ${(Views.FOCUS.reasons || []).map((x) =>
+            `<option${x === ACC.draft.reason ? " selected" : ""}>${esc(x)}</option>`).join("")}
+        </select>
+        <input id="accNote" placeholder="Anything worth remembering — optional"
+               value="${esc(ACC.draft.note)}" aria-label="Note">
+        <button class="pbtn sm" type="submit"${ACC.busy ? " disabled" : ""}>Save</button>
+        <button class="gbtn sm" type="button" id="accCancel">Cancel</button>
+      </form>` : ""}`;
+
+    w.querySelectorAll("[data-fs]").forEach((b) => b.onclick = () => {
+      const to = b.dataset.fs;
+      if (to === now && !(to === "depri" && !ACC.dropping)) return;
+      /* A reason is the point of dropping one. Picking or un-picking is a
+         click; dropping opens the form and writes nothing until it is filled. */
+      if (to === "depri") {
+        ACC.dropping = true;
+        ACC.draft = { reason: f?.reason || "", note: f?.note || "" };
+        paintAccount();
+        document.getElementById("accReason")?.focus();
+        return;
+      }
+      ACC.dropping = false;
+      writeFocus(to, "", "");
+    });
+
+    const rb = document.getElementById("accRes");
+    if (rb) rb.onclick = openResearch;
+
+    const form = document.getElementById("accDrop");
+    if (form) {
+      const sel = document.getElementById("accReason");
+      const note = document.getElementById("accNote");
+      sel.onchange = () => { ACC.draft.reason = sel.value; };
+      note.oninput = () => { ACC.draft.note = note.value; };
+      document.getElementById("accCancel").onclick = () => { ACC.dropping = false; paintAccount(); };
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        if (!sel.value) { toast("Pick a reason — that is the part nobody can reconstruct later"); sel.focus(); return; }
+        writeFocus("depri", sel.value, note.value.trim());
+      };
+    }
+  }
+
+  /* One write path for all three buttons and for the Focus lists view's
+     Restore, so the history reads the same whichever screen it came from. */
+  async function writeFocus(status, reason, note) {
+    const id = String(scope.id);
+    const was = focusOf(id);
+    ACC.busy = true; paintAccount();
+    try {
+      await API.setFocus({
+        companyId: id, companyName: scope.name || "", status, reason, note,
+        ownerName: was?.ownerName || DATA.find((a) => String(a.companyId) === id)?.owner || "",
+        setBy: who(), previous: was?.status || "normal",
+      });
+      Views.FOCUS.rows = Views.FOCUS.rows || {};
+      if (status === "normal") delete Views.FOCUS.rows[id];
+      else Views.FOCUS.rows[id] = {
+        companyId: id, companyName: scope.name || "", status, reason, note,
+        ownerName: was?.ownerName || "", setByEmail: who(), setAt: new Date().toISOString(),
+      };
+      ACC.dropping = false;
+      toast(status === "focus" ? `${scope.name} is on the focus list`
+          : status === "depri" ? `${scope.name} dropped — ${reason}`
+          : `${scope.name} is back to normal`);
+    } catch (e) {
+      toast(`Could not record that — ${e.message}`);
+    } finally {
+      ACC.busy = false; paintAccount();
+    }
+  }
+
+  /* ── research ────────────────────────────── */
+  /* The fifteen fields come from the proxy with the values, so this file never
+     restates them: a field added in airtable.mjs appears here on the next
+     fetch, and one that does not exist in the base cannot be typed into. */
+  /* Read for EVERY company at once, once. Asking per company looks cheaper and
+     is not: the proxy reads the whole Research table either way and throws away
+     every row but one, so fifteen accounts opened in an afternoon is fifteen
+     full reads of the same table. */
+  async function loadResearch(force) {
+    if (ACC.research && !force) return;
+    const r = await API.research();
+    ACC.fields = r.fields || [];
+    ACC.research = r.research || {};
+    ACC.researchError = r.configured === false
+      ? "Airtable is not configured, so nothing can be saved yet." : "";
+  }
+
+  async function openResearch() {
+    const id = String(scope.id);
+    const name = scope.name || ("Company " + id);
+
+    const s = el("div", "scrim");
+    s.innerHTML = `<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="rh">
+      <div class="h"><h3 id="rh">Research</h3>
+        <span class="sub">${esc(name)}</span>
+        <button class="gbtn" id="rx" type="button">Close</button></div>
+      <div class="b" id="rbody"><p class="dnote">Loading…</p></div></div>`;
+    document.body.appendChild(s);
+    const close = () => s.remove();
+    s.onclick = (e) => { if (e.target === s) close(); };
+    document.getElementById("rx").onclick = close;
+
+    try {
+      /* ACC.fields is set only by a load that worked, so this retries exactly
+         the case the latch above swallowed. */
+      await loadResearch(!ACC.fields);
+    } catch (e) {
+      document.getElementById("rbody").innerHTML =
+        `<p class="dnote warn">Could not read it — ${esc(e.message)}</p>`;
+      return;
+    }
+    if (!s.isConnected) return;   /* closed while we were fetching */
+
+    const vals = { ...(ACC.research[id] || {}) };
+    delete vals.updatedAt; delete vals.updatedByEmail;
+    const body = document.getElementById("rbody");
+
+    const field = (f) => {
+      const v = esc(vals[f.k] || "");
+      const cls = f.long ? "rf long" : f.half ? "rf half" : "rf";
+      /* A VALUE THE LIST DOES NOT OFFER IS STILL THE VALUE. Airtable holds
+         whatever was typed into it before this form existed — "501-1,000" with
+         a hyphen where the list has an en dash is enough — and a <select> with
+         no matching <option> renders as blank and posts "" on the next save.
+         That is silent data loss: the field looks empty, somebody saves an
+         unrelated change, and the answer is gone. So an unrecognised value is
+         added to its own list and marked. */
+      const opts = f.o || [];
+      const held = String(vals[f.k] || "");
+      const odd = f.o && held && !opts.includes(held);
+      const input = f.o
+        ? `<select data-k="${f.k}">${
+            (odd ? [held, ...opts] : opts).map((o) =>
+              `<option${held === o ? " selected" : ""}>${esc(o)}</option>`).join("")
+          }</select>${odd ? `<i class="rodd">not one of the listed values — kept as it is</i>` : ""}`
+        : f.long
+          ? `<textarea data-k="${f.k}" rows="3" placeholder="${esc(f.ph || "")}">${v}</textarea>`
+          : `<input data-k="${f.k}" value="${v}" placeholder="${esc(f.ph || "")}">`;
+      return `<label class="${cls}"><span>${esc(f.l)}</span>${input}</label>`;
+    };
+
+    const paintBody = () => {
+      const r = ACC.research?.[id] || {};
+      body.innerHTML = `
+        ${ACC.researchError ? `<p class="dnote warn">${esc(ACC.researchError)}</p>` : ""}
+        <div class="rform">${(ACC.fields || []).map(field).join("")}</div>
+        <div class="dactions">
+          <button class="pbtn" id="rsave" type="button">Save research</button>
+          <span class="rstamp">${r.updatedAt
+            ? `Last saved ${when(r.updatedAt)}${r.updatedByEmail ? ` by ${esc(r.updatedByEmail)}` : ""}`
+            : "Never saved"}</span>
+        </div>
+        <p class="dnote">This is ours, not Kylas'. It is keyed on the Kylas company id,
+          so it follows the account everywhere the console shows it — and nothing here
+          is ever written back to Kylas.</p>`;
+
+      body.querySelectorAll("[data-k]").forEach((i) =>
+        i.addEventListener("input", () => { vals[i.dataset.k] = i.value; }));
+      body.querySelectorAll("select[data-k]").forEach((i) =>
+        i.addEventListener("change", () => { vals[i.dataset.k] = i.value; }));
+
+      document.getElementById("rsave").onclick = async (e) => {
+        e.target.disabled = true; e.target.textContent = "Saving…";
+        try {
+          const res = await API.saveResearch({
+            companyId: id, companyName: name, values: vals, updatedBy: who(),
+          });
+          ACC.research[id] = { ...vals, updatedAt: new Date().toISOString(), updatedByEmail: who() };
+          /* A column the base does not have is not a save that worked. The
+             proxy names them rather than failing the whole write, so the rest
+             lands — but saying nothing would let somebody type into a field
+             that is quietly thrown away every time. */
+          if (res.dropped?.length)
+            toast(`Saved, but this base has no ${res.dropped.join(", ")} — run repair-base.mjs`);
+          else toast("Research saved");
+          close();
+          paintAccount();
+        } catch (err) {
+          e.target.disabled = false; e.target.textContent = "Save research";
+          toast(`Could not save it — ${err.message}`);
+        }
+      };
+    };
+    paintBody();
+    body.querySelector("[data-k]")?.focus();
+  }
+
+  /* "3 days ago", not an ISO string. Whoever reads this strip is deciding
+     whether the decision is still current, and a date they have to subtract
+     from today does not answer that. */
+  function when(iso) {
+    const t = Date.parse(iso || "");
+    if (!t) return "";
+    const days = Math.floor((Date.now() - t) / 864e5);
+    return days <= 0 ? "today" : days === 1 ? "yesterday"
+      : days < 30 ? `${days} days ago`
+      : days < 60 ? "last month" : `${Math.round(days / 30)} months ago`;
+  }
+
+  /* Repainted with everything else. console.js calls render() from a dozen
+     places — every save, every queue move, and the × that leaves the company
+     — and the account strip has to agree with the company the card is showing
+     at all of them. Wrapping is what gets all dozen without touching any:
+     console.js is a classic script, so its `render` IS this property. */
+  const coreRender = window.render;
+  window.render = function () { coreRender.apply(this, arguments); paintAccount(); };
+
+  /* And read the lists once, so the strip is right the first time it is seen
+     rather than after the first click. A failure here is recorded in the cache
+     and shown in the strip; it must not take the console down with it. */
+  Views.loadFocus().then(paintAccount, () => {});
 
   /* ── data sheet ──────────────────────────── */
   const pad = (n) => String(n).padStart(2, "0");

@@ -97,6 +97,9 @@
      view of them instead of the call form. */
   const VIEWS = [
     [/\/sales\/home\/?$/i, "dashboard"],
+    /* BEFORE the plain list, or /sales/companies/list matches first and the
+       focus route never fires — the list pattern is a prefix of this one. */
+    [/\/sales\/companies\/list\/focus\/?$/i, "focuslist"],
     [/\/sales\/companies\/list\/?$/i, "companies"],
   ];
   function currentRecord() {
@@ -314,6 +317,7 @@
       !rec ? "Call console" :
       rec.kind === "dashboard" ? "KPI dashboard" :
       rec.kind === "companies" ? "Company view" :
+      rec.kind === "focuslist" ? "Focus lists" :
       rec.kind === "company" ? "Work this company" : "Log a call";
   }, 700);
 

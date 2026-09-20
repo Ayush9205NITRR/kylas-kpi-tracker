@@ -2467,5 +2467,161 @@
     paint();
   }
 
-  global.Views = { rollup, dashboard, companies, FILTERS };
+  /* ── focus lists ──────────────────────────────────────────────────────
+     /sales/companies/list/focus. What each BD decided to chase, and what they
+     took off their list and why.
+
+     The deprioritized table comes FIRST and is the point of the screen. A
+     focus list is a BD's own business; an account somebody dropped is a
+     decision a manager may want to see, and the reason they gave is the only
+     part that cannot be reconstructed afterwards. Restore is one click,
+     because arguing with the decision is not the job — noticing it is.
+
+     Read from /focus, which is the Focus table. Nothing is computed here. */
+  const FOCUS = { rows: null, reasons: [], loading: false, error: "", inflight: null };
+
+  /* SHARE THE FETCH, do not skip it. Returning early while one is in flight
+     was safe while this view was the only caller; the company strip made it a
+     second one, and the loser of the race got back a resolved promise with
+     FOCUS.rows still null — the Focus lists screen then painted "Loading…"
+     and, because nothing re-renders when somebody else's fetch lands, stayed
+     there. Both callers await the same request instead. */
+  function loadFocus(force) {
+    if (FOCUS.inflight) return FOCUS.inflight;
+    if (FOCUS.rows && !force) return Promise.resolve();
+    FOCUS.loading = true;
+    FOCUS.inflight = API.focus()
+      .then((r) => {
+        FOCUS.rows = r.focus || {};
+        FOCUS.reasons = r.reasons || [];
+        FOCUS.error = r.configured === false ? "Airtable is not configured, so nothing has been recorded yet." : "";
+      })
+      .catch((e) => {
+        FOCUS.error = e.message;
+        FOCUS.rows = FOCUS.rows || {};
+      })
+      .finally(() => { FOCUS.loading = false; FOCUS.inflight = null; });
+    return FOCUS.inflight;
+  }
+
+  /* The account behind a focus row, if this console happens to hold it. The
+     row carries the name it was saved with, so a company nobody has opened
+     still reads properly — the lookup only adds the stage and the owner. */
+  const companyFor = (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id)) || null;
+
+  async function focusList(host) {
+    await loadFocus();
+    /* The company list too, or companyFor() finds nothing and every stage on
+       this screen is blank — which is how it read when this view was the first
+       one opened, because only the companies view had ever filled the cache.
+       Not awaited: a focus row carries the name it was saved with, so the
+       screen is complete without it and better with it. */
+    ensureCompanies("all", () => focusList(host));
+    if (FOCUS.loading && !FOCUS.rows) { host.innerHTML = `<p class="vnote">Loading…</p>`; return; }
+
+    const all = Object.values(FOCUS.rows || {});
+    const picked = all.filter((f) => f.status === "focus");
+    const dropped = all.filter((f) => f.status === "depri")
+      .sort((a, b) => String(b.setAt).localeCompare(String(a.setAt)));
+
+    /* "This week" is the number a manager acts on: a drop from March is
+       history, a drop from Tuesday is a conversation to have. */
+    const weekAgo = Date.now() - 7 * 864e5;
+    const thisWeek = dropped.filter((f) => Date.parse(f.setAt || "") >= weekAgo).length;
+
+    const byReason = {};
+    for (const f of dropped) byReason[f.reason || "No reason given"] = (byReason[f.reason || "No reason given"] || 0) + 1;
+    const topReason = Object.entries(byReason).sort((a, b) => b[1] - a[1])[0];
+
+    const owners = [...new Set(all.map((f) => f.ownerName).filter(Boolean))].sort();
+
+    host.innerHTML = `
+      <div class="vhead"><h2>Focus lists</h2>
+        <span class="vsub">${picked.length} picked · ${dropped.length} dropped${
+          thisWeek ? ` · <b>${thisWeek}</b> in the last 7 days` : ""}</span>
+        <button class="gbtn sm" id="fRefresh" type="button"${FOCUS.loading ? " disabled" : ""}
+          title="Re-read the lists">${FOCUS.loading ? "refreshing…" : "Refresh"}</button>
+      </div>
+      ${FOCUS.error ? `<p class="vwarn">${esc(FOCUS.error)}</p>` : ""}
+      ${topReason ? `<p class="vnote">Most common reason for dropping one: <b>${esc(topReason[0])}</b> (${topReason[1]}).</p>` : ""}
+
+      <div class="vsec">
+        <div class="vhead sm"><h2>Recently deprioritized</h2>
+          <span class="vsub">Every account a BD has taken off their list, with the reason they gave.</span></div>
+        ${dropped.length ? `<div class="vtable">
+          <div class="vr vh frow5"><span>Company</span><span>BD</span><span>Reason</span><span>Note</span><span></span></div>
+          ${dropped.slice(0, 60).map((f) => {
+            const co = companyFor(f.companyId);
+            return `<div class="vr frow5">
+              <span class="c1"><b>${esc(f.companyName || co?.name || ("Company " + f.companyId))}</b>
+                <em>${esc(co ? (label(co.stage) || co.stage || "") : "")}</em></span>
+              <span>${esc(f.ownerName || "—")}</span>
+              <span>${esc(f.reason || "—")}</span>
+              <span title="${esc(f.note || "")}">${esc(f.note || "")}</span>
+              <span><button class="gbtn sm" data-restore="${esc(f.companyId)}"
+                title="Put it back on ${esc(firstName(f.ownerName))}'s list">Restore</button></span>
+            </div>`;
+          }).join("")}
+        </div>${dropped.length > 60 ? `<p class="vnote">Showing the 60 most recent of ${dropped.length}.</p>` : ""}`
+        : `<div class="vempty">Nobody has deprioritized an account yet.</div>`}
+      </div>
+
+      <div class="vsec">
+        <div class="vhead sm"><h2>Each BD's list</h2>
+          <span class="vsub">BDs pick their own focus accounts from a company page.</span></div>
+        ${owners.length ? `<div class="vgrid">${owners.map((o) => {
+          const mine = picked.filter((f) => f.ownerName === o);
+          const theirs = dropped.filter((f) => f.ownerName === o);
+          return `<div class="vt fcard">
+            <div class="fhead"><span class="av" style="background:hsl(${hueOf(o)} 45% 46%)">${esc(initials(o))}</span>
+              <b>${esc(o)}</b>
+              <span class="fnums"><i class="tag">★ ${mine.length}</i>
+                <!-- Amber only when there is something to notice. A "0 dropped"
+                     in warning colour is the badge crying wolf on every card
+                     that has nothing wrong with it. -->
+                <i class="tag${theirs.length ? " warn" : ""}">${theirs.length} dropped</i></span></div>
+            ${mine.length ? `<ul class="flist">${mine.slice(0, 6).map((f) => {
+              const co = companyFor(f.companyId);
+              return `<li><button data-open="${esc(f.companyId)}">${esc(f.companyName || ("Company " + f.companyId))}</button>
+                      <span class="sm">${esc(co ? (label(co.stage) || co.stage || "") : "")}</span></li>`;
+            }).join("")}${mine.length > 6 ? `<li><span class="sm">+${mine.length - 6} more</span></li>` : ""}</ul>`
+            : `<p class="vnote" style="margin:6px 0 0">No focus accounts picked yet.</p>`}
+          </div>`;
+        }).join("")}</div>` : `<div class="vempty">Nobody has picked a focus account yet.</div>`}
+      </div>`;
+
+    host.querySelector("#fRefresh")?.addEventListener("click", async () => {
+      FOCUS.loading = true; focusList(host);
+      await loadFocus(true); focusList(host);
+    });
+    /* Restoring is setting the status back to normal, which is the same write
+       the company page makes — one path, so the history records it identically
+       whichever screen it came from. */
+    host.querySelectorAll("[data-restore]").forEach((b) => b.addEventListener("click", async () => {
+      const id = b.dataset.restore;
+      const was = FOCUS.rows[id];
+      b.disabled = true; b.textContent = "…";
+      try {
+        await API.setFocus({ companyId: id, companyName: was?.companyName || "",
+                             status: "normal", ownerName: was?.ownerName || "",
+                             previous: "depri" });
+        delete FOCUS.rows[id];
+        focusList(host);
+        toast(`Restored ${was?.companyName || "the account"}.`);
+      } catch (e) {
+        b.disabled = false; b.textContent = "Restore";
+        toast(`Could not restore it — ${e.message}`);
+      }
+    }));
+    host.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => {
+      const id = b.dataset.open;
+      openCompanyFromView(id, FOCUS.rows[id]?.companyName || "");
+    }));
+  }
+
+  /* FOCUS and loadFocus are exported because the company page writes to the
+     same table from the other end. Two caches of one table diverge the moment
+     somebody restores an account here and then opens it — the strip would
+     still read "deprioritized". One cache, both readers. */
+  global.Views = { rollup, dashboard, companies, focusList, FILTERS, FOCUS, loadFocus };
 })(window);

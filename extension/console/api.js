@@ -131,6 +131,15 @@
     rca: (owner) => req(`/rca${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     /* Who the funnel counts, and every name it could count. */
+    /* ── focus lists and research ──────────────────────────────────────
+       Both read and write on one path each, because they are one thing seen
+       from two ends. The reason list and the research field list come back
+       with the read rather than being restated here — a console offering a
+       reason the base has never heard of is a rejected write. */
+    focus: () => req("/focus", { timeout: 20000 }),
+    setFocus: (body) => req("/focus", { method: "POST", body, timeout: 20000 }),
+    research: (id) => req(`/research${id ? `?id=${encodeURIComponent(id)}` : ""}`, { timeout: 20000 }),
+    saveResearch: (body) => req("/research", { method: "POST", body, timeout: 20000 }),
     team: () => req("/team", { timeout: 20000 }),
     teamSave: (team) => req("/team-save", { method: "POST", body: { team }, timeout: 20000 }),
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),

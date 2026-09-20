@@ -23,7 +23,8 @@ import { createAirtable, syncContact, readCompanyKpis,
          readCompanies, readSyncState, listTolerant,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter,
-         readFocus, readResearch, writeFocus, writeResearch } from "./airtable.mjs";
+         readFocus, readResearch, writeFocus, writeResearch,
+         DEPRI_REASONS, RESEARCH_FIELDS } from "./airtable.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
@@ -1031,9 +1032,16 @@ const routes = {
     };
   },
 
-  /* A BD picking an account, or dropping it with a reason. */
+  /* A BD picking an account, or dropping it with a reason. GET reads the
+     lists, POST changes one — same path, because they are the same thing seen
+     from two ends and a separate /focus-list would drift from it. */
   "/focus": async (_url, req) => {
-    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    if (!airtable) {
+      if (req.method === "GET") return { focus: {}, reasons: DEPRI_REASONS, configured: false };
+      throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    }
+    if (req.method === "GET")
+      return { focus: await readFocus(airtable), reasons: DEPRI_REASONS, configured: true };
     const body = JSON.parse(await readBody(req));
     const status = String(body.status || "");
     if (!["focus", "normal", "depri"].includes(status))
@@ -1050,8 +1058,17 @@ const routes = {
     return { ok: true, ...res };
   },
 
-  "/research": async (_url, req) => {
-    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+  /* Same shape: GET for one company, POST to save it. */
+  "/research": async (url, req) => {
+    if (!airtable) {
+      if (req.method === "GET") return { research: {}, fields: RESEARCH_FIELDS, configured: false };
+      throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    }
+    if (req.method === "GET") {
+      const all = await readResearch(airtable);
+      const id = url.searchParams.get("id");
+      return { research: id ? { [id]: all[id] || {} } : all, fields: RESEARCH_FIELDS, configured: true };
+    }
     const body = JSON.parse(await readBody(req));
     if (!body.companyId)
       throw Object.assign(new Error("companyId is required"), { status: 400 });
