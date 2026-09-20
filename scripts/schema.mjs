@@ -124,6 +124,19 @@ export const TABLES = [
       { name: "Service Offering", type: "checkbox", options: check },
       { name: "Ever Picked", type: "checkbox", options: check,
         description: "Set true the first time a non-CNC stage is seen, never unset. This is what makes Phone Picked monotonic." },
+      /* THE SAME HIGH-WATER TRICK, for the two rungs that did not have it.
+         Every stage-driven rung is monotonic — KPI Rank is written as
+         MAX(existing, computed) and Ever Picked is OR'd with its previous
+         value — but Right POC and Successful Discovery were live rollups over
+         Event Rows with no floor, so anything that removed a row pulled the
+         funnel backwards. Ayush, 2026-09-20: make them sticky.
+         The cost, recorded because it is real: a genuinely mistaken entry can
+         no longer be taken back by clearing the data. It has to be unset in
+         Airtable by hand. */
+      { name: "Ever Right POC", type: "checkbox", options: check,
+        description: "Set true the first time any event row carries budget, timeline or pax. Never unset." },
+      { name: "Ever Discovery", type: "checkbox", options: check,
+        description: "Set true the first time one event row carries all three. Never unset." },
       { name: "KPI Rank", type: "number", options: num,
         description: "Highest rung ever reached. Written as MAX(existing, computed). Never decreases." },
       { name: "KPI Rank At", type: "dateTime", options: dateTime,
@@ -163,6 +176,15 @@ export const TABLES = [
       { name: "Timeline", type: "multilineText" },
       { name: "Pax", type: "multilineText" },
       { name: "Remarks", type: "multilineText" },
+      /* SOFT DELETE. syncContact used to hard-DELETE a row the console no
+         longer held, which is correct for "this was typed in error" and
+         catastrophic for a mis-tapped chip — the budget, timeline and pax went
+         with it and nothing anywhere kept a copy. The row is marked instead.
+         Has Any Signal and Is Complete gate on this, so a removed row stops
+         counting toward Right POC exactly as a deleted one did, while the
+         values somebody typed survive and can be restored. */
+      { name: "Removed At", type: "dateTime", options: dateTime,
+        description: "Set when the console removes this row. Blank means live. A marked row counts for nothing but is never destroyed." },
     ],
   },
   {
@@ -429,10 +451,10 @@ export const FOLLOWUPS = [
   link("RCA", "Contact", "Contacts", "RCA"),
 
   /* Remarks is excluded from both on purpose — see kpi-spec.md §5. */
-  formula("Event Rows", "Has Any Signal", `IF(OR(${anyFilled}), 1, 0)`,
-    "Any qualification field filled → the contact counts as a Right POC."),
-  formula("Event Rows", "Is Complete", `IF(AND(${anyFilled}), 1, 0)`,
-    "All qualification fields filled → a successful discovery call."),
+  formula("Event Rows", "Has Any Signal", `IF({Removed At}, 0, IF(OR(${anyFilled}), 1, 0))`,
+    "Any qualification field filled → the contact counts as a Right POC. A removed row counts for nothing."),
+  formula("Event Rows", "Is Complete", `IF({Removed At}, 0, IF(AND(${anyFilled}), 1, 0))`,
+    "All qualification fields filled → a successful discovery call. A removed row counts for nothing."),
 
   /* A rollup cannot filter on a sibling field, so zero out the estimates first
      and then sum. Otherwise inferred seconds inflate real talk time. */
@@ -467,11 +489,14 @@ export const FOLLOWUPS = [
   rollup("Contacts", "Last Stage Change At", "Stage Transitions", "Changed At", "MAX(values)"),
   rollup("Contacts", "First Stage Change At", "Stage Transitions", "Changed At", "MIN(values)"),
 
-  formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0)`),
-  formula("Contacts", "Right POC Name", `IF({Has Signal} = 1, {Name}, "")`,
+  /* OR'd with the sticky flag, so the rung holds once earned. Has Signal is
+     still read: a contact whose data is live qualifies immediately, before the
+     writer has had a chance to set the flag. */
+  formula("Contacts", "Is Right POC", `IF(OR({Has Signal} = 1, {Ever Right POC}), 1, 0)`),
+  formula("Contacts", "Right POC Name", `IF(OR({Has Signal} = 1, {Ever Right POC}), {Name}, "")`,
     "Name when this contact qualifies, blank otherwise. Rolled up into Companies."),
-  formula("Contacts", "Is Discovery", `IF({Has Complete Row} = 1, 1, 0)`),
-  formula("Contacts", "Discovery Name", `IF({Has Complete Row} = 1, {Name}, "")`,
+  formula("Contacts", "Is Discovery", `IF(OR({Has Complete Row} = 1, {Ever Discovery}), 1, 0)`),
+  formula("Contacts", "Discovery Name", `IF(OR({Has Complete Row} = 1, {Ever Discovery}), {Name}, "")`,
     "Name when one event row has budget AND timeline AND pax. Rolled up into Companies, exactly as Right POC Name is."),
   formula("Contacts", "KPI Stage", ladderFormula("KPI Rank")),
   formula("Contacts", "KPI Score",

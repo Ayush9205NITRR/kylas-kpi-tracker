@@ -18,8 +18,15 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
    rejected chain rejects with the ORIGINAL error, so one failed request would
    make every later one fail with the same stale message for the life of the
    process. The chain keeps only the timing, never the outcome. */
+  /* Same change as airtable.mjs, and it matters more here because the gap is
+     450ms: three Kylas calls in a save were 1350ms of sleep before any of them
+     had been sent. Pace from the last request, not from the queue's turn. */
+  let lastAt = 0;
   const call = (method, path, body) => {
-    const run = chain.then(() => sleep(GAP)).then(() => attempt(method, path, body));
+    const run = chain.then(() => {
+      const wait = Math.max(0, GAP - (Date.now() - lastAt));
+      return wait ? sleep(wait) : undefined;
+    }).then(() => { lastAt = Date.now(); return attempt(method, path, body); });
     chain = run.then(() => {}, () => {});
     return run;
   };

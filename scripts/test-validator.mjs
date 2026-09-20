@@ -32,9 +32,15 @@ const FAULTS = [
   ["formula field declared in createBase instead of afterwards",
    (s) => s.replace('{ name: "Frozen At", type: "dateTime", options: dateTime },',
                     '{ name: "Frozen At", type: "dateTime", options: dateTime },\n      { name: "Oops", type: "formula", options: { formula: "1" } },')],
+  /* Anchored on Companies.KPI Rank. Is Right POC was the anchor until
+     2026-09-20, when it gained the Ever Right POC term and this injection
+     silently stopped matching — the harness said "fault did not apply, test is
+     stale" rather than reporting a pass, which is twice now that it has caught
+     its own rot. KPI Rank is arithmetic over one field and has no reason to
+     change. */
   ["unbalanced brackets in a formula",
-   (s) => s.replace('formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0)`)',
-                    'formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0`)')],
+   (s) => s.replace('formula("Companies", "KPI Rank", `IF({KPI Score}, FLOOR({KPI Score} / 10000000000), 0)`)',
+                    'formula("Companies", "KPI Rank", `IF({KPI Score}, FLOOR({KPI Score} / 10000000000, 0)`)')],
   ["link with no reverse declared",
    (s) => s.replace('link("Call Log", "Contact", "Contacts", "Call Log")',
                     'link("Call Log", "Contact", "Contacts")')],

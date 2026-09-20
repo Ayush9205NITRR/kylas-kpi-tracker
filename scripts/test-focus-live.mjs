@@ -211,6 +211,54 @@ await f.evaluate(() => render());
 await page.waitForTimeout(200);
 check('which survives a render', await seg(f), '★ Focus | Not picked | Deprioritize*');
 
+/* ── an event row removed is not an event row lost ────────────────── */
+/* THE REGRESSION. Tapping a lit chip used to hard-drop the row, and on the
+   next save syncContact DELETED the Airtable record — taking the budget,
+   timeline and pax with it and pulling Right POC and Successful Discovery back
+   down. Nothing else in the base keeps those values. */
+console.log('\n— removing an event row —');
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/903/'));
+await page.waitForTimeout(3000);
+f = F();
+
+// tag an event type and fill the qualification fields
+await f.evaluate(() => {
+  const a = rec();
+  a.current = [{rowKey:'rk-test', eventType:'Employee offsites', budget:'9L', timeline:'Q4', pax:'80', remarks:'they asked'}];
+  touch('record'); renderRight(); refreshQual();
+});
+await page.waitForTimeout(400);
+console.log('— a tagged event with data on it —');
+check('the card is there', await f.locator('#formR .ev').count(), 1);
+check('qualification reads Right POC', await f.evaluate(() => qualOf(rec())), (q) => q !== 'MQL');
+
+// the destructive click
+console.log('\n— tapping the lit chip —');
+await f.locator('#formR .tc', { hasText: 'Employee offsites' }).click();
+await page.waitForTimeout(400);
+check('the card goes away', await f.locator('#formR .ev').count(), 0);
+check('but the row is KEPT', await f.evaluate(() => rec().removed.length), 1);
+check('with its budget intact', await f.evaluate(() => rec().removed[0].budget), '9L');
+check('an undo is offered', (await f.locator('.toast').textContent() || ''), (t) => /removed/.test(t));
+check('and a restore line is on screen', await f.locator('.evgone .gb').count(), 1);
+check('which shows what would come back', await f.locator('.evgone .v').textContent(), (t)=>/9L/.test(t||''));
+
+console.log('\n— restoring it —');
+await f.locator('.evgone .gb').click();
+await page.waitForTimeout(400);
+check('the card is back', await f.locator('#formR .ev').count(), 1);
+check('budget survived the round trip', await f.evaluate(() => rec().current.find(r=>r.eventType==='Employee offsites')?.budget), '9L');
+check('and it is out of removed', await f.evaluate(() => rec().removed.length), 0);
+check('qualification restored', await f.evaluate(() => qualOf(rec())), (q) => q !== 'MQL');
+
+console.log('\n— an empty tag is still a plain toggle —');
+await f.locator('#formR .tc', { hasText: 'Product launch' }).click();
+await page.waitForTimeout(300);
+await f.locator('#formR .tc', { hasText: 'Product launch' }).click();
+await page.waitForTimeout(300);
+check('no restore line for an empty row', await f.locator('.evgone .gb').count(), 0);
+
+
 /* ── the ladder ───────────────────────────────────────────────────────── */
 console.log('\n— the ladder —');
 await page.evaluate(() => history.pushState({}, '', '/sales/home'));

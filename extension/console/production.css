@@ -1037,3 +1037,20 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .vtabs button[aria-pressed="true"] i{background:var(--blueSoft);color:var(--blue)}
 /* The body owns its own top margin — the tab strip already has one. */
 .vbody>.vhead:first-child{margin-top:0}
+
+/* ── an event row that was removed but not lost ───────────────────────── */
+/* A toast lasts four seconds; the mistake is usually noticed later. So a
+   removed row with typed detail on it stays listed until the person decides,
+   rather than relying on them catching the undo. */
+.evgone{margin-top:12px;border-top:1px dashed var(--line2);padding-top:9px}
+.evgone .lbl{display:block;font-size:var(--t-meta);color:var(--text3);margin-bottom:5px}
+.evgone .gr{display:flex;align-items:baseline;gap:9px;padding:4px 0;min-width:0}
+.evgone .gr .t{font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);
+  flex:none;max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The values are the argument for restoring it — they get the room. */
+.evgone .gr .v{font-size:var(--t-meta);color:var(--text3);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evgone .gb{border:1px solid var(--line2);background:var(--panel);border-radius:6px;
+  padding:3px 10px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer;flex:none}
+.evgone .gb:hover{border-color:var(--blue);color:var(--blue)}

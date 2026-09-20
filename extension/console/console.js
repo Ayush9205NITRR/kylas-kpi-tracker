@@ -87,7 +87,7 @@ const blank=()=>({lid:rowKey(),kid:"",salutation:"",pocName:"",company:"",linked
   phones:[{type:"MOBILE",cc:"+91",value:"",primary:true}],
   stage:"YET_TO_BE_MINED",nextCallDate:"",nextCallTime:"",
   source:"",remarks:"",offsiteTimeline:"",owner:"",
-  past:[],current:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
+  past:[],current:[],removed:[],vendorInfo:"",serviceOffering:false,modeOfMeeting:"",
   done:false,flagged:false});
 
 let DATA=[
@@ -460,8 +460,32 @@ function visible(){
     /* Done/flagged narrowing is about what is left to do, so it has no meaning
        over a list of calls already made. */
     .filter(({a})=>mode==="session"||filter==="all"||(filter==="flag"?a.flagged:!a.done));
-  return mode==="session"?rows.sort(byRecentCall):rows;
+  /* THE LIST MUST NOT MOVE UNDER SOMEBODY'S HAND. In session mode this sorts
+     by lastCallAt, and a save updates lastCallAt — but the save's reply lands
+     five to seven seconds after the associate has already moved on, and the
+     renderQueue() that follows it re-sorted the whole column at that moment.
+     Rows jumped for a save made three contacts ago. That churn is most of what
+     "saving is slow" actually felt like: the save itself never blocked
+     anything (saveNext does not await it), the screen just kept rearranging
+     itself afterwards.
+
+     So the order is computed once per navigation and held. `queueOrder` is
+     rebuilt whenever the mode, the scope, the filter or the selected record
+     changes — every deliberate move — and never by a reply arriving. */
+  if(mode!=="session")return rows;
+  const key=`${mode}|${scope?.id||""}|${filter}|${cur}`;
+  if(queueOrder.key!==key){
+    queueOrder.key=key;
+    queueOrder.ids=rows.slice().sort(byRecentCall).map(({a})=>a.lid||a.kid);
+  }
+  const at=new Map(queueOrder.ids.map((id,n)=>[id,n]));
+  /* A row that appeared since the order was fixed — a new contact — goes to
+     the end rather than being dropped. */
+  return rows.slice().sort((x,y)=>
+    (at.get(x.a.lid||x.a.kid)??1e9)-(at.get(y.a.lid||y.a.kid)??1e9));
 }
+/* Rebuilt on navigation, not on a network reply. See visible(). */
+const queueOrder={key:"",ids:[]};
 function renderQueue(){
   renderMode();renderScope();renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
@@ -949,6 +973,31 @@ function bucketOf(a,t){
   if(a.current.some(r=>r.eventType===t))return "current";
   return null;
 }
+/* THE FOUR FIELDS SOMEBODY TYPED. Anything here and the row is not a stray
+   tag — it is the qualification data Right POC and Successful Discovery are
+   counted from, and the only copy of it anywhere. Call Log does not carry it
+   and the Kylas remarks block is rewritten on the next save. */
+const hasData=r=>!!(String(r.budget||"").trim()||String(r.timeline||"").trim()
+                  ||String(r.pax||"").trim()||String(r.remarks||"").trim());
+/* NOTHING IS DROPPED ON A CLICK. Ayush, 2026-09-20: he tapped a lit
+   "Employee offsites" chip on an account that already had detail, and the
+   budget, timeline and pax went with it — taking Right POC and the discovery
+   call down with them. The row used to be filtered out of the array and that
+   was the end of it: no confirm, no undo, no copy, and on the next save
+   syncContact issued a hard DELETE against the Airtable record.
+   Removing now MOVES the row to `removed`, keeping its rowKey, which is what
+   lets the proxy mark it rather than delete it and what lets Restore put it
+   back exactly where it was. */
+function removeRow(a,key,r){
+  a[key]=a[key].filter(o=>o!==r);
+  a.removed=[...(a.removed||[]),{...r,from:key,at:new Date().toISOString()}];
+}
+function restoreRow(a,r){
+  a.removed=(a.removed||[]).filter(o=>o!==r);
+  const back=(r.from==="past")?"past":"current";
+  const {from,at,...row}=r;
+  a[back]=[...a[back],row];
+}
 function eventsGroup(){
   const a=rec();
   const g=el("section","card");g.id="s-events";
@@ -967,7 +1016,23 @@ function eventsGroup(){
     btn.setAttribute("aria-pressed",bk?"true":"false");
     btn.title=bk?"Tap to remove":"Tap to add";
     btn.onclick=()=>{
-      if(bk){a.past=a.past.filter(r=>r.eventType!==t);a.current=a.current.filter(r=>r.eventType!==t);}
+      if(bk){
+        const gone=[...a.past.filter(r=>r.eventType===t),...a.current.filter(r=>r.eventType===t)];
+        gone.forEach(r=>removeRow(a,a.past.includes(r)?"past":"current",r));
+        /* A tag with nothing on it is just a tag — say nothing. One with typed
+           fields on it is the thing that must not vanish quietly, so it gets
+           the undo that console.js has had the machinery for all along. */
+        if(gone.some(hasData))
+          toast(`${t} removed — its budget, timeline and pax are kept below`,
+                ()=>{
+                  /* Back to the array each row actually came from. removeRow
+                     recorded that as `from`, so Past does not silently become
+                     Now on the way back. */
+                  (a.removed||[]).filter(x=>gone.some(g=>g.rowKey===x.rowKey))
+                    .forEach(x=>restoreRow(a,x));
+                  touch("record");renderRight();refreshQual();
+                });
+      }
       else a.current=[...a.current,{...emptyRow(),eventType:t}];
       touch("record");renderRight();refreshQual();
       if(!bk)setTimeout(()=>{
@@ -987,6 +1052,29 @@ function eventsGroup(){
     e.style.marginTop="9px";list.appendChild(e);
   }
   gb.appendChild(list);
+
+  /* REMOVED, NOT GONE — and visible, because a toast lasts four seconds and
+     the mistake is usually noticed later. Only rows that had something typed
+     into them are listed: an empty tag somebody tapped off is not worth a
+     line, and listing it would make this noise on every record. */
+  const kept=(a.removed||[]).filter(hasData);
+  if(kept.length){
+    const rm=el("div","evgone");
+    rm.appendChild(el("span","lbl",
+      `${kept.length} removed — ${kept.length===1?"its":"their"} detail is still here`));
+    kept.forEach(r=>{
+      const row=el("div","gr");
+      row.appendChild(el("span","t",esc(r.eventType)));
+      row.appendChild(el("span","v",esc([r.budget,r.timeline,r.pax].filter(Boolean).join(" · ")||"—")));
+      const b=el("button","gb","Restore");b.type="button";
+      b.title=`Put ${r.eventType} back with everything on it`;
+      b.onclick=()=>{restoreRow(a,r);touch("record");renderRight();refreshQual();
+                     toast(`${r.eventType} restored`);};
+      row.appendChild(b);
+      rm.appendChild(row);
+    });
+    gb.appendChild(rm);
+  }
   return g;
 }
 
@@ -1010,7 +1098,13 @@ function eventCard(a,key,r){
   h.appendChild(el("span","t",esc(r.eventType)));
   const x=el("button","del","×");x.type="button";
   x.setAttribute("aria-label","Remove "+r.eventType);
-  x.onclick=()=>{a[key]=a[key].filter(o=>o!==r);touch("record");renderRight();};
+  x.onclick=()=>{
+    removeRow(a,key,r);
+    if(hasData(r)) toast(`${r.eventType} removed — kept below, nothing is lost`,
+      ()=>{a.removed=(a.removed||[]).filter(o=>o.rowKey!==r.rowKey);
+           a[key]=[...a[key],r];touch("record");renderRight();refreshQual();});
+    touch("record");renderRight();refreshQual();
+  };
   h.appendChild(x);
   card.appendChild(h);
 

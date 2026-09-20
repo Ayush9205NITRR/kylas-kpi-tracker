@@ -16,16 +16,57 @@ const GAP = Number(process.env.AIRTABLE_GAP || 220);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function createAirtable(pat, baseId, { log = () => {} } = {}) {
-  let chain = Promise.resolve();
-/* A rejected promise must not stay in the chain: `chain.then(...)` off a
-   rejected chain rejects with the ORIGINAL error, so one failed request would
-   make every later one fail with the same stale message for the life of the
-   process. The chain keeps only the timing, never the outcome. */
-  const queue = (fn) => {
-    const run = chain.then(() => sleep(GAP)).then(fn);
-    chain = run.then(() => {}, () => {});
-    return run;
-  };
+  /* The promise chain that used to pace this is gone, replaced by the pump
+     below. Its hazard is not: a rejected job must never poison the ones behind
+     it, which the pump handles by settling each job in its own try/catch
+     rather than by threading results through a shared promise. */
+  /* WAIT ONLY FOR THE REMAINDER. This slept GAP before EVERY request, whether
+     or not anything had just been sent — so a proxy that had been idle for
+     minutes still paid 220ms before its first read, and a save's seven
+     Airtable writes paid 1540ms of sleep before a single packet left. The rate
+     limit is "5 requests a second", which is a floor on the INTERVAL between
+     requests, not a toll on each one.
+
+     So: sleep only for whatever is left of GAP since the last request actually
+     went out. Identical pacing under load, nothing at all when idle. */
+  let lastAt = 0;
+
+  /* WRITES JUMP THE QUEUE. One queue is not negotiable — Airtable's 5 req/s is
+     per BASE, so two queues pacing at GAP each would be 10 req/s and would
+     simply collect 429s — but the ORDER within it is ours, and
+     first-come-first-served was the wrong choice.
+
+     The report cache is four full table crawls. On a base with 2,000 call rows
+     that is twenty pages, and every page is a request in this queue. A save
+     landing while one runs used to wait behind ALL of it: seven writes stuck
+     behind twenty reads, which is why some saves took three times as long as
+     others for no reason the associate could see.
+
+     A save is somebody waiting. A cache refresh is nobody waiting. Reads go to
+     the back, writes to the front, one pacer over both — so the rate limit is
+     respected exactly as it was. */
+  const hi = [], lo = [];
+  let pumping = false;
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (hi.length || lo.length) {
+        const job = hi.length ? hi.shift() : lo.shift();
+        const wait = Math.max(0, GAP - (Date.now() - lastAt));
+        if (wait) await sleep(wait);
+        lastAt = Date.now();
+        /* Settling a job must never break the pump — an escaping throw here
+           would abandon everything still queued behind it, which is the same
+           hazard the old `chain` comment above describes in its own terms. */
+        try { job.resolve(await job.fn()); } catch (e) { job.reject(e); }
+      }
+    } finally { pumping = false; }
+  }
+  const queue = (fn, urgent = false) => new Promise((resolve, reject) => {
+    (urgent ? hi : lo).push({ fn, resolve, reject });
+    pump();
+  });
 
   async function call(method, path, body, tries = 4) {
     return queue(async () => {
@@ -45,7 +86,10 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
         return text ? JSON.parse(text) : null;
       }
       throw new Error(`${method} ${path} -> still rate limited`);
-    });
+    /* Anything that is not a GET is somebody's save. No call site has to know
+       about this, which is the point: a write added later is urgent by
+       construction rather than by remembering to say so. */
+    }, method !== "GET");
   }
 
   const t = (name) => "/" + encodeURIComponent(name);
@@ -278,6 +322,14 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
        disqualified does not stop having answered. */
     "Ever Picked": !!prev?.fields?.["Ever Picked"]
       || (!!c.stage && !NOT_CONNECTED.includes(c.stage)),
+    /* THE SAME FLOOR, for the two rungs that never had one. hasSignal and
+       isComplete read the rows this save is sending, so a contact that has
+       just qualified is latched on the save that qualifies it — and a later
+       save that removes the rows finds the flag already true and OR's it back
+       in. Which is the point: one mis-tapped chip can no longer walk the
+       funnel backwards. See schema.mjs for the cost of this. */
+    "Ever Right POC": !!prev?.fields?.["Ever Right POC"] || hasSignal(c),
+    "Ever Discovery": !!prev?.fields?.["Ever Discovery"] || isComplete(c),
     "KPI Rank": rank,
     /* DERIVED, not copied. The console sets pendingCreate when it invents a
        contact offline and never clears it on the object it sends — the proxy
@@ -337,16 +389,50 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       Timeline: r.timeline || "",
       Pax: r.pax || "",
       Remarks: r.remarks || "",
+      /* Blank on every live row, which is what makes Restore work: the row
+         comes back in `rows`, this upsert runs, and the tombstone clears. */
+      "Removed At": "",
       Contact: [contactRec.id],
     });
   }
-  /* A row deleted in the console must go here too, or a stale one keeps
-     counting toward Right POC forever. */
-  if (c.kid) {
+  /* A row the console no longer holds must stop counting toward Right POC —
+     but MARKING it does that just as well as deleting it did, and deleting it
+     destroyed the only copy of the budget, timeline and pax somebody typed.
+     One mis-tapped chip took all three with it, and nothing else in this base
+     or in Kylas keeps them: Call Log carries no event fields and the remarks
+     block is rewritten on this same save.
+
+     So: set Removed At. Has Any Signal and Is Complete gate on it, so the
+     arithmetic is identical to the delete it replaces, and the row can be
+     restored with everything on it. A row the console sends back has its
+     Removed At cleared by the upsert loop above, which writes every live row
+     unconditionally. */
+  /* ONLY WHEN SOMETHING WAS ACTUALLY REMOVED. This listed every Event Row the
+     contact has on EVERY save, to find rows the console no longer holds — a
+     whole round trip, on every call, to discover nothing almost every time.
+
+     The console now says so directly: it keeps removed rows in `removed`
+     rather than dropping them, so an absent-or-empty list means there is
+     nothing to mark and nothing to look for. `undefined` is the old console
+     talking, and that one still gets the read — dropping it there would leave
+     its removals counting toward Right POC for ever, which is the bug the
+     stale pass exists to prevent. */
+  const removedHere = c.removed;
+  const mayHaveStale = removedHere === undefined || removedHere.length > 0;
+  if (c.kid && mayHaveStale) {
     const held = await at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(c.kid)}'`).catch(() => []);
     const keep = new Set(rows.map((r) => r.rowKey));
-    const stale = held.filter((h) => h.fields["Row Key"] && !keep.has(h.fields["Row Key"])).map((h) => h.id);
-    if (stale.length) { await at.remove("Event Rows", stale); wrote.push(`removed ${stale.length} stale row(s)`); }
+    const stale = held.filter((h) => h.fields["Row Key"] && !keep.has(h.fields["Row Key"])
+                                  && !h.fields["Removed At"]);
+    /* Through the same tolerant upsert the live rows use, keyed on Row Key.
+       An upsert PATCH writes only the fields it is given, so this marks the
+       row without touching the values it is there to protect — and on a base
+       that has not been repaired yet, upsertTolerant drops the unknown column
+       and reports it rather than failing the save. */
+    const stamp = new Date().toISOString();
+    for (const h of stale)
+      await put("Event Rows", "Row Key", { "Row Key": h.fields["Row Key"], "Removed At": stamp });
+    if (stale.length) wrote.push(`marked ${stale.length} row(s) removed`);
   }
   if (rows.length) wrote.push(`${rows.length} event row(s)`);
 
