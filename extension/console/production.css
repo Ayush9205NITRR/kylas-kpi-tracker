@@ -1054,3 +1054,32 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
   padding:3px 10px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
   color:var(--text2);cursor:pointer;flex:none}
 .evgone .gb:hover{border-color:var(--blue);color:var(--blue)}
+
+/* ── an event card that has been saved ───────────────────────────────── */
+/* A card used to be an always-open form whether it held a budget somebody
+   spent a whole call earning or nothing at all. Save locks it: the numbers
+   become a sentence, the inputs go away, and a stray tap has nothing to
+   destroy. Edit puts them back. */
+.ev.evlock{padding-bottom:13px}
+.ev.evlock .evsum{padding:13px 17px 0;font-size:var(--t-label);color:var(--text2);
+  line-height:1.6}
+.ev.evlock .evsum b{font-weight:var(--w-strong);color:var(--text);
+  font-variant-numeric:tabular-nums}
+.ev.evlock .evsum i{font-style:normal;color:var(--text3)}
+/* The remarks, quieter than the numbers and allowed to wrap — it is a sentence
+   somebody wrote, and clipping it loses the part worth reading. */
+.ev.evlock .evsumnote{padding:7px 17px 0;font-size:var(--t-meta);color:var(--text3);
+  line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+/* A locked card hides the empty boxes, so without this it reads as finished
+   when it is not. Amber, matching every other "still needed" in the console. */
+.ev.evlock .evwant{margin:9px 17px 0;font-size:var(--t-meta);color:var(--amber)}
+.ev.evlock .evedit,
+.ev.editing .evsave{margin:12px 17px 0;border:1px solid var(--line2);
+  background:var(--panel);border-radius:7px;padding:6px 15px;font:inherit;
+  font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);cursor:pointer}
+.ev.evlock .evedit:hover{border-color:var(--blue);color:var(--blue)}
+/* Save is the affirmative one, so it carries the accent — it is the only
+   control on the card a person is meant to be looking for. */
+.ev.editing .evsave{border-color:var(--blue);background:var(--blue);color:var(--onBlue);
+  font-weight:var(--w-strong)}
+.ev.editing .evsave:hover{background:var(--blueDeep);border-color:var(--blueDeep)}

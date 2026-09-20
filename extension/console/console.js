@@ -170,6 +170,24 @@ let DATA=[
 ];
 
 let cur=0, isNew=false, filter="todo", target=100, tried=false;
+/* EVERY DELIBERATE CHOICE OF RECORD BUMPS THIS. openCompany() is async and
+   takes seconds; it captures the selected record before its await and restores
+   it after, which silently undoes a contact the associate picked WHILE the
+   fetch was in the air. Clicking the second name and being put back on the
+   first is that, and nothing else. A fetch compares this before and after, and
+   if it moved, somebody has chosen since and the reply has no business
+   overruling them. openContact() already guards its own race with `wanted`;
+   this is the same idea for the record pointer. */
+let selectionEpoch=0;
+const chooseRecord=(i)=>{
+  /* Moving to another contact ends any edit in progress. The row keeps what
+     was typed — every keystroke already wrote it to the record — but the card
+     returns to locked, so coming back shows the same protected summary as
+     opening the record fresh. editingRows is declared further down — a const
+     is not hoisted, but nothing calls this until both exist. */
+  if(i!==cur)editingRows.clear();
+  cur=i;selectionEpoch++;
+};
 let scope=null;      /* {id,name} when opened from a Kylas company page */
 let mode="company";  /* company: follow the Kylas page · session: one flat queue */
 let ME="";           /* the associate using the console; learned, then remembered */
@@ -177,6 +195,26 @@ let timer=null, secs=0, ringing=false;
 let tmode="idle";     /* idle | dial | est */
 let lastOutcome=null;
 let collapsed={past:false,current:false};
+/* WHICH EVENT CARDS ARE OPEN FOR EDITING, by rowKey. Ayush, 2026-09-20: "once
+   you click save that information should be stored in the UI and you're able
+   to edit; once you edit and you go back you save again."
+
+   A card used to be an always-open form, which is why a stray tap could reach
+   carefully gathered numbers: there was no difference on screen between a row
+   holding a budget somebody spent a call earning and an empty one.
+
+   Deliberately NOT persisted. "Locked" is a view state, and a record reopened
+   tomorrow SHOULD come back locked with its detail showing — that is the
+   protection, not a setting to remember. A row is editable only because
+   somebody just tapped its chip or just pressed Edit, and neither of those
+   survives closing the console, nor should it. */
+const editingRows=new Set();
+/* Everything on the row a person types. Same test the removal guard uses. */
+const rowFilled=r=>!!(String(r.budget||"").trim()||String(r.timeline||"").trim()
+                    ||String(r.pax||"").trim()||String(r.remarks||"").trim());
+/* A row with nothing in it has nothing to lock, so it stays open — locking it
+   would show an empty summary and an Edit button for no reason. */
+const isEditing=r=>editingRows.has(r.rowKey)||!rowFilled(r);
 /* Right POC the moment ANY of budget | timeline | pax is filled on ANY row,
    past or current. Until then the contact is only an MQL. Derived, never typed. */
 const filled=v=>String(v||"").trim()!=="";
@@ -545,7 +583,7 @@ function renderQueue(){
         ${sig.length?`<i class="asked" title="Asked and answered: ${esc(sig.join(", "))}">${
             esc(sig.join(" · "))}</i>`:""}
       </span>`;
-    b.onclick=()=>{cur=i;isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+    b.onclick=()=>{chooseRecord(i);isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
   });
 }
@@ -611,7 +649,7 @@ function renderMode(){
     b.title=k==="company"
       ?(scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
       :"The calls you have made today"+(due?` · ${due} due now`:"");
-    b.onclick=()=>{mode=k;const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();};
+    b.onclick=()=>{mode=k;const rows=visible();chooseRecord(rows.length?rows[0].i:cur);render();resetScroll();};
     w.appendChild(b);
   });
 }
@@ -804,7 +842,7 @@ function renderDupe(){
   const w=el("div","dupe");
   w.innerHTML=`<span>Already on <b>${esc(d.b.pocName||"another contact")}</b>${d.b.company?" · "+esc(d.b.company):""}</span>`;
   const go=el("button",null,"Open");go.type="button";
-  go.onclick=()=>{cur=d.i;isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+  go.onclick=()=>{chooseRecord(d.i);isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
   w.appendChild(go);
   host.appendChild(w);
 }
@@ -1033,7 +1071,13 @@ function eventsGroup(){
                   touch("record");renderRight();refreshQual();
                 });
       }
-      else a.current=[...a.current,{...emptyRow(),eventType:t}];
+      else {
+        const fresh={...emptyRow(),eventType:t};
+        /* Tapped just now, so it opens ready to type — which is how it has
+           always behaved and what somebody mid-call expects. */
+        editingRows.add(fresh.rowKey);
+        a.current=[...a.current,fresh];
+      }
       touch("record");renderRight();refreshQual();
       if(!bk)setTimeout(()=>{
         const cards=document.querySelectorAll("#formR .ev");
@@ -1108,6 +1152,46 @@ function eventCard(a,key,r){
   h.appendChild(x);
   card.appendChild(h);
 
+  /* ── LOCKED: what was saved, as a sentence rather than a form ─────────
+     Same words as the editable version, so the card does not appear to change
+     meaning when it commits — only its affordances go away. */
+  if(!isEditing(r)){
+    /* "evlock", not "locked" — console.css:381 already owns .locked for the
+       dashed "waiting" placeholder on the Source field, and it is display:flex.
+       Reusing the name laid this card out sideways and squeezed the remarks to
+       one character per line. */
+    card.classList.add("evlock");
+    const parts=[];
+    if(String(r.pax||"").trim())parts.push(`Around <b>${esc(r.pax)}</b> people`);
+    if(String(r.timeline||"").trim())parts.push(`<b>${esc(r.timeline)}</b>`);
+    if(String(r.budget||"").trim())parts.push(`Budget <b>${esc(r.budget)}</b>`);
+    const sum=el("div","evsum");
+    sum.innerHTML=parts.length?parts.join(" · ")
+      :`<i>No numbers on this one yet</i>`;
+    card.appendChild(sum);
+    if(String(r.remarks||"").trim()){
+      const n=el("div","evsumnote");
+      n.textContent=r.remarks;
+      card.appendChild(n);
+    }
+    /* WHAT IS MISSING, said here too. The footer lists it for the record as a
+       whole; on a locked card the reader cannot see the empty boxes, so
+       without this the card looks finished when it is not. */
+    const want=["pax","timeline","budget"].filter(k=>!String(r[k]||"").trim());
+    if(want.length){
+      const w=el("p","evwant");
+      w.textContent="Still blank: "+want.map(k=>({pax:"how many",timeline:"when",budget:"budget"})[k]).join(", ");
+      card.appendChild(w);
+    }
+    const ed=el("button","evedit","Edit");ed.type="button";
+    ed.title=`Change the detail on ${r.eventType}`;
+    ed.onclick=()=>{editingRows.add(r.rowKey);renderRight();
+      setTimeout(()=>document.querySelector("#formR .ev.editing .bl input")?.focus(),30);};
+    card.appendChild(ed);
+    return card;
+  }
+
+  card.classList.add("editing");
   const body=el("div","evb");
   const strip=el("div","strip");
   const blank=(k,ph,chips,min)=>{
@@ -1148,6 +1232,19 @@ function eventCard(a,key,r){
   note.oninput=e=>{r.remarks=e.target.value;touch("record");};
   nb.appendChild(note);
   card.appendChild(nb);
+
+  /* SAVE COMMITS THE VIEW, not the data — every keystroke above has already
+     written to the record and persist() has already debounced it to storage.
+     What this does is lock the card, which is what makes the difference
+     between "gathered" and "still being gathered" visible, and what puts the
+     detail out of reach of a stray tap. */
+  const sv=el("button","evsave","Save");sv.type="button";
+  sv.title=`Lock ${r.eventType} — you can edit it again after`;
+  sv.onclick=()=>{
+    editingRows.delete(r.rowKey);
+    touch("record");persist();renderRight();refreshQual();validate();
+  };
+  card.appendChild(sv);
   return card;
 }
 
@@ -1351,7 +1448,7 @@ function saveNext(){
                  note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});
   const rows=visible().filter(r=>r.i!==from);
   const nxt=rows.length?rows[0].i:cur;
-  cur=nxt;isNew=false;collapsed={past:false,current:false};
+  cur=nxt;isNew=false;collapsed={past:false,current:false};editingRows.clear();
   render();resetScroll();setTab("basic");
   toast(`${a.pocName} logged \u2014 next up: ${DATA[cur].pocName}`,()=>{a.done=was;cur=from;render();});
 }

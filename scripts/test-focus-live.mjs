@@ -211,6 +211,57 @@ await f.evaluate(() => render());
 await page.waitForTimeout(200);
 check('which survives a render', await seg(f), '★ Focus | Not picked | Deprioritize*');
 
+/* ── save locks a card, edit reopens it ─────────────────────── */
+/* A card used to be an always-open form whether it held numbers somebody spent
+   a call earning or nothing at all, which is what let one tap reach them. */
+console.log('\n— save and edit an event card —');
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/903/'));
+await page.waitForTimeout(3000);
+f = F();
+await f.locator('#formR .tc', { hasText: 'Employee offsites' }).click();
+await page.waitForTimeout(400);
+check('a new chip opens ready to type', await f.locator('#formR .ev.editing').count(), 1);
+await f.evaluate(() => {
+  const r = rec().current.find((x) => x.eventType === 'Employee offsites');
+  Object.assign(r, { budget: '9L', timeline: 'Q4', pax: '80', remarks: 'they asked for a quote' });
+  renderRight();
+});
+await page.waitForTimeout(300);
+await f.locator('#formR .evsave').click();
+await page.waitForTimeout(400);
+check('save locks it', await f.locator('#formR .ev.evlock').count(), 1);
+check('and there is nothing left to type into', await f.locator('#formR .ev.evlock input').count(), 0);
+check('the numbers read back', (await f.locator('.evsum').textContent() || '').replace(/\s+/g, ' '),
+      (t) => /80/.test(t) && /Q4/.test(t) && /9L/.test(t));
+await f.locator('#formR .evedit').click();
+await page.waitForTimeout(400);
+check('edit reopens it', await f.locator('#formR .ev.editing').count(), 1);
+check('with the value still in the field', await f.locator('#formR .bl input').nth(2).inputValue(), '9L');
+
+/* ── a selection made during a fetch is not overruled by it ───────── */
+/* openCompany() captured the selected record BEFORE its await and restored it
+   after, so clicking the second contact while the company was still loading
+   put you back on the first. Verified to FAIL without the epoch guard. */
+console.log('\n— picking a contact mid-fetch —');
+const race = await f.evaluate(async () => {
+  if (DATA.filter((a) => String(a.companyId) === '903').length < 2) {
+    const base = DATA.find((a) => String(a.companyId) === '903');
+    DATA.push({ ...structuredClone(base), kid: '99001', lid: 'race-2',
+                pocName: 'Second Poc', past: [], current: [], removed: [] });
+  }
+  const real = API.company;
+  API.company = (id) => new Promise((r) => setTimeout(() => real(id).then(r), 1200));
+  openCompanyFromView('903', 'Shorehouse Retail');
+  await new Promise((r) => setTimeout(r, 400));
+  const rows = visible();
+  const want = rows[1].i, wantName = DATA[want].pocName;
+  chooseRecord(want); render();
+  await new Promise((r) => setTimeout(r, 2000));
+  API.company = real;
+  return { wantName, after: DATA[cur].pocName };
+});
+check('the reply does not drag the selection back', race.after, race.wantName);
+
 /* ── an event row removed is not an event row lost ────────────────── */
 /* THE REGRESSION. Tapping a lit chip used to hard-drop the row, and on the
    next save syncContact DELETED the Airtable record — taking the budget,

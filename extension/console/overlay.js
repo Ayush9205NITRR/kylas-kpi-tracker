@@ -118,6 +118,18 @@
   async function openCompany(id, label) {
     const had = showCompany(id, label);
     const before = DATA[cur];
+    /* WHOSE CHOICE WINS WHEN THE REPLY LANDS. `before` is the record that was
+       selected when this fetch STARTED, and the fetch takes seconds — so
+       clicking the second contact while it is in the air used to be undone by
+       the reply, which put the first one back. That is the whole of "I click
+       the second name and it goes back to the first".
+
+       The epoch moves only on a deliberate choice (see chooseRecord in
+       console.js). If it has moved by the time we get here, the associate has
+       picked since and this reply is stale on the one question of what is
+       selected — everything else it brings is still merged. */
+    const epoch = selectionEpoch;
+    const chosenSince = () => selectionEpoch !== epoch;
 
     /* PAINT WHAT WE ALREADY KNOW, THEN GO ASK.
        Ayush, 2026-09-19: "when I click an account, there seems to be a lag
@@ -150,7 +162,11 @@
          and it carries pendingCreate — on the next drain it would be CREATED in
          Kylas, duplicating a POC that was there all along. We do not know what
          this company holds until the fetch succeeds, so claim nothing. */
-      if (!had) {
+      /* Same rule on the failure path, and it matters more here: the splice
+         moves indices, so removing the placeholder under a selection the
+         associate made during the fetch would not merely reset it, it would
+         point at the wrong record. */
+      if (!had && !chosenSince()) {
         const ph = DATA[cur];
         if (ph && !ph.kid && !ph.pocName.trim() && String(ph.companyId) === String(id)) {
           DATA.splice(cur, 1);
@@ -209,10 +225,12 @@
     }
 
     const roster = DATA.filter((a) => String(a.companyId) === String(id));
-    const keep = DATA.indexOf(before);
-    cur = keep > -1 && String(DATA[keep].companyId) === String(id)
-      ? keep
-      : (roster.length ? DATA.indexOf(roster.find((a) => !a.done) || roster[0]) : 0);
+    if (!chosenSince()) {
+      const keep = DATA.indexOf(before);
+      cur = keep > -1 && String(DATA[keep].companyId) === String(id)
+        ? keep
+        : (roster.length ? DATA.indexOf(roster.find((a) => !a.done) || roster[0]) : 0);
+    }
     isNew = !DATA[cur]?.kid;
 
     persist();
