@@ -65,10 +65,30 @@ const OUTCOMES=[
   {k:"4",t:"SQL",         stage:"SQL_SALES_QUALIFIED_LEAD"}
 ];
 const outcomeStage=(o,a)=>typeof o.stage==="function"?o.stage(a):o.stage;
+/* CALENDAR quarters — Ayush, 2026-09-21: "Q1, Q2, Q3, Q4, which is Jan to
+   March". The months are spelled out on every option because this console also
+   carried fiscal "Q2 FY27" chips for months, and two readings of "Q2" in one
+   product is how a whole quarter's pipeline gets filed wrong. */
+const QUARTERS=[
+  ["Q1","Jan–Mar",[0,1,2]],
+  ["Q2","Apr–Jun",[3,4,5]],
+  ["Q3","Jul–Sep",[6,7,8]],
+  ["Q4","Oct–Dec",[9,10,11]],
+];
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+/* Headcount bands, his numbers. Even twenties where most offsites actually
+   sit, widening as they get bigger — a band that covers 101 to 500 tells a
+   planner nothing, and one that covers 0 to 5 is noise. */
+const PAX_BANDS=["0–20","21–40","41–60","61–100","101–250","251–500","500+"];
+
 const QUICK={
-  budget:["Approx","₹L","₹Cr","Not approved","Signed off","No budget yet","Last year was"],
-  timeline:["Q2 FY27","Q3 FY27","Q4 FY27","Q1 FY28","Not decided","Month:","Tentative"],
-  pax:["Approx","+ internal","incl. contractors","Only leadership","Whole company"]
+  /* Amounts, not adjectives. "Approx" and "₹L" told a reader the shape of the
+     answer and never the answer; these are what a person actually says on a
+     call, so one tap records the number. Budget stays free text — Ayush chose
+     that deliberately, so "₹40L, signed off by the CFO" still goes in whole. */
+  budget:["₹10L","₹20L","₹25L","₹30L","₹50L","₹1Cr","Not approved","Unknown"],
+  timeline:[],   /* replaced by the quarter/month/date picker below */
+  pax:PAX_BANDS
 };
 
 /* ── data ────────────────────────────────── */
@@ -215,6 +235,16 @@ const rowFilled=r=>!!(String(r.budget||"").trim()||String(r.timeline||"").trim()
 /* A row with nothing in it has nothing to lock, so it stays open — locking it
    would show an empty summary and an Edit button for no reason. */
 const isEditing=r=>editingRows.has(r.rowKey)||!rowFilled(r);
+
+/* THE OFFSITE TIMELINE, READ OFF THE EVENT ROWS rather than asked for twice.
+   Current before Past — a timeline somebody is planning now is the answer to
+   "when is their offsite", and one from a past event is only a fallback worth
+   showing when there is nothing current. First non-empty wins; the rows are
+   in the order they were tagged, which is the order they came up on the call. */
+function offsiteTimelineOf(a){
+  const pick=(rows)=>(rows||[]).map(r=>String(r.timeline||"").trim()).find(Boolean)||"";
+  return pick(a.current)||pick(a.past)||"";
+}
 /* Right POC the moment ANY of budget | timeline | pax is filled on ANY row,
    past or current. Until then the contact is only an MQL. Derived, never typed. */
 const filled=v=>String(v||"").trim()!=="";
@@ -265,9 +295,15 @@ function copyNumber(num){
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 /* If the stored value is not one of the options, Kylas knows something this
    list does not — show it rather than rendering "Choose" over real data. */
-const opts=(l,v)=>{
+/* `empty` renames the blank option. Ayush, 2026-09-21: "the source of data, in
+   case it is empty, let it be just marked as empty". "Choose" is an
+   instruction, and on a field Kylas simply has no value for it reads as a
+   thing the associate forgot to do — so they go looking for the right answer
+   to a question nobody is asking. "— empty —" is the fact. */
+const opts=(l,v,empty)=>{
   const list=(v!==undefined&&v!==null&&v!==""&&!l.includes(v))?[...l,v]:l;
-  return list.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${o===""?"Choose":esc(label(o))}</option>`).join("");
+  return list.map(o=>`<option value="${esc(o)}"${o===v?" selected":""}>${
+    o===""?(empty||"Choose"):esc(label(o))}</option>`).join("");
 };
 let dirty=new Set();
 const touch=f=>dirty.add(f);
@@ -299,8 +335,8 @@ function textarea(id,val,ph,on){
   const t=el("textarea","in");t.id=id;t.value=val||"";if(ph)t.placeholder=ph;
   t.oninput=e=>on(e.target.value);return t;
 }
-function select(id,list,val,on){
-  const s=el("select","in");s.id=id;s.innerHTML=opts(list,val);
+function select(id,list,val,on,empty){
+  const s=el("select","in");s.id=id;s.innerHTML=opts(list,val,empty);
   s.onchange=e=>{on(e.target.value);validate();};return s;
 }
 /* long-text field with one-tap phrase inserts */
@@ -898,7 +934,7 @@ function renderBasic(){
      bare "Choose" that reads as "this account has no sources". */
   grid.appendChild(field("Came from","f-src",false,
     SOURCES.filter(Boolean).length||a.source
-      ? select("f-src",SOURCES,a.source,v=>a.source=v)
+      ? select("f-src",SOURCES,a.source,v=>a.source=v,"— empty —")
       : el("div","locked",`<b>waiting</b><span>Source of Data comes from Kylas — connect the proxy to load it.</span>`)));
   grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
   const whoCard=group("Who you're calling",[grid]);
@@ -981,8 +1017,15 @@ function renderRight(){
   const g3=el("div","cardB grp");g3c.appendChild(g3);
   g3.appendChild(field("Who handles this for them today?","f-vi",isReq(a,"f-vi"),
     select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
-  g3.appendChild(field("Offsite timeline","f-ot",false,
-    select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
+  /* OFFSITE TIMELINE IS GONE FROM HERE. Ayush, 2026-09-21: "we are still
+     asking offsite timeline as an individual field — rather, I can draw it
+     from the past and current."
+
+     He is right, and it was worse than redundant: the associate had already
+     typed when the offsite is, on the event row, and was then asked a second
+     time in a coarser vocabulary (JAN_MAR) that could disagree with what they
+     had just written. Two answers to one question, and no rule for which
+     wins. It is derived below instead. */
 
   const lab=el("label","cb1"+(a.serviceOffering?" on":""));
   lab.style.marginBottom="0";
@@ -1006,10 +1049,16 @@ function renderRight(){
 /* One chip per event type, one card per chip. Tapping a lit chip removes its
    card. Past vs Now lives on the card and is echoed back onto the chip, so the
    same six types never get printed on screen twice. */
-function bucketOf(a,t){
-  if(a.past.some(r=>r.eventType===t))return "past";
-  if(a.current.some(r=>r.eventType===t))return "current";
-  return null;
+/* HOW MANY OF THIS TYPE, and which way they lean. A company can run two
+   offsites a year — Ayush, 2026-09-21: "I cannot click it twice... I can have
+   multiple subsections of the same format" — so the question stopped being
+   "is this type tagged" and became "how many, and are any of them live".
+   `current` wins the tint when both exist: an event being planned now is what
+   the chip should be reporting, and a past one of the same type is history. */
+function countOf(a,t){
+  const past=(a.past||[]).filter(r=>r.eventType===t).length;
+  const current=(a.current||[]).filter(r=>r.eventType===t).length;
+  return {n:past+current,bucket:current?"current":past?"past":null};
 }
 /* THE FOUR FIELDS SOMEBODY TYPED. Anything here and the row is not a stray
    tag — it is the qualification data Right POC and Successful Discovery are
@@ -1047,31 +1096,21 @@ function eventsGroup(){
 
   const chips=el("div","tcs");
   EVENT_TYPES.filter(Boolean).forEach(t=>{
-    const bk=bucketOf(a,t);
+    const {n,bucket:bk}=countOf(a,t);
     const btn=el("button","tc"+(bk==="past"?" past-on":bk==="current"?" now-on":""),
-      `<i class="dot"></i>${esc(t)}`);
+      `<i class="dot"></i>${esc(t)}${n>1?`<b class="tcn">${n}</b>`:""}`);
     btn.type="button";
-    btn.setAttribute("aria-pressed",bk?"true":"false");
-    btn.title=bk?"Tap to remove":"Tap to add";
+    btn.setAttribute("aria-pressed",n?"true":"false");
+    /* "Tap to add ANOTHER", because it now always adds. */
+    btn.title=n?`Tap to add another ${t}`:`Tap to add ${t}`;
     btn.onclick=()=>{
-      if(bk){
-        const gone=[...a.past.filter(r=>r.eventType===t),...a.current.filter(r=>r.eventType===t)];
-        gone.forEach(r=>removeRow(a,a.past.includes(r)?"past":"current",r));
-        /* A tag with nothing on it is just a tag — say nothing. One with typed
-           fields on it is the thing that must not vanish quietly, so it gets
-           the undo that console.js has had the machinery for all along. */
-        if(gone.some(hasData))
-          toast(`${t} removed — its budget, timeline and pax are kept below`,
-                ()=>{
-                  /* Back to the array each row actually came from. removeRow
-                     recorded that as `from`, so Past does not silently become
-                     Now on the way back. */
-                  (a.removed||[]).filter(x=>gone.some(g=>g.rowKey===x.rowKey))
-                    .forEach(x=>restoreRow(a,x));
-                  touch("record");renderRight();refreshQual();
-                });
-      }
-      else {
+      /* ALWAYS ADDS. It used to toggle, which made the chip the one control on
+         screen that could destroy a card somebody had filled in — tap it a
+         second time and the budget, timeline and pax went with it. It also
+         made a second offsite impossible to record at all.
+         Removing is the card's own ×, which keeps the row, offers an undo and
+         leaves it restorable. One control that creates, one that removes. */
+      {
         const fresh={...emptyRow(),eventType:t};
         /* Tapped just now, so it opens ready to type — which is how it has
            always behaved and what somebody mid-call expects. */
@@ -1079,8 +1118,11 @@ function eventsGroup(){
         a.current=[...a.current,fresh];
       }
       touch("record");renderRight();refreshQual();
-      if(!bk)setTimeout(()=>{
-        const cards=document.querySelectorAll("#formR .ev");
+      /* Unconditionally now — every tap makes a card, so every tap should land
+         the cursor in it. This was guarded on "was it off", which after the
+         change above would have skipped exactly the second and third one. */
+      setTimeout(()=>{
+        const cards=document.querySelectorAll("#formR .ev.editing");
         cards[cards.length-1]?.querySelector(".bl input")?.focus();
       },30);
     };
@@ -1216,16 +1258,74 @@ function eventCard(a,key,r){
     w.appendChild(i);return w;
   };
 
+  /* WHEN, AT THREE LEVELS. Ayush, 2026-09-21: a quarter to begin with, then a
+     month, then the exact start date "if can". Most calls end at the quarter —
+     that is genuinely all the prospect knows in February — so the month and
+     the date only appear once the level above them is answered. Asking for a
+     date nobody has yet is how a field starts getting filled with guesses.
+
+     Stored as ONE string in r.timeline, which is what every reader downstream
+     already expects: the Airtable column is free text, and hasSignal/isComplete
+     only ask whether it is empty. "Q1 2027", "Q1 2027 · Feb", "Q1 2027 · 12 Feb
+     2027" are all it, at increasing precision. */
+  const when=el("div","tl");
+  const parse=(v)=>{
+    const m=/^(Q[1-4])\s+(\d{4})(?:\s+·\s+(.+))?$/.exec(String(v||"").trim());
+    if(!m)return {q:"",year:"",rest:String(v||"").trim()};
+    return {q:m[1],year:m[2],rest:m[3]||""};
+  };
+  const now=new Date();
+  /* This year and the next two: an offsite booked beyond that is not a thing
+     anyone is telling you about on a cold call. */
+  const YEARS=[now.getFullYear(),now.getFullYear()+1,now.getFullYear()+2];
+  const put=()=>{
+    const q=when.querySelector(".q").value;
+    const y=when.querySelector(".y").value;
+    const mo=when.querySelector(".mo")?.value||"";
+    const d=when.querySelector(".d")?.value||"";
+    /* The year select is hidden until a quarter is chosen, so on the very
+       first change it has no value yet — without this fallback the row stored
+       "Q1 " with a trailing space and no year, and the month picker (which
+       keys off a parsed year) never appeared. */
+    const yr=y||String(now.getFullYear());
+    r.timeline = !q ? "" :
+      d ? `${q} ${yr} · ${new Date(d+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}`
+      : mo ? `${q} ${yr} · ${mo}`
+      : `${q} ${yr}`;
+    touch("record");refreshQual();validate();drawWhen();
+  };
+  function drawWhen(){
+    const cur=parse(r.timeline);
+    const qs=QUARTERS.map(([k,months])=>`<option value="${k}"${cur.q===k?" selected":""}>${k} (${months})</option>`).join("");
+    const ys=YEARS.map(y=>`<option${String(cur.year)===String(y)?" selected":""}>${y}</option>`).join("");
+    /* Only the months inside the chosen quarter — offering Jan under Q3 is an
+       invitation to record something contradictory. */
+    const inQ=(QUARTERS.find(([k])=>k===cur.q)||[,,[]])[2].map(i=>MONTHS[i]);
+    const exact=/\d{1,2}\s\w{3}\s\d{4}/.test(cur.rest);
+    when.innerHTML=
+      `<select class="q" aria-label="Quarter"><option value="">when?</option>${qs}</select>`+
+      `<select class="y" aria-label="Year"${cur.q?"":" hidden"}>${ys}</select>`+
+      (cur.q?`<select class="mo" aria-label="Month"><option value="">month?</option>`+
+        inQ.map(m=>`<option${!exact&&cur.rest===m?" selected":""}>${m}</option>`).join("")+`</select>`:"")+
+      (cur.q?`<input class="d" type="date" aria-label="Offsite start date" title="Exact start date, if they know it">`:"");
+    when.querySelectorAll("select,input").forEach(n=>n.onchange=put);
+  }
+  drawWhen();
+
   const l=el("p","sent");
-  l.append("Around ",blank("pax","how many?",QUICK.pax,116)," people, ",
-           blank("timeline","when?",QUICK.timeline,116),
-           ". Budget ",blank("budget","how much?",QUICK.budget,128),".");
+  l.append("Around ",blank("pax","how many?",QUICK.pax,116)," people, ");
+  l.append(when);
+  l.append(". Budget ",blank("budget","how much?",QUICK.budget,128),".");
   body.append(l,strip);
   card.appendChild(body);
 
   /* remarks lives in its own block so it never competes with the numbers */
   const nb=el("div","evnote");
-  const nid="rm-"+key+"-"+r.eventType.replace(/\W+/g,"");
+  /* KEYED ON THE ROW, not the event type. Two "Employee offsites" cards gave
+     two textareas the same DOM id and two labels pointing at the first one, so
+     clicking the second card's Remarks label put the cursor in the first
+     card's box. rowKey is unique by construction. */
+  const nid="rm-"+r.rowKey;
   nb.innerHTML=`<label for="${nid}">Remarks</label>`;
   const note=el("textarea");note.id=nid;note.rows=2;note.value=r.remarks||"";
   note.placeholder="Anything worth reading before the next call…";
@@ -1343,7 +1443,10 @@ function missing(){
      collecting anything. */
   if (rung(a) >= MILESTONE.engaged.floor && !EXIT_STAGES.includes(a.stage)) {
     need(!a.nextCallDate, "A day to call back", "f-next");
-    need(!a.offsiteTimeline, "Offsite timeline", "f-ot");
+    /* Points at the events pane now, because that is where the answer is
+       typed. A "Still needed" link that scrolls to a field which no longer
+       exists is worse than no link. */
+    need(!offsiteTimelineOf(a), "Offsite timeline (on an event)", "s-events");
   }
   return m;
 }
@@ -1443,6 +1546,14 @@ function saveNext(){
      above those. With the field never arriving, every one of them was pinned
      to zero for ever — the dashboard's talk-time tile read 0m because the
      provenance never made the trip, not because nobody dialled. */
+  /* The field is no longer asked for, but it is still WRITTEN — Kylas has a
+     cfOffsiteTimeline and Airtable a column, and both should keep getting an
+     answer. Derived at the moment of saving so it reflects the rows as they
+     finally stand, rather than whatever was true when the card was opened.
+     An existing value is only overwritten when the rows actually say
+     something, so a record whose events were never filled keeps what it had. */
+  a.offsiteTimeline=offsiteTimelineOf(a)||a.offsiteTimeline;
+
   syncToKylas(a,{outcome:outcome?outcome.t:null,duration,durationSource,createdHere:wasNew,
                  at:new Date().toISOString(),
                  note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});

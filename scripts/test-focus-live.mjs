@@ -256,7 +256,10 @@ check('the numbers read back', (await f.locator('.evsum').textContent() || '').r
 await f.locator('#formR .evedit').click();
 await page.waitForTimeout(400);
 check('edit reopens it', await f.locator('#formR .ev.editing').count(), 1);
-check('with the value still in the field', await f.locator('#formR .bl input').nth(2).inputValue(), '9L');
+/* nth(1), not nth(2): timeline stopped being a free-text blank when it
+   became the quarter/month/date picker, so the sentence now holds two .bl
+   inputs — pax and budget — rather than three. */
+check('with the value still in the field', await f.locator('#formR .bl input').nth(1).inputValue(), '9L');
 
 /* ── a selection made during a fetch is not overruled by it ───────── */
 /* openCompany() captured the selected record BEFORE its await and restored it
@@ -304,8 +307,23 @@ check('the card is there', await f.locator('#formR .ev').count(), 1);
 check('qualification reads Right POC', await f.evaluate(() => qualOf(rec())), (q) => q !== 'MQL');
 
 // the destructive click
-console.log('\n— tapping the lit chip —');
-await f.locator('#formR .tc', { hasText: 'Employee offsites' }).click();
+/* THE CARD'S ×, not the chip. The chip used to toggle, which made it the one
+   control on screen that could destroy a filled-in card — and it also made a
+   second offsite impossible to record. It always adds now; removing is the ×,
+   which keeps the row, offers an undo and leaves it restorable. */
+console.log('\n— removing it with the card\u2019s × —');
+check('the chip adds rather than removes', await f.evaluate(() => {
+  const before = rec().current.length;
+  document.querySelectorAll('#formR .tc').forEach((b) => {
+    if (b.textContent.includes('Employee offsites')) b.click();
+  });
+  const after = rec().current.length;
+  /* put it back the way the rest of this block expects */
+  rec().current = rec().current.slice(0, before); renderRight();
+  return after > before;
+}), true);
+await page.waitForTimeout(300);
+await f.locator('#formR .ev .del').first().click();
 await page.waitForTimeout(400);
 check('the card goes away', await f.locator('#formR .ev').count(), 0);
 check('but the row is KEPT', await f.evaluate(() => rec().removed.length), 1);

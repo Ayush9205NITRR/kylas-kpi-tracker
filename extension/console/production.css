@@ -1088,3 +1088,16 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
    land?") has no other visible answer. */
 .vbuild{font-size:var(--t-meta);color:var(--text3);font-family:var(--m,ui-monospace);
   align-self:center;cursor:help;letter-spacing:-.01em}
+/* How many of this type are on the record. Only shown past one, because "1" on
+   every lit chip is noise — the chip being lit already says that. */
+.tc .tcn{margin-left:6px;font-size:var(--t-meta);font-weight:var(--w-strong);
+  opacity:.75;font-variant-numeric:tabular-nums}
+/* The three-level "when": quarter, then month, then an exact date. They sit in
+   the sentence, so they have to read as part of it rather than as a form. */
+.tl{display:inline-flex;gap:5px;align-items:baseline;flex-wrap:wrap;vertical-align:baseline}
+.tl select,.tl input{border:0;border-bottom:1.5px dashed var(--line2);background:transparent;
+  font:inherit;font-size:inherit;color:var(--blue);font-weight:var(--w-med);
+  padding:1px 2px;cursor:pointer;max-width:170px}
+.tl select:focus,.tl input:focus{outline:0;border-bottom-color:var(--blue);
+  border-bottom-style:solid}
+.tl input[type="date"]{color:var(--text2)}
