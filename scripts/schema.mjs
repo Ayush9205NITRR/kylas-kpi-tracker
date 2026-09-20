@@ -29,6 +29,13 @@ import { RCA_REASON_CODES, RCA_GATE_KEYS } from "./rca.mjs";
    from here, so changing these means changing that too. */
 const MEETING_MODES = ["In Person", "Virtual", "Calls", "Text"];
 
+/* Why a BD took an account off their list. From the reference's DEPRI_REASONS,
+   and a singleSelect for the same reason the modes are: a value the column has
+   never seen is a rejected write, not a blank cell. */
+const DEPRI_REASONS = ["No event budget this year", "Too small / not a fit",
+  "Events handled in-house", "Locked in with another agency",
+  "Can't reach the right POC", "Timing — revisit next quarter", "Other"];
+
 export const ladderFormula = (rankField) =>
   LADDER.slice(1).reduceRight(
     (acc, [n, label]) => `IF({${rankField}} = ${n}, "${label}", ${acc})`,
@@ -279,6 +286,62 @@ export const TABLES = [
      and an answer can be revised rather than duplicated. Append in spirit: a
      row is written when the question is asked and updated when it is answered,
      never deleted, because "we asked and nobody said" is itself a finding. */
+  {
+    name: "Focus",
+    description: "One row per company a BD has picked or dropped. The CURRENT state only — every change is also appended to Focus History, which is what makes 'who dropped this and why' answerable a month later.",
+    fields: [
+      { name: "Kylas Company ID", type: "singleLineText", description: "Upsert key. The same id the route and Kylas use." },
+      { name: "Company Name", type: "singleLineText", description: "Carried so the focus list reads without joining back." },
+      { name: "Status", type: "singleSelect", options: sel("focus", "depri") },
+      { name: "Reason", type: "singleSelect", options: sel(...DEPRI_REASONS),
+        description: "Why it was dropped. Blank on a focus row — nobody is asked to justify picking one." },
+      { name: "Note", type: "multilineText" },
+      { name: "Owner", type: "singleLineText",
+        description: "Whose list it is: the account owner at the time, NOT the person who set it. Kylas ownership goes stale and the list should not move under the BD." },
+      { name: "Set By", type: "singleLineText", description: "Who actually clicked." },
+      { name: "Set At", type: "dateTime", options: dateTime },
+    ],
+  },
+  {
+    name: "Focus History",
+    description: "Append-only. Never updated, never deleted: the point of a focus list is what somebody decided and when, and an overwrite loses exactly that.",
+    fields: [
+      { name: "Key", type: "singleLineText", description: "<kylas company id>-<iso timestamp>. Idempotent on a retry." },
+      { name: "Kylas Company ID", type: "singleLineText" },
+      { name: "From Status", type: "singleSelect", options: sel("focus", "normal", "depri") },
+      { name: "To Status", type: "singleSelect", options: sel("focus", "normal", "depri") },
+      { name: "Reason", type: "singleSelect", options: sel(...DEPRI_REASONS) },
+      { name: "Note", type: "multilineText" },
+      { name: "Owner", type: "singleLineText" },
+      { name: "Set By", type: "singleLineText" },
+      { name: "Changed At", type: "dateTime", options: dateTime },
+    ],
+  },
+  {
+    name: "Research",
+    description: "What a BD found out about a company before calling it. Fifteen fields, all free text, all optional — the shape comes from reference/enout-bd-ladder.html. Nothing here is synced from Kylas; this is the one table the ladder app owns outright.",
+    fields: [
+      { name: "Kylas Company ID", type: "singleLineText", description: "Upsert key." },
+      { name: "Company Name", type: "singleLineText" },
+      { name: "Industry", type: "singleLineText" },
+      { name: "Employees", type: "singleLineText" },
+      { name: "HQ City", type: "singleLineText" },
+      { name: "Other Offices", type: "singleLineText" },
+      { name: "Funding", type: "singleLineText" },
+      { name: "Revenue Band", type: "singleLineText" },
+      { name: "Known Events", type: "multilineText" },
+      { name: "Event Season", type: "singleLineText" },
+      { name: "Decides Events", type: "singleLineText" },
+      { name: "Current Agency", type: "singleLineText" },
+      { name: "Recent Trigger", type: "multilineText" },
+      { name: "Links", type: "singleLineText" },
+      { name: "V Score", type: "singleLineText" },
+      { name: "W Score", type: "singleLineText" },
+      { name: "Research Notes", type: "multilineText" },
+      { name: "Updated By", type: "singleLineText" },
+      { name: "Updated At", type: "dateTime", options: dateTime },
+    ],
+  },
   {
     name: "RCA",
     description: "One row per stalled contact per gate. Asked by the console when a contact has sat at a rung past the gate's patience; answered by the associate. Reason codes come from docs/rca-reasons.json — see gen-rca.mjs.",

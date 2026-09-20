@@ -53,7 +53,7 @@ export default function App() {
         </nav>
         <div className="actions">
           <button className="btn" type="button">Team</button>
-          <button className="btn primary" type="button" disabled={snap?.origin !== "supabase"}>Sync now</button>
+          <button className="btn primary" type="button" disabled={snap?.origin !== "proxy"}>Sync now</button>
         </div>
       </header>
 
@@ -89,9 +89,9 @@ function Banner({ snap, err }: { snap: Snapshot | null; err: string }) {
       <div className="banner">
         <span className="dot" />
         <span>
-          <b>Not connected to Supabase</b> — these six companies are made up, so the screens
-          have something to draw. Set <code>VITE_SUPABASE_URL</code> and{" "}
-          <code>VITE_SUPABASE_ANON_KEY</code> to see the team's real numbers.
+          <b>Fixture data</b> — these six companies are made up, so the screens have something
+          to draw. Unset <code>VITE_USE_FIXTURE</code> and start the proxy
+          (<code>source .env.local && node scripts/proxy.mjs</code>) to see the team's real numbers.
         </span>
       </div>
     );

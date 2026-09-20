@@ -1,7 +1,12 @@
 /* Where the screens get their data.
  *
- * One interface, two implementations: Supabase when it is configured, and a
- * small fixture when it is not, so the app runs on a laptop with no keys.
+ * One interface, two implementations: the proxy, and a small fixture behind a
+ * flag so the screens can be worked on with nothing running.
+ *
+ * The proxy is the same one the extension talks to. Ayush, 2026-09-20: Airtable
+ * rather than Supabase, because a second database, a second auth system and a
+ * second migration path is friction at every deploy for data that already
+ * lives in the base the console writes to on every save.
  *
  * The fixture is NOT the prototype's makeSample(). That generated 760 invented
  * companies and shipped them to anyone who opened the file, which is the
@@ -11,6 +16,7 @@
 import type { Company, DayNumber, RungDate } from "../rules/ladder";
 import { dayNumber, today } from "../rules/ladder";
 import type { Person } from "../rules/grouping";
+import { ProxySource } from "./proxy";
 
 export type Contact = {
   id: string; companyId: string; name: string; designation: string;
@@ -33,14 +39,15 @@ export type Snapshot = {
   research: Record<string, Research>;
   /** null when nothing has ever synced. */
   syncedAt: string | null;
-  /** "supabase" or "fixture" — the banner is not allowed to guess. */
-  origin: "supabase" | "fixture";
+  /** "proxy" or "fixture" — the banner is not allowed to guess. */
+  origin: "proxy" | "fixture";
 };
 
 export interface Source {
   load(): Promise<Snapshot>;
   contactsOf(companyId: string): Promise<Contact[]>;
-  setFocus(companyId: string, status: FocusStatus, reason?: string, note?: string): Promise<void>;
+  setFocus(companyId: string, status: FocusStatus, reason?: string, note?: string,
+           extra?: { companyName?: string; ownerName?: string; previous?: FocusStatus }): Promise<void>;
   saveResearch(companyId: string, r: Research): Promise<void>;
   syncNow(): Promise<void>;
 }
@@ -114,10 +121,14 @@ class FixtureSource implements Source {
   async saveResearch(companyId: string, r: Research) {
     this.snap.research[companyId] = { ...r, updatedAt: new Date().toISOString(), updatedByEmail: "you@enout.in" };
   }
-  async syncNow() { throw new Error("Not connected to Supabase — nothing to sync."); }
+  async syncNow() { throw new Error("Not connected to the proxy — nothing to sync."); }
 }
 
-/* Chosen once, at module load, so no screen has to wonder which it is. */
-export const source: Source = new FixtureSource();
+/* Chosen once, at module load, so no screen has to wonder which it is.
+   The proxy is local by default and the app is another of its clients, the
+   same as the extension — set VITE_PROXY_URL to point somewhere else, or
+   VITE_USE_FIXTURE=1 to work on the screens with no proxy running. */
+export const source: Source =
+  import.meta.env.VITE_USE_FIXTURE === "1" ? new FixtureSource() : new ProxySource();
 
 export { dayNumber };

@@ -11,8 +11,8 @@ npm test           # the business rules
 npm run build
 ```
 
-With no Supabase configured it runs on six obviously-fake companies and says so
-in the banner. It is **not** the prototype's `makeSample()` — 760 invented
+`VITE_USE_FIXTURE=1 npm run dev` runs it on six obviously-fake companies with a
+banner saying so, for working on the screens with no proxy up. It is **not** the prototype's `makeSample()` — 760 invented
 companies that looked real was the failure that generator caused, so this is
 six rows and a warning.
 
@@ -24,7 +24,7 @@ six rows and a warning.
 - `src/rules/` — the funnel, periods, families, freshness, modes, who counts.
   One module each, all tested (`src/rules/rules.test.ts`).
 - `src/routes/` — the four screens.
-- `supabase/schema.sql` — mirror tables, app-owned tables, and the RLS.
+- the storage is **Airtable**, through the proxy — see below.
 
 ## Two deliberate departures from the reference
 
@@ -43,24 +43,40 @@ Both are recorded in `src/rules/ladder.ts` next to the code they govern.
 
 ## Where the data comes from
 
+**Airtable, through the proxy — not Supabase.** Ayush, 2026-09-20: *"this is an
+extension using so many different things will lead to a lot of friction while
+being deployed"*. A second database means a second auth system, a second
+migration path and a second set of secrets, for data that already lives in the
+base the console writes to on every save. So this app is another client of
+`scripts/proxy.mjs`, exactly as the extension is, and it holds no key.
+
+```
+   browser                    proxy                     stores
+   BD Ladder  ──GET /ladder──▶ reportData()   ──────────▶ Airtable
+              ──POST /focus──▶ writeFocus()              (Companies, Contacts,
+              ─POST /research▶ writeResearch()            Stage Transitions,
+                               readCompanies()            Focus, Research, Team)
+                               ─────────────────────────▶ Kylas (contacts, on demand)
+```
+
 | | source |
 |---|---|
-| company, contacts, owner, stage, source, last call | Kylas, via the sync |
-| the six rung dates | **Airtable's Stage Transitions** — the console has been recording every stage change since it went in. Not re-derived here. |
+| company, owner, stage, source, last call | Airtable `Companies`, mirrored from Kylas by the sync |
+| the six rung dates | `firstArrivals()` in `report.mjs` over `Stage Transitions` — **the same derivation the Progress table counts**, read as dates |
+| a company nobody has worked | `seededRung()` — the stage implies one rung, dated by the last call, marked `seeded` |
 | meeting mode | `Stage Transitions.Mode`, stamped when the rung was crossed |
-| RCA | Airtable's `RCA` table, gates in `docs/rca-reasons.json` |
-| research, focus, roster overrides | this app's own Supabase tables |
+| RCA | Airtable `RCA`, gates in `docs/rca-reasons.json` |
+| research, focus, roster | Airtable `Research`, `Focus`, `Focus History`, `Team` |
 
-A company nobody has worked has no transitions, so its rung is **seeded** from
-the stage it sits on plus its last call. `company_rungs.source` records which,
-and the banner says how many.
+Run `node scripts/repair-base.mjs` to create the three new tables.
 
 ## Not built yet
 
-- The Supabase source (`src/data/source.ts` has the interface and the fixture;
-  the Supabase implementation is next), and the sync edge function.
-- Google auth restricted to `@enout.in`. The RLS predicate is written and is
-  the actual enforcement — Google's `hd` is only a hint.
+- **Identity.** Nothing records who set a focus or saved research yet: the
+  proxy is unauthenticated because it is local. `Set By` and `Updated By` are
+  in the schema and travel through the API, so this is a question of where the
+  name comes from, not of plumbing. Needs a decision before it is deployed
+  anywhere but a laptop.
 - Companies: filters, chips, sort, the freshness bars under each stage tile.
 - Company page: focus control, contacts, the research form.
 - The meeting-mode and RCA charts on the dashboard.

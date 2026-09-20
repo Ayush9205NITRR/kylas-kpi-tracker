@@ -16,15 +16,16 @@ import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
-import { STAGE_ID, STAGE_LABEL } from "./stages.mjs";
+import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant,
          readRcaDue, writeRcaAnswer,
-         readTeam, writeTeam, counter } from "./airtable.mjs";
+         readTeam, writeTeam, counter,
+         readFocus, readResearch, writeFocus, writeResearch } from "./airtable.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
-import { report, withDeltas, mergeCalls } from "./report.mjs";
+import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
@@ -504,9 +505,26 @@ const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
      deletes. mergeCalls prefers the raw rows for any such day, so an
      interrupted rollup reads correctly instead of double. */
   const calls = mergeCalls(raw, rolled);
-  const transitions = transRows.map((r) => ({ at: r.fields["Changed At"], owner: r.fields.Owner,
-                                              to: r.fields["To Stage"],
-                                              company: (r.fields.Contact || [])[0] || "" }));
+  /* A TRANSITION LINKS TO A CONTACT, AND THE LADDER COUNTS COMPANIES.
+     This used to key a transition by its contact record, so booked/done/sql
+     deduped per CONTACT while worked/picked/right/discovery deduped per
+     company — two contacts at one account each reaching an Active Requirement
+     call counted that account twice at "SQL meeting booked" and once at
+     "Discovery". Two units on one ladder, which is the exact fault the
+     METRICS comment above warns about. Resolved through the contact rows,
+     which carry the company link and are read here anyway.
+
+     A contact with no company link keeps its own record id — a company of
+     one. Dropping it would lose the rung entirely, and an account nobody has
+     linked is still an account somebody worked. */
+  const companyOfContact = new Map(
+    contactRows.map((r) => [r.id, (r.fields.Company || [])[0] || r.id]));
+  const transitions = transRows.map((r) => {
+    const contact = (r.fields.Contact || [])[0] || "";
+    return { at: r.fields["Changed At"], owner: r.fields.Owner,
+             to: r.fields["To Stage"], contact,
+             company: companyOfContact.get(contact) || contact };
+  });
   const signals = [];
   for (const r of contactRows) {
     const co = (r.fields.Company || [])[0] || r.id;
@@ -938,6 +956,112 @@ const routes = {
      snapshot only exists for days the cron ran and cannot be cut finer than a
      day, whereas Call Log and Stage Transitions are a complete history from the
      first save. See scripts/report.mjs. */
+  /* ── the BD ladder app ───────────────────────────────────────────────
+     One request, everything four screens need. The app holds the Kylas key
+     nowhere and talks only to this, the same rule the console follows.
+
+     The rung DATES come from report.mjs's firstArrivals — the same derivation
+     the Progress table counts, read as dates instead of as totals. Deriving
+     them a second time in the app would be two answers to one question, which
+     is the bug this repo has paid for twice. */
+  "/ladder": async (url) => {
+    if (!airtable) return { error: "Airtable is not configured", companies: [], configured: false };
+    const fresh = !!url.searchParams.get("fresh");
+    const [{ transitions, signals, team }, companies, focus, research] = await Promise.all([
+      reportData({ fresh }),
+      readCompanies(airtable),
+      readFocus(airtable),
+      readResearch(airtable),
+    ]);
+
+    /* Arrivals are keyed by the company's AIRTABLE RECORD id, because that is
+       what a contact and a transition link to. Everything the app shows is
+       keyed by the KYLAS id, which is also the :id in its routes. One map
+       between them, built here, rather than every caller guessing. */
+    const isCounted = counter(team);
+    const arrivals = arrivalsByCompany({ transitions, signals });
+    const kylasIdOf = new Map(companies.filter((c) => c.recordId).map((c) => [c.recordId, c.id]));
+    const byKylasId = new Map();
+    for (const [recordId, row] of arrivals) {
+      const kid = kylasIdOf.get(recordId) || recordId;
+      byKylasId.set(kid, { ...(byKylasId.get(kid) || {}), ...row });
+    }
+    /* The six rungs the ladder shows, in order, named as report.mjs names
+       them. "worked" is the reference's "Companies reached". */
+    const RUNGS = ["worked", "right", "discovery", "booked", "done", "sql"];
+
+    const rows = companies.map((c) => {
+      const a = byKylasId.get(String(c.id)) || {};
+      const rungs = RUNGS.map((k) => (a[k] ? { at: a[k], source: "airtable" } : null));
+
+      /* NOTHING MEASURED, BUT THE COMPANY IS PLAINLY SOMEWHERE. Most of the
+         account has never been worked through the console, so there is no
+         transition to date. The stage it sits on still implies a rung, and the
+         last call still says when — so the rung is stamped from those and
+         marked `seeded`, and every screen that shows it says so. Ayush,
+         2026-09-19: count only real dates, but a seeded row counts at the rung
+         its stage implies and nowhere else. */
+      if (!rungs.some(Boolean) && c.lastCalledAt)
+        rungs[seededRung(c.stage)] = { at: c.lastCalledAt, source: "seeded" };
+
+      return {
+        id: String(c.id || ""),
+        name: c.name || "",
+        owner: c.owner || "",
+        stage: c.stage || "",
+        source: c.source || "",
+        lastCall: c.lastCalledAt || null,
+        rungs,
+      };
+    }).filter((r) => r.id);
+
+    return {
+      configured: true,
+      companies: rows,
+      /* WHO COUNTS, decided here rather than in the app. The reference read a
+         role string and looked for "Business Development Associate"; this base
+         has an explicit In Funnel checkbox, which is the roster override, and
+         counter() carries the rule that an unknown name counts. Two copies of
+         that rule would drift, and the one in the browser would be the wrong
+         one. So the answer travels with the data. */
+      team: team.map((p) => ({ ...p, counted: isCounted(p.name) })),
+      focus,
+      research,
+      syncedAt: (await readSyncState(airtable).catch(() => null))?.at || null,
+    };
+  },
+
+  /* A BD picking an account, or dropping it with a reason. */
+  "/focus": async (_url, req) => {
+    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    const body = JSON.parse(await readBody(req));
+    const status = String(body.status || "");
+    if (!["focus", "normal", "depri"].includes(status))
+      throw Object.assign(new Error(`unknown focus status ${JSON.stringify(status)}`), { status: 400 });
+    if (!body.companyId)
+      throw Object.assign(new Error("companyId is required"), { status: 400 });
+    const res = await writeFocus(airtable, {
+      companyId: body.companyId, companyName: body.companyName || "",
+      status, reason: body.reason || "", note: body.note || "",
+      ownerName: body.ownerName || "", setBy: body.setBy || "",
+      previous: body.previous || "normal",
+    });
+    log(`focus ${body.companyId} -> ${status}${body.reason ? ` (${body.reason})` : ""}`);
+    return { ok: true, ...res };
+  },
+
+  "/research": async (_url, req) => {
+    if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+    const body = JSON.parse(await readBody(req));
+    if (!body.companyId)
+      throw Object.assign(new Error("companyId is required"), { status: 400 });
+    const { dropped } = await writeResearch(airtable, body.companyId, body.companyName || "",
+                                            body.values || {}, body.updatedBy || "");
+    if (dropped?.length) log(`! this base has no Research.${dropped.join(", Research.")} — run repair-base.mjs`);
+    log(`research saved for ${body.companyId}`);
+    return { ok: true, dropped: dropped || [] };
+  },
+
   "/report": async (url) => {
     if (!airtable) return { error: "Airtable is not configured", periods: [] };
     const period = ["day", "week", "month", "quarter", "year"].includes(url.searchParams.get("period"))

@@ -3,7 +3,8 @@
  *
  *   node scripts/test-report.mjs
  */
-import { report, withDeltas, weekKey, monthKey, periodsBetween, periodLabel, mergeCalls } from "./report.mjs";
+import { report, withDeltas, weekKey, monthKey, periodsBetween, periodLabel, mergeCalls,
+         firstArrivals, arrivalsByCompany, seededRung } from "./report.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -180,6 +181,56 @@ console.log("\na day held by both sources is counted once, from the raw rows");
   eq("nothing raw is ever dropped", mergeCalls(raw, []).length, 2);
   eq("no raw at all means the rollup stands", mergeCalls([], rolled).length, 3);
 }
+
+console.log("\nfirst arrivals, as dates rather than counts");
+{
+  /* The same fixtures the counting tests use, read the other way. The ladder
+     app needs WHEN a company arrived, not how many arrived that week, and both
+     answers have to come from one derivation. */
+  const t = [
+    { at: "2026-09-15T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_BOOKED" },
+    { at: "2026-09-16T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_DONE_\u2013_AWAITING_CLIENT_INPUTS" },
+    /* back to booked — already arrived there, so it must not re-arrive */
+    { at: "2026-09-17T10:05:00Z", owner: "Ayush", company: "C1", to: "ACTIVE_REQUIREMENT_CALL_BOOKED" },
+    { at: "2026-09-22T09:00:00Z", owner: "Charu", company: "C2", to: "SQL_SALES_QUALIFIED_LEAD" },
+  ];
+  const sig = [
+    { at: "2026-09-14T10:02:00Z", owner: "Ayush", company: "C1", metric: "right" },
+    { at: "2026-09-16T10:02:00Z", owner: "Ayush", company: "C1", metric: "right" },
+  ];
+  const by = arrivalsByCompany({ transitions: t, signals: sig });
+
+  eq("booked is dated from the FIRST arrival", by.get("C1").booked, "2026-09-15T10:05:00Z");
+  eq("re-entering booked does not move the date", firstArrivals({ transitions: t }).filter(
+     (a) => a.metric === "booked" && a.company === "C1").length, 1);
+  eq("done is its own date", by.get("C1").done, "2026-09-16T10:05:00Z");
+  eq("a signal arrives once, on the first", by.get("C1").right, "2026-09-14T10:02:00Z");
+  /* Crossing SQL crosses everything below it in one move, because the floors
+     are floors — and all three carry the same date. */
+  eq("one move past three floors dates all three",
+     [by.get("C2").booked, by.get("C2").done, by.get("C2").sql],
+     ["2026-09-22T09:00:00Z", "2026-09-22T09:00:00Z", "2026-09-22T09:00:00Z"]);
+  ok("the list comes back in time order", firstArrivals({ transitions: t, signals: sig })
+     .every((a, i, all) => i === 0 || all[i - 1].at <= a.at));
+  eq("nothing in, nothing out", firstArrivals({}).length, 0);
+}
+
+console.log("\na rung for a company nobody has worked");
+/* The stage is all there is, so it decides the one rung the company shows at —
+   and it must not imply the rungs below it. */
+eq("SQL",                 seededRung("SQL_SALES_QUALIFIED_LEAD"), 5);
+eq("meeting done",        seededRung("ACTIVE_REQUIREMENT_CALL_DONE_\u2013_AWAITING_CLIENT_INPUTS"), 4);
+eq("meeting booked",      seededRung("ACTIVE_REQUIREMENT_CALL_BOOKED"), 3);
+eq("a no-show is still booked", seededRung("ACTIVE_REQUIREMENT_CALL_NO_SHOW"), 3);
+eq("discovery done",      seededRung("DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS"), 2);
+eq("discovery only booked is not discovery done", seededRung("DISCOVERY_CALL_BOOKED"), 1);
+eq("MQL is the right POC",seededRung("MQL_MARKETING_QUALIFIED_LEAD"), 1);
+eq("CNC is reached and no more", seededRung("CNC_COULD_NOT_CONNECT"), 0);
+eq("the first stage is reached", seededRung("YET_TO_BE_MINED"), 0);
+eq("a stage this build has never heard of is reached, not promoted",
+   seededRung("SOMETHING_NEW"), 0);
+/* Closing Loops can follow either meeting, so its rung cannot claim one. */
+eq("closing loops does not claim a meeting", seededRung("CLOSING_LOOPS_LOW_VALUE"), 1);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

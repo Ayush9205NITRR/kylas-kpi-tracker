@@ -772,6 +772,10 @@ export async function readCompanies(at) {
     const id = String(f["Kylas Company ID"] || "");
     return {
       id,
+      /* The Airtable record id as well as the Kylas one. Contacts and
+         transitions link to a company by RECORD, so anything joining those
+         back to a company needs both halves of the identity. */
+      recordId: r.id,
       name: f.Name || (id ? `Company ${id}` : ""),
       stage: f["Kylas Stage"] || "",
       lastCalledAt: f["Last Called At"] || null,
@@ -910,6 +914,113 @@ export async function writeTeam(at, people) {
   }));
   if (!rows.length) return [];
   return at.upsertMany("Team", "Name", rows);
+}
+
+/* ── the ladder app's own two tables ──────────────────────────────────
+   Focus and Research are the only things in this base that Kylas knows nothing
+   about: one is what a BD decided to chase, the other is what they found out
+   before calling. Both are keyed on the Kylas company id, so they join to
+   everything else without a lookup. */
+
+export async function readFocus(at) {
+  const rows = await listTolerant(at, "Focus",
+    { fields: ["Kylas Company ID", "Company Name", "Status", "Reason", "Note",
+               "Owner", "Set By", "Set At"], pageSize: 100, maxPages: 60 }).catch(() => []);
+  const out = {};
+  for (const r of rows) {
+    const id = String(r.fields?.["Kylas Company ID"] || "").trim();
+    if (!id || !r.fields?.Status) continue;
+    out[id] = {
+      companyId: id,
+      companyName: r.fields["Company Name"] || "",
+      status: r.fields.Status,
+      reason: r.fields.Reason || "",
+      note: r.fields.Note || "",
+      ownerName: r.fields.Owner || "",
+      setByEmail: r.fields["Set By"] || "",
+      setAt: r.fields["Set At"] || "",
+    };
+  }
+  return out;
+}
+
+/* The fifteen research fields, as the column names this base uses. The ladder
+   app speaks the reference's keys, so the mapping lives here and only here —
+   two spellings of "decides events" in two files is how a form silently stops
+   saving one of its boxes. */
+export const RESEARCH_COLUMNS = {
+  industry: "Industry", size: "Employees", hq: "HQ City", offices: "Other Offices",
+  funding: "Funding", revenue: "Revenue Band", events: "Known Events",
+  season: "Event Season", decides: "Decides Events", vendor: "Current Agency",
+  trigger: "Recent Trigger", links: "Links", v: "V Score", w: "W Score",
+  notes: "Research Notes",
+};
+
+export async function readResearch(at) {
+  const rows = await listTolerant(at, "Research",
+    { fields: ["Kylas Company ID", ...Object.values(RESEARCH_COLUMNS), "Updated By", "Updated At"],
+      pageSize: 100, maxPages: 60 }).catch(() => []);
+  const out = {};
+  for (const r of rows) {
+    const id = String(r.fields?.["Kylas Company ID"] || "").trim();
+    if (!id) continue;
+    const row = {};
+    for (const [key, col] of Object.entries(RESEARCH_COLUMNS)) row[key] = r.fields?.[col] || "";
+    row.updatedAt = r.fields?.["Updated At"] || "";
+    row.updatedByEmail = r.fields?.["Updated By"] || "";
+    out[id] = row;
+  }
+  return out;
+}
+
+export async function writeResearch(at, companyId, companyName, values, who = "") {
+  const fields = { "Kylas Company ID": String(companyId), "Company Name": companyName || "",
+                   "Updated By": who, "Updated At": new Date().toISOString() };
+  for (const [key, col] of Object.entries(RESEARCH_COLUMNS))
+    fields[col] = String(values?.[key] ?? "").trim();
+  const { rec, dropped } = await upsertTolerant(at, "Research", "Kylas Company ID", fields);
+  return { rec, dropped };
+}
+
+/* Setting focus is TWO writes and the second one is the important one. The
+   Focus row is the current state, which an overwrite is supposed to replace;
+   Focus History is append-only, and it is the only thing that can answer "who
+   dropped this account, and what did they say at the time" once somebody has
+   picked it back up. Written history-first: a crash between the two leaves a
+   recorded decision that the current state has not caught up with, which is
+   recoverable. The other order loses the decision. */
+export async function writeFocus(at, { companyId, companyName, status, reason = "", note = "",
+                                       ownerName = "", setBy = "", previous = "normal" }) {
+  const nowIso = new Date().toISOString();
+  const id = String(companyId);
+
+  await upsertTolerant(at, "Focus History", "Key", {
+    Key: `${id}-${nowIso}`,
+    "Kylas Company ID": id,
+    "From Status": previous || "normal",
+    "To Status": status,
+    Reason: reason, Note: note, Owner: ownerName, "Set By": setBy,
+    "Changed At": nowIso,
+  }).catch(() => ({}));            /* history is best-effort; the state is not */
+
+  if (status === "normal") {
+    /* Taken off the list entirely. The row goes; the history keeps it. */
+    const hit = await at.find("Focus", `{Kylas Company ID} = '${esc(id)}'`).catch(() => null);
+    if (hit) await at.remove("Focus", [hit.id]);
+    return { cleared: true, at: nowIso };
+  }
+
+  const { dropped } = await upsertTolerant(at, "Focus", "Kylas Company ID", {
+    "Kylas Company ID": id,
+    "Company Name": companyName || "",
+    Status: status,
+    Reason: status === "depri" ? reason : "",
+    Note: note,
+    Owner: ownerName,
+    "Set By": setBy,
+    "Set At": nowIso,
+  });
+  return { cleared: false, at: nowIso, dropped };
 }
 
 /* What the last sync managed, so the console can say how complete this mirror

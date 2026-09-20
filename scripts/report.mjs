@@ -161,6 +161,92 @@ const blank = () => Object.fromEntries(METRICS.map((m) => [m.key, 0]));
         moves, they are data being filled in, so they arrive separately.
 
    Returns { periods: [{ key, label, ...counts }], totals, byOwner } */
+
+/* ── WHEN EACH COMPANY FIRST REACHED EACH RUNG ────────────────────────
+   The one derivation. report() counts these into periods; the ladder reads
+   them as dates, per company, so a company page can say when and a cohort can
+   ask what became of the companies that arrived in a given week.
+
+   A company that moves booked -> done -> booked again arrives at booked ONCE.
+   Later moves are movement within the same milestone, and counting them again
+   is how correcting a stage inflates a month.
+
+   Right POC and discovery are not stages at all — they are data being filled
+   in on a contact — so they arrive as their own signals and follow the same
+   once-only rule.
+
+   Returns a flat, time-ordered list: [{ metric, company, owner, at }] */
+export function firstArrivals({ transitions = [], signals = [] } = {}) {
+  const out = [];
+  const seen = new Set();
+
+  const ordered = [...transitions].filter((t) => t.at)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  for (const t of ordered) {
+    const rung = STAGE_RUNG[t.to] || 0;
+    const who = t.company || t.contact || "";
+    for (const f of FLOORS) {
+      if (rung < f.floor) continue;
+      const id = `${f.key}:${who}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ metric: f.key, company: who, owner: t.owner, at: t.at });
+    }
+  }
+
+  for (const sig of [...signals].filter((s) => s.at)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
+    const who = sig.company || sig.contact || "";
+    const id = `${sig.metric}:${who}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ metric: sig.metric, company: who, owner: sig.owner, at: sig.at });
+  }
+
+  return out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+/* ── A RUNG FOR A COMPANY NOBODY HAS WORKED ───────────────────────────
+   Most of the account has never been through the console, so it has no
+   transitions and no signals and therefore no measured rung. It is still
+   plainly somewhere: the stage it sits on says roughly how far it got. This
+   maps a stage to the highest rung it implies, so such a company can be shown
+   at one rung and NOT at the five below it.
+
+   The two lower floors are stage codes rather than milestones on purpose.
+   Right POC and successful discovery are defined in this codebase by DATA on a
+   contact — budget/timeline/pax filled, a complete event row — not by a stage,
+   and a seeded company has none of that. These are the closest stage that
+   implies each, used only when there is nothing better, and they are not the
+   definition of either rung. Anything derived from them is marked `seeded` and
+   the screen says so. */
+const SEED_RIGHT = "MQL_MARKETING_QUALIFIED_LEAD";
+const SEED_DISCOVERY = "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS";
+
+export function seededRung(stage) {
+  const rank = STAGE_RUNG[stage] || 0;
+  if (!rank) return 0;                       /* unknown stage: it was reached, no more */
+  if (rank >= MILESTONE.sql.floor) return 5;
+  if (rank >= MILESTONE.sqlMeetingDone.floor) return 4;
+  if (rank >= MILESTONE.sqlMeetingBooked.floor) return 3;
+  if (rank >= STAGE_RUNG[SEED_DISCOVERY]) return 2;
+  if (rank >= STAGE_RUNG[SEED_RIGHT]) return 1;
+  return 0;
+}
+
+/* The same answer keyed by company, which is the shape a screen wants:
+     { "1776620": { right: "2026-08-02T...", discovery: "2026-09-09T..." } } */
+export function arrivalsByCompany(input) {
+  const by = new Map();
+  for (const a of firstArrivals(input)) {
+    if (!a.company) continue;
+    const row = by.get(a.company) || {};
+    if (!row[a.metric]) row[a.metric] = a.at;
+    by.set(a.company, row);
+  }
+  return by;
+}
+
 export function report(period, { calls = [], transitions = [], signals = [] } = {},
                       { from = "", to = "" } = {}) {
   const key = KEY_OF[period] || dayKey;
@@ -209,30 +295,12 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
     if (c.outcome && c.outcome !== "No answer") bump(key(c.at), c.owner, "connects", n);
   }
 
-  /* FIRST arrival only, per company per milestone. A company that moves from
-     booked to done to booked again must count once for booked, not twice —
-     otherwise a stage being corrected inflates the month. */
-  const seen = new Set();
-  const ordered = [...transitions].filter((t) => t.at).sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  for (const t of ordered) {
-    const rung = STAGE_RUNG[t.to] || 0;
-    for (const f of FLOORS) {
-      if (rung < f.floor) continue;
-      const id = `${f.key}:${t.company || t.contact || ""}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      if (inWindow(t.at)) bump(key(t.at), t.owner, f.key);
-    }
-  }
-
-  /* Right POC and discovery are data, not stages, so they come as their own
-     first-time events. Same once-only rule. */
-  const seenSig = new Set();
-  for (const sig of [...signals].filter((s) => s.at).sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
-    const id = `${sig.metric}:${sig.company || sig.contact || ""}`;
-    if (seenSig.has(id)) continue;
-    seenSig.add(id);
-    if (inWindow(sig.at)) bump(key(sig.at), sig.owner, sig.metric);
+  /* FIRST arrival only, per company per milestone — computed once, by
+     firstArrivals() below, and counted here. The ladder app needs the same
+     answer as DATES rather than as counts, and deriving it twice is the bug
+     this codebase has paid for more than once. */
+  for (const a of firstArrivals({ transitions, signals })) {
+    if (inWindow(a.at)) bump(key(a.at), a.owner, a.metric);
   }
 
   const periods = keys.map((k) => rows.get(k));
