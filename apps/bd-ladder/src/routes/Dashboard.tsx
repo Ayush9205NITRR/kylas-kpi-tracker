@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RUNGS, tally, stepConversion, today, type Company } from "../rules/ladder";
-import { label, lead, range, type Grain, type YearMode } from "../rules/periods";
+import { label, range, type Grain, type YearMode } from "../rules/periods";
 import { isCounted } from "../rules/grouping";
 import type { Snapshot } from "../data/source";
 
@@ -68,9 +68,6 @@ export default function Dashboard({ snap }: { snap: Snapshot }) {
           </select>
         </label>
       </div>
-
-      <Story bds={bds} per={per} team={team} counted={counted}
-             grain={grain} off={off} today={T} fy={fy} />
 
       <div className="card scroll">
         <table className="ladder">
@@ -182,50 +179,5 @@ export default function Dashboard({ snap }: { snap: Snapshot }) {
         )}
       </div>
     </section>
-  );
-}
-
-function Story({ bds, per, team, counted, grain, off, today: T, fy }: {
-  bds: string[]; per: Map<string, number[]>; team: number[]; counted: Company[];
-  grain: Grain; off: number; today: number; fy: YearMode;
-}) {
-  const { s, e } = range(grain, off, T, fy);
-  if (!bds.length)
-    return (
-      <p className="story">
-        Nobody is set up as an active Business Development Associate yet.
-        <span className="sub">Open <b>Team</b> and mark who's a BDA — the funnel counts only them.</span>
-      </p>
-    );
-
-  if (!team[0] && !team[1] && !team[5])
-    return (
-      <p className="story">
-        {lead(grain, off, T, fy)} nothing has moved up the ladder yet.
-        <span className="sub">
-          Counts appear as soon as a BD logs a call dated inside {label(grain, off, T, fy)}.
-        </span>
-      </p>
-    );
-
-  const right = stepConversion(counted, s, e, 1);
-  const byDisc = [...bds].sort((a, b) => per.get(b)![2] - per.get(a)![2]);
-  const bySql = [...bds].sort((a, b) => per.get(b)![5] - per.get(a)![5]);
-  const bits: string[] = [];
-  if (per.get(byDisc[0])![2] > 0) bits.push(`${firstName(byDisc[0])} led on discovery calls with ${per.get(byDisc[0])![2]}`);
-  if (per.get(bySql[0])![5] > 0 && bySql[0] !== byDisc[0])
-    bits.push(`${firstName(bySql[0])} closed the most SQLs (${per.get(bySql[0])![5]})`);
-  if (team[3] && team[4] < team[3] * 0.7)
-    bits.push(`${team[3] - team[4]} booked SQL meetings haven't happened yet — worth confirming`);
-
-  return (
-    <p className="story">
-      {lead(grain, off, T, fy)} the team reached <b>{team[0]}</b>{" "}
-      {team[0] === 1 ? "company" : "companies"}.{" "}
-      {right.pct != null && <><b>{right.moved}</b> of them got through to the right POC ({right.pct}%),{" "}</>}
-      <b>{team[2]}</b> had a successful discovery call, and <b>{team[5]}</b>{" "}
-      {team[5] === 1 ? "became an SQL" : "became SQLs"}.
-      {bits.length > 0 && <span className="sub">{bits.join(" · ")}.</span>}
-    </p>
   );
 }
