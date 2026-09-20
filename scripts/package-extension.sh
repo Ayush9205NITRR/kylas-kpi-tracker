@@ -58,6 +58,36 @@ if grep -rqE "eval\(|new Function|importScripts" --include=*.js "$SRC"; then
   exit 1
 fi
 
+# ── the things the STORE rejects for, checked before upload ────────────
+# A rejection costs days of review queue, so each of these is worth a second
+# here. They are the ones that have an objective answer; the judgement calls
+# (screenshots, the single-purpose statement) are in docs/webstore.md.
+FAIL=0
+note() { echo "! $1" >&2; FAIL=1; }
+
+# Icons. Without these Chrome draws the generic puzzle piece and the listing
+# has no 128 to show. This was missing until 2026-09-20.
+for S in 16 32 48 128; do
+  [ -f "$SRC/icons/icon$S.png" ] || note "extension/icons/icon$S.png is missing — run: node scripts/gen-icons.mjs"
+done
+node -e '
+  const m = require("'"$SRC"'/manifest.json");
+  if (!m.icons || !m.icons["128"]) { console.error("! manifest has no icons.128"); process.exit(1); }
+' || FAIL=1
+
+# A description over 132 characters is truncated in the store listing.
+DESC_LEN=$(node -p "require('$SRC/manifest.json').description.length")
+[ "$DESC_LEN" -le 132 ] || note "description is $DESC_LEN chars; the store truncates past 132"
+
+# Every host permission has to be justified on the form. Listing them here
+# means writing those justifications is a matter of reading, not remembering.
+echo "  host permissions to justify on the form:"
+node -p "require('$SRC/manifest.json').host_permissions.map(h => '    ' + h).join('\n')"
+echo "  permissions to justify:"
+node -p "(require('$SRC/manifest.json').permissions||[]).map(h => '    ' + h).join('\n')"
+
+[ "$FAIL" = "0" ] || { echo "" >&2; echo "Fix the above, then run this again." >&2; exit 1; }
+
 mkdir -p "$REPO/dist"
 rm -f "$OUT"
 
@@ -74,4 +104,5 @@ unzip -Z1 "$OUT" | sed 's/^/    /' | head -20
 COUNT=$(unzip -Z1 "$OUT" | wc -l | tr -d ' ')
 [ "$COUNT" -gt 20 ] && echo "    ... $((COUNT - 20)) more"
 echo
-echo "Upload it at chrome.google.com/webstore/devconsole -> Package -> Upload new package."
+echo "Next: docs/webstore.md — listing, screenshots and the permission justifications."
+echo "Upload at chrome.google.com/webstore/devconsole -> Package -> Upload new package."
