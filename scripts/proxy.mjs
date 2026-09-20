@@ -466,6 +466,11 @@ function memo(name, { ttl, stale = 30 * 60 * 1000 }, fn) {
    logged — does not wait on a timer. The TTL is only for rows another
    associate's proxy wrote. */
 const REPORT_TTL = Number(process.env.REPORT_TTL_MS || 60 * 1000);
+/* Same TTL as the report: both answer "what does the base say right now", and
+   two different answers to that on one screen is worse than either being a
+   minute old. Dropped by the same save hook, below. */
+const rcaDue = memo("rca", { ttl: REPORT_TTL }, () => readRcaDue(airtable, { log }));
+
 const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
   /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
      fields, so a base one repair-base behind does not have them — and Airtable
@@ -545,7 +550,15 @@ const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
     if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
     if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
   }
-  return { calls, transitions, signals, team };
+  /* THE OWNER SET, FROM ROWS ALREADY IN HAND. /team wanted "every name that
+     could be on the roster" and re-read the whole Contacts table to get it —
+     a second full crawl of rows this function has just finished walking. On
+     the mock that cost /team 3969ms for a two-row Team table, all of it spent
+     queued behind the reads below at the Airtable gap. */
+  const contactOwners = [...new Set(contactRows
+    .map((r) => String(r.fields?.Owner || "").trim()).filter(Boolean))];
+
+  return { calls, transitions, signals, team, contactOwners };
 });
 
 /* Picklists, read once. The console cannot know what an account's custom
@@ -1311,6 +1324,11 @@ const routes = {
            a cache patched by hand is a second implementation of the read that
            can disagree with it. */
         reportData.refresh();
+        /* And the RCA list, which is now cached too. A save can move a stage
+           past the gate that was asking about it, and a dashboard still
+           listing a question the associate has just answered by acting is the
+           same lie the report cache exists to prevent. */
+        rcaDue.refresh();
       } catch (e) {
         result.airtableError = e.message;
         log(`! airtable for ${result.kid}: ${e.message}`);
@@ -1344,10 +1362,17 @@ const routes = {
      to fall back to — it holds no rung history, which is the whole reason the
      mirror exists. An unconfigured base answers "nothing due", which is honest:
      without the data, nothing is known to be overdue. */
+  /* MEMOIZED OVER THE WHOLE BASE, filtered per owner here. readRcaDue's
+     `owner` is a post-read filter over rows it has already fetched — it never
+     narrows the Airtable query — so asking it per owner re-read the entire
+     Contacts and RCA tables for a subset of rows the previous call already
+     had. The console asks twice on every dashboard open (once unscoped for the
+     count, once for the current owner), so that was two full crawls a page. */
   "/rca": async (url) => {
     if (!airtable) return { due: [], gates: RCA_GATES, configured: false };
     const owner = url.searchParams.get("owner") || "";
-    const due = await readRcaDue(airtable, { owner, log });
+    const all = await rcaDue({ fresh: !!url.searchParams.get("fresh") });
+    const due = owner ? all.filter((r) => String(r.owner || "") === owner) : all;
     return { due, gates: RCA_GATES, configured: true, owner };
   },
 
@@ -1371,6 +1396,10 @@ const routes = {
       owner: body.owner || "", by: body.by || body.owner || "",
     });
     log(`rca: ${body.kid} ${gate.key} -> ${body.reason}`);
+    /* The question has been answered, so it is no longer due — and the list
+       that says so is cached. Without this the associate answers, the panel
+       refreshes, and the same question is still sitting there. */
+    rcaDue.refresh();
     return { ok: true, id: rec?.id || null };
   },
 
@@ -1386,14 +1415,18 @@ const routes = {
        this fixture is one of two people, and on a real base is anyone who has
        been called for rather than allotted to. A roster that cannot offer you a
        name is a roster that cannot exclude them either. */
-    const [team, companies, contacts] = await Promise.all([
-      readTeam(airtable),
+    /* Through reportData, which holds the roster AND every contact owner and
+       is memoized — so opening the Team panel after the dashboard costs
+       nothing, and opening it first warms the dashboard. It used to read Team,
+       Companies and the whole Contacts table itself: three crawls for a
+       two-column answer, every one of them a duplicate of a read the report
+       had just done or was about to. */
+    const [{ team, contactOwners }, companies] = await Promise.all([
+      reportData(),
       readCompanies(airtable).catch(() => []),
-      listTolerant(airtable, "Contacts", { fields: ["Owner"], pageSize: 100, maxPages: 200 })
-        .catch(() => []),
     ]);
     const seen = new Set(companies.map((c) => c.owner).filter(Boolean));
-    for (const r of contacts) if (r.fields?.Owner) seen.add(String(r.fields.Owner).trim());
+    for (const o of contactOwners) seen.add(o);
     for (const p of team) seen.add(p.name);
     return { team, owners: [...seen].sort(), configured: true };
   },
@@ -1474,4 +1507,33 @@ server.on("error", (e) => {
 server.listen(PORT, "127.0.0.1", () => {
   log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION}`);
   log(`routes: ${Object.keys(routes).join("  ")}`);
+
+  /* WARM THE CACHES NOW, not when somebody is waiting.
+     Every read here is memoized and every one was previously paid for by
+     whoever opened the console first — serialised through the Airtable queue,
+     which is 220ms a page whether or not a person is watching. So the first
+     dashboard of the day took seconds to show anything, and the proxy spent
+     the minutes before it doing nothing at all.
+
+     Failures are logged and swallowed: a base that cannot be read is a problem
+     for the request that needs it, where the message can reach the person, and
+     never a reason for the proxy not to start. Nothing here blocks listen() —
+     the server is already accepting connections, and a request that arrives
+     mid-warm joins the flight already in progress rather than starting a
+     second one. */
+  if (!airtable) return;
+  const warm = (what, p) => p.then(
+    () => log(`  warmed ${what}`),
+    (e) => log(`  ! could not warm ${what} — ${e.message.slice(0, 90)}`));
+  Promise.all([
+    warm("the report", reportData()),
+    warm("companies", readCompanies(airtable)),
+    warm("the RCA list", rcaDue()),
+    /* WHO THE KEY BELONGS TO. Every route that scopes to an owner resolves
+       the caller through Kylas' /users/me first, and that call is cached for
+       ten minutes but cold at boot — so it was paid by the first /report and
+       again by the first /team, both while somebody watched. It is one Kylas
+       round trip; doing it now costs nothing and takes it off the path. */
+    warm("who the key belongs to", whoami()),
+  ]).then(() => log("caches warm — the first dashboard will not wait for these"));
 });

@@ -880,18 +880,23 @@ function renderBasic(){
      are already over there. Sitting next to the call notes it was also on
      screen for every no-answer call, which is the 65% that never gets near it. */
 
-  /* ORDER: WHAT YOU TOUCH, THEN WHAT YOU READ.
-     Identity sat first and pushed the stage and the call-back date below the
-     fold, so the two fields that are filled on EVERY call — including the 65%
-     where nobody picks up — could not be reached without scrolling. And it is
-     all a second copy: the header band above already carries the name, the
-     number, the email, the company and the role. Scrolling past a duplicate to
-     reach the only thing you came for is the cost paid 200 times a day.
+  /* ORDER: WHO, THEN WHERE. Ayush, 2026-09-20: "Who you are calling should
+     sit on top and then come where they stands."
 
-     The identity card keeps every field, because that is where they are
-     EDITED. It just stops being the thing in the way. */
-  W.appendChild(group("Where this stands",[sRow,rRow]));
+     THIS REVERSES A DELIBERATE CHOICE, and the reason it was made still
+     stands, so it is written down rather than deleted. Identity used to be
+     first and was moved BELOW because it pushed the stage and the call-back
+     date under the fold — and those two are filled on every call, including
+     the 65% where nobody picks up — while the identity card is a second copy
+     of what the header band above already shows.
+
+     What changed is who is reading it. Confirming you have the right person in
+     front of you comes before recording what happened to them, and getting
+     that wrong costs more than a scroll. The risk the old order avoided is
+     real and now applies again: if the stage and the date start falling below
+     the fold on a short window, that is this line's fault, not a new bug. */
   W.appendChild(whoCard);
+  W.appendChild(group("Where this stands",[sRow,rRow]));
 }
 
 function renderRight(){
