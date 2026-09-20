@@ -6,6 +6,14 @@
 
   const post = (type, payload) => framed && parent.postMessage({ source: "enout", type, ...payload }, "*");
 
+  /* I AM HERE. The host page opens this in an iframe and has no other way to
+     know it arrived: a chrome-extension URL belonging to a reloaded extension
+     still fires `load`, because Chrome serves an error page into the frame. So
+     the host cannot ask "did it load" — it has to be told, and told by code
+     that only runs when the console is genuinely running. Sent immediately,
+     before any fetch, so a dead proxy never looks like a dead console. */
+  post("ready");
+
   /* Kept so the clipboard fallback knows which number failed. */
   let lastDialled = "";
   window.requestDial = (number) => {

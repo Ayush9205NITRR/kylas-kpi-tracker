@@ -51,6 +51,25 @@
       :host(.open) .fab{display:none}
       :host(.dock) .scrim{opacity:0;pointer-events:none}
       iframe{width:100%;height:100%;border:0;display:block;background:#F7F9FC}
+      /* Shown only when this page is holding a console the browser has thrown
+         away. Covers the dead iframe rather than sitting beside it, because
+         the thing it is explaining is a blank rectangle. */
+      .stale{
+        position:absolute;inset:0;display:flex;flex-direction:column;
+        align-items:center;justify-content:center;gap:10px;text-align:center;
+        padding:24px;background:#F7F9FC;color:#1F2A37;
+        font:400 14px/1.5 "IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+      }
+      .stale b{font-size:15px;font-weight:600}
+      .stale span{color:#5A6472;max-width:34ch}
+      .stale button{
+        margin-top:4px;background:#2B6CF6;color:#fff;border:0;border-radius:8px;
+        padding:9px 18px;font:600 13px/1 inherit;cursor:pointer;
+      }
+      @media (prefers-color-scheme:dark){
+        .stale{background:#0F141C;color:#E6E9EF}
+        .stale span{color:#98A2B3}
+      }
       @media (prefers-color-scheme:dark){
         .wrap,iframe{background:#0F141C}
       }
@@ -67,7 +86,7 @@
   const wrap = root.querySelector(".wrap");
   const frame = root.querySelector("iframe");
 
-  let open = false, loaded = false;
+  let open = false, loaded = false, ready = false, deadline = null;
 
   /* Real Kylas record urls look like
        app.kylas.io/sales/companies/details/1776620
@@ -119,8 +138,27 @@
     }
     if (!open) return;
 
+    /* THE EXTENSION MAY HAVE BEEN RELOADED UNDER THIS PAGE.
+       Updating the extension — or hitting Reload on chrome://extensions after a
+       git pull — destroys the context this script was injected from, but leaves
+       the script itself running. SRC is a chrome-extension:// URL captured at
+       injection, and it no longer resolves, so the iframe navigates to nothing
+       and the panel opens as a blank white rectangle with no error anywhere:
+       not in the page console, not in the extension's. It looks exactly like
+       the console failing to render, and it cost Ayush an evening.
+
+       chrome.runtime.id is undefined once the context is gone, and on some
+       builds touching it throws, so both are treated the same. */
+    if (!alive()) { showStale(); return; }
+
     if (!loaded) {
       frame.src = SRC;
+      /* NOT `load` — that fires anyway. Chrome serves an error document into
+         the frame when the URL belongs to an extension that has been reloaded,
+         and an error document loads perfectly well. The only proof the console
+         is really there is the console saying so, so this waits for its
+         "ready" and treats silence as death. */
+      deadline = setTimeout(() => { if (!ready) showStale(); }, 5000);
       frame.addEventListener("load", () => {
         loaded = true;
         handoff();
@@ -128,6 +166,24 @@
     } else {
       handoff();
     }
+  }
+
+  function alive() {
+    try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
+  }
+
+  /* Replaces the blank panel with the one instruction that fixes it. Plain DOM
+     rather than innerHTML on the shadow root, so the styles and the iframe
+     above are left alone and a second call cannot stack two notices. */
+  function showStale() {
+    if (root.querySelector(".stale")) return;
+    const d = document.createElement("div");
+    d.className = "stale";
+    d.innerHTML = `<b>The call console was updated.</b>
+      <span>This tab is still running the old one. Reload the page to reconnect.</span>
+      <button type="button">Reload</button>`;
+    d.querySelector("button").addEventListener("click", () => location.reload());
+    wrap.appendChild(d);
   }
 
   function handoff() {
@@ -154,6 +210,7 @@
     if (e.source !== frame.contentWindow) return;
     const m = e.data;
     if (!m || m.source !== "enout") return;
+    if (m.type === "ready") { ready = true; clearTimeout(deadline); }
     if (m.type === "close") setOpen(false);
     if (m.type === "mode") setOpen(true, m.mode);
     if (m.type === "dial") dial(String(m.number || ""));
