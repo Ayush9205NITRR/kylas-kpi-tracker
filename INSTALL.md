@@ -87,7 +87,15 @@ It needs these scopes, on the base `appEwJu0bleHh9b8t`:
 - `schema.bases:write` — only needed for `repair-base.mjs`
 
 Put them in the file the repo already ignores, so they stay out of your shell
-history and out of git:
+history and out of git. There is a template with every variable and its
+default:
+
+```bash
+cp .env.local.example .env.local
+$EDITOR .env.local              # paste the two keys at the top
+```
+
+Or write the three required lines directly:
 
 ```bash
 cat > .env.local <<'EOF'
@@ -96,6 +104,19 @@ export AIRTABLE_PAT=paste_your_airtable_pat
 export AIRTABLE_BASE=appEwJu0bleHh9b8t
 EOF
 ```
+
+**`.env.local` is gitignored, so a fresh clone will not have one.** That is the
+point of it — the file has never left the machine that made it. If you have
+cloned again, look for the old one before issuing new keys:
+
+```bash
+find ~ -name .env.local -not -path '*/node_modules/*' 2>/dev/null
+```
+
+And `source` it in **every new terminal**: it sets shell variables, not machine
+ones, so a second tab knows nothing about the first. `source: no such file or
+directory: .env.local` means you are either in the wrong directory or the file
+was never made; `cd` to the repo root and check with `ls -a`.
 
 > Never paste a key into a chat, a commit, or a screenshot. If one does get
 > out, revoke it at the link above and issue a new one — rotating takes a
