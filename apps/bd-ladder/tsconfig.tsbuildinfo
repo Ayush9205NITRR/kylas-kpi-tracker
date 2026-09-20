@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/data/source.ts","./src/routes/Companies.tsx","./src/routes/CompanyPage.tsx","./src/routes/Dashboard.tsx","./src/routes/FocusLists.tsx","./src/rules/grouping.ts","./src/rules/ladder.ts","./src/rules/periods.ts","./src/rules/rules.test.ts"],"version":"5.9.3"}

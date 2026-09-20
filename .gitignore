@@ -7,3 +7,5 @@ logs/
 .save-journal.json
 .save-journal.json.tmp
 dist/
+apps/bd-ladder/node_modules
+apps/bd-ladder/dist
