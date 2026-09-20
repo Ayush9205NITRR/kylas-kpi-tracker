@@ -1015,3 +1015,25 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .ares dt{font-size:var(--t-meta);color:var(--text3);line-height:1.3}
 .ares dd{margin:1px 0 0;font-size:var(--t-label);color:var(--text);
   line-height:1.45;overflow-wrap:anywhere}
+
+/* ── accounts / focus lists, on the one real Kylas page ───────────────── */
+/* Kylas has no /sales/companies/list/focus, so the focus lists cannot be a URL
+   of their own — they are a tab on the list page that does exist. Tabs rather
+   than the .vseg pill because this switches the whole screen, and a pill reads
+   as a filter on what is already shown. */
+.vtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.vtabs button{border:0;background:none;padding:10px 14px;font:inherit;
+  font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+  display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.vtabs button:hover{color:var(--text)}
+.vtabs button[aria-pressed="true"]{color:var(--blue);border-bottom-color:var(--blue);
+  font-weight:var(--w-strong)}
+/* How many accounts are on somebody's focus list, on the tab. It is the one
+   number that decides whether the tab is worth opening. */
+.vtabs button i{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text3);background:var(--panel2);border-radius:10px;padding:1px 7px;
+  font-variant-numeric:tabular-nums}
+.vtabs button[aria-pressed="true"] i{background:var(--blueSoft);color:var(--blue)}
+/* The body owns its own top margin — the tab strip already has one. */
+.vbody>.vhead:first-child{margin-top:0}

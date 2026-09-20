@@ -37,10 +37,7 @@
       return;
     }
 
-    /* "focuslist", not "focus" — the host already sends a bare "focus" from
-       handoff() meaning "put the keyboard in the iframe", and a view answering
-       to the same name would swallow it on every open. */
-    if (m.type === "dashboard" || m.type === "companies" || m.type === "focuslist") { showView(m.type); return; }
+    if (m.type === "dashboard" || m.type === "companies") { showView(m.type); return; }
     if (m.type === "company" && m.kylasId) {
       showView(null);
       openCompany(String(m.kylasId), m.label);
@@ -75,7 +72,9 @@
        rejection here must show as a message rather than an empty panel and an
        unhandled rejection in the console. */
     wrap.innerHTML = `<p class="vnote">Loading…</p>`;
-    ({ dashboard: Views.dashboard, companies: Views.companies, focuslist: Views.focusList }[which])(wrap)
+    /* companiesScreen, not companies: the screen owns the Accounts / Focus
+       lists switch and draws whichever tab is selected into its own body. */
+    ({ dashboard: Views.dashboard, companies: Views.companiesScreen }[which])(wrap)
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
   }
 

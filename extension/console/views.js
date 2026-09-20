@@ -2678,5 +2678,68 @@
      same table from the other end. Two caches of one table diverge the moment
      somebody restores an account here and then opens it — the strip would
      still read "deprioritized". One cache, both readers. */
-  global.Views = { rollup, dashboard, companies, focusList, FILTERS, FOCUS, loadFocus };
+  /* ── the companies screen: accounts AND focus lists, one URL ──────────
+     /sales/companies/list/focus was never a Kylas URL. The overlay matched it
+     and drew the right view, but the page UNDERNEATH was Kylas' own 404 — so
+     the one way to reach the focus lists was to navigate Kylas somewhere it
+     does not go. Ayush, 2026-09-20: "focus list needs to be deployed there
+     itself", and before that: "accounts and focus list —
+     app.kylas.io/sales/companies/list, keeping the existing structure intact."
+
+     So they are two tabs on the one real page. The switch is drawn here and
+     the body is a separate element, which is what lets either view keep
+     calling itself on refresh without erasing the control that got you to it. */
+  const LIST_TABS = [
+    { k: "accounts", label: "Accounts" },
+    { k: "focus", label: "Focus lists" },
+  ];
+  let LIST_TAB = "accounts";
+
+  async function companiesScreen(host) {
+    try { LIST_TAB = (await Store.getSetting("companiesTab")) || "accounts"; }
+    catch { /* default */ }
+    if (!LIST_TABS.some((t) => t.k === LIST_TAB)) LIST_TAB = "accounts";
+    paintScreen(host);
+  }
+
+  function paintScreen(host) {
+    host.innerHTML = `
+      <div class="vtabs">${LIST_TABS.map((t) => `
+        <button type="button" data-tab="${t.k}" aria-pressed="${LIST_TAB === t.k}"
+          >${t.label}${t.k === "focus" && FOCUS.rows
+            ? ` <i>${Object.values(FOCUS.rows).filter((x) => x.status === "focus").length}</i>` : ""}</button>`).join("")}
+      </div>
+      <div class="vbody"></div>`;
+
+    const body = host.querySelector(".vbody");
+    host.querySelectorAll("[data-tab]").forEach((b) => b.onclick = async () => {
+      if (b.dataset.tab === LIST_TAB) return;
+      LIST_TAB = b.dataset.tab;
+      try { await Store.setSetting("companiesTab", LIST_TAB); } catch { /* a preference, not data */ }
+      paintScreen(host);
+    });
+
+    /* A rejection here has to read as a message, not as an empty panel with an
+       unhandled rejection in a console nobody has open. */
+    const draw = LIST_TAB === "focus" ? focusList : companies;
+    body.innerHTML = `<p class="vnote">Loading…</p>`;
+    draw(body).catch((e) => {
+      body.innerHTML = `<p class="vwarn">Could not build this view — ${esc(e.message)}</p>`;
+    });
+    /* The count on the tab is only knowable once the lists are read, and the
+       accounts tab never reads them. Fetch quietly and patch the LABEL — not
+       the screen. Repainting here would tear down the accounts view while it
+       was still drawing itself, which is a visible flicker at best and a lost
+       scroll position at worst, all to add a number to a tab. */
+    if (!FOCUS.rows && !FOCUS.inflight)
+      loadFocus().then(() => {
+        if (!host.isConnected || !FOCUS.rows) return;
+        const tab = host.querySelector('[data-tab="focus"]');
+        if (!tab || tab.querySelector("i")) return;
+        const n = Object.values(FOCUS.rows).filter((x) => x.status === "focus").length;
+        if (n) tab.insertAdjacentHTML("beforeend", ` <i>${n}</i>`);
+      }, () => {});
+  }
+
+  global.Views = { rollup, dashboard, companies, companiesScreen, focusList, FILTERS, FOCUS, loadFocus };
 })(window);

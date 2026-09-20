@@ -97,9 +97,11 @@
      view of them instead of the call form. */
   const VIEWS = [
     [/\/sales\/home\/?$/i, "dashboard"],
-    /* BEFORE the plain list, or /sales/companies/list matches first and the
-       focus route never fires — the list pattern is a prefix of this one. */
-    [/\/sales\/companies\/list\/focus\/?$/i, "focuslist"],
+    /* THE FOCUS LISTS ARE A TAB HERE, not a URL of their own. There was a
+       /sales/companies/list/focus route and it was a mistake: Kylas has no
+       such page, so the overlay drew the right view on top of Kylas' own 404
+       and the only way to reach it was to send the CRM somewhere it does not
+       go. The companies screen carries both tabs on the real list page. */
     [/\/sales\/companies\/list\/?$/i, "companies"],
   ];
   function currentRecord() {
@@ -316,8 +318,7 @@
     fabLabel.textContent =
       !rec ? "Call console" :
       rec.kind === "dashboard" ? "KPI dashboard" :
-      rec.kind === "companies" ? "Company view" :
-      rec.kind === "focuslist" ? "Focus lists" :
+      rec.kind === "companies" ? "Accounts & focus lists" :
       rec.kind === "company" ? "Work this company" : "Log a call";
   }, 700);
 

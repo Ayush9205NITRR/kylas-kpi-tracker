@@ -67,8 +67,7 @@ Three pages behave differently, by design:
 |---|---|
 | `/sales/companies/details/…` | the console, scoped to that company |
 | `/sales/home` | the dashboard — day, week, month |
-| `/sales/companies/list` | the filterable companies list |
-| `/sales/companies/list/focus` | the focus lists — who picked what, who dropped what |
+| `/sales/companies/list` | accounts, and the focus lists, as two tabs |
 
 At this point it works on **sample data**. It is not talking to Kylas yet.
 

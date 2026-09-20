@@ -277,9 +277,20 @@ check('it survives a render', await f.locator('.ares dl > div').count(), 5);
 
 /* ── the focus lists view ─────────────────────────────────────────────── */
 console.log('\n— focus lists —');
-await page.evaluate(() => history.pushState({}, '', '/sales/companies/list/focus'));
+/* THE REAL KYLAS URL, and then the tab. There used to be a
+   /sales/companies/list/focus route; Kylas has no such page, so the overlay
+   drew the focus lists on top of Kylas' own 404 and the only way in was to
+   send the CRM somewhere it does not go. */
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/list'));
 await page.waitForTimeout(2800);
 f = F();
+check('the companies screen has both tabs', await f.locator('.vtabs button').count(), 2);
+check('accounts is the one selected', await f.locator('.vtabs button[aria-pressed="true"]').textContent(),
+      (t) => /Accounts/.test(t || ''));
+await f.locator('.vtabs button[data-tab="focus"]').click();
+await page.waitForTimeout(2500);
+f = F();
+check('the tab switch keeps the tabs on screen', await f.locator('.vtabs button').count(), 2);
 check('the view renders', await f.locator('#viewport').isVisible(), true);
 check('the drop just made is in it', await f.locator('.vr.frow5:not(.vh)').count(), (n) => n >= 1);
 /* The stage comes from the companies cache, which only the companies view used
@@ -291,6 +302,15 @@ const before = await f.locator('.vr.frow5:not(.vh)').count();
 await f.locator('[data-restore]').first().click();
 await page.waitForTimeout(1600);
 check('restore takes the row away', await f.locator('.vr.frow5:not(.vh)').count(), before - 1);
+
+/* The tab is remembered, so coming back lands where you left. */
+await page.evaluate(() => history.pushState({}, '', '/sales/home'));
+await page.waitForTimeout(1500);
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/list'));
+await page.waitForTimeout(2800);
+f = F();
+check('the focus tab is remembered', await f.locator('.vtabs button[aria-pressed="true"]').textContent(),
+      (t) => /Focus/.test(t || ''));
 
 /* ONE CACHE, BOTH SCREENS. The strip and this view read the same FOCUS.rows;
    two copies would have the company page still calling a restored account
