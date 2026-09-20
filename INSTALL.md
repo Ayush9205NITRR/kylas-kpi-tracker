@@ -16,7 +16,7 @@ an extension's code is readable by anyone who installs it.
 
 ---
 
-## Already have 0.1.0 installed?
+## Already have an older version installed?
 
 Skip to **[Updating](#updating)** at the bottom. It is three commands.
 
@@ -25,7 +25,7 @@ Skip to **[Updating](#updating)** at the bottom. It is three commands.
 ## 1 · Get the code
 
 ```bash
-git clone -b claude/adoring-feynman-chhiyt \
+git clone -b claude/practical-cray-0y2ep1 \
   https://github.com/Ayush9205NITRR/kylas-kpi-tracker.git
 cd kylas-kpi-tracker
 ```
@@ -44,7 +44,7 @@ pwd          # e.g. /Users/ayushtiwari/kylas-kpi-tracker
 4. Select the **`extension`** folder inside the repo —
    `kylas-kpi-tracker/extension`, **not** the repo root
 
-The card should read **Enout BD Call Console 0.3.0**. An older number means a
+The card should read **Enout BD Call Console 1.5.0**. An older number means a
 stale copy is still loaded — remove it, or you will be testing the wrong code.
 
 ## 3 · Check the UI loads
@@ -68,6 +68,7 @@ Three pages behave differently, by design:
 | `/sales/companies/details/…` | the console, scoped to that company |
 | `/sales/home` | the dashboard — day, week, month |
 | `/sales/companies/list` | the filterable companies list |
+| `/sales/companies/list/focus` | the focus lists — who picked what, who dropped what |
 
 At this point it works on **sample data**. It is not talking to Kylas yet.
 
@@ -149,8 +150,14 @@ and nothing else. `verify-base` names them and says so; fix those in the
 Airtable UI, or delete the field and re-run `repair-base.mjs` to have it
 recreated from the schema.
 
-`repair-base.mjs` only **adds** absent fields, in dependency order, and only
-changes an existing one when you pass `--update-formulas`. Read the dry run
+`repair-base.mjs` also **creates a missing table** — `Focus`, `Focus History`
+and `Research` are new, and each is self-contained, so one run makes all three.
+A missing table that something links *into* needs a second run: `diffBase` does
+not report the fields of a table that does not exist yet, so the link is
+invisible to the run that creates it. The script says so when it applies.
+
+Otherwise `repair-base.mjs` only **adds** absent fields, in dependency order,
+and only changes an existing one when you pass `--update-formulas`. Read the dry run
 before applying anyway — a rollup created before the formula it reads points at
 nothing, silently.
 
@@ -165,7 +172,9 @@ Leave the terminal open — closing it stops the connection. You should see:
 ```
 06:47:27 airtable: appEwJu0bleHh9b8t
 06:47:27 proxy on http://127.0.0.1:8787
-06:47:27 routes: /meta  /health  /company  /queue  /save  /targets  /contact
+06:47:27 routes: /meta  /health  /company  /companies  /users  /kpi-debug  /ladder
+06:47:27         /focus  /research  /report  /snapshots  /queue  /save  /rca
+06:47:27         /rca-answer  /team  /team-save  /targets  /contact
 ```
 
 **Read the first line.** If it says `airtable: not configured … KPIs will not be
@@ -290,22 +299,40 @@ Three failures worth knowing, because they are the ones that happen:
 
 ```bash
 cd kylas-kpi-tracker
-git pull
+git fetch origin
+git checkout claude/practical-cray-0y2ep1     # once; `git pull` after that
 source .env.local && node scripts/verify-base.mjs     # schema may have moved
 ```
 
+`verify-base` is the one that decides how much work this is. Read what it
+says before running anything else:
+
+| it says | do |
+|---|---|
+| `Everything in the schema is present` | nothing — go straight to the restarts below |
+| `MISSING TABLE Focus` / `Focus History` / `Research` | `node scripts/repair-base.mjs --dry-run`, read it, then without the flag |
+| `MISSING TABLE` for anything else | the same, then **run `repair-base.mjs` a second time** — a link into a table that did not exist is invisible to the run that creates it |
+| a **FORMULA** drifted | `node scripts/repair-base.mjs --update-formulas` |
+| a drifted formula named **KPI Stage** | that, then `migrate-ladder.mjs` and `migrate-ladder.mjs --apply` — the stored ranks are on the old ladder too |
+| a **ROLLUP**, **CHOICES** or a wrong **type** | the Airtable UI; the update endpoint takes only `options.formula` |
+
+Then `verify-base.mjs` again, and do not go on until it is clean. A console
+writing to a field the base does not have reports the write as succeeding.
+
 **Restart the proxy too.** Press `Ctrl-C` in the terminal it is running in,
 then start it again. It
-does not reload its own code, so a new route (like `/companies`) does not exist
-in a process started before it was written.
+does not reload its own code, so a new route does not exist in a process
+started before it was written — `/focus` and `/research` are new in 1.5.0, and
+an old proxy answers both with a 404 that reads in the console as "could not
+record that".
 
 Then in Chrome: `chrome://extensions` → the **refresh arrow** on the card →
 reload the Kylas tab.
 
-All three matter. Chrome caches the old code until you hit refresh, the proxy
-keeps running whatever it started with, and a new version may expect Airtable
-fields the base does not have yet. If `verify-base` lists anything missing, run
-`repair-base.mjs` as in step 5.
+All three matter, and skipping one is the usual reason an update "does not do
+anything". Chrome serves the old console until you hit the refresh arrow, the
+proxy keeps running the code it started with, and a new version may expect
+Airtable fields the base does not have yet.
 
 ---
 
@@ -410,4 +437,11 @@ connection returns.
 duration is entered by hand unless the dialler supplies it.
 
 `scripts/test-*-live.mjs` are Playwright harnesses written for a Linux
-container. They hardcode paths and will not run on macOS as they stand.
+container. They hardcode paths and will not run on macOS as they stand — the
+newest, `test-focus-live.mjs`, also needs `channel:'chromium'`, because
+Playwright's bundled build does not load MV3 extensions and the symptom is not
+an error but a frame that never appears.
+
+The no-credential checks in the list above do run anywhere, and
+`scripts/test-schema-diff.mjs` needs full git history — it fails on a shallow
+clone with `invalid object name`, which is the clone and not the code.

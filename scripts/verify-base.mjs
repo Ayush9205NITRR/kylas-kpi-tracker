@@ -16,6 +16,9 @@
  * rollup aggregation and every select's choices.
  */
 import { diffBase, manualCount, cleanExceptExtras } from "./schema-diff.mjs";
+/* Only to tell a missing table that one repair-base run finishes from one that
+   needs two — see the advice at the bottom. */
+import { FOLLOWUPS } from "./schema.mjs";
 
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
@@ -128,6 +131,28 @@ if (d.formulaDrift.some((f) => /KPI Stage/.test(f.field)))
 if (manualCount(d) - d.missingTables.length > 0)
   console.log(`  the Airtable UI                    for rollups, choices and wrong types: the\n` +
               `                                     update endpoint takes only options.formula`);
-if (d.missingTables.length)
-  console.log(`  create-base.mjs                    for the missing tables (it refuses if any exist)`);
+/* A DEAD END UNTIL NOW. This said "create-base.mjs (it refuses if any exist)",
+   which on any base worth verifying is advice that cannot be followed: the
+   base has tables, so create-base declines, and the reader is left holding a
+   MISSING TABLE with nothing to run. repair-base creates a missing table from
+   its own fields, which is all three of Focus, Focus History and Research.
+
+   The catch is links. A link is declared in FOLLOWUPS, not in the table, and
+   diffBase does not list the fields of a table that does not exist yet — so
+   the link to a table created in THIS run is invisible to this run and only
+   shows up as a missing field in the next one. Two runs, and say so, because
+   the alternative is a table that looks created and rolls up nothing. */
+if (d.missingTables.length) {
+  const linked = d.missingTables.filter((n) =>
+    FOLLOWUPS.some((s) => s.table === n && s.field.type === "multipleRecordLinks"));
+  const plain = d.missingTables.filter((n) => !linked.includes(n));
+  if (plain.length)
+    console.log(`  repair-base.mjs                    creates ${plain.join(", ")}`);
+  if (linked.length)
+    console.log(`  repair-base.mjs, TWICE             creates ${linked.join(", ")} — ${
+      linked.length === 1 ? "its link is" : "their links are"}\n` +
+                `                                     declared separately and only becomes visible\n` +
+                `                                     once the table exists, so the second run is\n` +
+                `                                     what adds it. verify-base again after.`);
+}
 process.exit(1);

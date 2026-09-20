@@ -78,14 +78,18 @@ if (d.missingTables.length) {
     for (const name of d.missingTables) {
       const t = TABLES.find((x) => x.name === name);
       if (!t) { console.error(`  ! ${name} is not in the schema — nothing to create from`); continue; }
-      /* Only a table whose fields are all self-contained. Anything needing a
-         link to another table is a create-base.mjs job, because the order and
-         the reverse-link renaming matter. */
-      const needsLink = (t.fields || []).some((f) => f.type === "multipleRecordLinks");
-      if (needsLink) {
-        console.error(`  ! ${name} has a record link in it — create it with create-base.mjs`);
-        continue;
-      }
+      /* This used to test t.fields for a record link and refuse. It never
+         fired: a link is declared in FOLLOWUPS, not on the table, so no
+         TABLES entry has ever carried one and the guard was reading a list
+         that cannot contain what it was looking for.
+
+         The real constraint is the one below. diffBase does not report the
+         fields of a table that does not exist, so a link pointing INTO a
+         table created by this run is invisible to this run — the table is
+         made, and its link is not. Rather than refuse, create it and say
+         plainly that a second run finishes the job, because a table that
+         exists but rolls up nothing is the failure that hides. */
+      const linkAfter = FOLLOWUPS.filter((s) => s.table === name && s.field.type === "multipleRecordLinks");
       const made = await call("POST", `/bases/${BASE}/tables`, {
         name: t.name, description: t.description,
         fields: t.fields.map((f) => ({ name: f.name, type: f.type,
@@ -95,6 +99,9 @@ if (d.missingTables.length) {
       byName.set(t.name, { id: made.id, name: t.name, fields: made.fields || [] });
       createdTables++;
       console.log(`  + ${name} created with ${t.fields.length} field(s)`);
+      if (linkAfter.length)
+        console.log(`    ! run this again — ${name}.${linkAfter.map((s) => s.field.name).join(", ")} ` +
+                    `is a link and\n      was not visible while the table did not exist`);
     }
     console.log();
   }
