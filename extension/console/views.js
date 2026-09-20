@@ -1447,6 +1447,13 @@
         ${API.isAdmin ? "" : `<span class="vrole" title="Set ADMIN_EMAILS in .env.local to see the team">your numbers</span>`}
         <span class="vsub">${cos.length} compan${cos.length === 1 ? "y" : "ies"} allotted${
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
+        <!-- WHICH BUILD THIS IS, readable without a terminal. The manifest
+             version was the same on branches four features apart, so "did my
+             pull land" had no answer anybody could see. This is the hash of
+             the files Chrome is serving; the proxy prints the same one at
+             startup, and they disagreeing is the whole point. -->
+        <span class="vbuild" title="The console Chrome is running. The proxy prints its own on startup — if they differ, one of the two is stale.">${
+          esc(API.buildLine)}</span>
         ${kpiNote(cos, { storeIsPopulation: fromStore.length > 0, repaint: () => dashboard(host) })}
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>

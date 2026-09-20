@@ -20,6 +20,48 @@
     catch { return ""; }
   };
 
+  /* THE HASH OF THE FILES CHROME IS ACTUALLY SERVING. The manifest version was
+     identical on two branches four features apart, so it could not answer "am
+     I running what I just pulled" — and it can never answer "is Chrome loading
+     the folder I pulled into", which matters because this repo is commonly
+     cloned twice and no git command can see that.
+
+     Hashed exactly as scripts/proxy.mjs hashes the same files on disk: the .js
+     files, by sorted name, and nothing else. The manifest is excluded because
+     it legitimately differs between a checkout and a packaged copy, and its
+     one meaningful field is compared separately; CSS and fonts because a
+     restyle is not a different build.
+
+     Computed once, lazily, and never allowed to throw: opened as a plain tab
+     there is no chrome.runtime, and an empty hash means "cannot compare",
+     which is the honest answer rather than a false alarm. */
+  const buildHashes = new Map();
+  const myBuild = (names) => {
+    if (!names || !names.length) return Promise.resolve("");
+    const key = names.join(",");
+    if (buildHashes.has(key)) return buildHashes.get(key);
+    const run = (async () => {
+      try {
+        const enc = new TextEncoder();
+        const parts = [];
+        for (const n of names.slice().sort()) {
+          parts.push(enc.encode(n));
+          const r = await fetch(chrome.runtime.getURL("console/" + n));
+          parts.push(new Uint8Array(await r.arrayBuffer()));
+        }
+        const total = parts.reduce((n, p) => n + p.length, 0);
+        const buf = new Uint8Array(total);
+        let at = 0;
+        for (const p of parts) { buf.set(p, at); at += p.length; }
+        const digest = await crypto.subtle.digest("SHA-256", buf);
+        return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0"))
+          .join("").slice(0, 8);
+      } catch { return ""; }
+    })();
+    buildHashes.set(key, run);
+    return run;
+  };
+
   async function req(path, { timeout = 12000, method = "GET", body } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
@@ -87,9 +129,35 @@
            "unknown" is different: that is a build which reported, from outside
            a checkout, and there is nothing to compare. */
         const stale = mine ? (!theirs || (theirs !== "unknown" && theirs !== mine)) : false;
+
+        /* THE QUESTION THE VERSION CANNOT ANSWER. Two branches four features
+           apart both said 1.5.0, so a console running code from before a pull
+           reported itself identical to one running code from after it. This
+           hashes the files Chrome is actually serving and compares them with
+           the same files on the proxy's disk.
+
+           A mismatch here means one of two things and the message says both,
+           because the second is the one nobody thinks of: either the extension
+           was not reloaded after the pull, or Chrome is loading a DIFFERENT
+           FOLDER — this repo is commonly cloned twice, and no git command can
+           see that. An empty hash on either side means "cannot compare", which
+           stays silent rather than crying wolf. */
+        const build = r.build || {};
+        const ours = await myBuild(build.names);
+        const drifted = !!(ours && build.hash && build.hash !== "unknown" && ours !== build.hash);
+
         state = { online: true, reason: "", user: r.user || null, role: r.role || "admin",
-                  version: theirs, staleProxy: stale,
-                  staleNote: !stale ? ""
+                  version: theirs, build: build.hash || "", myBuild: ours,
+                  branch: build.branch || "", sha: build.sha || "",
+                  staleProxy: stale || drifted,
+                  staleNote: drifted
+                    ? `Chrome is running console build ${ours}; the proxy's copy on disk is ` +
+                      `${build.hash}${build.branch ? ` (${build.branch} ${build.sha})` : ""}. ` +
+                      `Either this extension was not reloaded after the last pull — ` +
+                      `chrome://extensions, the refresh arrow — or Chrome is loading a ` +
+                      `different folder than the one you pulled into; that card also says ` +
+                      `which folder it loaded.`
+                    : !stale ? ""
                     : theirs
                       ? `The proxy is running build ${theirs}, this console is ${mine}. ` +
                         `Restart it: stop node scripts/proxy.mjs, then start it again.`
@@ -103,6 +171,12 @@
     get isAdmin() { return (state.role || "admin") === "admin"; },
     get staleProxy() { return !!state.staleProxy; },
     get staleNote() { return state.staleNote || ""; },
+    /* For the dashboard footer: what this console is, so it can be read out
+       without opening a terminal. */
+    get buildLine() {
+      const b = state.myBuild || "?";
+      return state.branch ? `${b} · ${state.branch} ${state.sha}` : b;
+    },
 
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),

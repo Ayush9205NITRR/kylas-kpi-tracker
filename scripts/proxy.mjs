@@ -17,7 +17,9 @@
 import "./env.mjs";
 import { requireEnv, ENV_FILE } from "./env.mjs";
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
@@ -48,6 +50,50 @@ try {
   VERSION = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8")).version
             || "unknown";
 } catch { /* running outside the repo: the handshake degrades to "unknown" */ }
+
+/* WHICH COPY OF THE CONSOLE IS THIS. The manifest version is the same on
+   every branch — it was "1.5.0" on two branches four features apart — so the
+   staleness handshake could not tell them apart, and neither could the card in
+   chrome://extensions. Four rounds of "I pulled and nothing changed" went by
+   on that, with screenshots as the only way to tell.
+
+   A content hash of the files Chrome actually serves answers it exactly, and
+   answers the harder question too: the repo here is often cloned twice, so
+   "Chrome is loading a DIFFERENT FOLDER from the one you pulled into" is at
+   least as likely as a wrong branch, and no git command detects it. The
+   console hashes the same files over chrome-extension:// and compares. */
+const BUILD = (() => {
+  const out = { hash: "unknown", branch: "", sha: "" };
+  try {
+    const dir = new URL("../extension/console/", import.meta.url);
+    /* Sorted, so two machines hash the same bytes in the same order. Only the
+       files that decide behaviour — fonts and CSS churn without changing what
+       the console does, and a restyle should not read as a stale build. */
+    const names = readdirSync(dir).filter((f) => f.endsWith(".js")).sort();
+    const h = createHash("sha256");
+    for (const n of names) h.update(n).update(readFileSync(new URL(n, dir)));
+    /* THE JS ONLY. Not the manifest, and not the CSS or the fonts. The
+       manifest legitimately differs between a checkout and a packaged or
+       host-rewritten copy without the console behaving differently, and its
+       one meaningful field — version — is already compared on its own. The
+       stylesheets churn on every restyle, and a restyle is not a stale build.
+       What is left is exactly the code that decides what the console does. */
+    out.hash = h.digest("hex").slice(0, 8);
+    /* The LIST travels too, so the console hashes exactly these and the two
+       sides cannot drift into comparing different things. A file added here
+       and not there would otherwise read as a permanent mismatch. */
+    out.names = names;
+  } catch { /* outside a checkout: "unknown", and the console says so */ }
+  /* Nice to have, not load-bearing — a detached HEAD or a shallow clone still
+     hashes fine, it just cannot name itself. */
+  try {
+    const git = (a) => execFileSync("git", a, { cwd: new URL("..", import.meta.url).pathname,
+                                                encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    out.branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+    out.sha = git(["rev-parse", "--short", "HEAD"]);
+  } catch { /* no git, or not a repo */ }
+  return out;
+})();
 
 const STARTED = new Date().toISOString();
 
@@ -611,7 +657,7 @@ const routes = {
     const me = await whoami();
     return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "" },
              role: roleOf(me), admins: ADMINS.length,
-             version: VERSION, startedAt: STARTED };
+             version: VERSION, startedAt: STARTED, build: BUILD };
   },
 
   /* Everything the console needs when it opens on a company page: the company
@@ -1505,7 +1551,8 @@ server.on("error", (e) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION}`);
+  log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION} · console ${BUILD.hash}` +
+      (BUILD.branch ? ` · ${BUILD.branch} ${BUILD.sha}` : ""));
   log(`routes: ${Object.keys(routes).join("  ")}`);
 
   /* WARM THE CACHES NOW, not when somebody is waiting.

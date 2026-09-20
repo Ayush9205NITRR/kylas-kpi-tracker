@@ -1083,3 +1083,8 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .ev.editing .evsave{border-color:var(--blue);background:var(--blue);color:var(--onBlue);
   font-weight:var(--w-strong)}
 .ev.editing .evsave:hover{background:var(--blueDeep);border-color:var(--blueDeep)}
+/* Which build is on screen. Quiet — it is only ever read when something is
+   wrong — but always present, because the question it answers ("did my pull
+   land?") has no other visible answer. */
+.vbuild{font-size:var(--t-meta);color:var(--text3);font-family:var(--m,ui-monospace);
+  align-self:center;cursor:help;letter-spacing:-.01em}

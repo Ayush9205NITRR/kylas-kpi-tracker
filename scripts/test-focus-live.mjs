@@ -211,6 +211,26 @@ await f.evaluate(() => render());
 await page.waitForTimeout(200);
 check('which survives a render', await seg(f), '★ Focus | Not picked | Deprioritize*');
 
+/* ── which build is actually running ───────────────────────── */
+/* The manifest version was identical on two branches four features apart, so
+   "did my pull land" had no answer anybody could see, and four rounds went by
+   on screenshots. The console hashes the JS Chrome is serving and the proxy
+   hashes the same files on disk. */
+console.log('\n— the build handshake —');
+const build = await f.evaluate(async () => {
+  await API.health?.();
+  return { line: API.buildLine, stale: API.staleProxy, note: API.staleNote };
+});
+check('the console knows its own build', build.line, (v) => /^[0-9a-f]{8}/.test(v || ''));
+check('and names the branch it came from', build.line, (v) => /\//.test(v || ''));
+/* Both halves are the same checkout here, so they must agree. Verified to FAIL
+   on a one-line edit to a console file — the message then names both causes,
+   a missed reload and Chrome loading a different folder. */
+check('console and proxy agree', build.stale, false);
+check('so nothing is warned about', build.note, '');
+/* On the dashboard, not here — the company page has no .vbuild. Checked where
+   it actually lives, below, rather than asserting something always true. */
+
 /* ── save locks a card, edit reopens it ─────────────────────── */
 /* A card used to be an always-open form whether it held numbers somebody spent
    a call earning or nothing at all, which is what let one tap reach them. */
@@ -348,6 +368,10 @@ check('sql', ladder[6]?.n, 1);
 /* A funnel that widens is a real finding, but this fixture should not: each
    rung must be at most the one above it. */
 check('the ladder descends', ladder.every((r, i) => i === 0 || r.n <= ladder[i - 1].n), true);
+/* The build line lives on the dashboard, beside the data age — the one place
+   a person can read it without opening a terminal. */
+check('the dashboard prints the build', (await f.locator('.vbuild').textContent() || ''),
+      (t) => /^[0-9a-f]{8}/.test(t.trim()));
 await page.screenshot({ path: '/tmp/claude-0/live-ladder.png' });
 
 /* ── research on the company page, not behind a button ────────────────── */
