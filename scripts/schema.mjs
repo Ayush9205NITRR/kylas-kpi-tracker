@@ -495,8 +495,8 @@ export const FOLLOWUPS = [
     "Which POCs gave a complete row. Successful Discovery is the count of companies where this is not blank."),
   rollup("Companies", "Contact Count", "Contacts", "Name", "COUNTA(values)"),
 
-  formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`),
-  formula("Companies", "Phone Picked", `IF({Ever Picked} = 1, 1, 0)`),
+  formula("Companies", "Phone Picked", `IF({Ever Picked} = 1, 1, 0)`,
+    "The stage has been something other than Could Not Connect. Somebody answered."),
   formula("Companies", "Right POC", `IF({Right POC Contacts}, 1, 0)`,
     "Any of budget | timeline | pax on any row, Past or Current, on any contact."),
   /* Cumulative by construction: a complete row has all three filled, so it also
@@ -522,4 +522,23 @@ export const FOLLOWUPS = [
   formula("Companies", "KPI Stage At",
     `IF({KPI Score}, DATEADD(${EPOCH}, MOD({KPI Score}, 10000000000), 'seconds'))`,
     "When the company last moved up a rung."),
+
+  /* A CALL LOGGED **OR** THE STAGE MOVED. This was IF({Last Call At}, 1, 0)
+     alone, and Last Call At rolls up Call Log.Called At — but syncContact
+     writes a Call Log row only when the save carries a call. A save that only
+     moves the stage writes a Stage Transition and no Call Log row, so a
+     company that had demonstrably been spoken to still counted as unreached.
+     On a team that changes stages as often as it logs a duration, the top rung
+     of the funnel read zero while every rung beneath it had numbers — and a
+     funnel whose first bar is empty looks broken rather than wrong.
+
+     Ayush, 2026-09-20: "the formula of companies reached is through last call
+     date, so whenever a stage is changed we are capturing that stage change
+     through last call date — that is the clear metric."
+
+     KPI Stage At is the rung's own timestamp, derived from KPI Score, so it is
+     set for any company that has ever moved. Either source is evidence of
+     contact, which is all this rung claims. */
+  formula("Companies", "Reached", `IF(OR({Last Call At}, {KPI Stage At}), 1, 0)`,
+    "Contact was made: a call was logged, or the stage moved. Either is evidence."),
 ];

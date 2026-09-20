@@ -390,6 +390,7 @@
     research: null,      /* companyId -> values, null until read */
     fields: null,        /* the field list, served with the data */
     researchError: "",
+    researchOpen: false, /* the strip's disclosure, remembered across accounts */
     dropping: false,     /* the reason form is open */
     draft: { reason: "", note: "" },
     busy: false,
@@ -475,6 +476,7 @@
         : stamp ? `<span class="astamp">${stamp}</span>` : ""}
       ${f?.reason ? `<span class="areason" title="${esc(f.note || "")}">${esc(f.reason)}${
         f.note ? ` — ${esc(f.note)}` : ""}</span>` : ""}
+      ${researchStripHTML(id)}
       ${ACC.dropping ? `
       <!-- novalidate deliberately: with the required attribute the browser
            blocks submit before onsubmit runs, so the message explaining WHY a
@@ -511,6 +513,11 @@
 
     const rb = document.getElementById("accRes");
     if (rb) rb.onclick = openResearch;
+
+    /* Remembered for the session, not per company: somebody who wants the
+       research open wants it open on the next account too. */
+    const rt = document.getElementById("accResToggle");
+    if (rt) rt.onclick = () => { ACC.researchOpen = !ACC.researchOpen; paintAccount(); };
 
     const form = document.getElementById("accDrop");
     if (form) {
@@ -554,6 +561,47 @@
     } finally {
       ACC.busy = false; paintAccount();
     }
+  }
+
+  /* WHAT WE KNOW, ON THE PAGE, NOT BEHIND A BUTTON. Ayush, 2026-09-20: "when I
+     go into a company there should be a section of research where I can show
+     that this company has raised funding, so that they're able to see that."
+
+     A research form reachable in one click is not the same as research an
+     associate reads without asking for it. Somebody about to dial wants the
+     funding round and the event season in front of them while the number is
+     ringing; a button labelled Research is something they open once, on the
+     first call, and never again.
+
+     So the facts come to the strip and the form stays where it is. Which
+     facts: the ones that change how the call opens. Funding, a recent trigger,
+     who decides and when the season is — an opener each. Industry, HQ and
+     headcount are context, not an opener, and are left to the form. Research
+     notes too: it is a paragraph, and a paragraph here would push the queue
+     off the screen. */
+  const STRIP_FIELDS = ["funding", "trigger", "season", "decides", "events", "vendor"];
+
+  function researchStripHTML(id) {
+    const r = ACC.research?.[id];
+    if (!r) return "";                    /* not read yet — say nothing, not "none" */
+    const facts = STRIP_FIELDS
+      .map((k) => [ACC.fields?.find((f) => f.k === k), String(r[k] || "").trim()])
+      .filter(([f, v]) => f && v);
+    if (!facts.length) return "";
+    /* Collapsed by default ONLY when there is a lot of it. One fact is a line;
+       six are a wall in a 380px column, and the associate came here to call. */
+    const many = facts.length > 3;
+    const show = ACC.researchOpen || !many;
+    return `<div class="ares${show ? " on" : ""}">
+      <button type="button" id="accResToggle" aria-expanded="${show}"
+        title="${show ? "Hide" : "Show"} what we know about this company">
+        <span class="k">Research</span>
+        ${show ? "" : `<span class="peek">${esc(facts[0][1])}</span>`}
+        <span class="n">${facts.length}</span>
+      </button>
+      ${show ? `<dl>${facts.map(([f, v]) =>
+        `<div><dt>${esc(f.l)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
+    </div>`;
   }
 
   /* ── research ────────────────────────────── */

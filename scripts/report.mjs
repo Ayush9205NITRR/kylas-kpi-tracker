@@ -14,7 +14,7 @@
  * Pure functions over rows the caller fetched. No network here, so it is
  * testable — see scripts/test-report.mjs.
  */
-import { STAGE_RUNG, MILESTONE } from "./stages.mjs";
+import { STAGE_RUNG, MILESTONE, NOT_CONNECTED } from "./stages.mjs";
 
 /* ── periods ───────────────────────────────────────────────────────── */
 /* ISO dates throughout, because they sort as strings and a KPI report that
@@ -127,7 +127,31 @@ export function periodsBetween(period, fromISO, toISO) {
 /* A transition INTO a stage at or above the floor. Because rank only rises,
    the first such transition is the moment that company arrived — later ones are
    movement within the same milestone and must not be counted again. */
+/* THE FIRST TWO RUNGS WERE MISSING FROM THIS LIST, so firstArrivals() never
+   emitted them and "Companies worked" and "Companies picked" were structurally
+   zero on every screen that reads the report — not zero because nothing had
+   happened, zero because nothing could ever be counted into them. Every rung
+   below them had numbers, which is what made it read as a broken funnel rather
+   than as an absent metric. Ayush, 2026-09-20: "companies reached is still
+   showing zero."
+
+   `worked` is any real stage move. Floor 2, not 1: rung 1 is YET_TO_BE_MINED,
+   which means nobody has touched it, so a move INTO it is not evidence of
+   contact. Anything above it is. This is the report's side of the same
+   question Companies.Reached answers in Airtable — a call logged or the stage
+   moved — and the two now agree.
+
+   `picked` cannot be a floor at all, and that is why it needs `test`. The
+   not-connected stages are not contiguous: FOLLOWUP_CNC is rung 15, above MQL
+   at 14, so any numeric floor either swallows a CNC stage or excludes MQL.
+   It is a set exclusion, and deliberately the SAME set airtable.mjs uses for
+   Ever Picked — one definition of "somebody answered", used by the writer and
+   by the report, because two that disagree on an edge is how Phone Picked
+   once read 100%. */
 const FLOORS = [
+  { key: "worked", floor: 2, label: "Companies worked" },
+  { key: "picked", floor: 2, label: "Companies picked",
+    test: (code) => !NOT_CONNECTED.includes(code) },
   { key: "booked", floor: MILESTONE.sqlMeetingBooked.floor, label: MILESTONE.sqlMeetingBooked.label },
   { key: "done", floor: MILESTONE.sqlMeetingDone.floor, label: MILESTONE.sqlMeetingDone.label },
   { key: "sql", floor: MILESTONE.sql.floor, label: MILESTONE.sql.label },
@@ -142,8 +166,8 @@ export const METRICS = [
   { key: "connects", label: "Calls picked", kind: "flow" },
   /* FIRST — one per company, the period it first reached that rung. These seven
      are the ladder, in order, and every one counts the same thing. */
-  { key: "worked", label: "Companies worked", kind: "first" },
-  { key: "picked", label: "Companies picked", kind: "first" },
+  { key: "worked", label: "Companies reached", kind: "first" },
+  { key: "picked", label: "Phone picked", kind: "first" },
   { key: "right", label: "Right POC", kind: "first" },
   { key: "discovery", label: "Discovery", kind: "first" },
   { key: "booked", label: "SQL meeting booked", kind: "first" },
@@ -187,6 +211,7 @@ export function firstArrivals({ transitions = [], signals = [] } = {}) {
     const who = t.company || t.contact || "";
     for (const f of FLOORS) {
       if (rung < f.floor) continue;
+      if (f.test && !f.test(t.to)) continue;
       const id = `${f.key}:${who}`;
       if (seen.has(id)) continue;
       seen.add(id);

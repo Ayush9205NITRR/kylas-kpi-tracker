@@ -53,13 +53,49 @@
      having filled a complete row — and cumulative() below only closes the gaps
      that are logically true, so this list is NOT guaranteed to descend. Where
      it widens, the view says so. */
+  /* THE STAGE GROUP, NAMED, NOT DESCRIBED. Three of these rungs are "rank is
+     at or above a floor", which on a 26-rung ladder means each one is a GROUP
+     of stages — and until now the view said "booked, regardless of outcome"
+     and left the reader to work out which stages that was. Ayush, 2026-09-20:
+     "for SQL meeting booked there is a group of stages, SQL meeting done there
+     is again a group of stages... I want the exact same format displayed."
+
+     Derived from STAGE_RUNG and the same MILESTONE floors the Airtable
+     formulas are built from, so the funnel cannot describe a group the base
+     does not count. Highest rung first, which is the order they are climbed
+     in reverse and the order the ladder reads. */
+  const atOrAbove = (floor) => Object.entries(STAGE_RUNG)
+    .filter(([, r]) => r >= floor)
+    .sort((a, b) => b[1] - a[1])
+    .map(([code]) => LABEL[code] || code);
+
+  /* Phone Picked is the inverse of NOT_CONNECTED, so it is named by what it
+     excludes — there are 21 stages in it and 5 out. */
+  const notPicked = NOT_CONNECTED.map((c) => LABEL[c] || c);
+
+  /* Ayush's rungs, in his order (2026-09-17; Phone picked added 2026-09-20).
+     Two different kinds of test sit in one list: reached/right/discovery come
+     from the event DATA, picked/booked/done/sql from the STAGE. They can
+     disagree — a company can sit at SQL with nobody having filled a complete
+     row — and cumulative() below only closes the gaps that are logically true,
+     so this list is NOT guaranteed to descend. Where it widens, the view says
+     so. */
   const FUNNEL = [
-    { key: "reached",   label: "Companies reached",    sub: "at least one call logged" },
+    { key: "reached",   label: "Companies reached",    sub: "a call logged, or the stage moved" },
+    /* PICKED WAS ALWAYS COMPUTED AND NEVER SHOWN. Companies.Phone Picked has
+       been in the base and read by readCompanyKpis all along; it was simply
+       missing from this list, so the one rung that answers "did anybody
+       actually answer the phone" was invisible on every screen. */
+    { key: "picked",    label: "Phone picked",         sub: "any stage except Could Not Connect",
+      excludes: notPicked },
     { key: "right",     label: "Right POC connected",  sub: "any of budget, timeline or pax" },
-    { key: "discovery", label: "Successful discovery call", sub: "one complete row" },
-    { key: "booked",    label: "SQL meeting booked",   sub: "booked, regardless of outcome" },
-    { key: "done",      label: "SQL meeting done",     sub: "the call was held" },
-    { key: "sql",       label: "SQL",                  sub: "qualified" },
+    { key: "discovery", label: "Successful discovery call", sub: "one complete row: budget and timeline and pax" },
+    { key: "booked",    label: "SQL meeting booked",   sub: "booked, regardless of outcome",
+      group: atOrAbove(MILESTONE.sqlMeetingBooked.floor) },
+    { key: "done",      label: "SQL meeting done",     sub: "the meeting was held",
+      group: atOrAbove(MILESTONE.sqlMeetingDone.floor) },
+    { key: "sql",       label: "SQL",                  sub: "qualified",
+      group: atOrAbove(MILESTONE.sql.floor) },
   ];
 
   /* Only implications that are actually TRUE.
@@ -604,6 +640,14 @@
     }).join("")}</div>`;
   }
 
+  /* The whole definition in one line, for the hover. The sub-label is the
+     short form; this is the one that names the stages, so a reader who
+     mistrusts a number can check what it counted without leaving the row. */
+  const rungWhat = (r) =>
+    r.group ? `${r.sub} — counts ${r.group.join(", ")}`
+    : r.excludes ? `${r.sub} — every stage except ${r.excludes.join(", ")}`
+    : r.sub;
+
   function funnelHTML(cos) {
     const rows = funnelRows(cos);
     const grew = rows.filter((r) => r.widened);
@@ -618,14 +662,17 @@
         <span class="fo">vs reached</span>
       </div>
       ${rows.map((r) => `
-      <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${esc(r.sub)}. ${r.n} compan${r.n === 1 ? "y" : "ies"}${
+      <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${esc(rungWhat(r))}. ${r.n} compan${r.n === 1 ? "y" : "ies"}${
         r.fromPrev ? `, ${r.fromPrev} of the rung above` : ""}">
-        <span class="fl">${esc(r.label)}</span>
+        <span class="fl">${esc(r.label)}<em>${esc(r.sub)}</em></span>
         <span class="fb"><i style="width:${r.width}%"></i></span>
         <span class="fn tnum">${r.n}</span>
         <span class="fp tnum">${r.fromPrev ? esc(r.fromPrev) : "—"}${
           r.widened ? ` <em title="More companies here than at the rung above — the data the rung above is counted from was not captured.">&#9650;</em>` : ""}</span>
         <span class="fo tnum">${r.ofTop ? esc(r.ofTop) : ""}</span>
+        ${r.group || r.excludes ? `<span class="fg">${
+          r.group ? `counts <b>${r.group.map(esc).join("</b> · <b>")}</b>`
+                  : `every stage except <b>${r.excludes.map(esc).join("</b> · <b>")}</b>`}</span>` : ""}
       </div>`).join("")}
     </div>
     ${grew.length ? `<p class="vnote">${grew.map((g) => esc(g.label)).join(" and ")} ${
@@ -885,7 +932,10 @@
      sits outside the conversion band for that reason. */
   const COUNT_COLS = [
     { key: "calls", label: "Calls" },
-    { key: "worked", label: "Worked" },
+    /* "Reached", to match the ladder above it and the Airtable field. These are
+       column headers in a dense table, so they stay short — but short is not a
+       licence to be a third name for the same rung. */
+    { key: "worked", label: "Reached" },
     { key: "picked", label: "Picked" },
     { key: "right", label: "Right POC" },
     { key: "discovery", label: "Discovery" },
@@ -956,8 +1006,13 @@
      "Picked", not "Connected" — Ayush's word, and the better one. A call is
      picked up or it is not; "connected" reads like a line status. */
   const RUNGS = [
-    { key: "worked",    name: "Companies worked" },
-    { key: "picked",    name: "Companies picked" },
+    /* "reached", not "worked". The key stays `worked` because it is what the
+       report, the snapshots and First Worked At have always been called, but
+       the screen says what Ayush and the Airtable Reached field both say —
+       one thing with two names on two screens is the drift this codebase
+       exists to avoid. */
+    { key: "worked",    name: "Companies reached" },
+    { key: "picked",    name: "Phone picked" },
     { key: "right",     name: "Right POC connected" },
     { key: "discovery", name: "Successful discovery call" },
     { key: "booked",    name: "SQL meeting booked" },

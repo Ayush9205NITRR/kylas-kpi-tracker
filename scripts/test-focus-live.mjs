@@ -21,42 +21,101 @@
  * that was never going to exist.
  */
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
-const SEED = {
-  Companies: [
-    { 'Kylas Company ID': '1776620', Name: 'seats', Owner: 'Rubal Sansanwal',
-      'Kylas Stage': 'DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS',
-      'KPI Stage': 'DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS', 'Right POC': 1 },
-    { 'Kylas Company ID': '1773706', Name: 'vincitlabs', Owner: 'Rubal Sansanwal',
-      'Kylas Stage': 'MQL_MARKETING_QUALIFIED_LEAD', 'KPI Stage': 'MQL_MARKETING_QUALIFIED_LEAD', 'Right POC': 1 },
-    { 'Kylas Company ID': '903', Name: 'Shorehouse Retail', Owner: 'Priya Deshmukh',
-      'Kylas Stage': 'SQL_SALES_QUALIFIED_LEAD', 'KPI Stage': 'SQL_SALES_QUALIFIED_LEAD', 'Right POC': 1 },
-    { 'Kylas Company ID': '1778327', Name: 'Kritsnam Analytics', Owner: 'Priya Deshmukh',
-      'Kylas Stage': 'CNC_COULD_NOT_CONNECT_2', 'KPI Stage': 'CNC_COULD_NOT_CONNECT_2', 'Right POC': 0 },
-  ],
-  Focus: [
-    { 'Kylas Company ID': '903', 'Company Name': 'Shorehouse Retail', Status: 'focus',
-      Reason: '', Note: '', Owner: 'Priya Deshmukh', 'Set By': 'priya@enout.in', 'Set At': ago(3) },
-    { 'Kylas Company ID': '1773706', 'Company Name': 'vincitlabs', Status: 'focus',
-      Reason: '', Note: '', Owner: 'Rubal Sansanwal', 'Set By': 'rubal@enout.in', 'Set At': ago(1) },
-    { 'Kylas Company ID': '1778327', 'Company Name': 'Kritsnam Analytics', Status: 'depri',
-      Reason: "Can't reach the right POC", Note: 'Four attempts, switchboard only, no direct line anywhere.',
-      Owner: 'Priya Deshmukh', 'Set By': 'priya@enout.in', 'Set At': ago(2) },
-  ],
-  Research: [
-    /* "501-1,000" with a PLAIN HYPHEN, where the field list offers an en dash.
-       Deliberate: it is the shape of every value this base already holds from
-       before the form existed, and the check below is that such a value is
-       kept rather than silently blanked by a <select> that cannot match it. */
-    { 'Kylas Company ID': '903', 'Company Name': 'Shorehouse Retail', Industry: 'Retail',
-      Employees: '501-1,000', 'HQ City': 'Mumbai', 'Other Offices': '',
-      'Known Events': 'Annual dealer meet, regional store openings',
-      'Updated By': 'priya@enout.in', 'Updated At': ago(5) },
-  ],
-  Team: [
-    { Name: 'Rubal Sansanwal', Role: 'Business Development Associate', Active: true, Note: '' },
-    { Name: 'Priya Deshmukh', Role: 'Business Development Associate', Active: true, Note: '' },
-  ],
-};
+/* RECORD LINKS, BUILT BY CONSTRUCTION. The ladder counts COMPANIES, and a
+   transition reaches its company only through Contact -> Company. A fixture
+   without those links collapses every transition onto one empty company key,
+   which reads as "the rung is broken" when it means "the fixture is". The mock
+   hands out record ids sequentially in the seed file's key order, so they can
+   be computed here rather than guessed. */
+let recN = 0;
+const rid = () => 'rec' + String(++recN).padStart(14, '0');
+const ids = {};
+
+const CO = [
+  ['1776620', 'seats',              'Rubal Sansanwal', 'DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS', 22],
+  ['1773706', 'vincitlabs',         'Rubal Sansanwal', 'MQL_MARKETING_QUALIFIED_LEAD',               14],
+  ['903',     'Shorehouse Retail',  'Priya Deshmukh',  'SQL_SALES_QUALIFIED_LEAD',                   26],
+  ['1778327', 'Kritsnam Analytics', 'Priya Deshmukh',  'CNC_COULD_NOT_CONNECT_2',                     7],
+];
+const qualified = (id) => id === '1776620' || id === '903';
+
+const SEED = {};
+SEED.Companies = CO.map(([id, Name, Owner, stage, rank]) => {
+  ids['co:' + id] = rid();
+  return { 'Kylas Company ID': id, Name, Owner, 'Kylas Stage': stage, 'KPI Stage': stage,
+           'KPI Rank': rank, 'KPI Stage At': ago(4), 'Last Call At': ago(2) };
+});
+SEED.Contacts = CO.map(([id, , Owner, stage], i) => {
+  ids['ct:' + id] = rid();
+  return { Name: ['Hema Bharathi', 'Shipra Gupta', 'Devanshi Kalro', 'Arun Menon'][i],
+           'Kylas Contact ID': 'c' + (i + 1), Owner, 'Current Stage': stage,
+           Company: [ids['co:' + id]],
+           'Is Right POC': qualified(id) ? 1 : 0, 'Is Discovery': qualified(id) ? 1 : 0,
+           'KPI Rank At': ago(6) };
+});
+
+/* The history the ladder is counted from. Deliberately shaped so every rung
+   has a different number and one company drops out at Phone picked:
+     seats      CNC -> MQL -> Discovery done     reached, picked, right, discovery
+     vincitlabs CNC -> MQL                       reached, picked
+     Shorehouse MQL -> AR booked -> done -> SQL  all seven
+     Kritsnam   CNC -> CNC 2                     reached ONLY — never left CNC
+   So: reached 4, picked 3, right 2, discovery 2, booked 1, done 1, sql 1. */
+const T = [];
+const move = (coid, to, d) => T.push({
+  Key: `${coid}-${d}`, 'From Stage': '', 'To Stage': to, 'Changed At': ago(d),
+  Owner: CO.find((c) => c[0] === coid)[2], Source: 'Console', Contact: [ids['ct:' + coid]] });
+move('1776620', 'CNC_COULD_NOT_CONNECT', 20);
+move('1776620', 'MQL_MARKETING_QUALIFIED_LEAD', 14);
+move('1776620', 'DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS', 6);
+move('1773706', 'CNC_COULD_NOT_CONNECT', 18);
+move('1773706', 'MQL_MARKETING_QUALIFIED_LEAD', 9);
+move('903', 'MQL_MARKETING_QUALIFIED_LEAD', 25);
+move('903', 'ACTIVE_REQUIREMENT_CALL_BOOKED', 12);
+move('903', 'ACTIVE_REQUIREMENT_CALL_DONE_\u2013_AWAITING_CLIENT_INPUTS', 8);
+move('903', 'SQL_SALES_QUALIFIED_LEAD', 5);
+move('1778327', 'CNC_COULD_NOT_CONNECT', 15);
+move('1778327', 'CNC_COULD_NOT_CONNECT_2', 7);
+SEED['Stage Transitions'] = T; T.forEach(rid);
+
+SEED.Focus = [
+  { 'Kylas Company ID': '903', 'Company Name': 'Shorehouse Retail', Status: 'focus',
+    Reason: '', Note: '', Owner: 'Priya Deshmukh', 'Set By': 'priya@enout.in', 'Set At': ago(3) },
+  { 'Kylas Company ID': '1773706', 'Company Name': 'vincitlabs', Status: 'focus',
+    Reason: '', Note: '', Owner: 'Rubal Sansanwal', 'Set By': 'rubal@enout.in', 'Set At': ago(1) },
+  { 'Kylas Company ID': '1778327', 'Company Name': 'Kritsnam Analytics', Status: 'depri',
+    Reason: "Can't reach the right POC", Note: 'Four attempts, switchboard only, no direct line anywhere.',
+    Owner: 'Priya Deshmukh', 'Set By': 'priya@enout.in', 'Set At': ago(2) },
+];
+SEED.Focus.forEach(rid);
+
+SEED.Research = [
+  /* Employees is "501-1,000" with a PLAIN HYPHEN where the field list offers an
+     en dash. Deliberate: it is the shape of a value entered before this form
+     existed, and the check below is that it survives rather than being blanked
+     by a <select> that cannot match it.
+     Funding and Recent Trigger are here because they are what the strip on the
+     company page is for — Ayush, 2026-09-20: "I can show that this company has
+     raised funding, so that they're able to see that". */
+  { 'Kylas Company ID': '903', 'Company Name': 'Shorehouse Retail', Industry: 'Retail',
+    Employees: '501-1,000', 'HQ City': 'Mumbai', 'Other Offices': '',
+    Funding: 'Series C, Mar 2026 - $40M led by Accel',
+    'Recent Trigger': 'Opened a Pune office in August; hiring 120',
+    'Event Season': 'Q3 FY27 / Oct-Dec', 'Decides Events': 'CHRO + Admin head',
+    'Known Events': 'Annual dealer meet, regional store openings',
+    'Updated By': 'priya@enout.in', 'Updated At': ago(5) },
+];
+SEED.Research.forEach(rid);
+
+/* In Funnel, not Active: counter() reads In Funnel and nothing else, and a
+   roster where it is missing excludes everybody — every rung reads zero with
+   the reason only visible in `excluded`. */
+SEED.Team = [
+  { Name: 'Rubal Sansanwal', Role: 'Business Development Associate', 'In Funnel': true, Note: '' },
+  { Name: 'Priya Deshmukh', Role: 'Business Development Associate', 'In Funnel': true, Note: '' },
+];
+SEED.Team.forEach(rid);
+
 if (process.argv.includes('--seed')) { console.log(JSON.stringify(SEED, null, 2)); process.exit(0); }
 
 const { chromium } = await import('/opt/node22/lib/node_modules/playwright/index.mjs');
@@ -151,6 +210,70 @@ check('and shows the reason', await strip(f), (s) => /Timing — revisit next qu
 await f.evaluate(() => render());
 await page.waitForTimeout(200);
 check('which survives a render', await seg(f), '★ Focus | Not picked | Deprioritize*');
+
+/* ── the ladder ───────────────────────────────────────────────────────── */
+console.log('\n— the ladder —');
+await page.evaluate(() => history.pushState({}, '', '/sales/home'));
+await page.waitForTimeout(3000);
+f = F();
+/* Everyone, and a quarter wide enough to hold the seeded history. The mock
+   Kylas user is not one of the two BDs, so the default "Me" scope correctly
+   counts nothing — that is not the bug being tested here. */
+await f.locator('#dOwner').selectOption('all');
+await page.waitForTimeout(2000);
+await f.locator('.vperiod button', { hasText: 'Quarter' }).click().catch(() => {});
+await page.waitForTimeout(2500);
+f = F();
+
+const ladder = await f.locator('table.ladder tbody tr').evaluateAll((rs) => rs.map((r) => ({
+  /* The rung number is its own <i> inside .rungname, so textContent is
+     "\n  1Companies reached" — trim BEFORE stripping the digits. */
+  rung: r.querySelector('.rungname')?.textContent?.trim().replace(/^\d+/, '').trim(),
+  n: Number(r.querySelector('.teamcol b')?.textContent?.trim() || 0),
+})));
+check('seven rungs', ladder.length, 7);
+/* THE REGRESSION THIS SUITE EXISTS FOR. FLOORS in report.mjs held only
+   booked/done/sql, so firstArrivals() could never emit worked or picked and
+   the top two rungs were structurally zero — every rung below them had
+   numbers, which reads as a broken funnel rather than an absent metric. */
+check('rung 1 is Companies reached', ladder[0]?.rung, 'Companies reached');
+check('rung 1 is NOT zero', ladder[0]?.n, 4);
+check('rung 2 is Phone picked', ladder[1]?.rung, 'Phone picked');
+/* Kritsnam never left the CNC ladder, so it is reached and not picked. */
+check('phone picked excludes a CNC-only company', ladder[1]?.n, 3);
+check('right POC', ladder[2]?.n, 2);
+check('discovery', ladder[3]?.n, 2);
+check('booked', ladder[4]?.n, 1);
+check('done', ladder[5]?.n, 1);
+check('sql', ladder[6]?.n, 1);
+/* A funnel that widens is a real finding, but this fixture should not: each
+   rung must be at most the one above it. */
+check('the ladder descends', ladder.every((r, i) => i === 0 || r.n <= ladder[i - 1].n), true);
+await page.screenshot({ path: '/tmp/claude-0/live-ladder.png' });
+
+/* ── research on the company page, not behind a button ────────────────── */
+console.log('\n— research on the company page —');
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/903/'));
+await page.waitForTimeout(3000);
+f = F();
+check('the strip is on the page', await f.locator('.ares').count(), 1);
+/* Collapsed at five facts, and the funding line is the peek — the whole point
+   is that somebody about to dial sees it without asking for it. */
+check('the funding shows without opening anything',
+      await f.locator('.ares .peek').textContent(), (t) => /Series C/.test(t || ''));
+await f.locator('#accResToggle').click();
+await page.waitForTimeout(400);
+const facts = await f.locator('.ares dl > div').evaluateAll((ds) => ds.map((d) =>
+  d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
+check('expanding shows every fact we hold', facts.length, 5);
+check('funding is one of them', facts.join('|'), (t) => /Funding.*Series C/.test(t));
+check('so is the recent trigger', facts.join('|'), (t) => /Recent trigger.*Pune/.test(t));
+/* Research notes and industry are deliberately NOT here — they are context,
+   not an opener, and a paragraph would push the queue off the screen. */
+check('research notes stay in the form', facts.join('|'), (t) => !/Research notes/.test(t));
+await f.evaluate(() => render());
+await page.waitForTimeout(300);
+check('it survives a render', await f.locator('.ares dl > div').count(), 5);
 
 /* ── the focus lists view ─────────────────────────────────────────────── */
 console.log('\n— focus lists —');

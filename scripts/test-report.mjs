@@ -182,6 +182,36 @@ console.log("\na day held by both sources is counted once, from the raw rows");
   eq("no raw at all means the rollup stands", mergeCalls([], rolled).length, 3);
 }
 
+console.log("\nthe first two rungs exist at all");
+{
+  /* THE REGRESSION. FLOORS held only booked/done/sql, so firstArrivals() could
+     not emit `worked` or `picked` and both rungs read zero on every screen
+     while every rung below them had numbers. Nothing here caught it: the
+     suite only ever asserted the three that were present. */
+  const t = (company, to, at) => ({ company, to, at, owner: "Rubal" });
+  const rows = firstArrivals({ transitions: [
+    t("A", "CNC_COULD_NOT_CONNECT", "2026-09-01T10:00:00Z"),
+    t("A", "MQL_MARKETING_QUALIFIED_LEAD", "2026-09-05T10:00:00Z"),
+    t("B", "CNC_COULD_NOT_CONNECT_2", "2026-09-02T10:00:00Z"),
+    t("C", "YET_TO_BE_MINED", "2026-09-02T10:00:00Z"),
+    t("D", "SQL_SALES_QUALIFIED_LEAD", "2026-09-06T10:00:00Z"),
+  ] });
+  const of = (k) => rows.filter((a) => a.metric === k).map((a) => a.company).sort().join(",");
+
+  eq("a stage move is a company worked", of("worked"), "A,B,D");
+  /* Moving something to "not touched yet" is not contact. */
+  eq("a move to YET_TO_BE_MINED is not", of("worked").includes("C"), false);
+  /* The same set airtable.mjs uses for Ever Picked — B never left CNC. */
+  eq("picked excludes the CNC ladder", of("picked"), "A,D");
+  eq("worked is dated from the first move",
+     rows.find((a) => a.metric === "worked" && a.company === "A").at, "2026-09-01T10:00:00Z");
+  /* FOLLOWUP_CNC is rung 15, ABOVE MQL at 14 — which is exactly why picked
+     cannot be a numeric floor. A company sitting there has not been picked. */
+  const late = firstArrivals({ transitions: [t("E", "FOLLOWUP_CNC", "2026-09-03T10:00:00Z")] });
+  eq("FOLLOWUP_CNC counts as worked", late.some((a) => a.metric === "worked"), true);
+  eq("FOLLOWUP_CNC does not count as picked", late.some((a) => a.metric === "picked"), false);
+}
+
 console.log("\nfirst arrivals, as dates rather than counts");
 {
   /* The same fixtures the counting tests use, read the other way. The ladder

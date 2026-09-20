@@ -615,14 +615,33 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .vfun{background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:6px 22px 14px;box-shadow:none;margin-bottom:18px}
 
-/* Minimal: one label, one mark, three numbers. The per-row definition moved to
-   the row's title — six explanatory sublines under six bars is the thing that
-   made this read as dense rather than informative. */
+/* The definition is BACK on the row, and this is a reversal. It had moved to
+   the row's title because six explanatory sublines under six bars read as
+   dense — but a tooltip cannot be read on a screen somebody is presenting
+   from, and three of these rungs are a GROUP of stages whose membership is the
+   whole question. Ayush, 2026-09-20: "there is a group of stages... I want the
+   exact same format displayed."
+
+   The density problem is real, so it is solved by hierarchy instead of by
+   hiding: the short form sits under the rung name at meta size, and the stage
+   list goes on its own full-width line, quieter still. The numbers keep the
+   weight, so the row still scans as a bar and a count. */
 .vfr{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 62px 76px 84px;
   gap:14px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}
 .vfr:last-child{border-bottom:0}
 .vfr .fl{min-width:0;font-size:var(--t-label);font-weight:var(--w-med);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The short definition, under the name. Allowed to wrap — truncating the
+   sentence that says what a number means is worse than a second line. */
+.vfr .fl em{display:block;font-style:normal;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--text3);white-space:normal;
+  letter-spacing:0;margin-top:2px;line-height:1.35}
+/* The stage group, spanning the whole row under the bar. Which stages a rung
+   counts is the difference between trusting the number and not, so it is on
+   the row rather than in a tooltip — but it is the quietest thing there. */
+.vfr .fg{grid-column:1/-1;font-size:var(--t-meta);color:var(--text3);
+  line-height:1.5;margin-top:-4px}
+.vfr .fg b{font-weight:var(--w-med);color:var(--text2)}
 /* No track behind the bar. An empty rung should read as empty, not as a grey
    bar that looks like a value of its own. 8px, 4px rounded end. */
 .vfr .fb{height:8px}
@@ -643,6 +662,9 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 @media(max-width:760px){
   .vfr{grid-template-columns:minmax(0,1.4fr) 54px 68px}
   .vfr .fb,.vfr .fo{display:none}
+  /* Narrow enough that the stage list would be three wrapped lines per rung.
+     The sub-label survives, because it is the one-line answer. */
+  .vfr .fg{display:none}
 }
 
 .vlg{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 12px}
@@ -963,3 +985,33 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 /* A stored value the list does not offer, kept and labelled rather than
    silently blanked. */
 .rodd{font-style:normal;font-size:var(--t-meta);color:var(--amber);margin-top:2px}
+
+/* ── what we know about this company, on the page ─────────────────────── */
+/* Not behind the Research button. An associate about to dial wants the funding
+   round in front of them while the number rings; a button is something you
+   open on the first call and never again. */
+.ares{flex:0 0 100%;margin-top:2px}
+.ares>button{display:flex;align-items:baseline;gap:8px;width:100%;
+  background:transparent;border:0;padding:3px 0;font:inherit;cursor:pointer;
+  text-align:left;color:var(--text2)}
+.ares>button .k{font-size:var(--t-meta);font-weight:var(--w-strong);
+  text-transform:uppercase;letter-spacing:.04em;color:var(--text3);flex:none}
+/* The first fact, shown while collapsed. It is the reason to expand, so
+   hiding it behind a count would make the control pointless. */
+.ares>button .peek{font-size:var(--t-meta);color:var(--text2);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ares>button .n{font-size:var(--t-meta);color:var(--text3);flex:none;
+  font-variant-numeric:tabular-nums;margin-left:auto}
+.ares>button:hover .k,.ares>button:hover .n{color:var(--blue)}
+.ares>button::after{content:"▾";font-size:10px;color:var(--text3);flex:none;
+  transition:transform .15s}
+.ares.on>button::after{transform:rotate(180deg)}
+
+/* Label above value, not beside it. The column is ~340px and a funding line
+   reads "Series C, Mar 2026 · listed" — beside a label it would truncate at
+   the part that matters. */
+.ares dl{margin:4px 0 2px;display:flex;flex-direction:column;gap:7px}
+.ares dl>div{min-width:0}
+.ares dt{font-size:var(--t-meta);color:var(--text3);line-height:1.3}
+.ares dd{margin:1px 0 0;font-size:var(--t-label);color:var(--text);
+  line-height:1.45;overflow-wrap:anywhere}

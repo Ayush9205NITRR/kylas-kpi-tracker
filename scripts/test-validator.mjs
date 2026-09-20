@@ -15,9 +15,14 @@ const FAULTS = [
   ["duplicate field name",
    (s) => s.replace('{ name: "Owner", type: "singleLineText" },\n      { name: "Current Stage"',
                     '{ name: "Owner", type: "singleLineText" },\n      { name: "owner", type: "singleLineText" },\n      { name: "Current Stage"')],
+  /* Anchored on Right POC, not Reached. Reached was the anchor until
+     2026-09-20, when its formula gained {KPI Stage At} and this injection
+     silently stopped matching — the harness reported "fault did not apply,
+     test is stale" rather than a pass, which is the only reason anybody
+     noticed. Right POC is one term over one rollup and has no reason to move. */
   ["formula referring to a missing field",
-   (s) => s.replace('formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`)',
-                    'formula("Companies", "Reached", `IF({Nonexistent Field}, 1, 0)`)')],
+   (s) => s.replace('formula("Companies", "Right POC", `IF({Right POC Contacts}, 1, 0)`',
+                    'formula("Companies", "Right POC", `IF({Nonexistent Field}, 1, 0)`')],
   ["rollup through a field that is not a link",
    (s) => s.replace('rollup("Contacts", "Call Count", "Call Log", "Called At", "COUNTA(values)")',
                     'rollup("Contacts", "Call Count", "Owner", "Called At", "COUNTA(values)")')],
