@@ -31,16 +31,17 @@
  *   node scripts/migrate-ladder.mjs --apply             write it
  *   node scripts/verify-base.mjs                        confirm
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { RANK_REMAP, CODE_REMAP, RETIRED, ADDED, STAGE_RUNG, STAGE_LABEL } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) {
-  console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...).");
-  process.exit(1);
-}
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 /* One key per migration. Derived from what is being migrated, so adding a
    second retirement later produces a different key and runs again — while

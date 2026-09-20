@@ -113,10 +113,19 @@ cloned again, look for the old one before issuing new keys:
 find ~ -name .env.local -not -path '*/node_modules/*' 2>/dev/null
 ```
 
-And `source` it in **every new terminal**: it sets shell variables, not machine
-ones, so a second tab knows nothing about the first. `source: no such file or
-directory: .env.local` means you are either in the wrong directory or the file
-was never made; `cd` to the repo root and check with `ls -a`.
+**You no longer need to `source` it.** Every script reads `.env.local` itself,
+searching up from its own directory, so this works from anywhere in the repo:
+
+```bash
+node scripts/proxy.mjs
+```
+
+`source .env.local && node scripts/proxy.mjs` still works and still wins — a
+variable already set in the shell is never overwritten by the file. Keep using
+it if you prefer; nothing written down elsewhere has to change.
+
+If a key is missing, the script now names the file it actually read and what
+that file set, rather than telling you to set a variable.
 
 > Never paste a key into a chat, a commit, or a screenshot. If one does get
 > out, revoke it at the link above and issue a new one — rotating takes a
@@ -127,7 +136,6 @@ was never made; `cd` to the repo root and check with `ls -a`.
 The schema gains fields as the KPIs get defined. Check yours matches:
 
 ```bash
-source .env.local
 node scripts/verify-base.mjs
 ```
 

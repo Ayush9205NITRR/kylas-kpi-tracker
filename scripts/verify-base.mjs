@@ -15,6 +15,10 @@
  * comparison now lives in schema-diff.mjs and includes the formula text, the
  * rollup aggregation and every select's choices.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { diffBase, manualCount, cleanExceptExtras } from "./schema-diff.mjs";
 /* Only to tell a missing table that one repair-base run finishes from one that
    needs two — see the advice at the bottom. */
@@ -22,10 +26,7 @@ import { FOLLOWUPS } from "./schema.mjs";
 
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) {
-  console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...).");
-  process.exit(1);
-}
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const res = await fetch(`https://api.airtable.com/v0/meta/bases/${BASE}/tables`, {
   headers: { Authorization: `Bearer ${PAT}` },

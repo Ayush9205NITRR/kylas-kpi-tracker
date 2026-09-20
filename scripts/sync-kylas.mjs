@@ -34,6 +34,10 @@
  * "Kylas sync" so the period report counts it and can tell it apart from a
  * stage an associate set on a call.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createClient, toConsoleContact, toConsoleCompany, idOf } from "./kylas.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG } from "./stages.mjs";
@@ -46,8 +50,8 @@ const LIMIT = Number(arg("limit") || 0);
 const KEY = process.env.KYLAS_KEY;
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!KEY) { console.error("Set KYLAS_KEY."); process.exit(1); }
-if (!PAT || !BASE) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+requireEnv("KYLAS_KEY");
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const log = (...a) => console.log(...a);
 const kylas = createClient(KEY, { log: (m) => log("  kylas:", m) });

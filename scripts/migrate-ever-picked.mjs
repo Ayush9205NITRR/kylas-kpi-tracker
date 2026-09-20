@@ -40,13 +40,17 @@
  * for everything, so nothing can be wrongly false. That also makes this safe to
  * run twice: it is derived from evidence, not incremented.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { NOT_CONNECTED } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const KEY = "ever-picked-2026-09-19-cnc-not-picked";
 const at = createAirtable(PAT, BASE, { log: (m) => console.log("  " + m) });

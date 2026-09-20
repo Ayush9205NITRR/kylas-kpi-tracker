@@ -34,6 +34,9 @@
  * A row with three or four flags is worth opening in Kylas. One flag on its
  * own is usually just a real call.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG, STAGE_LABEL, CNC_LADDER } from "./stages.mjs";
 

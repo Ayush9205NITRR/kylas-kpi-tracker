@@ -23,6 +23,10 @@
  *
  * Run verify-base.mjs first to see the state, and again afterwards to confirm.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
 import { diffBase } from "./schema-diff.mjs";
 
@@ -30,10 +34,7 @@ const DRY = process.argv.includes("--dry-run");
 const FORMULAS = process.argv.includes("--update-formulas");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) {
-  console.error("Set AIRTABLE_PAT (schema.bases:write) and AIRTABLE_BASE (app...).");
-  process.exit(1);
-}
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const META = "https://api.airtable.com/v0/meta";
 async function call(method, path, body) {

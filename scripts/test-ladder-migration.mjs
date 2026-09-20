@@ -18,7 +18,10 @@ import { STAGE_RUNG, RANK_REMAP } from "./stages.mjs";
 const PORT = 9917;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const SEED = "/tmp/claude-0/test-ladder-seed.json";
-const env = { ...process.env, AIRTABLE_BASE_URL: BASE_URL, AIRTABLE_PAT: "testpat",
+/* ENV_FILE=/dev/null: a real .env.local on the developer's machine must not
+   reach a script this test spawns. These already pin AIRTABLE_BASE_URL at the
+   mock, so the isolation held by luck — this makes it the rule. */
+const env = { ...process.env, ENV_FILE: "/dev/null", AIRTABLE_BASE_URL: BASE_URL, AIRTABLE_PAT: "testpat",
               AIRTABLE_BASE: "appTest", AIRTABLE_GAP: "20" };
 
 let pass = 0, fail = 0;

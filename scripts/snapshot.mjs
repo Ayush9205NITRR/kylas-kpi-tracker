@@ -9,6 +9,10 @@
  * already has a row is left alone: the whole point is that last Tuesday reads
  * the same tomorrow as it does today.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG } from "./stages.mjs";
 
@@ -16,7 +20,7 @@ const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > -1 ? p
 const DRY = process.argv.includes("--dry-run");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 /* Yesterday by default: today is still happening and must not be frozen. */
 const DATE = arg("date") || new Date(Date.now() - 864e5).toISOString().slice(0, 10);

@@ -12,6 +12,10 @@
  * Reads and writes. A write is: create or update the contact, rewrite the
  * marker block inside its remarks, and append a native Kylas call log.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv, ENV_FILE } from "./env.mjs";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
@@ -49,30 +53,7 @@ const STARTED = new Date().toISOString();
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
-if (!KEY) {
-  /* NAME THE FILE. "Set KYLAS_KEY" is only useful to somebody who already
-     knows where keys live here — and the person reading it has just watched
-     `source .env.local` fail, which is the actual problem nine times out of
-     ten. A fresh clone never has that file, because it is gitignored and has
-     never left the machine that made it. */
-  const { existsSync } = await import("node:fs");
-  const here = new URL("../.env.local", import.meta.url).pathname;
-  console.error("KYLAS_KEY is not set in this shell.\n");
-  if (existsSync(here)) {
-    console.error(`  .env.local exists. Did you source it in THIS terminal?`);
-    console.error(`    source .env.local && node scripts/proxy.mjs\n`);
-    console.error(`  It sets shell variables, not machine ones, so every new tab needs it again.`);
-  } else {
-    console.error(`  There is no .env.local here. Make one:`);
-    console.error(`    cp .env.local.example .env.local`);
-    console.error(`    $EDITOR .env.local          # paste the two keys`);
-    console.error(`    source .env.local && node scripts/proxy.mjs\n`);
-    console.error(`  Cloned again and had one before? Find it rather than issuing new keys:`);
-    console.error(`    find ~ -name .env.local -not -path '*/node_modules/*' 2>/dev/null\n`);
-    console.error(`  Kylas key: app.kylas.io/setup/integrations/api-keys/list`);
-  }
-  process.exit(1);
-}
+requireEnv("KYLAS_KEY");
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 

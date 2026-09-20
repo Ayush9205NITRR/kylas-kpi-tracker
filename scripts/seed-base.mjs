@@ -10,6 +10,10 @@
  * contact, append its event rows and calls, and compute the monotonic KPI rank.
  * Getting it right here is what makes the real writer straightforward.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { readFileSync } from "node:fs";
 
 const DRY = process.argv.includes("--dry-run");
@@ -18,7 +22,7 @@ const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
 
 if (!FILE) { console.error("Pass the exported json: node scripts/seed-base.mjs export.json"); process.exit(1); }
-if (!DRY && (!PAT || !BASE)) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+if (!DRY) requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const dump = JSON.parse(readFileSync(FILE, "utf8"));
 const contacts = dump.contacts || [];

@@ -12,6 +12,10 @@
  *
  * Raw responses land in ./kylas-probe/ so the shapes can be read afterwards.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const KEY = process.env.KYLAS_KEY;
@@ -23,10 +27,7 @@ const COMPANY = arg("company");
 const CONTACT = arg("contact");
 const WRITE = process.argv.includes("--write");
 
-if (!KEY) {
-  console.error("Set KYLAS_KEY — app.kylas.io/setup/integrations/api-keys/list");
-  process.exit(1);
-}
+requireEnv("KYLAS_KEY");
 
 const OUT = "kylas-probe";
 mkdirSync(OUT, { recursive: true });

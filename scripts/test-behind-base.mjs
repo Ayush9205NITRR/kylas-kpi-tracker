@@ -35,6 +35,10 @@ const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 if (existsSync(REPO + '/.save-journal.json')) unlinkSync(REPO + '/.save-journal.json');
 const AT = 'http://127.0.0.1:9901';
 const ENV = { KYLAS_BASE:'http://127.0.0.1:9900', KYLAS_KEY:'x',
+/* ENV_FILE=/dev/null: a real .env.local on the developer's machine must not
+   reach a script this test spawns. These already pin AIRTABLE_BASE_URL at the
+   mock, so the isolation held by luck — this makes it the rule. */
+  ENV_FILE:'/dev/null',
   AIRTABLE_BASE_URL:AT, AIRTABLE_PAT:'pat_mock', AIRTABLE_BASE:'appMOCK', PORT:'8787' };
 
 const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
@@ -187,7 +191,7 @@ await sleep(300);
 
 const run = (args=[]) => new Promise((resolve)=>{
   const p = spawn('node',['scripts/migrate-first-worked.mjs',...args],
-    {cwd:REPO,env:{...process.env,AIRTABLE_BASE_URL:AT,AIRTABLE_PAT:'pat_mock',AIRTABLE_BASE:'appMOCK'}});
+    {cwd:REPO,env:{...process.env,ENV_FILE:'/dev/null',AIRTABLE_BASE_URL:AT,AIRTABLE_PAT:'pat_mock',AIRTABLE_BASE:'appMOCK'}});
   let out=''; p.stdout.on('data',d=>out+=d); p.stderr.on('data',d=>out+=d);
   p.on('exit',code=>resolve({code,out}));
 });

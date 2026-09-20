@@ -13,6 +13,9 @@
  * Not idempotent. Into an existing base it refuses if any table name is already
  * taken, rather than half-merging into what is there.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
 
 const DRY = process.argv.includes("--dry-run");

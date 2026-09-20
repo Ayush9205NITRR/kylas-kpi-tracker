@@ -42,13 +42,17 @@
  * the console already wrote are updated in place rather than duplicated, and
  * re-running changes nothing.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { STAGES } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 
 const at = createAirtable(PAT, BASE, { log: (m) => console.log("  " + m) });
 const iso = (v) => { const t = Date.parse(v || ""); return Number.isFinite(t) ? new Date(t).toISOString() : ""; };

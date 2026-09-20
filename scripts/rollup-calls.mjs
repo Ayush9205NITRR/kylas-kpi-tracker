@@ -34,6 +34,10 @@
  * Totals are written ABSOLUTE, never incremented — an increment would double
  * the day every time the script was re-run over rows it had not yet deleted.
  */
+/* Loads .env.local if it is there, so nothing needs sourcing first. Must come
+   before any import that reads process.env at module scope. */
+import "./env.mjs";
+import { requireEnv } from "./env.mjs";
 import { createAirtable } from "./airtable.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > -1 ? process.argv[i + 1] : undefined; };
@@ -42,7 +46,7 @@ const DAYS = Number(arg("days") || process.env.CALL_RETAIN_DAYS || 90);
 
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
-if (!PAT || !BASE) { console.error("Set AIRTABLE_PAT and AIRTABLE_BASE (app...)."); process.exit(1); }
+requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
 if (!Number.isFinite(DAYS) || DAYS < 1) { console.error("--days must be a positive number."); process.exit(1); }
 
 const at = createAirtable(PAT, BASE, { log: (m) => console.log("  " + m) });

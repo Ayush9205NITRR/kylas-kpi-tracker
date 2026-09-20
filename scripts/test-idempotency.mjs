@@ -20,6 +20,10 @@ import { readFileSync, existsSync, unlinkSync } from 'node:fs';
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const JOURNAL = REPO + '/.save-journal.json';
 const ENV = { KYLAS_BASE:'http://127.0.0.1:9900', KYLAS_KEY:'x',
+/* ENV_FILE=/dev/null: a real .env.local on the developer's machine must not
+   reach a script this test spawns. These already pin AIRTABLE_BASE_URL at the
+   mock, so the isolation held by luck — this makes it the rule. */
+  ENV_FILE:'/dev/null',
   AIRTABLE_BASE_URL:'http://127.0.0.1:9901', AIRTABLE_PAT:'pat_mock',
   AIRTABLE_BASE:'appMOCK', PORT:'8787' };
 
