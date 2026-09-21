@@ -31,7 +31,8 @@ import { createAirtable, syncContact, readCompanyKpis,
          readTeam, writeTeam, counter,
          readFocus, readResearch, writeFocus, writeResearch,
          DEPRI_REASONS, RESEARCH_FIELDS,
-         SIGNAL_READ_FIELDS, contactSignals } from "./airtable.mjs";
+         SIGNAL_READ_FIELDS, contactSignals,
+         SOURCE_RESEARCH_FIELDS, readSourceResearch } from "./airtable.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
@@ -136,6 +137,22 @@ const airtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, { log }) : 
    signal anyone can act on — it reads the same as a line that never printed. */
 if (airtable) log(`airtable: ${AT_BASE}`);
 else log("airtable: not configured (set AIRTABLE_PAT and AIRTABLE_BASE) — KPIs will not be written");
+
+/* THE ENRICHMENT BASE, which is somebody else's. Ayush, 2026-09-21: "the
+   research section should be taken from airtable", pointing at
+   app55PsyRKqkf2CAQ / tbl2Jje9EBC4Cqydw. Read-only, and a SEPARATE client:
+   Airtable's 5 req/s is per base, so one pacer over two bases would either
+   throttle the KPI reads for no reason or exceed the limit on one of them.
+
+   Defaulted to the ids from that link so it works with nothing configured, and
+   overridable because a link in a chat is not a contract. The PAT has to be
+   scoped to this base as well; if it is not, /research says so rather than
+   showing an empty panel that looks like an account nobody has researched. */
+const RESEARCH_BASE = process.env.RESEARCH_BASE || "app55PsyRKqkf2CAQ";
+const RESEARCH_TABLE = process.env.RESEARCH_TABLE || "tbl2Jje9EBC4Cqydw";
+const sourceBase = AT_PAT && RESEARCH_BASE && process.env.RESEARCH_OFF !== "1"
+  ? createAirtable(AT_PAT, RESEARCH_BASE, { log }) : null;
+if (sourceBase) log(`research source: ${RESEARCH_BASE}/${RESEARCH_TABLE}`);
 
 /* ── WHICH SIDE ANSWERS A READ ──────────────────────────────────────────
    Kylas is the system of record and stays the write target, but reading the
@@ -517,6 +534,41 @@ const REPORT_TTL = Number(process.env.REPORT_TTL_MS || 60 * 1000);
    two different answers to that on one screen is worse than either being a
    minute old. Dropped by the same save hook, below. */
 const rcaDue = memo("rca", { ttl: REPORT_TTL }, () => readRcaDue(airtable, { log }));
+
+/* THE ENRICHMENT TABLE, CACHED HARD. It is a whole-table crawl of a base we do
+   not write to, so nothing a BD does here can change it and a minute's TTL
+   would buy accuracy nobody can use at the cost of a crawl every minute. Ten
+   minutes, stale-while-revalidate like the rest: the first open of the day
+   pays for it and no call after that does.
+
+   This is also the answer to "latency while making calls" for this panel —
+   research must never be a read a person waits on. */
+/* OUR OWN RESEARCH TABLE, CACHED TOO. This was a full crawl on every /research
+   — and /research fires on the first account a console opens, which is the
+   moment somebody is waiting for /company. Airtable's 5 req/s is per base and
+   one queue serves both, so a twenty-page Research crawl put twenty requests
+   in front of the read the BD was actually waiting on. Measured on the mock:
+   /research 647ms starting at t=77, /company 1291ms starting at t=94. On a
+   real base both are larger.
+
+   Ayush, 2026-09-21: "the system is still experiencing noticeable latency…
+   especially while making calls."
+
+   A minute, and dropped outright on a research save so the sheet you just
+   closed never shows you what it held before you typed. */
+const ourResearch = memo("research", { ttl: REPORT_TTL }, () => readResearch(airtable));
+
+/* memo() calls its function with no arguments — its own parameter is {fresh} —
+   so the sample the key detector matches against is handed over here rather
+   than passed in. It is only ever a hint: name detection is tried first and
+   RESEARCH_KEY_FIELD overrides both. */
+let knownCompanyIds = [];
+const sourceResearch = memo("source research",
+  { ttl: Number(process.env.RESEARCH_TTL_MS || 10 * 60 * 1000), stale: 60 * 60 * 1000 },
+  () => (sourceBase
+    ? readSourceResearch(sourceBase, RESEARCH_TABLE, { knownIds: knownCompanyIds, log })
+    : Promise.resolve({ rows: {}, status: { ok: false, off: true,
+        error: "no Airtable PAT, or RESEARCH_OFF=1" } })));
 
 const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
   /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
@@ -1116,9 +1168,26 @@ const routes = {
       throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
     }
     if (req.method === "GET") {
-      const all = await readResearch(airtable);
+      /* TWO SOURCES, KEPT APART. `research` is ours and editable; `source` is
+         their enrichment base and read-only. Merging them would make a scraped
+         funding figure indistinguishable from a BD's own note, and the first
+         time the two disagreed nobody could say which to believe. */
+      const all = await ourResearch();
+      /* Our own rows are keyed by Kylas company id, so they are the sample the
+         key detector matches against when their column is not named anything a
+         heuristic would recognise. Free — we have just read them. */
+      knownCompanyIds = Object.keys(all);
+      const src = await sourceResearch()
+        .catch((e) => ({ rows: {}, status: { ok: false, error: e.message.slice(0, 200) } }));
       const id = url.searchParams.get("id");
-      return { research: id ? { [id]: all[id] || {} } : all, fields: RESEARCH_FIELDS, configured: true };
+      return {
+        research: id ? { [id]: all[id] || {} } : all,
+        fields: RESEARCH_FIELDS,
+        source: id ? { [id]: src.rows[id] || {} } : src.rows,
+        sourceFields: SOURCE_RESEARCH_FIELDS,
+        sourceStatus: src.status,
+        configured: true,
+      };
     }
     const body = JSON.parse(await readBody(req));
     if (!body.companyId)
@@ -1126,6 +1195,9 @@ const routes = {
     const { dropped } = await writeResearch(airtable, body.companyId, body.companyName || "",
                                             body.values || {}, body.updatedBy || "");
     if (dropped?.length) log(`! this base has no Research.${dropped.join(", Research.")} — run repair-base.mjs`);
+    /* Dropped, not aged out. Closing the form and being shown what it held
+       before you typed is the one thing a cache here must never do. */
+    ourResearch.refresh({ atMostEvery: 0 });
     log(`research saved for ${body.companyId}`);
     return { ok: true, dropped: dropped || [] };
   },

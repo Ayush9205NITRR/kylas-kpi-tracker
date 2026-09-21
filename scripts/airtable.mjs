@@ -45,14 +45,27 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
      A save is somebody waiting. A cache refresh is nobody waiting. Reads go to
      the back, writes to the front, one pacer over both — so the rate limit is
      respected exactly as it was. */
-  const hi = [], lo = [];
+  /* THREE TIERS, NOT TWO. hi is a save; lo is a read somebody is waiting for;
+     bg is a whole-table crawl that nothing on screen is blocked on.
+
+     Two was not enough. The Research table is a crawl, and it is kicked off by
+     the console on the first account it opens — which is exactly when /company
+     is in flight, and /company is the read the BD is actually waiting for. One
+     queue at 5 req/s meant a twenty-page crawl sat in front of it. Measured on
+     the mock, cold: /company 2279ms with the crawl alongside it, 622ms
+     without. Ayush, 2026-09-21: "the system is still experiencing noticeable
+     latency… especially while making calls."
+
+     The tier is the call site's to declare, because only the call site knows
+     whether anybody is waiting. Writes stay urgent by construction. */
+  const hi = [], lo = [], bg = [];
   let pumping = false;
   async function pump() {
     if (pumping) return;
     pumping = true;
     try {
-      while (hi.length || lo.length) {
-        const job = hi.length ? hi.shift() : lo.shift();
+      while (hi.length || lo.length || bg.length) {
+        const job = hi.length ? hi.shift() : lo.length ? lo.shift() : bg.shift();
         const wait = Math.max(0, GAP - (Date.now() - lastAt));
         if (wait) await sleep(wait);
         lastAt = Date.now();
@@ -63,12 +76,12 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
       }
     } finally { pumping = false; }
   }
-  const queue = (fn, urgent = false) => new Promise((resolve, reject) => {
-    (urgent ? hi : lo).push({ fn, resolve, reject });
+  const queue = (fn, tier = "lo") => new Promise((resolve, reject) => {
+    (tier === "hi" ? hi : tier === "bg" ? bg : lo).push({ fn, resolve, reject });
     pump();
   });
 
-  async function call(method, path, body, tries = 4) {
+  async function call(method, path, body, tries = 4, tier = "") {
     return queue(async () => {
       for (let i = 0; i < tries; i++) {
         const res = await fetch(`${API}/${baseId}${path}`, {
@@ -88,8 +101,9 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
       throw new Error(`${method} ${path} -> still rate limited`);
     /* Anything that is not a GET is somebody's save. No call site has to know
        about this, which is the point: a write added later is urgent by
-       construction rather than by remembering to say so. */
-    }, method !== "GET");
+       construction rather than by remembering to say so. A read may ask to go
+       last; nothing can ask to jump a write. */
+    }, method !== "GET" ? "hi" : (tier === "bg" ? "bg" : "lo"));
   }
 
   const t = (name) => "/" + encodeURIComponent(name);
@@ -148,7 +162,11 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
        `fields` is not an optimisation: a company row carries ~30 computed
        fields and we want a named handful, so asking for them by name also
        documents which ones the dashboard depends on. */
-    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40 } = {}) {
+    /* `tier: "bg"` marks a crawl nobody is waiting for, so its pages queue
+       behind every interactive read instead of in front of them. Per PAGE,
+       deliberately: a twenty-page crawl that yielded only between crawls would
+       still block the first read behind its first page. */
+    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40, tier = "" } = {}) {
       const out = [];
       let offset = "";
       for (let p = 0; p < maxPages; p++) {
@@ -156,7 +174,7 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
                    formula ? `filterByFormula=${encodeURIComponent(formula)}` : "",
                    ...fields.map((f) => `fields[]=${encodeURIComponent(f)}`),
                    offset ? `offset=${encodeURIComponent(offset)}` : ""].filter(Boolean).join("&");
-        const r = await call("GET", `${t(table)}?${q}`);
+        const r = await call("GET", `${t(table)}?${q}`, undefined, 4, tier);
         (r?.records || []).forEach((x) => out.push(x));
         offset = r?.offset || "";
         if (!offset) break;
@@ -1137,9 +1155,12 @@ export const RESEARCH_COLUMNS = {
 };
 
 export async function readResearch(at) {
+  /* tier "bg": nobody is looking at a research panel while this runs — it is
+     prefetched so the panel is instant WHEN they look — so its pages must not
+     sit in front of the /company read somebody is waiting on. */
   const rows = await listTolerant(at, "Research",
     { fields: ["Kylas Company ID", ...Object.values(RESEARCH_COLUMNS), "Updated By", "Updated At"],
-      pageSize: 100, maxPages: 60 }).catch(() => []);
+      pageSize: 100, maxPages: 60, tier: "bg" }).catch(() => []);
   const out = {};
   for (const r of rows) {
     const id = String(r.fields?.["Kylas Company ID"] || "").trim();
@@ -1151,6 +1172,127 @@ export async function readResearch(at) {
     out[id] = row;
   }
   return out;
+}
+
+/* ── THE RESEARCH THAT WAS ALREADY THERE ───────────────────────────────
+   Ayush, 2026-09-21: "the research section should be taken from airtable"
+   + a link to app55PsyRKqkf2CAQ / tbl2Jje9EBC4Cqydw, "every company id has a
+   research section".
+
+   That is a DIFFERENT base from the KPI one, filled by whatever process
+   enriches their accounts, and it is not ours to write to. So it is read-only
+   enrichment shown beside the console's own fifteen fields, never merged into
+   them: a BD's own note and a scraped funding figure are different kinds of
+   fact and a screen that blurs them is worse than two blocks.
+
+   NOTHING HERE IS GUESSED FROM A SPELLING I CANNOT SEE. I have no access to
+   that base, so every column name below is matched loosely — case, spacing,
+   punctuation and the "no." / "number of" business all normalise away — and
+   the key column is DETECTED rather than assumed. If detection fails the
+   status says exactly what it found instead of quietly returning nothing,
+   because "no research" and "I could not find the id column" look identical
+   on screen and are completely different problems.
+
+   RESEARCH_KEY_FIELD overrides the detection if their column is named
+   something no heuristic would guess. */
+const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+export const SOURCE_RESEARCH_FIELDS = [
+  { k: "apollo", l: "LinkedIn (Apollo)", link: 1,
+    names: ["linkedin appollo", "linkedin apollo", "linkedin", "apollo"] },
+  { k: "boolean", l: "Boolean post link", link: 1,
+    names: ["boolean post link", "boolean post", "boolean link", "boolean"] },
+  { k: "fundTotal", l: "Total funding", names: ["total funding"] },
+  { k: "fundLast", l: "Latest funding amount", names: ["latest funding amount", "last funding amount"] },
+  { k: "fundType", l: "Latest funding type", names: ["latest funding type", "last funding type"] },
+  { k: "srcConcat", l: "Source", names: ["source concatenate", "source concat", "source"] },
+  { k: "pipeline", l: "Account pipeline stage", names: ["account pipeline stage", "pipeline stage", "account stage"] },
+  { k: "revenue", l: "Annual revenue", names: ["annual revenue", "revenue"] },
+  { k: "employees", l: "Employees (Kylas)",
+    names: ["no of employees kylas", "no of employees", "number of employees", "employees kylas", "employees"] },
+  { k: "revPerEmp", l: "Revenue per employee",
+    names: ["at rev per employee", "rev per employee", "revenue per employee"] },
+];
+
+/* The column holding the Kylas company id, found rather than assumed. Name
+   first, because a column called "Kylas Company ID" is not ambiguous. Failing
+   that, the column whose values actually look like the ids we hold — which is
+   the only test that survives someone calling it "Account Ref". */
+export function detectKeyField(rows, knownIds = []) {
+  const names = [...new Set(rows.flatMap((r) => Object.keys(r.fields || {})))];
+  const byName = names.find((n) => /^kylas\s*company\s*id$/.test(norm(n).replace(/\s+/g, " ")))
+    || names.find((n) => norm(n) === "company id")
+    || names.find((n) => /\bkylas\b/.test(norm(n)) && /\bid\b/.test(norm(n)));
+  if (byName) return { field: byName, how: "name" };
+
+  const known = new Set(knownIds.map((x) => String(x)));
+  if (!known.size) return { field: "", how: "none" };
+  let best = "", hits = 0;
+  for (const n of names) {
+    let k = 0;
+    for (const r of rows) if (known.has(String(r.fields?.[n] ?? "").trim())) k++;
+    if (k > hits) { hits = k; best = n; }
+  }
+  /* One coincidental match is not evidence. Three is a column. */
+  return hits >= Math.min(3, known.size) ? { field: best, how: `values (${hits} matched)` }
+                                         : { field: "", how: "none" };
+}
+
+export async function readSourceResearch(at, table, { knownIds = [], log = () => {} } = {}) {
+  /* NO PROJECTION. Asking for names I cannot verify is how the whole read
+     fails on one wrong string — and the names are the thing being discovered
+     here, so there is nothing to ask for yet. */
+  let rows;
+  try {
+    rows = await at.listAll(table, { pageSize: 100, maxPages: 200, tier: "bg" });
+  } catch (e) {
+    return { rows: {}, status: { ok: false, error: e.message.slice(0, 200), table } };
+  }
+  if (!rows.length) return { rows: {}, status: { ok: true, table, rows: 0, note: "the table is empty" } };
+
+  const override = process.env.RESEARCH_KEY_FIELD || "";
+  const key = override ? { field: override, how: "RESEARCH_KEY_FIELD" }
+                       : detectKeyField(rows, knownIds);
+  const columns = [...new Set(rows.flatMap((r) => Object.keys(r.fields || {})))];
+  if (!key.field) {
+    log(`! could not find the company-id column in ${table}. Columns: ${columns.join(", ").slice(0, 300)}`);
+    return { rows: {}, status: { ok: false, table, rows: rows.length, columns,
+                                 error: "no company-id column found — set RESEARCH_KEY_FIELD" } };
+  }
+
+  /* Each wanted field to a real column on this table, once, by normalised
+     name. Longest match wins so "latest funding amount" is not taken by the
+     looser "total funding" alternative of another key. */
+  const map = {};
+  const taken = new Set();
+  for (const f of SOURCE_RESEARCH_FIELDS) {
+    const hit = f.names
+      .map((want) => columns.find((c) => norm(c) === want && !taken.has(c)))
+      .find(Boolean)
+      || columns.find((c) => !taken.has(c) && f.names.some((want) => norm(c).includes(want)));
+    if (hit) { map[f.k] = hit; taken.add(hit); }
+  }
+
+  const out = {};
+  for (const r of rows) {
+    const id = String(r.fields?.[key.field] ?? "").trim();
+    if (!id) continue;
+    const row = {};
+    for (const [k, col] of Object.entries(map)) {
+      const v = r.fields?.[col];
+      /* Airtable hands back numbers, arrays (a multi-select or a link) and
+         objects (an attachment) as well as strings. The panel shows text. */
+      row[k] = v == null ? ""
+        : Array.isArray(v) ? v.map((x) => (x && typeof x === "object" ? x.name || x.url || "" : x)).filter(Boolean).join(", ")
+        : typeof v === "object" ? String(v.name || v.url || "")
+        : String(v);
+    }
+    out[id] = row;
+  }
+  return { rows: out, status: { ok: true, table, rows: rows.length, keyed: Object.keys(out).length,
+                                keyField: key.field, keyHow: key.how,
+                                mapped: map, columns,
+                                unmapped: SOURCE_RESEARCH_FIELDS.filter((f) => !map[f.k]).map((f) => f.l) } };
 }
 
 export async function writeResearch(at, companyId, companyName, values, who = "") {

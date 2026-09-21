@@ -927,18 +927,26 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 
 /* Three states, one control, so it reads as a choice rather than as three
    buttons that might each do something different. */
-.aseg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r);
-  overflow:hidden;background:var(--panel);flex:none}
-.aseg button{border:0;background:none;padding:5px 11px;font:inherit;
-  font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);cursor:pointer;
-  white-space:nowrap}
+/* BIGGER THAN IT WAS, AND FULL WIDTH. Ayush, 2026-09-21: "Focus / Not picked /
+   De-prioritize — these options should be clearly visible and easily clickable
+   so they can be updated quickly." They were 5px×11px chips in a 368px column,
+   which is a ~24px tap target sat beside the company name: findable if you
+   know it is there, and not otherwise. Now the band is its own row at full
+   width, each third an equal target about 34px tall, which is the size the
+   rest of this console uses for a thing you press while holding a phone. */
+.aseg{display:flex;border:1px solid var(--line2);border-radius:var(--r);
+  overflow:hidden;background:var(--panel);flex:1 1 100%;min-width:0}
+.aseg button{flex:1;border:0;background:none;padding:9px 8px;font:inherit;
+  font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .aseg button+button{border-left:1px solid var(--line)}
 .aseg button:hover:not([disabled]){background:var(--panel2);color:var(--text)}
 .aseg button[aria-pressed="true"]{background:var(--blueSoft);color:var(--blue);
-  font-weight:var(--w-strong)}
+  font-weight:var(--w-strong);box-shadow:inset 0 -2px 0 var(--blue)}
 /* Dropped is a decision, not an error — amber, the same hue the queue uses for
    "this did not come from Kylas". Rose would read as a failed save. */
-.aseg button[data-fs="depri"][aria-pressed="true"]{background:var(--amberSoft);color:var(--amber)}
+.aseg button[data-fs="depri"][aria-pressed="true"]{background:var(--amberSoft);color:var(--amber);
+  box-shadow:inset 0 -2px 0 var(--amber)}
 .aseg button[disabled]{opacity:.45;cursor:default}
 
 .qacct .gbtn.sm i{font-style:normal;font-variant-numeric:tabular-nums;
@@ -987,34 +995,28 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .rodd{font-style:normal;font-size:var(--t-meta);color:var(--amber);margin-top:2px}
 
 /* ── what we know about this company, on the page ─────────────────────── */
-/* Not behind the Research button. An associate about to dial wants the funding
-   round in front of them while the number rings; a button is something you
-   open on the first call and never again. */
-.ares{flex:0 0 100%;margin-top:2px}
-.ares>button{display:flex;align-items:baseline;gap:8px;width:100%;
-  background:transparent;border:0;padding:3px 0;font:inherit;cursor:pointer;
-  text-align:left;color:var(--text2)}
-.ares>button .k{font-size:var(--t-meta);font-weight:var(--w-strong);
+/* ONE CONTROL, not a button and a strip repeating each other. It is its own
+   row under the focus band, carrying the word, the one fact worth seeing
+   before you dial, and the count — and it opens the research COLUMN, which is
+   where the reading happens now. */
+.ares{flex:0 0 100%;margin-top:3px;display:flex;align-items:baseline;gap:8px;width:100%;
+  background:transparent;border:0;border-radius:6px;padding:5px 6px;font:inherit;
+  cursor:pointer;text-align:left;color:var(--text2)}
+.ares:hover{background:var(--panel2)}
+.ares .k{font-size:var(--t-meta);font-weight:var(--w-strong);
   text-transform:uppercase;letter-spacing:.04em;color:var(--text3);flex:none}
-/* The first fact, shown while collapsed. It is the reason to expand, so
-   hiding it behind a count would make the control pointless. */
-.ares>button .peek{font-size:var(--t-meta);color:var(--text2);flex:1;min-width:0;
+/* The first fact, shown without asking. It is the reason to open the column,
+   so hiding it behind a count would make the control pointless. */
+.ares .peek{font-size:var(--t-meta);color:var(--text2);flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ares>button .n{font-size:var(--t-meta);color:var(--text3);flex:none;
+.ares .n{font-size:var(--t-meta);color:var(--text3);flex:none;
   font-variant-numeric:tabular-nums;margin-left:auto}
-.ares>button:hover .k,.ares>button:hover .n{color:var(--blue)}
-.ares>button::after{content:"▾";font-size:10px;color:var(--text3);flex:none;
+.ares:hover .k,.ares:hover .n{color:var(--blue)}
+.ares[aria-expanded="true"]{background:var(--blueSoft)}
+.ares[aria-expanded="true"] .k,.ares[aria-expanded="true"] .n{color:var(--blue)}
+.ares::after{content:"\203A";font-size:13px;color:var(--text3);flex:none;
   transition:transform .15s}
-.ares.on>button::after{transform:rotate(180deg)}
-
-/* Label above value, not beside it. The column is ~340px and a funding line
-   reads "Series C, Mar 2026 · listed" — beside a label it would truncate at
-   the part that matters. */
-.ares dl{margin:4px 0 2px;display:flex;flex-direction:column;gap:7px}
-.ares dl>div{min-width:0}
-.ares dt{font-size:var(--t-meta);color:var(--text3);line-height:1.3}
-.ares dd{margin:1px 0 0;font-size:var(--t-label);color:var(--text);
-  line-height:1.45;overflow-wrap:anywhere}
+.ares[aria-expanded="true"]::after{transform:rotate(180deg)}
 
 /* ── accounts / focus lists, on the one real Kylas page ───────────────── */
 /* Kylas has no /sales/companies/list/focus, so the focus lists cannot be a URL
@@ -1101,18 +1103,30 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .tl select:focus,.tl input:focus{outline:0;border-bottom-color:var(--blue);
   border-bottom-style:solid}
 .tl input[type="date"]{color:var(--text2)}
-/* Research, read in place. "Edit research" is the only thing that still opens
-   a covering sheet, because editing is the one job that earns the whole
-   screen — reading has to sit next to the contacts. */
-.ares .aresnone{margin:6px 0 0;font-size:var(--t-meta);color:var(--text3)}
-.ares .aresedit{margin-top:9px;border:1px solid var(--line2);background:var(--panel);
-  border-radius:7px;padding:5px 12px;font:inherit;font-size:var(--t-meta);
+/* Research, read beside the call. .ares is the opener; the third pane is the
+   read; "Edit research" is the only thing that still opens a covering sheet,
+   because editing is the one job that earns the whole screen. */
+.aresedit{margin-top:11px;border:1px solid var(--line2);background:var(--panel);
+  border-radius:7px;padding:6px 13px;font:inherit;font-size:var(--t-meta);
   font-weight:var(--w-med);color:var(--text2);cursor:pointer}
-.ares .aresedit:hover{border-color:var(--blue);color:var(--blue)}
-/* Open, it is eight or nine facts. Stacked, that is a screen of scrolling and
-   the contacts fall off the bottom — the opposite of reading research WHILE
-   you work the account. Two columns where the width allows halves it, and the
-   rest scrolls on its own rather than pushing the queue off-screen. */
-.ares.on dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-  gap:7px 14px;align-content:start;max-height:34vh;overflow-y:auto;
-  padding-right:2px}
+.aresedit:hover{border-color:var(--blue);color:var(--blue)}
+
+/* ── the research pane ─────────────────────────────────────────────────
+   Two blocks: theirs, then ours. Label above value, because a funding line
+   reads "Series C, Mar 2026 · $40M led by Accel" and beside a label in a
+   narrow column it would truncate at the part that matters. */
+.rblock{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px 16px}
+.rblock h4{margin:0 0 10px;font-size:var(--t-label);font-weight:var(--w-strong);
+  color:var(--text2);letter-spacing:.01em;display:flex;align-items:baseline;gap:7px}
+.rblock h4 i{font-style:normal;font-weight:var(--w-med);color:var(--text3);
+  font-variant-numeric:tabular-nums}
+.rlist{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:9px 16px;align-content:start}
+.rlist>div{min-width:0}
+.rlist dt{font-size:var(--t-meta);color:var(--text3);line-height:1.3}
+.rlist dd{margin:1px 0 0;font-size:var(--t-label);color:var(--text);
+  line-height:1.45;overflow-wrap:anywhere}
+.rlist dd a{color:var(--blue)}
+.rnote{margin:6px 0 0;font-size:var(--t-meta);color:var(--text3);line-height:1.5}
+.rnote.warn{color:var(--amber)}

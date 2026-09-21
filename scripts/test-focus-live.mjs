@@ -123,6 +123,38 @@ SEED.Research = [
 ];
 SEED.Research.forEach(rid);
 
+/* THEIR enrichment base, standing in for app55PsyRKqkf2CAQ /
+   tbl2Jje9EBC4Cqydw. Ayush, 2026-09-21: "the research section should be taken
+   from airtable (every company id has a research section)".
+
+   The column names are copied VERBATIM from that message — "linkedin -
+   Appollo" with the typo, "No. of Employees (kylas)" with the full stop and
+   the brackets, "at_rev_per_employee" in snake case. Loose matching that is
+   only ever tested against tidy names is not tested, and I cannot see the real
+   table to check. The second row is deliberately half-filled: most enrichment
+   tables are, and a panel that renders blanks for the missing half is worse
+   than one that leaves them out.
+
+   Employees is a NUMBER, not a string, because Airtable returns it as one and
+   `.trim()` on a number is a TypeError that would take the whole panel down.
+   live-stack.sh points RESEARCH_TABLE at this. */
+SEED['Apollo Research'] = [
+  { 'Kylas Company ID': '903',
+    'linkedin - Appollo': 'https://www.linkedin.com/company/shorehouse',
+    'Boolean Post link': 'https://www.google.com/search?q=shorehouse+offsite',
+    'Total Funding': '$48M', 'Latest Funding Amount': '$40M',
+    'Latest Funding Type': 'Series C',
+    'Source - Concatenate': 'Apollo · LinkedIn · Tracxn',
+    'Account Pipeline Stage': 'SQL', 'Annual Revenue': '₹320 Cr',
+    'No. of Employees (kylas)': 760, at_rev_per_employee: 4210526 },
+  { 'Kylas Company ID': '1776620',
+    'linkedin - Appollo': 'https://www.linkedin.com/company/seats',
+    'Total Funding': '$6M', 'Latest Funding Type': 'Seed',
+    'Annual Revenue': '₹40 Cr', 'No. of Employees (kylas)': 85,
+    'Source - Concatenate': 'Apollo' },
+];
+SEED['Apollo Research'].forEach(rid);
+
 /* In Funnel, not Active: counter() reads In Funnel and nothing else, and a
    roster where it is missing excludes everybody — every rung reads zero with
    the reason only visible in `excluded`. */
@@ -170,14 +202,15 @@ check('a picked account reads as picked', await seg(f), '★ Focus* | Not picked
 check('it says who picked it and when', await strip(f), (s) => /Picked .* by .+@/.test(s));
 
 /* ── the research form ────────────────────────────────────────────────── */
-/* TWO CLICKS NOW, DELIBERATELY. #accRes opens the research IN the column,
-   beside the contacts — reading it must not cover the queue you are working.
-   The sheet is one more click, on Edit research, because editing is the one
-   job that earns the whole screen. */
+/* TWO CLICKS NOW, DELIBERATELY. #accRes opens the research COLUMN, beside the
+   call — reading it must not cover the thing you are working. The sheet is one
+   more click, on Edit research, because editing is the one job that earns the
+   whole screen. */
 console.log('\n— research —');
 await f.locator('#accRes').click();
-await page.waitForTimeout(400);
+await page.waitForTimeout(500);
 check('reading it does not cover anything', await f.locator('.scrim').count(), 0);
+check('it is a column, not a sheet', await f.locator('#split').getAttribute('data-res'), 'on');
 await f.locator('#accResEdit').click();
 await page.waitForTimeout(1200);
 check('every declared field is drawn', await f.locator('.rf').count(), (n) => n >= 15);
@@ -195,7 +228,9 @@ await f.locator('.rf input[data-k="hq"]').fill('Navi Mumbai');
 await f.locator('#rsave').click();
 await page.waitForTimeout(1500);
 check('saving closes the sheet', await f.locator('.scrim').count(), 0);
-check('the count on the strip moves', await strip(f), (s) => /Research \d+\/\d+/.test(s));
+/* The peek sits between the word and the count now — "Research · Series C,
+   Mar 2026 · 8/15" — so the two are no longer adjacent. */
+check('the control still carries its count', await strip(f), (s) => /Research\b.*\d+\/\d+/.test(s));
 
 /* ── deprioritising ───────────────────────────────────────────────────── */
 console.log('\n— deprioritize —');
@@ -420,48 +455,79 @@ check('the dashboard prints the build', (await f.locator('.vbuild').textContent(
       (t) => /^[0-9a-f]{8}/.test(t.trim()));
 await page.screenshot({ path: '/tmp/claude-0/live-ladder.png' });
 
-/* ── research on the company page, not behind a button ────────────────── */
-console.log('\n— research on the company page —');
+/* ── research beside the call, and where it comes from ────────────────── */
+console.log('\n— research beside the call —');
 await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/903/'));
-await page.waitForTimeout(3000);
+await page.waitForTimeout(3200);
 f = F();
-check('the strip is on the page', await f.locator('.ares').count(), 1);
-/* OPEN IS REMEMBERED FOR THE SESSION, so by now the earlier #accRes click has
-   left it open. Collapse it first — this block is about what the two states
-   each show, and a test that only works in the order it happens to run in is
-   not a test. */
-if (await f.locator('.ares.on').count()) {
-  await f.locator('#accResToggle').click();
-  await page.waitForTimeout(400);
-}
-/* Collapsed: the openers, with the funding line as the peek — the whole point
-   is that somebody about to dial sees it without asking for it. */
+/* ONE CONTROL, carrying the peek. There used to be two — a "Research 8/15"
+   button and a strip under it repeating the word, the funding line and the
+   same count, both opening the same thing. */
+check('there is one research control', await f.locator('.ares').count(), 1);
 check('the funding shows without opening anything',
       await f.locator('.ares .peek').textContent(), (t) => /Series C/.test(t || ''));
-const shut = await f.locator('.ares dl > div').evaluateAll((ds) => ds.map((d) =>
-  d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
-check('collapsed, it is the openers only', shut.length, 5);
-check('funding is one of them', shut.join('|'), (t) => /Funding.*Series C/.test(t));
-check('so is the recent trigger', shut.join('|'), (t) => /Recent trigger.*Pune/.test(t));
-/* Research notes and industry are deliberately NOT among the openers — they
-   are context, not an opener, and a paragraph would push the queue down. */
-check('research notes are not an opener', shut.join('|'), (t) => !/Research notes/.test(t));
 
-/* Open: everything we hold, still in the column. The user's ask, 2026-09-21 —
-   "see research and at the same time access all content all at once" — is
-   this plus the contacts being reachable, which the next two check. */
-await f.locator('#accResToggle').click();
-await page.waitForTimeout(400);
-const facts = await f.locator('.ares dl > div').evaluateAll((ds) => ds.map((d) =>
-  d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
-check('opening shows more than the openers', facts.length, (n) => n > shut.length);
-check('industry is there once it is open', facts.join('|'), (t) => /Industry.*Retail/.test(t));
+/* OPEN IS REMEMBERED FOR THE SESSION, so by now the earlier click has left it
+   open. Normalise first: a test that only works in the order it happens to run
+   in is not a test. */
+if ((await f.locator('#split').getAttribute('data-res')) === 'on') {
+  await f.locator('#accRes').click();
+  await page.waitForTimeout(400);
+}
+check('closed, the column is not there', await f.locator('#paneRes').isVisible(), false);
+
+await f.locator('#accRes').click();
+await page.waitForTimeout(700);
+/* THE ASK, 2026-09-21: "the Research tab should remain visible alongside the
+   calling interface, so that I can access research while making calls without
+   switching between screens." So: the column is up, AND both working panes are
+   still up, AND nothing is covering anything. */
+check('the column opens', await f.locator('#paneRes').isVisible(), true);
+check('Basic information is still on screen', await f.locator('#paneL').isVisible(), true);
+check('so is Event & vendor', await f.locator('#paneR').isVisible(), true);
+check('and the contact queue', await f.locator('#qfil .qf').count(), (n) => n >= 3);
 check('nothing is covering it', await f.locator('.scrim').count(), 0);
-check('and the contact filters are still on screen',
-      await f.locator('#qfil .qf').count(), (n) => n >= 3);
+
+const blocks = await f.locator('#paneRes .rblock h4').allTextContents();
+check('two blocks, theirs and ours', blocks.length, 2);
+check('their base is named first', blocks[0], (t) => /research base/i.test(t || ''));
+
+/* THE TEN COLUMNS FROM THEIR BASE. Ayush, 2026-09-21: "the research section
+   should be taken from airtable", with a link to app55PsyRKqkf2CAQ. The seed
+   spells the columns exactly as that message did, typo and all, so this is
+   also the proof that the loose matching earns its keep. */
+const srcFacts = await f.locator('#paneRes .rblock:first-child .rlist > div').evaluateAll(
+  (ds) => ds.map((d) => d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
+check('all ten are drawn', srcFacts.length, 10);
+check('total funding', srcFacts.join('|'), (t) => /Total funding=\$48M/.test(t));
+check('latest amount is not swallowed by total', srcFacts.join('|'), (t) => /Latest funding amount=\$40M/.test(t));
+check('the concatenated source', srcFacts.join('|'), (t) => /Source=Apollo/.test(t));
+check('a numeric employee count survives', srcFacts.join('|'), (t) => /Employees \(Kylas\)=760/.test(t));
+check('the Apollo link is a link', await f.locator('#paneRes .rlist dd a').count(), (n) => n >= 1);
+
+/* And ours, below theirs, kept apart — a scraped funding figure and a BD's own
+   note are different kinds of fact. */
+const ourFacts = await f.locator('#paneRes .rblock:last-child .rlist > div').evaluateAll(
+  (ds) => ds.map((d) => d.querySelector('dt').textContent));
+check('our own fields are their own block', ourFacts.length, (n) => n >= 5);
+check('industry is one of ours', ourFacts.join('|'), (t) => /Industry/.test(t));
+
 await f.evaluate(() => render());
 await page.waitForTimeout(300);
-check('it survives a render', await f.locator('.ares dl > div').count(), facts.length);
+check('it survives a render', await f.locator('#paneRes .rblock').count(), 2);
+await page.screenshot({ path: '/tmp/claude-0/live-research.png' });
+
+/* An account their base has nothing for must say so, and say WHY it is empty —
+   "no research" and "the PAT cannot see that base" look identical otherwise. */
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/1773706/'));
+await page.waitForTimeout(3000);
+f = F();
+check('an account with no enrichment row says so, with the count',
+      await f.locator('#paneRes .rblock:first-child .rnote').textContent(),
+      (t) => /Nothing in that table for company 1773706/.test(t || '') && /account\(s\)/.test(t || ''));
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/903/'));
+await page.waitForTimeout(2500);
+f = F();
 
 /* ── the focus lists view ─────────────────────────────────────────────── */
 console.log('\n— focus lists —');

@@ -406,8 +406,11 @@
   const ACC = {
     research: null,      /* companyId -> values, null until read */
     fields: null,        /* the field list, served with the data */
+    source: null,        /* companyId -> their enrichment base's row, read-only */
+    sourceFields: null,
+    sourceStatus: null,  /* why it is empty, when it is — see researchPaneHTML */
     researchError: "",
-    researchOpen: false, /* the strip's disclosure, remembered across accounts */
+    researchOpen: false, /* the third pane, remembered across accounts */
     dropping: false,     /* the reason form is open */
     draft: { reason: "", note: "" },
     busy: false,
@@ -456,17 +459,36 @@
     const now = statusOf(id);
     /* Primed on the first company opened, not at boot: a console nobody scopes
        to an account never needs the table, and this runs on every render, so
-       the guard is the whole of the rate limiting. */
+       the guard is the whole of the rate limiting.
+
+       BEHIND THE ACCOUNT, NEVER ALONGSIDE IT. This used to fire the moment the
+       first paint happened, which is while /company is still in flight — and
+       on the proxy both are reads of the same Airtable base, through one queue
+       at 5 req/s. So a Research crawl went in FRONT of the thing the BD was
+       actually waiting for. Measured on the mock: /research started at t=77ms
+       and took 647ms, /company started at t=94ms and took 1291ms. On a real
+       base with real row counts, worse.
+
+       Ayush, 2026-09-21: "the system is still experiencing noticeable latency…
+       especially while making calls."
+
+       requestIdleCallback is exactly the right primitive: it runs when the
+       browser has nothing better to do, which is after the account has landed
+       and painted. The 3s timeout is the floor — research must still arrive on
+       a busy console, just not first. */
     if (ACC.research === null && !ACC.researchLoading) {
       ACC.researchLoading = true;
-      loadResearch().then(paintAccount, (e) => {
-        /* Latch the failure. Leaving it null would retry on the next render,
-           and render runs on every keystroke that validates — a dead proxy
-           would become a fetch storm. The sheet retries when it is opened. */
-        ACC.research = {};
-        ACC.researchError = `Could not read the research table — ${e.message}`;
-        paintAccount();
-      }).finally(() => { ACC.researchLoading = false; });
+      const soon = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
+      soon(() => {
+        loadResearch().then(paintAccount, (e) => {
+          /* Latch the failure. Leaving it null would retry on the next render,
+             and render runs on every keystroke that validates — a dead proxy
+             would become a fetch storm. The sheet retries when it is opened. */
+          ACC.research = {};
+          ACC.researchError = `Could not read the research table — ${e.message}`;
+          paintAccount();
+        }).finally(() => { ACC.researchLoading = false; });
+      }, { timeout: 3000 });
     }
 
     const r = ACC.research?.[id];
@@ -486,14 +508,11 @@
           aria-pressed="${now === s.k ? "true" : "false"}"${ACC.busy ? " disabled" : ""}
           >${s.label}</button>`).join("")}
       </div>
-      <button class="gbtn sm" id="accRes" type="button"
-        title="What we know about this company before we call it">Research${
-        ACC.research ? ` <i>${filled}/${(ACC.fields || []).length}</i>` : ""}</button>
+      ${researchButtonHTML(id, filled)}
       ${Views.FOCUS.error ? `<span class="awarn">${esc(Views.FOCUS.error)}</span>`
         : stamp ? `<span class="astamp">${stamp}</span>` : ""}
       ${f?.reason ? `<span class="areason" title="${esc(f.note || "")}">${esc(f.reason)}${
         f.note ? ` — ${esc(f.note)}` : ""}</span>` : ""}
-      ${researchStripHTML(id)}
       ${ACC.dropping ? `
       <!-- novalidate deliberately: with the required attribute the browser
            blocks submit before onsubmit runs, so the message explaining WHY a
@@ -528,18 +547,16 @@
       writeFocus(to, "", "");
     });
 
-    /* Opens the SECTION, not the sheet — reading should never cover the
-       contacts. The sheet is one more click away, on Edit research, because
-       editing is the case where covering the screen is the right answer. */
-    const rb = document.getElementById("accRes");
-    if (rb) rb.onclick = () => { ACC.researchOpen = true; paintAccount(); };
-    const re = document.getElementById("accResEdit");
-    if (re) re.onclick = openResearch;
+    /* Opens the PANE, not a sheet — reading must never cover the call. The
+       sheet is one more click away, on Edit research inside it, because
+       editing is the one case where covering the screen is right.
 
-    /* Remembered for the session, not per company: somebody who wants the
-       research open wants it open on the next account too. */
-    const rt = document.getElementById("accResToggle");
-    if (rt) rt.onclick = () => { ACC.researchOpen = !ACC.researchOpen; paintAccount(); };
+       Both buttons toggle rather than open: a control that can only turn a
+       column on makes the × the only way off, which is a thing to hunt for
+       while the phone is ringing. Remembered for the session, not per company:
+       somebody who wants research open wants it open on the next account too. */
+    const rb = document.getElementById("accRes");
+    if (rb) rb.onclick = () => { ACC.researchOpen = !ACC.researchOpen; paintAccount(); };
 
     const form = document.getElementById("accDrop");
     if (form) {
@@ -554,6 +571,11 @@
         writeFocus("depri", sel.value, note.value.trim());
       };
     }
+
+    /* The third column follows the strip: one state, painted in both places,
+       so the chevron and the column can never disagree about whether research
+       is open. */
+    paintResearchPane();
   }
 
   /* One write path for all three buttons and for the Focus lists view's
@@ -615,42 +637,123 @@
      rest follows when the section is opened in full. */
   const STRIP_FIELDS = ["funding", "trigger", "season", "decides", "events", "vendor"];
 
-  function researchStripHTML(id) {
+  /* ONE CONTROL, CARRYING THE PEEK. There were two: a "Research 8/15" button
+     and, under it, a strip repeating the word Research with the funding line
+     and the same count. Both opened the same thing. That is the clutter Ayush
+     keeps asking to be rid of, and it appeared precisely because the strip
+     grew out of a different design — it used to expand in place, which was the
+     right fix for "reading research must not cover the contacts" and the wrong
+     shape for what was actually wanted: 2026-09-21, "the Research tab should
+     remain visible alongside the calling interface, so that I can access
+     research while making calls without switching between screens."
+
+     A 368px column beside the queue is not alongside the call; the third pane
+     is. So the full read lives there, and this is the opener: the word, the
+     one fact worth seeing before you dial, and the count. */
+  function researchButtonHTML(id, filled) {
     const r = ACC.research?.[id];
-    if (!r) return "";                    /* not read yet — say nothing, not "none" */
-    const val = (k) => String(r[k] || "").trim();
-    const labelOf = (k) => ACC.fields?.find((f) => f.k === k);
+    const val = (k) => String(r?.[k] || "").trim();
     const open = !!ACC.researchOpen;
+    /* The peek is the first OPENER that has anything in it — the facts that
+       change how a call starts. Funding, then a recent trigger, then the
+       season. Industry and headcount are context, not an opener. */
+    const peek = STRIP_FIELDS.map(val).find(Boolean) || "";
+    return `<button class="ares" id="accRes" type="button" aria-expanded="${open}"
+      title="${open ? "Close the research column"
+        : "What we know about this company — opens beside the call"}">
+      <span class="k">Research</span>
+      ${peek ? `<span class="peek">${esc(peek)}</span>` : ""}
+      ${ACC.research ? `<span class="n">${filled}/${(ACC.fields || []).length}</span>` : ""}
+    </button>`;
+  }
 
-    /* READING RESEARCH NO LONGER COVERS THE CONTACTS. Ayush, 2026-09-21: "I am
-       able to click filter list, see research and at the same time access all
-       content all at once." It used to take a full-screen sheet to see any of
-       this, which hid the queue, the card and everything else — for something
-       you want IN VIEW while the phone rings, not instead of the call.
+  /* ── the research pane ─────────────────────────────────────────────────
+     Two blocks, kept apart on purpose.
 
-       So the whole of it opens here, in the column, above the contacts. The
-       sheet still exists and is still the only way to EDIT, which is the one
-       job a covering panel is right for. */
-    const keys = open
-      ? (ACC.fields || []).map((f) => f.k)   /* everything we hold */
-      : STRIP_FIELDS;                        /* the openers */
-    const facts = keys.map((k) => [labelOf(k), val(k)]).filter(([f, v]) => f && v);
-    const total = (ACC.fields || []).filter((f) => val(f.k)).length;
-    if (!facts.length && !open) return "";
+     FROM THE RESEARCH BASE is their own enrichment table — Ayush, 2026-09-21:
+     "the research section should be taken from airtable", with a link to
+     app55PsyRKqkf2CAQ. Read-only here, because we do not own it and a console
+     that writes back into somebody else's pipeline is a console that corrupts
+     it.
 
-    return `<div class="ares${open ? " on" : ""}">
-      <button type="button" id="accResToggle" aria-expanded="${open}"
-        title="${open ? "Collapse" : "Show everything we know about this company"}">
-        <span class="k">Research</span>
-        ${open || !facts.length ? "" : `<span class="peek">${esc(facts[0][1])}</span>`}
-        <span class="n">${total}</span>
-      </button>
-      ${facts.length ? `<dl>${facts.map(([f, v]) =>
-        `<div><dt>${esc(f.l)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>`
-        : `<p class="aresnone">Nothing recorded for this account yet.</p>`}
-      ${open ? `<button type="button" class="aresedit" id="accResEdit"
-        title="Open the full form">Edit research</button>` : ""}
-    </div>`;
+     WHAT WE FOUND is the fifteen fields a BD fills in. Editable, ours.
+
+     Merging them would make a scraped funding figure indistinguishable from a
+     BD's own note, and the first time the two disagreed nobody could say which
+     to believe. */
+  function researchPaneHTML(id) {
+    const our = ACC.research?.[id];
+    const src = ACC.source?.[id];
+    const st = ACC.sourceStatus || {};
+    const fmt = (f, v) => (f.link && /^https?:\/\//i.test(v)
+      ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.replace(/^https?:\/\/(www\.)?/, ""))}</a>`
+      : esc(v));
+
+    const srcFacts = (ACC.sourceFields || [])
+      .map((f) => [f, String(src?.[f.k] ?? "").trim()]).filter(([, v]) => v);
+
+    /* WHY THE STATUS LINE IS NOT OPTIONAL. "No research for this account" and
+       "the PAT cannot see that base" look identical on screen and are entirely
+       different problems — one is a fact about the company, the other is a
+       line to add to .env.local. This says which. */
+    const srcBlock = srcFacts.length
+      ? `<dl class="rlist">${srcFacts.map(([f, v]) =>
+          `<div><dt>${esc(f.l)}</dt><dd>${fmt(f, v)}</dd></div>`).join("")}</dl>`
+      : st.ok === false
+        ? `<p class="rnote warn">${esc(st.off
+            ? "Not connected — set AIRTABLE_PAT, or unset RESEARCH_OFF."
+            : st.error || "Could not read the research base.")}</p>`
+      : st.keyField
+        ? `<p class="rnote">Nothing in that table for company ${esc(id)} — it holds ${
+            st.keyed || 0} account(s), keyed on ${esc(st.keyField)}.</p>`
+      : `<p class="rnote">Reading…</p>`;
+
+    const ourFacts = (ACC.fields || [])
+      .map((f) => [f, String(our?.[f.k] ?? "").trim()]).filter(([, v]) => v);
+
+    return `
+      <section class="rblock">
+        <h4>From the research base${srcFacts.length ? ` <i>${srcFacts.length}</i>` : ""}</h4>
+        ${srcBlock}
+        ${st.unmapped?.length && srcFacts.length ? `<p class="rnote">Not found in that
+          table: ${esc(st.unmapped.join(", "))}.</p>` : ""}
+      </section>
+      <section class="rblock">
+        <h4>What we found <i>${ourFacts.length}/${(ACC.fields || []).length}</i></h4>
+        ${ourFacts.length
+          ? `<dl class="rlist">${ourFacts.map(([f, v]) =>
+              `<div><dt>${esc(f.l)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>`
+          : `<p class="rnote">Nothing recorded for this account yet.</p>`}
+        ${ACC.researchError ? `<p class="rnote warn">${esc(ACC.researchError)}</p>` : ""}
+        <button type="button" class="aresedit" id="accResEdit"
+          title="Open the full form">Edit research</button>
+      </section>`;
+  }
+
+  /* Owned here, not by console.js' render(), which rewrites the panes it owns
+     on every keystroke that validates — this one has to survive that. */
+  function paintResearchPane() {
+    const split = document.getElementById("split");
+    const host = document.getElementById("formRes");
+    if (!split || !host) return;
+    const on = !!ACC.researchOpen && !!scope;
+    split.dataset.res = on ? "on" : "off";
+    /* Below 960px the panes are tabs, so closing research has to put a tab
+       with the call on it back on screen — otherwise the column vanishes and
+       the console looks empty. Above that width the third column simply
+       appears beside what is already there and the tab is irrelevant. */
+    if (!on && split.dataset.tab === "res") setTab("basic");
+    if (!on) return;
+    if (matchMedia("(max-width:960px)").matches) setTab("res");
+    const id = String(scope.id);
+    host.innerHTML = researchPaneHTML(id);
+    const n = (ACC.fields || []).filter((f) => String(ACC.research?.[id]?.[f.k] || "").trim()).length;
+    const c = document.getElementById("phRes");
+    if (c) c.textContent = ACC.fields ? `${n}/${(ACC.fields || []).length}` : "";
+    const t = document.getElementById("tabRes");
+    if (t) t.textContent = ACC.fields ? String(n) : "";
+    const e = document.getElementById("accResEdit");
+    if (e) e.onclick = openResearch;
   }
 
   /* ── research ────────────────────────────── */
@@ -666,6 +769,12 @@
     const r = await API.research();
     ACC.fields = r.fields || [];
     ACC.research = r.research || {};
+    /* Their enrichment base, read-only, travelling with the same call — it is
+       the same question ("what do we know about this company") and two round
+       trips to answer it would be two chances to be slow. */
+    ACC.source = r.source || {};
+    ACC.sourceFields = r.sourceFields || [];
+    ACC.sourceStatus = r.sourceStatus || {};
     ACC.researchError = r.configured === false
       ? "Airtable is not configured, so nothing can be saved yet." : "";
   }
@@ -794,6 +903,11 @@
      rather than after the first click. A failure here is recorded in the cache
      and shown in the strip; it must not take the console down with it. */
   Views.loadFocus().then(paintAccount, () => {});
+
+  /* The pane's own × is outside everything paintAccount() rewrites, so it is
+     bound once here rather than on every repaint. */
+  document.getElementById("resClose")
+    ?.addEventListener("click", () => { ACC.researchOpen = false; paintAccount(); });
 
   /* ── data sheet ──────────────────────────── */
   const pad = (n) => String(n).padStart(2, "0");

@@ -39,8 +39,13 @@ sleep 1
 
 # ENV_FILE=/dev/null so a real .env.local on the machine cannot point this at
 # the real Airtable base. These suites write.
+# RESEARCH_TABLE names a table in the seed, not the real tbl2Jje9EBC4Cqydw. The
+# mock serves every base from one map, so the two "bases" share rows — but it
+# rate-limits PER base id, as Airtable does, so the distinct id here is what
+# makes the two-client pacing behave the way it will in production.
 KYLAS_BASE=http://127.0.0.1:9900 KYLAS_KEY=test \
 AIRTABLE_BASE_URL=http://127.0.0.1:9901 AIRTABLE_PAT=pat_test AIRTABLE_BASE=appTEST \
+RESEARCH_BASE=appRESEARCH RESEARCH_TABLE="Apollo Research" \
 ENV_FILE=/dev/null node scripts/proxy.mjs > "$LOGS/px.log" 2>&1 &
 
 # The fake Kylas page only has to exist once; leave a running one alone.

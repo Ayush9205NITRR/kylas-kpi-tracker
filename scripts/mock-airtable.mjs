@@ -67,13 +67,26 @@ function matches(row, formula, all) {
   return String(row.fields[field] ?? "") === want.replace(/\\'/g, "'");
 }
 
-let recent = [];
+/* PER BASE, which is how Airtable's limit actually works — "5 requests per
+   second per base". Counting globally made this mock lie about the one thing
+   it exists to simulate: the console reads its KPI base and the enrichment
+   base through two separate clients, each correctly pacing itself at 5 req/s,
+   which against one global counter looked like a 429 storm. Two seconds of
+   spurious backoff on every cold start, charged to whichever request happened
+   to be in flight — and I spent a measurement run blaming the wrong thing.
+
+   The rows themselves stay one shared map; this stand-in has no notion of
+   separate bases and does not need one. It is the PACING that has to be
+   faithful, because that is what the client is written against. */
+const recent = new Map();     // baseId -> timestamps within the last second
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const now = Date.now();
-  recent = recent.filter((t) => now - t < 1000);
-  recent.push(now);
-  if (recent.length > 5) return json(res, 429, { error: { type: "RATE_LIMIT_REACHED" } });
+  const forBase = url.pathname.split("/").filter(Boolean).filter((s) => s !== "v0")[0] || "-";
+  const seen = (recent.get(forBase) || []).filter((t) => now - t < 1000);
+  seen.push(now);
+  recent.set(forBase, seen);
+  if (seen.length > 5) return json(res, 429, { error: { type: "RATE_LIMIT_REACHED" } });
 
   if (!/^Bearer /.test(req.headers.authorization || "")) return json(res, 401, { error: "unauthorized" });
 
@@ -265,7 +278,7 @@ createServer(async (req, res) => {
   json(res, 405, { error: "not mocked", method: req.method });
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`mock airtable on http://127.0.0.1:${PORT}`);
-  console.log(`  upsert / select / delete · 429s above 5 req/s · /__writes /__reset`);
+  console.log(`  upsert / select / delete · 429s above 5 req/s PER BASE · /__writes /__reset`);
 });
 
 function text(req) {

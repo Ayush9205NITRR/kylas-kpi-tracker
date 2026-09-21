@@ -243,8 +243,20 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 /* ── panes ─────────────────────────────────── */
 .right{display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
 .split{display:grid;grid-template-columns:1fr 1fr;min-height:0;min-width:0}
+/* THE THIRD COLUMN. Closed it does not exist — a 0fr track still paints its
+   border and takes a pixel — so it is hidden outright and the grid stays two
+   up. Open, research gets slightly less than the two working columns: it is
+   read, not typed into, so it can take the narrower measure. */
+#paneRes{display:none}
+.split[data-res="on"]{grid-template-columns:1fr 1fr .88fr}
+.split[data-res="on"] #paneRes{display:grid}
 .pane{display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0;border-right:1px solid var(--line)}
 .pane:last-child{border-right:0}
+.ph .phx{margin-left:auto;background:transparent;border:0;border-radius:5px;padding:0 7px;
+  font-size:15px;line-height:1.3;color:var(--text3);cursor:pointer}
+.ph .phx:hover{background:var(--panel3);color:var(--text)}
+/* With the × claiming the right edge, the count can no longer have it too. */
+.ph:has(.phx) .c{margin-left:0}
 .ph{background:var(--panel);border-bottom:1px solid var(--line);padding:9px 16px;
   display:flex;align-items:baseline;gap:10px;font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
 .ph .c{margin-left:auto;font-weight:var(--w-med);font-size:var(--t-meta);color:var(--text3)}
@@ -252,7 +264,7 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .pwrap{max-width:700px;margin:0 auto;padding:22px 22px 70px;display:flex;flex-direction:column;gap:20px}
 .tabbar{display:none}
 @media(max-width:960px){
-  .split{grid-template-columns:1fr}
+  .split,.split[data-res="on"]{grid-template-columns:1fr}
   .pane{border-right:0}.ph{display:none}
   .tabbar{display:flex;gap:6px;background:var(--panel);border-bottom:1px solid var(--line);padding:11px 14px}
   .tabbar button{flex:1;background:var(--panel2);border:1.5px solid transparent;border-radius:var(--r);
@@ -260,8 +272,13 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
     display:flex;align-items:center;justify-content:center;gap:8px}
   .tabbar button[aria-selected="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
   .tabbar .n{font-size:var(--t-meta);opacity:.8}
-  .split[data-tab="basic"] #paneR{display:none}
-  .split[data-tab="more"] #paneL{display:none}
+  /* One pane at a time down here, and the third tab is how research is
+     reached — there is no room to have it alongside anything. data-res is
+     ignored; data-tab decides, so the × in its header is hidden too. */
+  .split[data-tab="basic"] #paneR,.split[data-tab="basic"] #paneRes{display:none}
+  .split[data-tab="more"] #paneL,.split[data-tab="more"] #paneRes{display:none}
+  .split[data-tab="res"] #paneL,.split[data-tab="res"] #paneR{display:none}
+  .split[data-tab="res"] #paneRes{display:grid}
 }
 
 /* ── sections are real cards. Structure separates them, not colour. ── */

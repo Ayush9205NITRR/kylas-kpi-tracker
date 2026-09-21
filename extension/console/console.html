@@ -62,8 +62,17 @@
       <div class="tabbar" role="tablist">
         <button role="tab" data-tab="basic" aria-selected="true">Basic info</button>
         <button role="tab" data-tab="more" aria-selected="false">Event &amp; vendor <span class="n" id="tabCount"></span></button>
+        <button role="tab" data-tab="res" aria-selected="false">Research <span class="n" id="tabRes"></span></button>
       </div>
-      <div class="split" id="split" data-tab="basic">
+      <!-- RESEARCH IS A PANE, NOT A SHEET. Ayush, 2026-09-21: "the Research
+           tab should remain visible alongside the calling interface, so that I
+           can access research while making calls without switching between
+           screens." It used to be a full-screen dialog, which is the one thing
+           it must not be: what you know about a company is for reading WHILE
+           the phone rings, not instead of the call. data-res on .split is what
+           opens the third column; below 960px it is the third tab instead.
+           Owned by overlay.js, so console.js' render() cannot wipe it. -->
+      <div class="split" id="split" data-tab="basic" data-res="off">
         <section class="pane" id="paneL">
           <div class="ph">Basic information<span class="c" id="phL"></span></div>
           <div class="pscroll" id="scrollL"><div class="pwrap" id="formL"></div></div>
@@ -71,6 +80,11 @@
         <section class="pane" id="paneR">
           <div class="ph">Event &amp; vendor<span class="c" id="phR"></span></div>
           <div class="pscroll" id="scrollR"><div class="pwrap" id="formR"></div></div>
+        </section>
+        <section class="pane" id="paneRes">
+          <div class="ph">Research<span class="c" id="phRes"></span>
+            <button class="phx" id="resClose" type="button" title="Close the research column">×</button></div>
+          <div class="pscroll" id="scrollRes"><div class="pwrap" id="formRes"></div></div>
         </section>
       </div>
     </div>
