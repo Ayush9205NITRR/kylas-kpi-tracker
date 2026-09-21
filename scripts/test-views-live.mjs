@@ -1,6 +1,10 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+/* channel:'chromium' deliberately — Playwright's own bundled build does not
+   load MV3 extensions, and the symptom is not an error: the content script
+   never injects and every locator times out waiting for a frame that was
+   never going to exist. HEADLESS=1 to run it where there is no display. */
 const ctx = await chromium.launchPersistentContext('/tmp/claude-0/pviews', {
-  headless: false, viewport: { width: 1500, height: 950 },
+  channel: 'chromium', headless: process.env.HEADLESS === '1', viewport: { width: 1500, height: 950 },
   args: ['--disable-extensions-except=/tmp/claude-0/exttest','--load-extension=/tmp/claude-0/exttest'] });
 const page = await ctx.newPage();
 const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -55,19 +59,20 @@ console.log('\n— companies list at /sales/companies/list —');
 console.log('  rows :', await f.locator('.vr[data-id]').count());
 for (const r of await f.locator('.vr[data-id]').allTextContents()) console.log('   ', r.replace(/\s+/g,' ').trim());
 console.log('  filters :', (await f.locator('.vfilters label').allTextContents()).map(s=>s.split('\n')[0]).join(' | '));
-/* The KPI filter is a multi-select popover now, not a <select>: open it and
-   tick a box the way a person does. The old selectOption() call threw and took
-   the rest of this file with it. */
-await f.locator('#fKpi summary').click();
-await f.locator('#fKpi input[type=checkbox][value="discovery"]').check();
-await page.waitForTimeout(400); f = F();
-console.log('  after KPI=discovery :', await f.locator('.vr[data-id]').count(), 'row(s)');
+/* #fKpi, #fSource and #fStage are the multi-select popovers, and the Accounts
+   view does not draw them — it has its own chip rows for the same dimensions,
+   which is why Board and Table went away on 2026-09-19. This file kept
+   clicking #fKpi and threw, taking the rest of the run with it. The filter
+   that IS in this bar on every view is Focus, so that is what gets exercised
+   here: Accounts is the tab people are on. */
+for (const v of ['focus', 'depri', 'none', '']) {
+  await f.locator('#fFocus').selectOption(v);
+  await page.waitForTimeout(900); f = F();
+  console.log(`  focus=${(v || 'all').padEnd(6)}    :`, await f.locator('.vr[data-id]').count(), 'row(s)');
+}
 /* Sticky header: after a scroll it must still be at the top of the scroller.
    Only meaningful when there is something to scroll — with a filter on there
    may be three rows and a short page, and "false" would say nothing. */
-await f.locator('#fKpi input[type=checkbox][value="discovery"]').uncheck();
-await f.locator('#fKpi summary').click();
-await page.waitForTimeout(400); f = F();
 console.log('  header sticky       :', await f.locator('.vr.vh').evaluate((h) => {
   const port = h.closest('#viewport');
   if (port.scrollHeight <= port.clientHeight) return 'n/a — page does not scroll';

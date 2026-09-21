@@ -1101,3 +1101,18 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .tl select:focus,.tl input:focus{outline:0;border-bottom-color:var(--blue);
   border-bottom-style:solid}
 .tl input[type="date"]{color:var(--text2)}
+/* Research, read in place. "Edit research" is the only thing that still opens
+   a covering sheet, because editing is the one job that earns the whole
+   screen — reading has to sit next to the contacts. */
+.ares .aresnone{margin:6px 0 0;font-size:var(--t-meta);color:var(--text3)}
+.ares .aresedit{margin-top:9px;border:1px solid var(--line2);background:var(--panel);
+  border-radius:7px;padding:5px 12px;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--text2);cursor:pointer}
+.ares .aresedit:hover{border-color:var(--blue);color:var(--blue)}
+/* Open, it is eight or nine facts. Stacked, that is a screen of scrolling and
+   the contacts fall off the bottom — the opposite of reading research WHILE
+   you work the account. Two columns where the width allows halves it, and the
+   rest scrolls on its own rather than pushing the queue off-screen. */
+.ares.on dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:7px 14px;align-content:start;max-height:34vh;overflow-y:auto;
+  padding-right:2px}

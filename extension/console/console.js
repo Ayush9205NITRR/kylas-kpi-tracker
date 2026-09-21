@@ -1104,13 +1104,22 @@ function eventsGroup(){
     /* "Tap to add ANOTHER", because it now always adds. */
     btn.title=n?`Tap to add another ${t}`:`Tap to add ${t}`;
     btn.onclick=()=>{
-      /* ALWAYS ADDS. It used to toggle, which made the chip the one control on
-         screen that could destroy a card somebody had filled in — tap it a
-         second time and the budget, timeline and pax went with it. It also
-         made a second offsite impossible to record at all.
-         Removing is the card's own ×, which keeps the row, offers an undo and
-         leaves it restorable. One control that creates, one that removes. */
-      {
+      /* TAPPING AGAIN TAKES BACK A MIS-TAP, AND ONLY A MIS-TAP. Ayush,
+         2026-09-21: "if it has data it will remain, else if it does not have
+         data, if you click back again it will be gone."
+
+         So the chip removes the EMPTY card of this type if there is one, and
+         otherwise adds. That gives both things at once: a stray tap is undone
+         by tapping again, and a company with two real offsites can still have
+         two cards, because a card with anything typed in it is never what the
+         chip takes away. Removing one of those is the card's own ×, which
+         keeps the row and offers an undo. */
+      const blankOne=[...a.current,...a.past].find(r=>r.eventType===t&&!hasData(r));
+      if(blankOne){
+        a.current=a.current.filter(r=>r!==blankOne);
+        a.past=a.past.filter(r=>r!==blankOne);
+        editingRows.delete(blankOne.rowKey);
+      } else {
         const fresh={...emptyRow(),eventType:t};
         /* Tapped just now, so it opens ready to type — which is how it has
            always behaved and what somebody mid-call expects. */
@@ -1118,10 +1127,9 @@ function eventsGroup(){
         a.current=[...a.current,fresh];
       }
       touch("record");renderRight();refreshQual();
-      /* Unconditionally now — every tap makes a card, so every tap should land
-         the cursor in it. This was guarded on "was it off", which after the
-         change above would have skipped exactly the second and third one. */
-      setTimeout(()=>{
+      /* Only when a card was ADDED. Focusing after a removal would put the
+         cursor in a different card than the one the tap was about. */
+      if(!blankOne)setTimeout(()=>{
         const cards=document.querySelectorAll("#formR .ev.editing");
         cards[cards.length-1]?.querySelector(".bl input")?.focus();
       },30);

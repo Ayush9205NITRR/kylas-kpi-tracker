@@ -6,8 +6,12 @@ const reset = () => fetch(AT + '/__reset', { headers: H });
 const dump = () => fetch(AT + '/__writes', { headers: H }).then(r => r.json());
 
 await reset();
+/* channel:'chromium' deliberately — Playwright's own bundled build does not
+   load MV3 extensions, and the symptom is not an error: the content script
+   never injects and every locator times out waiting for a frame that was
+   never going to exist. HEADLESS=1 to run it where there is no display. */
 const ctx = await chromium.launchPersistentContext('/tmp/claude-0/pat', {
-  headless: false, viewport: { width: 1600, height: 1000 },
+  channel: 'chromium', headless: process.env.HEADLESS === '1', viewport: { width: 1600, height: 1000 },
   args: ['--disable-extensions-except=/tmp/claude-0/exttest', '--load-extension=/tmp/claude-0/exttest'],
 });
 const page = await ctx.newPage();

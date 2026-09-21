@@ -1565,6 +1565,11 @@
      a filter that hides everything. */
   const FILTERS = {
     owner: "", calledSince: "",
+    /* "" = everything, "focus" = on somebody's list, "depri" = dropped,
+       "none" = neither. Ayush, 2026-09-21: "create a filter to find accounts
+       who are in the focus list." The lists themselves live on the other tab;
+       this is for working THROUGH them, next to every other filter. */
+    focus: "",
     source: { mode: "any", values: [] },
     stage: { mode: "any", values: [] },
     kpi: { mode: "any", values: [] },
@@ -1716,6 +1721,13 @@
      options WOULD give rather than counting only what is already selected —
      otherwise every unticked chip reads 0 and the filter cannot be widened. */
   function accMatch(co, skip) {
+    /* READ FROM FILTERS, NOT FROM A SECOND COPY. The Focus select lives in the
+       shell's filter bar, which every view shares, but the explorer filters
+       through this predicate rather than through keep() — so a control wired
+       only to FILTERS rendered, took a selection, and changed nothing on the
+       one tab people actually use. That is what it did before this line. */
+    if (skip !== "focus" && FILTERS.focus &&
+        (FOCUS.rows?.[String(co.id)]?.status || "none") !== FILTERS.focus) return false;
     if (skip !== "stage" && ACC.stage && stageOf(co) !== ACC.stage) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && ACC.sources.size && !ACC.sources.has(co.source || "—")) return false;
@@ -1797,7 +1809,8 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size;
+    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size
+      || FILTERS.focus;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2080,7 +2093,10 @@
       matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
       matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
       matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
-      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince);
+      (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince) &&
+      /* Read from the same FOCUS cache the strip and the Focus lists tab use,
+         so all three can never disagree about who is picked. */
+      (!FILTERS.focus || (FOCUS.rows?.[String(c.id)]?.status || "none") === FILTERS.focus);
 
     const ordered = (list) => {
       const col = colOf(SORT.key);
@@ -2239,9 +2255,16 @@
              under them with every filter the grid had. boardHTML, laneHTML and
              the COLS table are still in this file and unreferenced, so either
              comes back as one line if it turns out to be missed. */""}
-        ${VIEW_MODE === "board" ? "" : `<button class="gbtn" id="fDensity" type="button"
-          title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
-        >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>`}
+        <!-- Compact/Comfortable is gone. It was a preference about row height
+             sitting in a row of filters that are about WHICH ACCOUNTS, and it
+             bought a third of a screen at the cost of one more thing to read
+             past. The filter that belongs here is this one. -->
+        <label>Focus<select id="fFocus">
+          <option value=""${!FILTERS.focus ? " selected" : ""}>All accounts</option>
+          <option value="focus"${FILTERS.focus === "focus" ? " selected" : ""}>★ On a focus list</option>
+          <option value="depri"${FILTERS.focus === "depri" ? " selected" : ""}>Dropped</option>
+          <option value="none"${FILTERS.focus === "none" ? " selected" : ""}>Neither</option>
+        </select></label>
         <span class="vage">${CACHE.at ? esc(ageText())
           : ""}</span>
         ${kpiNote(all, { repaint: () => companies(host) })}
@@ -2295,7 +2318,7 @@
        again, which is otherwise a reload. */
     on("fClear", "click", () => {
       if (CACHE.error) { CACHE.owner = null; CACHE.error = ""; }
-      FILTERS.owner = ""; FILTERS.calledSince = "";
+      FILTERS.owner = ""; FILTERS.calledSince = ""; FILTERS.focus = "";
       for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
       companies(host);
     });
@@ -2357,14 +2380,19 @@
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
       ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      /* Focus narrows this explorer too, so "Clear" that left it set would
+         leave rows hidden with every visible chip reading unfiltered. */
+      FILTERS.focus = "";
       ACC.limit = 100; redraw();
     });
 
-    on("fDensity", "click", async () => {
-      DENSITY = DENSITY === "compact" ? "comfortable" : "compact";
-      try { await Store.setSetting("density", DENSITY); } catch { /* preference only */ }
-      companies(host);
-    });
+    on("fFocus", "change", (e) => { FILTERS.focus = e.target.value; companies(host); });
+    /* The list needs the focus rows to filter on, and the Accounts tab never
+       read them — so the first use of the filter would have matched nothing.
+       Fetched once, then it repaints itself. */
+    if (!FOCUS.rows && !FOCUS.inflight)
+      loadFocus().then(() => { if (host.isConnected && FILTERS.focus) companies(host); }, () => {});
+
 
     /* SORT. Clicking the column you are already sorted by reverses it; a new
        column starts in that column's own natural direction. Only the rows are

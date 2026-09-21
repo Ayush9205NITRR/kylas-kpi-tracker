@@ -528,8 +528,13 @@
       writeFocus(to, "", "");
     });
 
+    /* Opens the SECTION, not the sheet — reading should never cover the
+       contacts. The sheet is one more click away, on Edit research, because
+       editing is the case where covering the screen is the right answer. */
     const rb = document.getElementById("accRes");
-    if (rb) rb.onclick = openResearch;
+    if (rb) rb.onclick = () => { ACC.researchOpen = true; paintAccount(); };
+    const re = document.getElementById("accResEdit");
+    if (re) re.onclick = openResearch;
 
     /* Remembered for the session, not per company: somebody who wants the
        research open wants it open on the next account too. */
@@ -553,31 +558,41 @@
 
   /* One write path for all three buttons and for the Focus lists view's
      Restore, so the history reads the same whichever screen it came from. */
-  async function writeFocus(status, reason, note) {
+  /* PAINTS FIRST, WRITES BEHIND. Picking a focus account used to disable the
+     control, wait for the Airtable round trip and only then repaint — so a
+     click that expresses a decision already made sat there looking broken for
+     as long as the network took. Ayush, 2026-09-21: "while clicking on focus
+     it is taking time than usual."
+
+     Nothing here needs the server's answer. The row is ours, the id is ours,
+     and the write is an upsert keyed on the company — it cannot conflict with
+     anything. So the cache moves now, the screen repaints now, and the request
+     goes out behind it. A failure puts the old value back and says so, which
+     is the one case where the optimistic path owes the reader something. */
+  function writeFocus(status, reason, note) {
     const id = String(scope.id);
     const was = focusOf(id);
-    ACC.busy = true; paintAccount();
-    try {
-      await API.setFocus({
-        companyId: id, companyName: scope.name || "", status, reason, note,
-        ownerName: was?.ownerName || DATA.find((a) => String(a.companyId) === id)?.owner || "",
-        setBy: who(), previous: was?.status || "normal",
-      });
-      Views.FOCUS.rows = Views.FOCUS.rows || {};
-      if (status === "normal") delete Views.FOCUS.rows[id];
-      else Views.FOCUS.rows[id] = {
-        companyId: id, companyName: scope.name || "", status, reason, note,
-        ownerName: was?.ownerName || "", setByEmail: who(), setAt: new Date().toISOString(),
-      };
-      ACC.dropping = false;
-      toast(status === "focus" ? `${scope.name} is on the focus list`
-          : status === "depri" ? `${scope.name} dropped — ${reason}`
-          : `${scope.name} is back to normal`);
-    } catch (e) {
+    const name = scope.name || "";
+
+    Views.FOCUS.rows = Views.FOCUS.rows || {};
+    if (status === "normal") delete Views.FOCUS.rows[id];
+    else Views.FOCUS.rows[id] = {
+      companyId: id, companyName: name, status, reason, note,
+      ownerName: was?.ownerName || "", setByEmail: who(), setAt: new Date().toISOString(),
+    };
+    ACC.dropping = false;
+    paintAccount();
+
+    API.setFocus({
+      companyId: id, companyName: name, status, reason, note,
+      ownerName: was?.ownerName || DATA.find((a) => String(a.companyId) === id)?.owner || "",
+      setBy: who(), previous: was?.status || "normal",
+    }).catch((e) => {
+      /* Put back exactly what was there, including nothing. */
+      if (was) Views.FOCUS.rows[id] = was; else delete Views.FOCUS.rows[id];
+      paintAccount();
       toast(`Could not record that — ${e.message}`);
-    } finally {
-      ACC.busy = false; paintAccount();
-    }
+    });
   }
 
   /* WHAT WE KNOW, ON THE PAGE, NOT BEHIND A BUTTON. Ayush, 2026-09-20: "when I
@@ -596,28 +611,45 @@
      headcount are context, not an opener, and are left to the form. Research
      notes too: it is a paragraph, and a paragraph here would push the queue
      off the screen. */
+  /* The openers, first, because they are what changes how a call starts. The
+     rest follows when the section is opened in full. */
   const STRIP_FIELDS = ["funding", "trigger", "season", "decides", "events", "vendor"];
 
   function researchStripHTML(id) {
     const r = ACC.research?.[id];
     if (!r) return "";                    /* not read yet — say nothing, not "none" */
-    const facts = STRIP_FIELDS
-      .map((k) => [ACC.fields?.find((f) => f.k === k), String(r[k] || "").trim()])
-      .filter(([f, v]) => f && v);
-    if (!facts.length) return "";
-    /* Collapsed by default ONLY when there is a lot of it. One fact is a line;
-       six are a wall in a 380px column, and the associate came here to call. */
-    const many = facts.length > 3;
-    const show = ACC.researchOpen || !many;
-    return `<div class="ares${show ? " on" : ""}">
-      <button type="button" id="accResToggle" aria-expanded="${show}"
-        title="${show ? "Hide" : "Show"} what we know about this company">
+    const val = (k) => String(r[k] || "").trim();
+    const labelOf = (k) => ACC.fields?.find((f) => f.k === k);
+    const open = !!ACC.researchOpen;
+
+    /* READING RESEARCH NO LONGER COVERS THE CONTACTS. Ayush, 2026-09-21: "I am
+       able to click filter list, see research and at the same time access all
+       content all at once." It used to take a full-screen sheet to see any of
+       this, which hid the queue, the card and everything else — for something
+       you want IN VIEW while the phone rings, not instead of the call.
+
+       So the whole of it opens here, in the column, above the contacts. The
+       sheet still exists and is still the only way to EDIT, which is the one
+       job a covering panel is right for. */
+    const keys = open
+      ? (ACC.fields || []).map((f) => f.k)   /* everything we hold */
+      : STRIP_FIELDS;                        /* the openers */
+    const facts = keys.map((k) => [labelOf(k), val(k)]).filter(([f, v]) => f && v);
+    const total = (ACC.fields || []).filter((f) => val(f.k)).length;
+    if (!facts.length && !open) return "";
+
+    return `<div class="ares${open ? " on" : ""}">
+      <button type="button" id="accResToggle" aria-expanded="${open}"
+        title="${open ? "Collapse" : "Show everything we know about this company"}">
         <span class="k">Research</span>
-        ${show ? "" : `<span class="peek">${esc(facts[0][1])}</span>`}
-        <span class="n">${facts.length}</span>
+        ${open || !facts.length ? "" : `<span class="peek">${esc(facts[0][1])}</span>`}
+        <span class="n">${total}</span>
       </button>
-      ${show ? `<dl>${facts.map(([f, v]) =>
-        `<div><dt>${esc(f.l)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
+      ${facts.length ? `<dl>${facts.map(([f, v]) =>
+        `<div><dt>${esc(f.l)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>`
+        : `<p class="aresnone">Nothing recorded for this account yet.</p>`}
+      ${open ? `<button type="button" class="aresedit" id="accResEdit"
+        title="Open the full form">Edit research</button>` : ""}
     </div>`;
   }
 

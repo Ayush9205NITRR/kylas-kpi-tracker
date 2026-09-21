@@ -154,8 +154,15 @@ check('a picked account reads as picked', await seg(f), '★ Focus* | Not picked
 check('it says who picked it and when', await strip(f), (s) => /Picked .* by .+@/.test(s));
 
 /* ── the research form ────────────────────────────────────────────────── */
+/* TWO CLICKS NOW, DELIBERATELY. #accRes opens the research IN the column,
+   beside the contacts — reading it must not cover the queue you are working.
+   The sheet is one more click, on Edit research, because editing is the one
+   job that earns the whole screen. */
 console.log('\n— research —');
 await f.locator('#accRes').click();
+await page.waitForTimeout(400);
+check('reading it does not cover anything', await f.locator('.scrim').count(), 0);
+await f.locator('#accResEdit').click();
 await page.waitForTimeout(1200);
 check('every declared field is drawn', await f.locator('.rf').count(), (n) => n >= 15);
 check('a saved value comes back', await f.locator('.rf input[data-k="industry"]').inputValue(), 'Retail');
@@ -398,23 +405,42 @@ await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/90
 await page.waitForTimeout(3000);
 f = F();
 check('the strip is on the page', await f.locator('.ares').count(), 1);
-/* Collapsed at five facts, and the funding line is the peek — the whole point
+/* OPEN IS REMEMBERED FOR THE SESSION, so by now the earlier #accRes click has
+   left it open. Collapse it first — this block is about what the two states
+   each show, and a test that only works in the order it happens to run in is
+   not a test. */
+if (await f.locator('.ares.on').count()) {
+  await f.locator('#accResToggle').click();
+  await page.waitForTimeout(400);
+}
+/* Collapsed: the openers, with the funding line as the peek — the whole point
    is that somebody about to dial sees it without asking for it. */
 check('the funding shows without opening anything',
       await f.locator('.ares .peek').textContent(), (t) => /Series C/.test(t || ''));
+const shut = await f.locator('.ares dl > div').evaluateAll((ds) => ds.map((d) =>
+  d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
+check('collapsed, it is the openers only', shut.length, 5);
+check('funding is one of them', shut.join('|'), (t) => /Funding.*Series C/.test(t));
+check('so is the recent trigger', shut.join('|'), (t) => /Recent trigger.*Pune/.test(t));
+/* Research notes and industry are deliberately NOT among the openers — they
+   are context, not an opener, and a paragraph would push the queue down. */
+check('research notes are not an opener', shut.join('|'), (t) => !/Research notes/.test(t));
+
+/* Open: everything we hold, still in the column. The user's ask, 2026-09-21 —
+   "see research and at the same time access all content all at once" — is
+   this plus the contacts being reachable, which the next two check. */
 await f.locator('#accResToggle').click();
 await page.waitForTimeout(400);
 const facts = await f.locator('.ares dl > div').evaluateAll((ds) => ds.map((d) =>
   d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent));
-check('expanding shows every fact we hold', facts.length, 5);
-check('funding is one of them', facts.join('|'), (t) => /Funding.*Series C/.test(t));
-check('so is the recent trigger', facts.join('|'), (t) => /Recent trigger.*Pune/.test(t));
-/* Research notes and industry are deliberately NOT here — they are context,
-   not an opener, and a paragraph would push the queue off the screen. */
-check('research notes stay in the form', facts.join('|'), (t) => !/Research notes/.test(t));
+check('opening shows more than the openers', facts.length, (n) => n > shut.length);
+check('industry is there once it is open', facts.join('|'), (t) => /Industry.*Retail/.test(t));
+check('nothing is covering it', await f.locator('.scrim').count(), 0);
+check('and the contact filters are still on screen',
+      await f.locator('#qfil .qf').count(), (n) => n >= 3);
 await f.evaluate(() => render());
 await page.waitForTimeout(300);
-check('it survives a render', await f.locator('.ares dl > div').count(), 5);
+check('it survives a render', await f.locator('.ares dl > div').count(), facts.length);
 
 /* ── the focus lists view ─────────────────────────────────────────────── */
 console.log('\n— focus lists —');
@@ -460,6 +486,64 @@ await page.evaluate(() => history.pushState({}, '', '/sales/companies/details/90
 await page.waitForTimeout(2500);
 f = F();
 check('the company page agrees with the restore', await seg(f), (s) => !/Deprioritize\*/.test(s));
+
+/* ── picking is instant ───────────────────────────────────────────────── */
+/* Ayush, 2026-09-21: "while clicking on focus it is taking time than usual."
+   It was awaiting the round trip before painting. The write still happens and
+   still rolls the strip back with a toast if it fails — what changed is that
+   the button no longer waits for it. The number is the whole assertion, so it
+   is measured rather than eyeballed. */
+console.log('\n— picking an account is instant —');
+const t0 = Date.now();
+await f.locator('.aseg button[data-fs="focus"]').click();
+await f.locator('.aseg button[data-fs="focus"][aria-pressed="true"]').waitFor({ timeout: 2500 });
+const took = Date.now() - t0;
+check(`it paints without waiting for the write (${took}ms)`, took, (ms) => ms < 800);
+await page.waitForTimeout(1200);
+check('and the write still lands', await f.evaluate(
+  () => Views.FOCUS.rows['903']?.status), 'focus');
+
+/* ── a chip tapped twice ──────────────────────────────────────────────── */
+/* Ayush, 2026-09-21: "once you click employee offsite once the section would
+   appear — if it has data it will remain, else if you click back again it
+   will be gone." So the chip is not a toggle over the TYPE, it is a toggle
+   over the EMPTY card: an untouched one goes away, a filled one stays and a
+   second card is added beside it. */
+console.log('\n— a chip tapped twice —');
+const chip = () => f.locator('#formR .tc', { hasText: 'Product launch' });
+const cards = () => f.evaluate(() => rec().current.filter((r) => r.eventType === 'Product launch').length);
+await chip().click(); await page.waitForTimeout(400);
+check('one tap opens a card', await cards(), 1);
+await chip().click(); await page.waitForTimeout(400);
+check('tapping again takes an EMPTY one back', await cards(), 0);
+await chip().click(); await page.waitForTimeout(350);
+await f.evaluate(() => { rec().current.find((r) => r.eventType === 'Product launch').budget = '500000'; renderRight(); });
+await page.waitForTimeout(300);
+await chip().click(); await page.waitForTimeout(400);
+check('but one with data survives, and a second opens', await cards(), 2);
+
+/* ── the focus filter on the accounts list ────────────────────────────── */
+/* Ayush, 2026-09-21: "create a filter to find account who are in focus list."
+   It took the place of Compact, which set a row height nobody changed. */
+console.log('\n— the focus filter —');
+await page.evaluate(() => history.pushState({}, '', '/sales/companies/list'));
+await page.waitForTimeout(3200);
+f = F();
+if (await f.locator('.vtabs button[data-tab="accounts"]').count()) {
+  await f.locator('.vtabs button[data-tab="accounts"]').click();
+  await page.waitForTimeout(1800);
+  f = F();
+}
+check('Compact is gone', await f.locator('#fDensity').count(), 0);
+check('a Focus filter is there instead', await f.locator('#fFocus').count(), 1);
+const allRows = await f.locator('.vr[data-id]').count();
+await f.locator('#fFocus').selectOption('focus');
+await page.waitForTimeout(1400);
+const picked = await f.locator('.vr[data-id]').count();
+check('it narrows the list', picked, (n) => n > 0 && n <= allRows);
+await f.locator('#fFocus').selectOption('none');
+await page.waitForTimeout(1200);
+check('and "neither" is a different set', await f.locator('.vr[data-id]').count(), (n) => n !== picked);
 
 console.log(`\nerrors: ${errors.length ? errors.join('\n  ') : 'none'}`);
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
