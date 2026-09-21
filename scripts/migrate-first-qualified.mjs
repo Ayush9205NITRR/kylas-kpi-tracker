@@ -61,7 +61,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
-import { createAirtable, listTolerant } from "./airtable.mjs";
+import { createAirtable, listTolerant, columnsOf } from "./airtable.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const PAT = process.env.AIRTABLE_PAT;
@@ -91,18 +91,36 @@ const FIELDS = ["Kylas Contact ID", "Name", "Owner", "Company",
 const contacts = await listTolerant(at, "Contacts",
   { fields: FIELDS, pageSize: 100, maxPages: 400 });
 
-const hasCol = (name) => contacts.some((r) => name in (r.fields || {}));
-if (contacts.length && !hasCol("First Right POC At") && !hasCol("First Discovery At")) {
-  console.log(`! no contact on this base carries First Right POC At or First Discovery At.`);
-  console.log(`  The columns do not exist yet — run scripts/repair-base.mjs first,`);
-  console.log(`  then run this again. (This script fills blanks; it cannot create columns.)`);
+/* ASK THE SCHEMA, NOT THE ROWS. This guard used to be
+   `contacts.some((r) => name in (r.fields || {}))`, and it was wrong in the one
+   case it exists for. Airtable OMITS an empty field from a record entirely, so
+   a column that has been created and never written appears in NO record —
+   which is precisely the state of First Right POC At on a base that has just
+   been repaired, right up until this script fills it. The guard therefore
+   refused to run on exactly the base it was written for:
+
+       ! no contact on this base carries First Right POC At or First Discovery At.
+         The columns do not exist yet — run scripts/repair-base.mjs first
+
+   reported by Ayush on 2026-09-22 after repair-base had already run.
+
+   columnsOf() returns null when the PAT cannot read the schema, and null is
+   NOT "missing": in that case this proceeds and lets the PATCH answer, which
+   it does clearly with UNKNOWN_FIELD_NAME. */
+const cols = await columnsOf(at, "Contacts");
+const lacks = (name) => cols && !cols.has(name);
+if (lacks("First Right POC At") && lacks("First Discovery At")) {
+  console.log(`! this base has no First Right POC At or First Discovery At column.`);
+  console.log(`  Run scripts/repair-base.mjs --apply first, then run this again.`);
+  console.log(`  (This script fills blanks; it cannot create columns.)`);
   process.exit(APPLY ? 1 : 0);
 }
-if (contacts.length && !hasCol("Is Right POC")) {
+if (lacks("Is Right POC")) {
   console.log(`! this base has no Is Right POC formula, so there is nothing to date.`);
   console.log(`  Run scripts/repair-base.mjs --update-formulas first.`);
   process.exit(APPLY ? 1 : 0);
 }
+if (!cols) console.log(`  (could not read the base schema — proceeding; a missing column will be named by the write)\n`);
 
 console.log(`${contacts.length} contact(s)\n`);
 

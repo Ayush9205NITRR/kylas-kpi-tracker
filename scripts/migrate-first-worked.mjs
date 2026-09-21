@@ -58,7 +58,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
-import { createAirtable, listTolerant } from "./airtable.mjs";
+import { createAirtable, listTolerant, columnsOf } from "./airtable.mjs";
 import { NOT_CONNECTED } from "./stages.mjs";
 
 const APPLY = process.argv.includes("--apply");
@@ -99,12 +99,21 @@ const [contacts, transitions] = await Promise.all([
 
 /* A base that has never been repaired has neither column, and there is nothing
    this script can usefully do to it — writing would 422 on every batch. Say so
-   once, plainly, rather than failing sixty times. */
-const hasCol = (name) => contacts.some((r) => name in (r.fields || {}));
-if (contacts.length && !hasCol("First Worked At") && !hasCol("First Picked At")) {
-  console.log(`! no contact on this base carries First Worked At or First Picked At.`);
-  console.log(`  Either the columns do not exist yet — run scripts/repair-base.mjs first —`);
-  console.log(`  or no save has happened since they were added. Nothing to backfill from here.`);
+   once, plainly, rather than failing sixty times.
+
+   FROM THE SCHEMA, NOT THE ROWS. This was `name in record.fields`, which
+   Airtable cannot answer: it omits an empty field from a record entirely, so a
+   column created and not yet written appears in none of them. That reads as
+   "the column does not exist" on a base where it does — which is the state
+   every base is in immediately after repair-base adds it, and which stopped
+   migrate-first-qualified dead on 2026-09-22. This one only escaped because
+   the writer had already been filling First Worked At by the time anyone ran
+   it. Same fix, same reasoning: null from columnsOf means "could not ask", not
+   "absent", so an unreadable schema proceeds and lets the write answer. */
+const cols = await columnsOf(at, "Contacts");
+if (cols && !cols.has("First Worked At") && !cols.has("First Picked At")) {
+  console.log(`! this base has no First Worked At or First Picked At column.`);
+  console.log(`  Run scripts/repair-base.mjs --apply first, then run this again.`);
   console.log(`  (This script fills blanks from history; it cannot create the columns.)`);
   if (!APPLY) process.exit(0);
 }

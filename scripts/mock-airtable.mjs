@@ -99,14 +99,33 @@ createServer(async (req, res) => {
      holds before naming fields in a projection. NAMES ONLY: this stand-in has
      no schema of its own, so it reports the shape of the rows it was seeded
      with and calls every type singleLineText. Enough to choose fields by, not
-     a substitute for verify-base.mjs against the real base. */
+     a substitute for verify-base.mjs against the real base.
+
+     PLUS MOCK_AIRTABLE_COLUMNS=Contacts.First Right POC At[,Contacts.X], which
+     declares a column that EXISTS AND IS EMPTY. Deriving the schema from the
+     rows gave this stand-in the same blind spot as the code it was meant to
+     test: Airtable omits an empty field from a record entirely, so a column
+     created and never written appears nowhere in the data — and a check of the
+     shape `name in record.fields` calls it missing. That is the state of every
+     column the moment repair-base adds it, and it is what stopped
+     migrate-first-qualified dead on a base that was perfectly fine. A mock
+     that cannot represent "declared but empty" cannot catch it. */
   if (parts[0] === "meta" && parts[1] === "bases" && parts[3] === "tables") {
+    const declared = new Map();
+    for (const spec of (process.env.MOCK_AIRTABLE_COLUMNS || "").split(",")) {
+      const [t, ...rest] = spec.trim().split(".");
+      if (!t || !rest.length) continue;
+      declared.set(t, (declared.get(t) || []).concat(rest.join(".")));
+    }
+    const names = new Set([...Object.keys(TABLES), ...declared.keys()]);
     return json(res, 200, {
-      tables: Object.entries(TABLES).map(([tname, trows]) => ({
+      tables: [...names].map((tname) => ({
         id: "tbl" + tname.replace(/\W/g, ""),
         name: tname,
-        fields: [...new Set(trows.flatMap((r) => Object.keys(r.fields)))]
-          .map((f) => ({ id: "fld" + f.replace(/\W/g, ""), name: f, type: "singleLineText" })),
+        fields: [...new Set([
+          ...(TABLES[tname] || []).flatMap((r) => Object.keys(r.fields)),
+          ...(declared.get(tname) || []),
+        ])].map((f) => ({ id: "fld" + f.replace(/\W/g, ""), name: f, type: "singleLineText" })),
       })),
     });
   }

@@ -114,6 +114,28 @@ export function createAirtable(pat, baseId, { log = () => {} } = {}) {
        listTolerant needs to report a missing column and had nowhere to say it. */
     log,
 
+    /* THE BASE'S DECLARED SCHEMA, from the metadata API. Not paced through the
+       queue: it is one request, it is not the data API, and the migrations
+       that need it run alone.
+
+       This exists because there is no way to learn the schema from the rows.
+       Airtable OMITS an empty field from a record entirely — so a column that
+       exists and has never been written appears in no response, and any check
+       of the shape `name in record.fields` concludes it is absent. That is a
+       false negative on exactly the column a migration is about to fill for
+       the first time, which is the one case that matters. */
+    async metaTables() {
+      const res = await fetch(`${API}/meta/bases/${baseId}/tables`, {
+        headers: { Authorization: `Bearer ${pat}` },
+      });
+      if (!res.ok) {
+        const e = new Error(`GET /meta/bases/${baseId}/tables -> ${res.status}`);
+        e.status = res.status;
+        throw e;
+      }
+      return res.json();
+    },
+
     /* Airtable's own upsert: match on a field, update if found, create if not.
        Cheaper and race-free compared with select-then-write. */
     async upsert(table, mergeOn, fields) {
@@ -685,6 +707,21 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
    degrades to Kylas because of the fallback, which means the flip silently
    does not happen and the only trace is a truncated line in a log.
    Ask again without the projection instead: more bytes, still an answer. */
+/* Which columns a table actually declares, or null when we could not ask.
+   NULL IS NOT "NONE", and callers must not treat it as such: a PAT without
+   schema.bases:read gets a 403 here, and a migration that read that as "the
+   column is missing" would refuse to run on a base that is perfectly fine.
+   Unknown means proceed and let the write say — UNKNOWN_FIELD_NAME is a clear
+   answer and every writer here already handles it. */
+export async function columnsOf(at, table) {
+  try {
+    const t = (await at.metaTables()).tables?.find((x) => x.name === table);
+    return t ? new Set((t.fields || []).map((f) => f.name)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listTolerant(at, table, opts) {
   try {
     return await at.listAll(table, opts);
