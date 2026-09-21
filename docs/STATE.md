@@ -22,7 +22,7 @@ describe.
 | Extension | packaged by `scripts/package-extension.sh` → `dist/`. **Not published.** |
 | Chrome Web Store | listing is a *draft*. Privacy tab answers are in the session log; `docs/privacy.html` is the policy. |
 | Airtable base | **not repaired.** `repair-base.mjs` has never been run against the live base. |
-| Proxy | runs locally for development. **Nothing is deployed anywhere.** |
+| Proxy | runs locally, one per laptop. **Nothing is deployed anywhere.** `scripts/install-agent.sh --apply` makes it start at login so nobody has to run it by hand; a shared server needs auth and per-user keys first — see `docs/central-server.md`. |
 | Crons | written (`scripts/cron.sh`, `install-cron.sh`). **Never installed on a real machine.** |
 | Associates using it | none |
 
