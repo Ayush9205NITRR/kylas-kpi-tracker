@@ -708,13 +708,46 @@ const CONTACT_READ_FIELDS = [
 
 /* Event rows for a set of contacts, in ONE read rather than one per contact.
    A company of 30 contacts would otherwise be 30 requests behind the rate
-   limit gap before the console could paint anything. */
-async function eventsFor(at, recordIds) {
-  if (!recordIds.length) return new Map();
-  const all = await listTolerant(at, "Event Rows", {
-    fields: ["Row Key", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks", "Contact"],
-    pageSize: 100, maxPages: 60,
-  });
+   limit gap before the console could paint anything.
+
+   AND CACHED, for the same reason the contact scan beside it is. This scanned
+   the WHOLE Event Rows table on every company open and every queue read —
+   sixty pages on a busy base, every single time an associate clicked an
+   account, for rows that had not changed since the click before. It was the
+   largest remaining cost in /company. Dropped by dropReadCaches() on every
+   save, so a row you just wrote is never missing from the account you reopen.
+
+   Split from the filter on purpose: the scan does not depend on WHICH contacts
+   are wanted, so readCompany can start it in parallel with the contact read
+   rather than after it. */
+const EVENTS = { at: 0, rows: null, inflight: null, gen: 0 };
+
+async function allEventRows(at, tier = "") {
+  if (EVENTS.rows && Date.now() - EVENTS.at < SCAN_TTL) return EVENTS.rows;
+  /* One flight. Two company opens a moment apart would otherwise start two
+     identical sixty-page crawls and pace each other into the rate limit. */
+  if (!EVENTS.inflight) {
+    /* THE GENERATION, not just a timestamp. A crawl in the air when a save
+       lands was started BEFORE that write, so its rows are stale — but it
+       resolves afterwards and would stamp EVENTS.at with the time it finished,
+       which reads as fresh. The next person to open that account would be
+       shown it without the row they had just typed, and a re-open would not
+       fix it for thirty seconds. So a flight only publishes if nothing has
+       invalidated the cache since it started; its caller still gets the rows
+       it fetched, which is correct for the read that asked. */
+    const gen = EVENTS.gen;
+    EVENTS.inflight = listTolerant(at, "Event Rows", {
+      fields: ["Row Key", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks", "Contact"],
+      pageSize: 100, maxPages: 60, tier,
+    }).then((rows) => {
+      if (EVENTS.gen === gen) { EVENTS.at = Date.now(); EVENTS.rows = rows; }
+      return rows;
+    }).finally(() => { EVENTS.inflight = null; });
+  }
+  return EVENTS.inflight;
+}
+
+const eventsByContact = (all, recordIds) => {
   const want = new Set(recordIds);
   const by = new Map();
   for (const r of all) {
@@ -724,6 +757,11 @@ async function eventsFor(at, recordIds) {
     by.get(owner).push(r);
   }
   return by;
+};
+
+async function eventsFor(at, recordIds) {
+  if (!recordIds.length) return new Map();
+  return eventsByContact(await allEventRows(at), recordIds);
 }
 
 /* CACHED, because it was being rebuilt per request. Reading ONE contact was
@@ -735,11 +773,11 @@ async function eventsFor(at, recordIds) {
 const IDX = { at: 0, byRec: null, byKid: null };
 const IDX_TTL = Number(process.env.AIRTABLE_INDEX_TTL_MS || 60_000);
 
-async function companyIndex(at, fresh) {
+async function companyIndex(at, fresh, tier = "") {
   if (!fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
     return { byRec: IDX.byRec, byKid: IDX.byKid };
   const rows = await at.listAll("Companies",
-    { fields: ["Kylas Company ID", "Name", "Owner"], pageSize: 100, maxPages: 200 });
+    { fields: ["Kylas Company ID", "Name", "Owner"], pageSize: 100, maxPages: 200, tier });
   const byRec = new Map(), byKid = new Map();
   for (const r of rows) {
     const co = { id: String(r.fields?.["Kylas Company ID"] || ""),
@@ -790,17 +828,46 @@ const SCAN_TTL = Number(process.env.AIRTABLE_SCAN_TTL_MS || 30_000);
 export function dropReadCaches() {
   SCAN.at = 0; SCAN.rows = null;
   IDX.at = 0; IDX.byRec = null; IDX.byKid = null;
+  /* The event rows too — a save writes them, and an associate who reopens the
+     account they just saved must not be shown it without the row they typed.
+     Bumping the generation also disowns any crawl already in the air, which
+     started before this write; see allEventRows. */
+  EVENTS.at = 0; EVENTS.rows = null; EVENTS.gen++;
 }
-async function allContacts(at) {
+async function allContacts(at, tier = "") {
   if (SCAN.rows && Date.now() - SCAN.at < SCAN_TTL) return SCAN.rows;
   const rows = await listTolerant(at, "Contacts",
-    { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 });
+    { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200, tier });
   SCAN.at = Date.now(); SCAN.rows = rows;
   return rows;
 }
 
+/* The three scans /company and /queue are built from, filled before anybody
+   asks. Called once at proxy start: the first account opened in the morning
+   used to pay for all three while somebody watched it, and that click is the
+   one an associate judges the console by.
+
+   tier "bg" throughout — nobody is waiting for a warm-up, and it must not sit
+   in front of the first real read if one arrives mid-flight. One caveat worth
+   stating plainly: a /company arriving while the event crawl is still in the
+   air JOINS that flight rather than starting a second, so it inherits
+   background pacing for the remainder of it. That is still the better of the
+   two — a second identical sixty-page crawl would pace against the first and
+   both would finish later — and it only applies in the seconds after boot. */
+export async function warmAccountReads(at) {
+  await Promise.all([companyIndex(at, false, "bg"), allContacts(at, "bg"), allEventRows(at, "bg")]);
+}
+
 /* Every contact at one company, plus the company itself. */
 export async function readCompany(at, companyKid) {
+  /* THE EVENT SCAN DOES NOT DEPEND ON WHICH CONTACTS WE WANT — it reads the
+     whole table and the filtering happens here. It used to be awaited LAST, so
+     a company open was three round trips nose to tail: index, then contacts,
+     then events. Started here it overlaps both, and on a warm cache it has
+     already resolved by the time anything needs it.
+
+     Errors are picked up at the await below; this is only the head start. */
+  const eventsSoon = allEventRows(at).catch((e) => e);
   const { byKid } = await companyIndex(at);
   const co = byKid.get(String(companyKid));
   if (!co) return null;
@@ -831,7 +898,12 @@ export async function readCompany(at, companyKid) {
   }
   const rows = recs?.length ? recs
     : (await allContacts(at)).filter((r) => (r.fields?.Company || [])[0] === co.recordId);
-  const events = await eventsFor(at, rows.map((r) => r.id));
+  /* The head start, collected. A rejection was caught into the value above so
+     it could not become an unhandled rejection while nothing was awaiting it;
+     it is rethrown here, where the caller is listening. */
+  const all = await eventsSoon;
+  if (all instanceof Error) throw all;
+  const events = eventsByContact(all, rows.map((r) => r.id));
   return {
     company: { id: co.id, name: co.name, owner: co.owner },
     contacts: rows.map((r) => toConsoleContactFromAirtable(r,
@@ -845,13 +917,22 @@ export async function readQueue(at, owner) {
      the client serialises requests behind its rate-limit gap anyway — but
      asking for them together lets it pipeline instead of waiting out a full
      round trip before even starting the second. */
-  const [rows, { byRec }] = await Promise.all([
-    listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }),
+  /* All three together, for the same reason: the event scan reads the whole
+     table and narrows here, so it never needed to wait for the contact list.
+
+     allContacts, NOT a fresh listTolerant of the same table with the same
+     projection — which is what this was. A second, uncached copy of the
+     identical crawl: /queue paid 2.6s on a 900-contact base for rows the cache
+     next to it already held, every time, and it is the screen the console
+     opens on. */
+  const [rows, { byRec }, all] = await Promise.all([
+    allContacts(at),
     companyIndex(at),
+    allEventRows(at),
   ]);
   const mine = owner && owner !== "all"
     ? rows.filter((r) => String(r.fields?.Owner || "") === String(owner)) : rows;
-  const events = await eventsFor(at, mine.map((r) => r.id));
+  const events = eventsByContact(all, mine.map((r) => r.id));
   return mine.map((r) => toConsoleContactFromAirtable(r, {
     company: byRec.get((r.fields?.Company || [])[0]) || null,
     events: events.get(r.id) || [],

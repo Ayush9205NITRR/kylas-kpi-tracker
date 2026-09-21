@@ -62,13 +62,22 @@ console.log('  filters :', (await f.locator('.vfilters label').allTextContents()
 /* #fKpi, #fSource and #fStage are the multi-select popovers, and the Accounts
    view does not draw them — it has its own chip rows for the same dimensions,
    which is why Board and Table went away on 2026-09-19. This file kept
-   clicking #fKpi and threw, taking the rest of the run with it. The filter
-   that IS in this bar on every view is Focus, so that is what gets exercised
-   here: Accounts is the tab people are on. */
-for (const v of ['focus', 'depri', 'none', '']) {
-  await f.locator('#fFocus').selectOption(v);
+   clicking #fKpi and threw, taking the rest of the run with it.
+
+   The Focus filter is a chip row now too, beside the other three — Ayush,
+   2026-09-22: "put a filter of focus list here where they are able to see all
+   stuff." Dispatched rather than clicked: the row sits below the fold of an
+   iframe inside a shadow root, where a synthetic click maps outside the frame
+   and does nothing. */
+const focusRow = f.locator('.frow').filter({ has: f.locator('.lbl', { hasText: 'Focus' }) });
+console.log('  focus chips :',
+  (await focusRow.locator('.chip').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()).join('  '));
+for (const i of [0, 1, 2]) {
+  await focusRow.locator('.chip').nth(i).evaluate(
+    (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
   await page.waitForTimeout(900); f = F();
-  console.log(`  focus=${(v || 'all').padEnd(6)}    :`, await f.locator('.vr[data-id]').count(), 'row(s)');
+  const lbl = (await focusRow.locator('.chip').nth(i).textContent() || '').replace(/\s+/g, ' ').trim();
+  console.log(`  + ${lbl.padEnd(22)}:`, await f.locator('.acctable .vr[data-id]').count(), 'row(s)');
 }
 /* Sticky header: after a scroll it must still be at the top of the scroller.
    Only meaningful when there is something to scroll — with a filter on there

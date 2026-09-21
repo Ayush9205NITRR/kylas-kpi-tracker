@@ -47,8 +47,16 @@ SEED.Companies = CO.map(([id, Name, Owner, stage, rank]) => {
 });
 SEED.Contacts = CO.map(([id, , Owner, stage], i) => {
   ids['ct:' + id] = rid();
+  /* THE IDS MOCK-KYLAS ACTUALLY HAS, not c1..c4. Kylas contact ids are
+     numeric, and a save PUTs to /v1/contacts/{id} — so a fixture whose ids
+     exist only in Airtable makes every save 404 with "not mocked". That is not
+     a product fault and it is not visible from this side: the console shows
+     the card, the gate passes, the click does nothing. It is what kept
+     test-writer-live red, and it hid the whole write path from test coverage
+     until test-roundtrip-live went looking for it. */
   return { Name: ['Hema Bharathi', 'Shipra Gupta', 'Devanshi Kalro', 'Arun Menon'][i],
-           'Kylas Contact ID': 'c' + (i + 1), Owner, 'Current Stage': stage,
+           'Kylas Contact ID': ['112936', '112937', '38470', '99001'][i],
+           Owner, 'Current Stage': stage,
            Company: [ids['co:' + id]],
            'Is Right POC': qualified(id) ? 1 : 0, 'Is Discovery': qualified(id) ? 1 : 0,
            /* THE RIGHT POC WHO NEVER MOVED STAGE, seeded on purpose. Shorehouse
@@ -622,15 +630,60 @@ if (await f.locator('.vtabs button[data-tab="accounts"]').count()) {
   f = F();
 }
 check('Compact is gone', await f.locator('#fDensity').count(), 0);
-check('a Focus filter is there instead', await f.locator('#fFocus').count(), 1);
-const allRows = await f.locator('.vr[data-id]').count();
-await f.locator('#fFocus').selectOption('focus');
-await page.waitForTimeout(1400);
-const picked = await f.locator('.vr[data-id]').count();
-check('it narrows the list', picked, (n) => n > 0 && n <= allRows);
-await f.locator('#fFocus').selectOption('none');
+/* A CHIP ROW BESIDE THE OTHER THREE, not a select in the shell bar. Ayush,
+   2026-09-22, pointing at this screen: "put a filter of focus list here where
+   they are able to see all stuff." The select could ask for one status and
+   carried no counts; Source, KPI status and Last call are all multi-select
+   with counts, so a fourth dimension had no business looking different. */
+const rowLabels = await f.locator('.frow .lbl').allTextContents();
+check('Focus is one of the filter rows', rowLabels.map((t) => t.trim()),
+      (v) => v.includes('Focus'));
+const focusRow = f.locator('.frow').filter({ has: f.locator('.lbl', { hasText: 'Focus' }) });
+const chipText = (await focusRow.locator('.chip').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim());
+check('three states, each with its count', chipText.length, 3);
+check('and the counts are real, not zeros', chipText.join(' '), (t) => /[1-9]/.test(t));
+
+/* THE CHIP'S OWN COUNT IS THE EXPECTATION. Earlier blocks in this file pick
+   and drop accounts, so how many are on a focus list by now depends on what
+   ran before — a hard-coded number here would be a test that passes for the
+   wrong reason, or breaks when an unrelated block is added above it. Asserting
+   rows == the count the chip itself shows also checks the thing most worth
+   checking: that the number on the chip and the list under it agree. */
+const chipCount = (i) => focusRow.locator('.chip').nth(i).locator('.k')
+  .textContent().then((t) => Number(t.trim()));
+const rowCount = () => f.locator('.acctable .vr[data-id]').count();
+
+/* DISPATCHED IN-PAGE, NOT CLICKED AT COORDINATES. The console is an iframe
+   inside a shadow root and this row sits below the fold — a synthetic mouse
+   click maps to a page point outside the frame and silently does nothing,
+   which is the same limit that stops the footer's Save button being reachable
+   from a test (test-roundtrip-live uses the header's instead). The event is a
+   real bubbling MouseEvent on the real element, so the real handler runs;
+   only the pointer geometry is skipped. */
+const tapChip = async (i) => {
+  await focusRow.locator('.chip').nth(i).evaluate(
+    (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+  await page.waitForTimeout(1300);
+};
+
+const allRows = await rowCount();
+const nFocus = await chipCount(0);
+await tapChip(0);                                      /* ★ On a focus list */
+check('the chip reads as pressed',
+      await focusRow.locator('.chip').first().getAttribute('aria-pressed'), 'true');
+check('the list matches the count on the chip', await rowCount(), nFocus);
+
+/* Multi-select, like the three rows above it: adding Dropped WIDENS the set
+   rather than replacing it, which is the whole reason these are chips. */
+const nDropped = await chipCount(1);
+await tapChip(1);                                      /* + Dropped */
+check('a second chip widens rather than replaces', await rowCount(), nFocus + nDropped);
+
+check('Clear appears once something is filtered', await f.locator('#accClear').count(), 1);
+await f.locator('#accClear').evaluate(
+  (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
 await page.waitForTimeout(1200);
-check('and "neither" is a different set', await f.locator('.vr[data-id]').count(), (n) => n !== picked);
+check('Clear puts them all back', await rowCount(), allRows);
 
 console.log(`\nerrors: ${errors.length ? errors.join('\n  ') : 'none'}`);
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');

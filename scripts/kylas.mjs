@@ -593,10 +593,32 @@ const line = (label, value) => (value ? `${label.padEnd(10)} ${value}` : null);
 const row = (r) => [r.eventType, r.budget, r.timeline, r.pax].filter(Boolean).join(" | ");
 
 /* What a Kylas user sees on the record. Readable, not parsed back — the numbers
-   come from Airtable, this is context for whoever opens the contact. */
+   come from Airtable, this is context for whoever opens the contact.
+
+   EACH ROW'S NOTE SITS UNDER ITS OWN ROW. There used to be one "Notes" line at
+   the bottom, built from c.current only, which lost two things at once: every
+   remark on a PAST row never reached Kylas at all, and once a contact could
+   carry several events of the same type — the offsite they ran last year and
+   the one they are planning — the surviving notes were joined with " · " and
+   no longer said which event they were about. Ayush, 2026-09-22: "additional
+   info, about offsites (past, now), vale remarks mein kaise push hoga."
+
+   Airtable had them all along; this is the Kylas side catching up. */
 export function renderRemarks(c, { stageLabel } = {}) {
-  const rows = (list, label) => (list || []).map((r) => row(r)).filter(Boolean)
-    .map((t, i) => line(i ? "" : label, t)).filter(Boolean);
+  /* The label goes on the first row that actually PRINTS, not on index 0 — an
+     empty leading row would otherwise take "Past" with it and leave the block
+     unlabelled. */
+  const rows = (list, label) => {
+    let used = false;
+    return (list || []).flatMap((r) => {
+      const t = row(r);
+      if (!t) return [];
+      const head = line(used ? "" : label, t);
+      used = true;
+      const note = String(r.remarks || "").trim();
+      return [head, note ? line("", "  ↳ " + note) : null].filter(Boolean);
+    });
+  };
   const out = [
     line("Stage", stageLabel || c.stage),
     line("Owner", c.owner),
@@ -606,7 +628,6 @@ export function renderRemarks(c, { stageLabel } = {}) {
     line("Vendor", c.vendorInfo),
     line("Mode", c.modeOfMeeting),
     line("Offering", c.serviceOffering ? "pitched on this call" : ""),
-    line("Notes", (c.current || []).map((r) => r.remarks).filter(Boolean).join(" · ")),
   ].filter(Boolean);
   return out.join("\n");
 }

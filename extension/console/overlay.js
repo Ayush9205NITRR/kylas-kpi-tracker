@@ -94,6 +94,23 @@
   /* ── loading a company ───────────────────── */
   /* Show whatever is already held straight away, then fetch. An associate
      should never watch a spinner before they can start reading a record. */
+  /* The shipped sample rows, removed the first time real data lands. They are
+     tagged in console.js — see the note there for why they are dangerous once
+     anything merges by Kylas id.
+
+     `cur` is an INDEX into DATA, so it has to be repaired here rather than
+     left to the caller: splicing rows out from under it would silently move
+     the selection to a different contact, which is the same class of fault as
+     the mid-fetch race openCompany already guards. The record itself is
+     tracked across the splice, not the number. */
+  function dropSamples() {
+    if (!DATA.some((a) => a.demo)) return;
+    const keep = DATA[cur];
+    for (let i = DATA.length - 1; i >= 0; i--) if (DATA[i].demo) DATA.splice(i, 1);
+    const at = DATA.indexOf(keep);
+    cur = at > -1 ? at : 0;
+  }
+
   function showCompany(id, label) {
     const roster = DATA.filter((a) => String(a.companyId) === String(id));
     scope = { id, name: label || roster[0]?.company || ("Company " + id) };
@@ -183,6 +200,13 @@
       return;
     }
     scope.offline = false;
+
+    /* THE SAMPLES GO THE MOMENT SOMETHING REAL ARRIVES. console.js ships a
+       handful of plausible-looking contacts so the console is not blank
+       without a proxy, and the merge below keys on kid — so a real contact
+       sharing an id with one of them would be handed its invented budget and
+       event rows. Dropped here, once, before anything is matched. */
+    dropSamples();
 
     /* Kylas owns the contact fields; the overlay keeps its own. Merging by id
        rather than replacing is what stops a refetch wiping notes typed a moment
@@ -305,6 +329,9 @@
     /* Kylas owns the contact fields, the overlay keeps its own — the same
        merge the company fetch uses, so a refetch never wipes a note typed a
        moment ago and not yet synced. */
+    /* Same reason as the company path: this merge keys on kid, and the shipped
+       samples carry plausible ids. */
+    dropSamples();
     const at = DATA.findIndex((a) => String(a.kid) === String(fetched.kid));
     if (at > -1) DATA[at] = API.merge(DATA[at], fetched);
     else { DATA.unshift(fetched); filter = "all"; }

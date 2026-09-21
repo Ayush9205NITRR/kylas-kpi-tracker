@@ -412,6 +412,11 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .f-cool{background:var(--f-cool)} .f-cold{background:var(--f-cold)} .f-never{background:var(--f-never)}
 .r0{background:var(--r0)} .r1{background:var(--r1)} .r2{background:var(--r2)}
 .r3{background:var(--r3)} .r4{background:var(--r4)} .r5{background:var(--r5)} .rn{background:var(--rn)}
+/* Focus chips. The same two hues the account strip uses for the same two
+   decisions — blue for picked, amber for dropped — so the chip row and the
+   strip on the company page cannot look like different facts. */
+.fo-focus{background:var(--blue)} .fo-depri{background:var(--amber)}
+.fo-none{background:var(--line2)}
 
 .fams{display:grid;gap:14px;margin-bottom:12px}
 .fam h3{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin:0 0 7px;font-size:var(--t-label)}

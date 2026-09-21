@@ -188,6 +188,22 @@ let DATA=[
  remarks:"",offsiteTimeline:"",owner:"",past:[],current:[],
  vendorInfo:"",serviceOffering:false,modeOfMeeting:"",done:false,flagged:false}
 ];
+/* THESE ARE SAMPLES, AND THEY HAVE TO SAY SO. The rows above exist so the
+   console has something to show before a proxy answers — but they carry
+   plausible Kylas ids and invented budget figures, and openCompany() merges a
+   fetched contact onto any local row with the SAME kid (deliberately: that is
+   what stops a refetch wiping notes typed a second ago). So a real contact
+   whose Kylas id happens to equal one of these would come back wearing a
+   fabricated budget, timeline and pax, on a real company, with nothing on
+   screen to say where it came from.
+
+   Not hypothetical: making the test fixture use real Kylas ids instead of
+   c1..c4 produced exactly that — Devanshi Kalro at Shorehouse Retail arrived
+   with "Approx 40L, signed off by CFO" and a dealer meet nobody had entered.
+
+   Tagged here rather than in each literal so a row added later cannot forget,
+   and dropped by overlay.js the moment a real fetch succeeds. */
+DATA.forEach((d) => { d.demo = 1; });
 
 let cur=0, isNew=false, filter="todo", target=100, tried=false;
 /* EVERY DELIBERATE CHOICE OF RECORD BUMPS THIS. openCompany() is async and

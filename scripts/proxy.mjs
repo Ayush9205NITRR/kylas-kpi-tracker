@@ -26,7 +26,7 @@ import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
-         readCompanies, readSyncState, listTolerant,
+         readCompanies, readSyncState, listTolerant, warmAccountReads,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter,
          readFocus, readResearch, writeFocus, writeResearch,
@@ -1645,5 +1645,14 @@ server.listen(PORT, "127.0.0.1", () => {
        again by the first /team, both while somebody watched. It is one Kylas
        round trip; doing it now costs nothing and takes it off the path. */
     warm("who the key belongs to", whoami()),
+    /* THE THREE SCANS EVERY ACCOUNT OPEN NEEDS. Contacts, Event Rows and the
+       company index are read by /company and /queue, and until one of those
+       ran they were cold — so the FIRST account somebody opened in the morning
+       paid for all three while they watched, and that is the click they judge
+       the whole console by. Warmed here they are already in hand.
+
+       Behind the others in the list on purpose: they are prefetches and the
+       dashboard is a screen somebody may be looking at right now. */
+    warm("the account scans", warmAccountReads(airtable)),
   ]).then(() => log("caches warm — the first dashboard will not wait for these"));
 });
