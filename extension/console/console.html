@@ -92,6 +92,11 @@
 
   <div class="viewport" id="viewport" hidden><div class="vwrap" id="vwrap"></div></div>
 
+  <!-- Columns this Airtable base does not have. A standing line, not a toast:
+       a dropped First Right POC At makes every save look successful and leaves
+       the rung uncountable for ever, which is invisible here and surfaces a
+       week later as a funnel that disagrees with the cards in it. -->
+  <div class="gaps" id="gaps" hidden></div>
   <div class="foot" id="foot"><div class="footIn">
     <span class="msg" id="msg"></span>
     <button class="flagbtn" id="flagBtn" type="button">⚑ Flag for cleanup</button>

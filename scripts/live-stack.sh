@@ -33,7 +33,11 @@ done
 sleep 1
 
 cd "$REPO"
-MOCK_AIRTABLE_SEED="$SEED" node scripts/mock-airtable.mjs > "$LOGS/ma.log" 2>&1 &
+# MOCK_AIRTABLE_NOFIELD passes through, so a caller can stand up a base that is
+# one repair-base behind — which is the state Ayush's actually is, and the one
+# where a save reports success and the KPI it fed never moves.
+MOCK_AIRTABLE_SEED="$SEED" MOCK_AIRTABLE_NOFIELD="${MOCK_AIRTABLE_NOFIELD:-}" \
+  node scripts/mock-airtable.mjs > "$LOGS/ma.log" 2>&1 &
 node scripts/mock-kylas.mjs > "$LOGS/mk.log" 2>&1 &
 sleep 1
 

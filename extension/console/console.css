@@ -41,7 +41,13 @@
      face at 18–27px; these keep this console's tighter grid — it is a data
      entry screen used 200 times a day, not a page — while adopting its two
      faces. */
-  --t-meta:12px; --t-label:13px; --t-body:14px; --t-sec:17px; --t-name:21px;
+  /* ONE STEP UP, 2026-09-22. Ayush: "change the font, make the UI more
+     readable." 12/13/14 is a spreadsheet, and this is read at arm's length
+     while somebody is on the phone — the labels under every box were 12px,
+     which is smaller than the reference sets body text. Body moves to the
+     reference's own 15px and the rest follows it; the grid is unchanged, so
+     nothing reflows. Five sizes still, per CLAUDE.md. */
+  --t-meta:13px; --t-label:14px; --t-body:15px; --t-sec:18px; --t-name:22px;
 
   --w-body:400; --w-med:500; --w-strong:600; --w-max:700;
 
@@ -138,6 +144,13 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
   padding:7px 14px;font-size:var(--t-label);font-weight:var(--w-strong);color:var(--onBlue)}
 .pbtn:hover{background:var(--blueDeep);border-color:var(--blueDeep)}
 .pbtn:disabled{background:var(--panel3);border-color:var(--line2);color:var(--text3);cursor:not-allowed}
+/* BLOCKED IS NOT DISABLED. A disabled Save is a dead button: the click does
+   nothing, fires nothing and explains nothing, so the only account of why is
+   one line of small text at the other end of the footer. This reads as
+   unavailable and is still clickable — pressing it names what is missing and
+   scrolls to the field. */
+.pbtn.blocked{background:var(--panel3);border-color:var(--line2);color:var(--text2)}
+.pbtn.blocked:hover{background:var(--roseSoft);border-color:var(--rose);color:var(--rose)}
 
 /* ── call bar ──────────────────────────────── */
 .callbar{background:var(--panel);border-bottom:1px solid var(--line);padding:9px 18px}
@@ -257,11 +270,18 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .ph .phx:hover{background:var(--panel3);color:var(--text)}
 /* With the × claiming the right edge, the count can no longer have it too. */
 .ph:has(.phx) .c{margin-left:0}
-.ph{background:var(--panel);border-bottom:1px solid var(--line);padding:9px 16px;
-  display:flex;align-items:baseline;gap:10px;font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
+/* The pane's own name, which is the top of the hierarchy on this screen —
+   above the card titles, which are above the field labels. It read as the
+   quietest of the three. Small caps and tracking rather than size, so it
+   labels the column without competing with the work in it. */
+.ph{background:var(--panel);border-bottom:1px solid var(--line);padding:11px 18px;
+  display:flex;align-items:baseline;gap:10px;font-size:var(--t-meta);font-weight:var(--w-max);
+  text-transform:uppercase;letter-spacing:.07em;color:var(--text2)}
 .ph .c{margin-left:auto;font-weight:var(--w-med);font-size:var(--t-meta);color:var(--text3)}
 .pscroll{overflow-y:auto;min-height:0;container-type:inline-size;background:var(--ground)}
-.pwrap{max-width:700px;margin:0 auto;padding:22px 22px 70px;display:flex;flex-direction:column;gap:20px}
+/* More air between cards than inside them — that difference is what makes
+   four sections read as four things rather than one long form. */
+.pwrap{max-width:700px;margin:0 auto;padding:22px 22px 70px;display:flex;flex-direction:column;gap:26px}
 .tabbar{display:none}
 @media(max-width:960px){
   .split,.split[data-res="on"]{grid-template-columns:1fr}
@@ -286,11 +306,20 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
   overflow:hidden}
 /* The header band was a filled strip with a 17px bold heading. Two headings for
    one thing — the pane already says "Basic information". It is a caption now. */
-.cardH{padding:12px 16px 0;background:transparent;border-bottom:0;
+/* DEFINED, 2026-09-22. Ayush: "less cluttered, defined sections." The caption
+   was the same size and weight as the labels inside the card, so four cards
+   down a pane read as one undifferentiated column of text and the eye had
+   nothing to land on. The heading now uses the display face a step up, sits in
+   its own darker ink, and has a rule under it — structure, not colour, per
+   CLAUDE.md. The card keeps its border; what changed is that its title now
+   looks like a title. */
+.cardH{padding:14px 18px 10px;background:transparent;
+  border-bottom:1px solid var(--line);margin-bottom:2px;
   display:flex;align-items:baseline;gap:10px}
-.cardH h2{font-size:var(--t-label);font-weight:var(--w-strong);letter-spacing:0;color:var(--text2)}
+.cardH h2{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-strong);
+  letter-spacing:-.01em;color:var(--text)}
 .cardH .sub{margin-left:auto;font-size:var(--t-meta);color:var(--text3);font-weight:var(--w-body);flex:none}
-.cardB{padding:14px 16px 16px}
+.cardB{padding:16px 18px 18px}
 .grp{display:flex;flex-direction:column;gap:14px}
 .grp .f{margin-bottom:0}
 .rowFlex{display:flex;gap:12px;flex-wrap:wrap}
@@ -401,6 +430,17 @@ select.mini:hover{border-color:var(--blue);color:var(--blue)}
 .skipnote{font-size:var(--t-body);color:var(--text2);line-height:1.6}
 
 /* ── footer ────────────────────────────────── */
+/* ── what this base cannot store ──────────────────────────────────────
+   A standing line above the footer, not a toast. A column Airtable does not
+   have is dropped from the write and the save still reports success, so the
+   only symptom is a KPI that never moves — days later, somewhere else. It
+   stays until a save comes back clean. */
+.gaps{background:var(--amberSoft);border-top:1px solid var(--amberLine);
+  color:var(--text);padding:10px 22px;font-size:var(--t-label);line-height:1.5}
+.gaps.bad{background:var(--roseSoft);border-top-color:var(--rose)}
+.gaps b{font-weight:var(--w-max)}
+.gaps code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--t-meta);
+  background:var(--panel);border:1px solid var(--line2);border-radius:4px;padding:1px 5px}
 .foot{background:var(--panel);border-top:1px solid var(--line);padding:14px 22px;
   padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}
 .footIn{display:flex;gap:12px;align-items:center;flex-wrap:wrap}

@@ -1495,7 +1495,23 @@ function validate(){
   setTimeout(renderDupe,0);
   const m=missing(),msg=document.getElementById("msg"),a=rec(),sv=document.getElementById("saveBtn");
   document.getElementById("flagBtn").className="flagbtn"+(a.flagged?" on":"");
-  sv.disabled=m.length>0;
+  /* NOT DISABLED — BLOCKED, WHICH IS A DIFFERENT THING. `sv.disabled = true`
+     made this button inert: the click did nothing, fired nothing, and said
+     nothing, so the only explanation was one line of small red text at the far
+     left of the footer. Ayush, 2026-09-22: "the data once gets updated is not
+     getting saved" — on a card whose Save was greyed out because a call-back
+     date was missing.
+
+     saveNext() has always had the right answer to this — it names what is
+     missing and jumps to the field — and that path was unreachable from here
+     for as long as the button was disabled. The button in the header was never
+     disabled and did explain itself, which is the same button doing two
+     different things depending on where you clicked it.
+
+     So: styled as unavailable, still clickable, and clicking it tells you why. */
+  sv.disabled=false;
+  sv.classList.toggle("blocked",m.length>0);
+  sv.title=m.length?`Still needed: ${m.map(([l])=>l).join(", ")}`:"";
   if(m.length){
     msg.className="msg bad";msg.innerHTML="";
     msg.append("Still needed: ");
@@ -1535,7 +1551,16 @@ function jump(anc){
 }
 function saveNext(){
   const m=missing();
-  if(m.length){tried=true;validate();toast("Still needed: "+m.map(x=>x[0]).join(", "));return;}
+  /* NAME IT, THEN TAKE THEM THERE. Listing what is missing and leaving the
+     person to find it is most of the way to useless when the field is in the
+     other pane and below the fold — which "A day to call back" is, on a card
+     whose events pane is what you have been typing in. */
+  if(m.length){
+    tried=true;validate();
+    toast("Still needed: "+m.map(x=>x[0]).join(", "));
+    jump(m[0][1]);
+    return;
+  }
   tried=false;
   const a=rec(),was=a.done;
   const wasNew=isNew||!a.kid;
@@ -1720,6 +1745,30 @@ async function flushOutbox(){
 }
 
 let warnedMissing=false;
+/* Columns this base does not have, as reported by the saves that tried to
+   write them. Held for the session and shown until a save comes back clean —
+   see the note where it is filled. */
+const MISSING_COLS=new Set();
+/* THE ONES THAT COST KPIs, as opposed to the ones that cost a value on a card.
+   A dropped Salutation is cosmetic. A dropped First Right POC At means the
+   rung cannot be counted at all, which is invisible from the console and
+   shows up a week later as a funnel that disagrees with the cards in it. */
+const KPI_COLS=["First Right POC At","First Discovery At","First Worked At",
+                "First Picked At","Ever Right POC","Ever Discovery","Ever Picked",
+                "KPI Rank","KPI Rank At"];
+function renderGaps(){
+  const w=document.getElementById("gaps");
+  if(!w)return;
+  const cols=[...MISSING_COLS];
+  if(!cols.length){w.hidden=true;w.innerHTML="";return;}
+  const bad=cols.filter(c=>KPI_COLS.some(k=>c.endsWith("."+k)||c===k));
+  w.hidden=false;
+  w.className="gaps"+(bad.length?" bad":"");
+  w.innerHTML=`<b>${bad.length?"KPIs are being under-counted.":"Saved without some fields."}</b> `+
+    `This Airtable base has no ${cols.map(c=>`<code>${esc(c)}</code>`).join(", ")}. `+
+    (bad.length?`The calls are safe, but a rung with no date cannot be counted — which is why the funnel disagrees with the cards. `:"")+
+    `Run <code>node scripts/repair-base.mjs --apply</code>, then <code>--update-formulas</code>.`;
+}
 async function syncToKylas(a,call){
   a.syncing=true;renderQueue();
   await flushOutbox().catch(()=>{});
@@ -1741,12 +1790,28 @@ async function syncToKylas(a,call){
     /* The save went through WITHOUT a column the base does not have. Not an
        error — the call is safe — but the field it dropped is one the console
        shows, so silence would leave somebody hunting for a value that was never
-       stored. Said ONCE a session: at 200 calls a day a per-save toast is
-       noise, and the fix (run repair-base) is the same every time. */
+       stored.
+
+       A TOAST ONCE A SESSION WAS NOT ENOUGH, and the reason is what Ayush
+       reported on 2026-09-22: "the data gets updated but my KPI count is still
+       mismatched." If the base is missing First Right POC At, every save looks
+       like it worked — Kylas takes it, Airtable takes it, the card says
+       Logged — and the two middle rungs stay uncounted for ever, because the
+       flag is written and the date it needs is dropped on the floor. The one
+       toast that said so scrolled away four seconds after the first call of
+       the day.
+
+       So it is remembered and shown as a standing line under the footer until
+       a save reports nothing missing. Accumulated across saves, because
+       Airtable names one field per rejection and different records touch
+       different columns. */
+    for(const f of res.airtable?.missing||[])MISSING_COLS.add(f);
+    if(!(res.airtable?.missing||[]).length&&res.airtable)MISSING_COLS.clear();
     if(res.airtable?.missing?.length&&!warnedMissing){
       warnedMissing=true;
       toast(`Airtable is missing ${res.airtable.missing.join(", ")} — saved without it. Run repair-base.mjs.`);
     }
+    renderGaps();
   }else{
     a.syncError=res.error||"not sent";
   }
