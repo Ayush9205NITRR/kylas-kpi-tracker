@@ -6,6 +6,21 @@
 (function (global) {
   const DEFAULT_BASE = "http://127.0.0.1:8787";
   let base = DEFAULT_BASE;
+  /* THE ASSOCIATE'S OWN KYLAS KEY, for a shared proxy. Empty on a local one,
+     which is every install today — the proxy holds the key there and this
+     console never sees it, which is the arrangement the file header describes
+     and the one to keep wherever it is possible.
+
+     It is only non-empty when the proxy is somebody else's machine. Then the
+     key is both the credential and the identity: without it a shared proxy
+     answers 401, and with it "Me" on the dashboard, admin versus associate and
+     "Picked by…" are that person rather than whoever started the process. The
+     alternative — one key on the server for everybody — makes eight associates
+     into one, which is the thing the KPI ladder exists to tell apart.
+
+     In chrome.storage, not in the page: an extension's storage is not readable
+     by a site, which a page's localStorage effectively is. */
+  let userKey = "";
   let state = { online: false, reason: "not checked yet", user: null, role: "admin" };
   const listeners = new Set();
 
@@ -66,9 +81,13 @@
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     try {
+      const headers = {};
+      if (body) headers["content-type"] = "application/json";
+      /* Sent whenever we have one. A local proxy ignores it, so there is no
+         mode to get wrong — the same request works against both. */
+      if (userKey) headers["x-kylas-key"] = userKey;
       const res = await fetch(base + path, {
-        signal: ctl.signal, method,
-        headers: body ? { "content-type": "application/json" } : undefined,
+        signal: ctl.signal, method, headers,
         body: body ? JSON.stringify(body) : undefined,
       });
       /* Deliberately not named `body` — that is the request payload above, and
@@ -78,6 +97,11 @@
         const err = new Error(payload?.error || `proxy returned ${res.status}`);
         err.status = res.status;
         err.problems = payload?.problems || null;
+        /* "This proxy is shared and wants your own key" is a different thing
+           from "the proxy is down", and the badge has to say which — otherwise
+           the fix (paste your key) reads as the fix for an outage (wait). */
+        err.needsKey = !!payload?.needsKey;
+        if (payload?.hint) err.hint = payload.hint;
         throw err;
       }
       if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
@@ -97,12 +121,21 @@
 
     async configure() {
       try { base = (await Store.getSetting("proxy")) || DEFAULT_BASE; } catch { base = DEFAULT_BASE; }
+      try { userKey = (await Store.getSetting("kylasKey")) || ""; } catch { userKey = ""; }
       return base;
     },
     get base() { return base; },
     async setBase(v) {
       base = v || DEFAULT_BASE;
       await Store.setSetting("proxy", base);
+      return API.health();
+    },
+    /* Whether a key is held, never the key itself — nothing should be able to
+       read it back out of here and put it on a screen or in a log. */
+    get hasKey() { return !!userKey; },
+    async setKey(v) {
+      userKey = String(v || "").trim();
+      await Store.setSetting("kylasKey", userKey);
       return API.health();
     },
 
@@ -165,8 +198,21 @@
                         `report its build. Restart it: stop node scripts/proxy.mjs, then start it again.` };
         announce();
         return r;
-      } catch { return null; }
+      } catch (e) {
+        /* A SHARED PROXY ASKING FOR A KEY IS NOT AN OUTAGE, and the badge has
+           to be able to tell them apart — the fix for one is "paste your key",
+           the fix for the other is "wait, or start the proxy". */
+        if (e?.needsKey) {
+          state = { ...state, online: false, needsKey: true,
+                    reason: e.hint || e.message };
+          announce();
+        }
+        return null;
+      }
     },
+    /* True only when the proxy has said so. Cleared by a successful call,
+       because `state` is replaced wholesale on the ok path above. */
+    get needsKey() { return !!state.needsKey; },
     get role() { return state.role || "admin"; },
     get isAdmin() { return (state.role || "admin") === "admin"; },
     get staleProxy() { return !!state.staleProxy; },

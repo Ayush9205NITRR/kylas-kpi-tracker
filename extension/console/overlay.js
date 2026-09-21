@@ -374,6 +374,25 @@
   }
   if (linkEl) linkEl.onclick = async () => {
     if (API.state.online) return;
+    /* TWO DIFFERENT FAULTS BEHIND ONE BADGE, and the fix for each is the
+       opposite of the fix for the other. "The proxy is not running" is solved
+       by starting it or correcting the address; "this proxy is shared and
+       wants your own key" is solved by pasting a key, and waiting will never
+       solve it. The proxy says which with needsKey, so ask for the right
+       thing rather than the address every time. */
+    if (API.needsKey) {
+      const k = prompt(
+        "This proxy is shared, so it needs YOUR Kylas API key.\n\n"
+        + "Generate one in Kylas: Settings \u2192 API Keys.\n"
+        + "It is stored in this browser only, and is what makes the dashboard "
+        + "show your numbers rather than somebody else's.",
+        "");
+      if (k === null) return;
+      setLink("busy", "Checking\u2026");
+      const ok = await API.setKey(k.trim());
+      setLink(ok ? "on" : "off", ok ? `Kylas · ${ok.user?.name || ""}` : API.state.reason);
+      return;
+    }
     const next = prompt("Proxy address\n\nRun it with:  KYLAS_KEY=... node scripts/proxy.mjs", API.base);
     if (next === null) return;
     setLink("busy", "Checking…");

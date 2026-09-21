@@ -17,6 +17,7 @@
 import "./env.mjs";
 import { requireEnv, ENV_FILE } from "./env.mjs";
 import { createServer } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -101,7 +102,40 @@ const STARTED = new Date().toISOString();
 
 const KEY = process.env.KYLAS_KEY;
 const PORT = Number(process.env.PORT || 8787);
-requireEnv("KYLAS_KEY");
+
+/* ── WHO MAY REACH THIS, AND AS WHOM ──────────────────────────────────
+   Ayush, 2026-09-22: "server run on one machine" — one proxy serving the
+   whole team instead of one per laptop.
+
+   Two settings make that possible, and they are deliberately coupled.
+
+   PROXY_BIND is the address to listen on. The default is 127.0.0.1, which is
+   the whole of the access control today: the operating system will not let
+   another machine connect, so there is nothing to authenticate. Anything else
+   — a LAN address, a Tailscale address, 0.0.0.0 — is reachable by somebody
+   else, and this process holds a Kylas key and an Airtable PAT.
+
+   PROXY_REQUIRE_KEY makes every request carry its OWN Kylas key, in an
+   x-kylas-key header. That does two jobs at once. It is the credential —
+   without a key Kylas answers nothing, so an unauthenticated caller gets
+   nowhere — and it is the IDENTITY, which is the part that actually matters
+   here: whoami() resolves from the caller's key, so "Me" on the dashboard,
+   admin versus associate, and "Picked by…" on a focus row stay per person.
+   A shared server running on one key makes all eight associates the same
+   human, which removes the reason the KPI ladder exists.
+
+   THE INTERLOCK: binding anywhere but loopback without PROXY_REQUIRE_KEY is
+   refused outright, below. Not warned about — refused. The failure mode it
+   prevents is somebody setting PROXY_BIND to share the proxy with a colleague
+   and publishing an unauthenticated read/write door onto the CRM, and a
+   warning in a log is not a defence against that. */
+const BIND = process.env.PROXY_BIND || "127.0.0.1";
+const REQUIRE_KEY = process.env.PROXY_REQUIRE_KEY === "1";
+const LOOPBACK = /^(127\.|::1$|localhost$)/i.test(BIND);
+
+/* With per-request keys the process key is optional: it is the fallback for a
+   caller that sends none, which on a loopback proxy is every caller. */
+if (!REQUIRE_KEY) requireEnv("KYLAS_KEY");
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -113,12 +147,40 @@ const SHAPE_FILE = new URL("../.company-shape", import.meta.url);
 let shapeHint = "";
 try { shapeHint = readFileSync(SHAPE_FILE, "utf8").trim(); } catch { /* first run */ }
 
-const kylas = createClient(KEY, {
-  log,
-  shapeHint,
-  onShape: (name) => {
-    try { writeFileSync(SHAPE_FILE, name); }
-    catch { /* unwritable is survivable — it only costs the probe again */ }
+const onShape = (name) => {
+  try { writeFileSync(SHAPE_FILE, name); }
+  catch { /* unwritable is survivable — it only costs the probe again */ }
+};
+const newClient = (k) => createClient(k, { log, shapeHint, onShape });
+
+/* One client per key, made once. A client carries the learned company-search
+   shape and its own pacing, so rebuilding it per request would re-probe and
+   re-pace for every call. */
+const clients = new Map();
+const clientFor = (k) => {
+  if (!clients.has(k)) clients.set(k, newClient(k));
+  return clients.get(k);
+};
+const defaultClient = KEY ? clientFor(KEY) : null;
+
+/* THE CALLER'S KEY, FOR THE LIFE OF ONE REQUEST. AsyncLocalStorage rather
+   than threading a client through twenty-five call sites and every helper
+   under them: the routes are already written against a module-level `kylas`,
+   and a parameter added to all of them is twenty-five chances to forget one —
+   where forgetting means serving one associate as another. */
+const REQ = new AsyncLocalStorage();
+
+/* `kylas` stays the same name the routes already use. It resolves to the
+   current request's client on every property access, so nothing below had to
+   change. */
+const kylas = new Proxy({}, {
+  get(_t, prop) {
+    const c = REQ.getStore()?.kylas || defaultClient;
+    if (!c) throw Object.assign(
+      new Error("No Kylas key for this request. Send x-kylas-key, or set KYLAS_KEY on the proxy."),
+      { status: 401 });
+    const v = c[prop];
+    return typeof v === "function" ? v.bind(c) : v;
   },
 });
 
@@ -442,12 +504,17 @@ const ownerList = () => [...owners.entries()].map(([id, name]) => ({ id, name })
    Only a SUCCESS is cached — a failure here means Kylas is unreachable, and
    remembering that would keep the console logged out long after it came
    back. */
-let meCache = null;
+/* KEYED BY THE KEY, not one slot. With a shared proxy the answer to "who am
+   I" is different for every caller, and a single cache would hand the second
+   associate the first one's identity — silently, and for ten minutes. */
+const meCache = new Map();
 const ME_TTL = Number(process.env.ME_TTL_MS || 10 * 60 * 1000);
 async function whoami() {
-  if (meCache && Date.now() - meCache.at < ME_TTL) return meCache.me;
+  const k = REQ.getStore()?.key || KEY || "";
+  const hit = meCache.get(k);
+  if (hit && Date.now() - hit.at < ME_TTL) return hit.me;
   const me = await kylas.me();
-  meCache = { at: Date.now(), me };
+  meCache.set(k, { at: Date.now(), me });
   return me;
 }
 
@@ -1614,7 +1681,9 @@ const server = createServer(async (req, res) => {
   /* A localhost dev proxy with no secrets in its responses; the extension's
      origin is a generated id, so echoing is simpler than allow-listing. */
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
-  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  /* x-kylas-key travels on every request when the proxy is shared, so it has
+     to be allowed through the preflight or the browser never sends it. */
+  res.setHeader("Access-Control-Allow-Headers", "content-type, x-kylas-key");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
@@ -1625,15 +1694,32 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: "not found", routes: Object.keys(routes) }));
   }
 
+  /* THE CALLER'S KEY. On a loopback proxy there is none and the process key
+     stands in, which is every install today. On a shared one it is required,
+     and /health is the exception because a monitor has to be able to ask
+     whether the thing is up without holding a CRM credential. */
+  const sent = String(req.headers["x-kylas-key"] || "").trim();
+  if (REQUIRE_KEY && !sent && url.pathname !== "/health") {
+    res.writeHead(401, { "content-type": "application/json" });
+    return res.end(JSON.stringify({
+      error: "This proxy is shared, so it needs your own Kylas API key.",
+      hint: "Open the console, click the connection badge, and paste your key. "
+          + "Generate one in Kylas under Settings -> API Keys.",
+      needsKey: true,
+    }));
+  }
+  const key = sent || KEY || "";
+
   try {
-    const body = await handler(url, req);
+    const body = await REQ.run({ key, kylas: key ? clientFor(key) : null },
+                               () => handler(url, req));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   } catch (e) {
     const status = e.status || 502;
     log(`! ${url.pathname} ${status} ${e.message}`);
     res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: e.message, problems: e.problems }));
+    res.end(JSON.stringify({ error: e.message, problems: e.problems, needsKey: status === 401 || undefined }));
   }
 });
 
@@ -1656,9 +1742,29 @@ server.on("error", (e) => {
   process.exit(1);
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION} · console ${BUILD.hash}` +
+/* THE INTERLOCK, ENFORCED BEFORE THE SOCKET OPENS. Binding anywhere but
+   loopback without per-request keys would publish an unauthenticated door onto
+   the CRM — every contact, every number, and the ability to move stages. A
+   warning in a log is not a defence against that, so it refuses. */
+if (!LOOPBACK && !REQUIRE_KEY) {
+  console.error(`\nPROXY_BIND is ${BIND}, which other machines can reach, but`);
+  console.error(`PROXY_REQUIRE_KEY is not set — so anyone who can reach this port`);
+  console.error(`would have full read and write on your CRM without a credential.\n`);
+  console.error(`Either keep it private:      unset PROXY_BIND`);
+  console.error(`or make callers identify:    PROXY_REQUIRE_KEY=1\n`);
+  console.error(`With PROXY_REQUIRE_KEY=1 each associate sends their own Kylas key,`);
+  console.error(`which is both the credential and the identity — see docs/central-server.md.\n`);
+  process.exit(1);
+}
+
+server.listen(PORT, BIND, () => {
+  log(`proxy on http://${BIND}:${PORT} — build ${VERSION} · console ${BUILD.hash}` +
       (BUILD.branch ? ` · ${BUILD.branch} ${BUILD.sha}` : ""));
+  /* Which of the two modes this is, said every time. "Is this the shared one?"
+     should never be a question answered by reading somebody's environment. */
+  log(REQUIRE_KEY
+    ? "keys: each caller sends their own (x-kylas-key) — identity is per person"
+    : "keys: the process key, for everyone — right on loopback, wrong if shared");
   log(`routes: ${Object.keys(routes).join("  ")}`);
 
   /* WARM THE CACHES NOW, not when somebody is waiting.
