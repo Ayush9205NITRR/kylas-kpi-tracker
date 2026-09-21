@@ -235,9 +235,15 @@ code and answers everything cheerfully. **Restart the proxy after editing
   company open scans the whole Contacts table because the `Company Kylas ID`
   rollup is missing. That scan is most of the "opening an account is slow".
 - Then `seed-transitions.mjs`, then `migrate-ever-picked.mjs`, then
-  `migrate-first-worked.mjs`. **That order** — each reads what the one before
-  it writes. The last is what makes the funnel's bottom two rungs stop reading
-  zero; without it "Companies worked" is 0 under a non-zero "Right POC".
+  `migrate-first-worked.mjs`, then `migrate-first-qualified.mjs`. **That
+  order** — each reads what the one before it writes. `first-worked` is what
+  makes the funnel's bottom two rungs stop reading zero; without it "Companies
+  worked" is 0 under a non-zero "Right POC". `first-qualified` is the same
+  repair for the two rungs in the middle: `Is Right POC` and `Is Discovery` are
+  formulas with no date of their own, so a contact who gave you a budget
+  without the stage moving had the flag set and nothing to date the arrival by,
+  and the report dropped it. Ayush, 2026-09-21: "2 right POCs and 1 discovery
+  call… not reflecting in the KPI dashboard."
 - Enable GitHub Pages, or host `docs/privacy.html` on enout.in, for the store's
   privacy policy URL.
 

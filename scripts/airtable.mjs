@@ -360,6 +360,18 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
      two can never disagree about whether somebody spoke to this contact. */
   if (!prev?.fields?.["First Picked At"] && !!c.stage && !NOT_CONNECTED.includes(c.stage))
     fields["First Picked At"] = firstAt;
+  /* AND THE SAME STAMP FOR THE TWO RUNGS IN THE MIDDLE. These latch off the
+     SAME tests as Ever Right POC / Ever Discovery above — hasSignal(c) and
+     isComplete(c), reading the rows this save is sending — so the flag and its
+     date can never disagree about when it happened. Without this the report
+     had to date them from KPI Rank At, which only moves when the stage moves;
+     a contact who gave you a budget and stayed on the same stage had the flag
+     set and no date, and the ladder cannot count an arrival it cannot place.
+     See schema.mjs for the full account. */
+  if (!prev?.fields?.["First Right POC At"] && hasSignal(c))
+    fields["First Right POC At"] = firstAt;
+  if (!prev?.fields?.["First Discovery At"] && isComplete(c))
+    fields["First Discovery At"] = firstAt;
   if (companyRec) fields.Company = [companyRec.id];
   /* Dropping blanks protects USER-ENTERED fields: a value absent from this
      save is not an instruction to wipe what somebody typed last time. */
@@ -876,6 +888,61 @@ export async function readCompanies(at) {
       _airtable: { updatedAt: f["Kylas Updated At"] || "" },
     };
   });
+}
+
+/* ── THE FOUR RUNGS THAT ARE NOT STAGE MOVES ───────────────────────────
+   Companies worked, phone picked, right POC and discovery do not have
+   transition rows: nothing in Kylas changes when somebody writes down a
+   budget. They are DATA becoming true on a contact, so the report takes them
+   as `signals` — and a signal needs a date, because a rung with no date cannot
+   be placed in a week or a month and is dropped.
+
+   THE FIELDS TO READ, kept beside the function that reads them so a field
+   added to one is not missing from the other. That divergence is exactly how
+   this broke: First Right POC At was not read, so it could not be used.
+
+   WHY THE FALLBACK CHAIN. Rows written before First Right POC At existed have
+   the flag and no stamp, and dropping them would make the fix look like a
+   regression — the rung would go from wrong to empty. So:
+     1. the stamp, when the writer set it;
+     2. KPI Rank At, what the proxy used to use — right whenever the stage
+        moved on the same save, which is the common case for old rows;
+     3. First Worked At / First Picked At — the contact was certainly a right
+        POC no earlier than the first time anybody called them.
+   Each step is a worse answer than the one above it and none invents a date
+   out of nothing. A row with no date anywhere is reported in `undated` rather
+   than silently discarded, because "we hold this and cannot count it" is a
+   thing somebody needs to be told. */
+export const SIGNAL_READ_FIELDS = [
+  "Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
+  "First Worked At", "First Picked At", "First Right POC At", "First Discovery At",
+];
+
+export function contactSignals(rows = []) {
+  const signals = [];
+  const undated = [];
+  for (const r of rows) {
+    const f = r.fields || {};
+    /* A contact with no company link is a company of one — dropping it would
+       lose the rung, and an account nobody has linked is still an account
+       somebody worked. Same rule as the transitions above. */
+    const company = (f.Company || [])[0] || r.id;
+    const owner = f.Owner;
+    if (f["First Worked At"])
+      signals.push({ at: f["First Worked At"], owner, company, metric: "worked" });
+    if (f["First Picked At"])
+      signals.push({ at: f["First Picked At"], owner, company, metric: "picked" });
+
+    const fallback = f["KPI Rank At"] || f["First Worked At"] || f["First Picked At"] || "";
+    const add = (metric, stamp) => {
+      const at = stamp || fallback;
+      if (at) signals.push({ at, owner, company, metric, dated: stamp ? "stamp" : "fallback" });
+      else undated.push({ contact: r.id, name: f.Name || "", metric });
+    };
+    if (f["Is Right POC"]) add("right", f["First Right POC At"]);
+    if (f["Is Discovery"]) add("discovery", f["First Discovery At"]);
+  }
+  return { signals, undated };
 }
 
 /* ── RCA: which accounts owe an explanation ────────────────────────────

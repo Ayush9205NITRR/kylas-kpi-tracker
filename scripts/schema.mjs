@@ -158,6 +158,27 @@ export const TABLES = [
         description: "First call ever logged against this contact. Written once, never updated." },
       { name: "First Picked At", type: "dateTime", options: dateTime,
         description: "First time this contact reached a stage that is not a no-answer — the moment somebody actually spoke to them. Written once, never updated." },
+      /* THE MIDDLE TWO RUNGS HAD NO DATE OF THEIR OWN, which is why they were
+         not being counted. Ayush, 2026-09-21: "this account has 2 right POCs
+         and 1 discovery call, but these activities are not reflecting in the
+         KPI dashboard."
+
+         Is Right POC and Is Discovery are formulas: they go true the moment an
+         event row carries budget/timeline/pax, with no stage move and so no
+         transition row. The report needs a DATE to place an arrival in a
+         period, and the only one to hand was KPI Rank At — stamped when the
+         numeric rank RISES. Fill in budget and pax without moving the stage
+         and the rank does not rise, so there was no date, so proxy.mjs
+         dropped the signal on the floor. Structurally uncountable, exactly
+         like Companies worked and Companies picked before the FLOORS fix.
+
+         Written once and never updated, for the same reason as the two above:
+         a later save moving them would move a company between periods and
+         change a month that had already been reported. */
+      { name: "First Right POC At", type: "dateTime", options: dateTime,
+        description: "First time any event row on this contact carried budget, timeline or pax. Written once, never updated. This is what dates the Right POC rung." },
+      { name: "First Discovery At", type: "dateTime", options: dateTime,
+        description: "First time one event row carried all three. Written once, never updated. This is what dates the Discovery rung." },
       { name: "Pending Create", type: "checkbox", options: check,
         description: "Captured in the console but not yet in Kylas. Tells the writer POST rather than PUT." },
       { name: "Exit Reason", type: "singleSelect", options: sel(...EXIT_STAGES),

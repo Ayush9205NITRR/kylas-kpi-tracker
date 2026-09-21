@@ -30,7 +30,8 @@ import { createAirtable, syncContact, readCompanyKpis,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter,
          readFocus, readResearch, writeFocus, writeResearch,
-         DEPRI_REASONS, RESEARCH_FIELDS } from "./airtable.mjs";
+         DEPRI_REASONS, RESEARCH_FIELDS,
+         SIGNAL_READ_FIELDS, contactSignals } from "./airtable.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
@@ -535,11 +536,9 @@ const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
       .catch(() => []),
     listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
     /* Right POC and discovery are DATA becoming true, not a stage move, so
-       they have no transition row. The closest honest timestamp is when the
-       contact's rank last rose — the save that filled the fields. */
-    listTolerant(airtable, "Contacts", {
-      fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
-               "First Worked At", "First Picked At"] }),
+       they have no transition row. The field list and the reading of it are
+       both in airtable.mjs — see contactSignals(). */
+    listTolerant(airtable, "Contacts", { fields: SIGNAL_READ_FIELDS }),
     /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
        Dropping non-team people in the view would leave the Team column summing
        everybody while the per-person columns beside it summed the team — two
@@ -578,24 +577,16 @@ const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
              to: r.fields["To Stage"], contact,
              company: companyOfContact.get(contact) || contact };
   });
-  const signals = [];
-  for (const r of contactRows) {
-    const co = (r.fields.Company || [])[0] || r.id;
-    const owner = r.fields.Owner;
-    /* THE BOTTOM TWO RUNGS, per company. Written once by the writer and never
-       updated, so unlike the call log they survive rollup-calls.mjs deleting
-       old rows — a company's first touch cannot drift forward as history is
-       compacted. report() dedupes to the FIRST arrival per company, so the
-       earliest contact at a company is the one that dates it. */
-    if (r.fields["First Worked At"])
-      signals.push({ at: r.fields["First Worked At"], owner, company: co, metric: "worked" });
-    if (r.fields["First Picked At"])
-      signals.push({ at: r.fields["First Picked At"], owner, company: co, metric: "picked" });
-    const at = r.fields["KPI Rank At"];
-    if (!at) continue;
-    if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
-    if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
-  }
+  /* THE FOUR NON-STAGE RUNGS. One derivation, in airtable.mjs, because the
+     field list and the reading of it drifting apart is precisely how Right POC
+     and Discovery stopped being counted: First Right POC At existed on the row
+     and was never read here. `undated` is what it holds and could not place in
+     a period — said out loud rather than dropped on the floor. */
+  const { signals, undated } = contactSignals(contactRows);
+  if (undated.length)
+    log(`! ${undated.length} contact(s) qualify for a rung with no date anywhere — ` +
+        `run migrate-first-qualified.mjs --apply to stamp them`);
+
   /* THE OWNER SET, FROM ROWS ALREADY IN HAND. /team wanted "every name that
      could be on the roster" and re-read the whole Contacts table to get it —
      a second full crawl of rows this function has just finished walking. On

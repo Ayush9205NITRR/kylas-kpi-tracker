@@ -51,7 +51,23 @@ SEED.Contacts = CO.map(([id, , Owner, stage], i) => {
            'Kylas Contact ID': 'c' + (i + 1), Owner, 'Current Stage': stage,
            Company: [ids['co:' + id]],
            'Is Right POC': qualified(id) ? 1 : 0, 'Is Discovery': qualified(id) ? 1 : 0,
-           'KPI Rank At': ago(6) };
+           /* THE RIGHT POC WHO NEVER MOVED STAGE, seeded on purpose. Shorehouse
+              gets its own First Right POC At and NO KPI Rank At; everyone else
+              keeps the rank date. Ayush, 2026-09-21: "2 right POCs and 1
+              discovery call, but these are not reflecting in the KPI
+              dashboard." Is Right POC is a formula that goes true when an event
+              row carries a budget — no stage moves, so the rank never rises, so
+              there was no date and the report dropped the arrival. With that
+              one row undated the rungs below read right 1 / discovery 1 instead
+              of 2, which is what the assertions further down catch. */
+           ...(id === '903'
+             ? { 'First Right POC At': ago(6), 'First Discovery At': ago(6) }
+             : { 'KPI Rank At': ago(6) }),
+           /* First Picked At means somebody ANSWERED, so Kritsnam — which
+              never left the CNC ladder — must not carry one, or rung 2 counts
+              it and "phone picked" stops excluding a company nobody spoke to. */
+           'First Worked At': ago(20),
+           ...(id === '1778327' ? {} : { 'First Picked At': ago(18) }) };
 });
 
 /* The history the ladder is counted from. Deliberately shaped so every rung
@@ -385,6 +401,11 @@ check('rung 1 is NOT zero', ladder[0]?.n, 4);
 check('rung 2 is Phone picked', ladder[1]?.rung, 'Phone picked');
 /* Kritsnam never left the CNC ladder, so it is reached and not picked. */
 check('phone picked excludes a CNC-only company', ladder[1]?.n, 3);
+/* THE SECOND REGRESSION OF THE SAME SHAPE. Shorehouse's contact is seeded
+   with First Right POC At and no KPI Rank At — a contact who gave a budget
+   without the stage moving. The proxy used to date these from KPI Rank At
+   alone and `continue` past the ones that had none, so this rung read 1.
+   Ayush, 2026-09-21: "2 right POCs… not reflecting in the KPI dashboard." */
 check('right POC', ladder[2]?.n, 2);
 check('discovery', ladder[3]?.n, 2);
 check('booked', ladder[4]?.n, 1);
