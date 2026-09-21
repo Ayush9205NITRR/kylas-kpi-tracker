@@ -1282,16 +1282,21 @@ function eventCard(a,key,r){
     w.appendChild(i);return w;
   };
 
-  /* WHEN, AT THREE LEVELS. Ayush, 2026-09-21: a quarter to begin with, then a
-     month, then the exact start date "if can". Most calls end at the quarter —
-     that is genuinely all the prospect knows in February — so the month and
-     the date only appear once the level above them is answered. Asking for a
-     date nobody has yet is how a field starts getting filled with guesses.
+  /* WHEN, AT TWO LEVELS: a quarter, then a month inside it. Ayush, 2026-09-21
+     asked for a third — the exact start date "if can" — and on 2026-09-22, with
+     the row in front of him, asked for it back out: "isme exact data bas hta
+     do". He is right. On a cold call the answer is a quarter, occasionally a
+     month; a dd/mm/yyyy box next to them was a fourth control in a sentence
+     that is meant to be read, and a date nobody has yet is how a field starts
+     collecting guesses. The month is as precise as this conversation gets.
 
      Stored as ONE string in r.timeline, which is what every reader downstream
      already expects: the Airtable column is free text, and hasSignal/isComplete
-     only ask whether it is empty. "Q1 2027", "Q1 2027 · Feb", "Q1 2027 · 12 Feb
-     2027" are all it, at increasing precision. */
+     only ask whether it is empty. "Q1 2027" and "Q1 2027 · Feb" are both it.
+
+     A ROW SAVED WITH A DATE KEEPS IT. parse() still reads the old shape and
+     drawWhen() still shows the month it belongs to, so nothing written before
+     today is lost or silently rewritten — it simply cannot be entered again. */
   const when=el("div","tl");
   const parse=(v)=>{
     const m=/^(Q[1-4])\s+(\d{4})(?:\s+·\s+(.+))?$/.exec(String(v||"").trim());
@@ -1306,16 +1311,12 @@ function eventCard(a,key,r){
     const q=when.querySelector(".q").value;
     const y=when.querySelector(".y").value;
     const mo=when.querySelector(".mo")?.value||"";
-    const d=when.querySelector(".d")?.value||"";
     /* The year select is hidden until a quarter is chosen, so on the very
        first change it has no value yet — without this fallback the row stored
        "Q1 " with a trailing space and no year, and the month picker (which
        keys off a parsed year) never appeared. */
     const yr=y||String(now.getFullYear());
-    r.timeline = !q ? "" :
-      d ? `${q} ${yr} · ${new Date(d+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}`
-      : mo ? `${q} ${yr} · ${mo}`
-      : `${q} ${yr}`;
+    r.timeline = !q ? "" : mo ? `${q} ${yr} · ${mo}` : `${q} ${yr}`;
     touch("record");refreshQual();validate();drawWhen();
   };
   function drawWhen(){
@@ -1325,13 +1326,16 @@ function eventCard(a,key,r){
     /* Only the months inside the chosen quarter — offering Jan under Q3 is an
        invitation to record something contradictory. */
     const inQ=(QUARTERS.find(([k])=>k===cur.q)||[,,[]])[2].map(i=>MONTHS[i]);
-    const exact=/\d{1,2}\s\w{3}\s\d{4}/.test(cur.rest);
+    /* An exact date written before this control was removed. The month select
+       still selects the month it fell in, so the card reads sensibly and the
+       stored string is left exactly as it is until somebody changes it. */
+    const exact=/(\d{1,2})\s(\w{3})\s\d{4}/.exec(cur.rest);
+    const keep=exact?exact[2]:cur.rest;
     when.innerHTML=
       `<select class="q" aria-label="Quarter"><option value="">when?</option>${qs}</select>`+
       `<select class="y" aria-label="Year"${cur.q?"":" hidden"}>${ys}</select>`+
       (cur.q?`<select class="mo" aria-label="Month"><option value="">month?</option>`+
-        inQ.map(m=>`<option${!exact&&cur.rest===m?" selected":""}>${m}</option>`).join("")+`</select>`:"")+
-      (cur.q?`<input class="d" type="date" aria-label="Offsite start date" title="Exact start date, if they know it">`:"");
+        inQ.map(m=>`<option${keep===m?" selected":""}>${m}</option>`).join("")+`</select>`:"");
     when.querySelectorAll("select,input").forEach(n=>n.onchange=put);
   }
   drawWhen();

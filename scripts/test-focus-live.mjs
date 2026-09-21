@@ -461,6 +461,25 @@ check('the ladder descends', ladder.every((r, i) => i === 0 || r.n <= ladder[i -
    a person can read it without opening a terminal. */
 check('the dashboard prints the build', (await f.locator('.vbuild').textContent() || ''),
       (t) => /^[0-9a-f]{8}/.test(t.trim()));
+
+/* ONE DEFINITION OF EVERY RUNG ON ONE SCREEN. Step conversion used to be built
+   from the company list as it stands RIGHT NOW, all time, while the ladder
+   above it counts arrivals INSIDE the period — so the two tables printed
+   different numbers under the same word. Ayush, 2026-09-22: "Reached 3 hai par
+   companies abhi bhi 2 dikha rahe hai." Both read the report now, so they
+   cannot drift; this is the assertion that keeps it that way. */
+const stepHead = await f.locator('.stepconv table thead th').allTextContents();
+if (stepHead.length) {
+  check('step conversion names the first rung as the ladder does',
+        stepHead[1]?.trim(), ladder[0]?.rung);
+  const allRow = await f.locator('.stepconv table tbody tr').first()
+    .locator('td').allTextContents();
+  check('and counts the same companies', Number(allRow[1]), ladder[0]?.n);
+  /* One rung to the next, all the way down — the old list jumped Reached
+     straight to Right POC, skipping Phone picked, so its first column was a
+     two-rung step labelled as one. */
+  check('every step is one rung', stepHead.length - 2, ladder.length - 1);
+}
 await page.screenshot({ path: '/tmp/claude-0/live-ladder.png' });
 
 /* ── research beside the call, and where it comes from ────────────────── */

@@ -558,6 +558,41 @@ const rcaDue = memo("rca", { ttl: REPORT_TTL }, () => readRcaDue(airtable, { log
    closed never shows you what it held before you typed. */
 const ourResearch = memo("research", { ttl: REPORT_TTL }, () => readResearch(airtable));
 
+/* THE COMPANY LIST, WHICH THE DASHBOARD IS MOSTLY MADE OF. Two full crawls of
+   Companies — the mirror columns and the KPI formulas, deliberately separate
+   projections so one bad name cannot cost both halves — and it was run fresh
+   by /companies, again by /team, and again by the RCA strip. Warm, on a
+   400-company base, that was 2.65s for /companies and 2.64s for /team on
+   EVERY dashboard load, for rows that had not moved. Ayush, 2026-09-22:
+   "latency reduce kar do in loading dashboard."
+
+   Nothing about it is per-request: the rows change when the sync runs or when
+   somebody saves, and the save hook below drops it. Same TTL as the report,
+   because the two are read side by side on one screen and a minute's
+   disagreement between them is worse than either being a minute old. */
+const companyList = memo("companies", { ttl: REPORT_TTL }, () => readCompanies(airtable));
+
+/* THE FOCUS TABLE. Read by /focus — which every console asks for at boot and
+   again whenever the Accounts tab paints — and by /ladder alongside it. Small
+   table, but a crawl is a crawl at 5 req/s, and it was 199ms of every one of
+   those. Dropped on a focus write, below, so picking an account and looking at
+   the list cannot disagree. */
+const focusRows = memo("focus", { ttl: REPORT_TTL }, () => readFocus(airtable));
+
+/* THE FROZEN DAYS. Read by the trend chart, and parameterised by a window —
+   so the widest window is read once and the route slices it, rather than every
+   distinct `days` being its own crawl. An hour, not a minute: snapshot.mjs
+   writes this table once a day on a cron, and nothing a person does in the
+   console changes it, so a shorter TTL would buy freshness that cannot exist. */
+const snapshotRows = memo("snapshots",
+  { ttl: Number(process.env.SNAPSHOT_TTL_MS || 60 * 60 * 1000), stale: 6 * 60 * 60 * 1000 },
+  async () => {
+    const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+    const rows = await airtable.list("Daily Snapshot", `IS_AFTER({Date}, '${since}')`, 400);
+    return rows.map((r) => r.fields).filter((f) => f.Date)
+      .sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
+  });
+
 /* memo() calls its function with no arguments — its own parameter is {fresh} —
    so the sample the key detector matches against is handed over here rather
    than passed in. It is only ever a hint: name detection is tried first and
@@ -768,7 +803,7 @@ const routes = {
        ?keys=1 is a Kylas diagnostic and deliberately skips this. */
     if (!url.searchParams.get("keys")) {
       const mirror = await fromAirtable("companies", async () => {
-        const list = await readCompanies(airtable);
+        const list = await companyList({ fresh });
         return list.length ? list : null;
       });
       if (mirror) {
@@ -1073,9 +1108,9 @@ const routes = {
     const fresh = !!url.searchParams.get("fresh");
     const [{ transitions, signals, team }, companies, focus, research] = await Promise.all([
       reportData({ fresh }),
-      readCompanies(airtable),
-      readFocus(airtable),
-      readResearch(airtable),
+      companyList({ fresh }),
+      focusRows({ fresh }),
+      ourResearch(),
     ]);
 
     /* Arrivals are keyed by the company's AIRTABLE RECORD id, because that is
@@ -1144,7 +1179,7 @@ const routes = {
       throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
     }
     if (req.method === "GET")
-      return { focus: await readFocus(airtable), reasons: DEPRI_REASONS, configured: true };
+      return { focus: await focusRows(), reasons: DEPRI_REASONS, configured: true };
     const body = JSON.parse(await readBody(req));
     const status = String(body.status || "");
     if (!["focus", "normal", "depri"].includes(status))
@@ -1157,6 +1192,10 @@ const routes = {
       ownerName: body.ownerName || "", setBy: body.setBy || "",
       previous: body.previous || "normal",
     });
+    /* Dropped outright, not aged out: the console writes optimistically and
+       then re-reads, and being shown the status from before your own click is
+       the one thing this cache must never do. */
+    focusRows.refresh({ atMostEvery: 0 });
     log(`focus ${body.companyId} -> ${status}${body.reason ? ` (${body.reason})` : ""}`);
     return { ok: true, ...res };
   },
@@ -1262,10 +1301,9 @@ const routes = {
     if (!airtable) return { snapshots: [], reason: "Airtable is not configured" };
     const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days") || 60)));
     const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
-    const rows = await airtable.list("Daily Snapshot", `IS_AFTER({Date}, '${since}')`, 400);
-    const snapshots = rows.map((r) => r.fields)
-      .filter((f) => f.Date)
-      .sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
+    /* One read of the widest window, sliced here. Two charts asking for 60 and
+       90 days used to be two crawls of the same table. */
+    const snapshots = (await snapshotRows()).filter((f) => String(f.Date) > since);
     log(`snapshots since ${since} — ${snapshots.length}`);
     return { snapshots, since };
   },
@@ -1438,6 +1476,11 @@ const routes = {
            listing a question the associate has just answered by acting is the
            same lie the report cache exists to prevent. */
         rcaDue.refresh();
+        /* And the company list. A save writes the Companies row — Last Call At
+           and, through it, every KPI formula hanging off it — so a cached list
+           would show the dashboard an account the associate has just worked as
+           untouched. Same lie, different table. */
+        companyList.refresh();
       } catch (e) {
         result.airtableError = e.message;
         log(`! airtable for ${result.kid}: ${e.message}`);
@@ -1532,7 +1575,7 @@ const routes = {
        had just done or was about to. */
     const [{ team, contactOwners }, companies] = await Promise.all([
       reportData(),
-      readCompanies(airtable).catch(() => []),
+      companyList().catch(() => []),
     ]);
     const seen = new Set(companies.map((c) => c.owner).filter(Boolean));
     for (const o of contactOwners) seen.add(o);
@@ -1637,8 +1680,13 @@ server.listen(PORT, "127.0.0.1", () => {
     (e) => log(`  ! could not warm ${what} — ${e.message.slice(0, 90)}`));
   Promise.all([
     warm("the report", reportData()),
-    warm("companies", readCompanies(airtable)),
+    warm("companies", companyList()),
     warm("the RCA list", rcaDue()),
+    /* The two small tables the dashboard and the console both open with. Each
+       is one crawl and about 200ms, which is nothing on the tenth load and is
+       the first thing anybody sees on the first. */
+    warm("the focus lists", focusRows()),
+    warm("the frozen days", snapshotRows()),
     /* WHO THE KEY BELONGS TO. Every route that scopes to an owner resolves
        the caller through Kylas' /users/me first, and that call is cached for
        ten minutes but cold at boot — so it was paid by the first /report and

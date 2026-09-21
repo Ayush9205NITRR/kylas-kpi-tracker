@@ -199,13 +199,33 @@
   }
 
   /* Kylas is a single-page app, so moving between records never reloads. Follow
-     the history so the console retargets instead of going stale. */
+     the history so the console retargets instead of going stale.
+
+     THE EVENTS FIRST, THE POLL AS A BACKSTOP. A 700ms interval was the only
+     thing watching, so clicking from one company to the next left the console
+     showing the previous one for up to two thirds of a second — 200 times a
+     day. pushState and replaceState are what a single-page app navigates with
+     and neither fires anything, so they are wrapped to say so; popstate covers
+     the back button. The interval stays because a route changed by some path
+     neither of those covers must still be caught, just not first. */
   let lastPath = location.pathname;
-  setInterval(() => {
+  const pathTick = () => {
     if (location.pathname === lastPath) return;
     lastPath = location.pathname;
     if (open) handoff();
-  }, 700);
+  };
+  for (const m of ["pushState", "replaceState"]) {
+    const orig = history[m];
+    history[m] = function (...a) {
+      const r = orig.apply(this, a);
+      /* After the frame, not during: the app is mid-render when it calls this,
+         and currentRecord() reads the DOM. */
+      setTimeout(pathTick, 0);
+      return r;
+    };
+  }
+  window.addEventListener("popstate", () => setTimeout(pathTick, 0));
+  setInterval(pathTick, 700);
 
   fab.addEventListener("click", () => setOpen(true));
   scrim.addEventListener("click", () => setOpen(false));
@@ -302,7 +322,7 @@
      in Kylas wants the console, not another click — but if they close it, that
      is a decision, so it stays closed until they move to another record. */
   let autoOpenedFor = null, dismissedFor = null;
-  setInterval(() => {
+  const autoTick = () => {
     const rec = currentRecord();
     const key = rec ? `${rec.kind}:${rec.id}` : null;
     if (!key) return;
@@ -310,17 +330,34 @@
     if (key === dismissedFor || key === autoOpenedFor) return;
     autoOpenedFor = key;
     setOpen(true);
-  }, 700);
+  };
+  /* ONCE, NOW, AND THEN ON A TIMER. This ran only on the interval, so every
+     page that should open the console waited up to 700ms before it appeared —
+     an average of 350 and a worst case of 700, on top of everything else.
+     Measured on a 400-company base: the console frame did not exist until
+     748ms after the page loaded, while the console itself boots in 70ms and
+     all six of the dashboard's requests together take 69. Nearly the whole of
+     "loading the dashboard is slow" was this line waiting for its first tick.
+     Ayush, 2026-09-22: "latency reduce kar do in loading dashboard."
 
-  /* keep the launcher honest about what it will do */
-  setInterval(() => {
+     The interval stays for the SPA case, where the record changes under a
+     console that is already closed. */
+  autoTick();
+  setInterval(autoTick, 700);
+
+  /* keep the launcher honest about what it will do — same again: now, then on
+     the timer, so it does not read "Call console" for the first half second on
+     a page where it means something more specific. */
+  const labelTick = () => {
     const rec = currentRecord();
     fabLabel.textContent =
       !rec ? "Call console" :
       rec.kind === "dashboard" ? "KPI dashboard" :
       rec.kind === "companies" ? "Accounts & focus lists" :
       rec.kind === "company" ? "Work this company" : "Log a call";
-  }, 700);
+  };
+  labelTick();
+  setInterval(labelTick, 700);
 
   (document.body || document.documentElement).appendChild(host);
 })();

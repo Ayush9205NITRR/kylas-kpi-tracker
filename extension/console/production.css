@@ -1099,15 +1099,18 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
    every lit chip is noise — the chip being lit already says that. */
 .tc .tcn{margin-left:6px;font-size:var(--t-meta);font-weight:var(--w-strong);
   opacity:.75;font-variant-numeric:tabular-nums}
-/* The three-level "when": quarter, then month, then an exact date. They sit in
-   the sentence, so they have to read as part of it rather than as a form. */
-.tl{display:inline-flex;gap:5px;align-items:baseline;flex-wrap:wrap;vertical-align:baseline}
-.tl select,.tl input{border:0;border-bottom:1.5px dashed var(--line2);background:transparent;
+/* The two-level "when": a quarter, then a month inside it. They sit in the
+   sentence, so they read as part of it rather than as a form — but as ONE
+   answer, not three: a single dashed rule under the group instead of three
+   under the parts, which is what made "Q1 (Jan–Mar) · 2026 · Jan" look like
+   three separate questions had been asked. */
+.tl{display:inline-flex;gap:2px;align-items:baseline;vertical-align:baseline;
+  border-bottom:1.5px dashed var(--line2);padding:0 2px}
+.tl:focus-within{border-bottom-color:var(--blue);border-bottom-style:solid}
+.tl select{border:0;background:transparent;
   font:inherit;font-size:inherit;color:var(--blue);font-weight:var(--w-med);
   padding:1px 2px;cursor:pointer;max-width:170px}
-.tl select:focus,.tl input:focus{outline:0;border-bottom-color:var(--blue);
-  border-bottom-style:solid}
-.tl input[type="date"]{color:var(--text2)}
+.tl select:focus{outline:0}
 /* Research, read beside the call. .ares is the opener; the third pane is the
    read; "Edit research" is the only thing that still opens a covering sheet,
    because editing is the one job that earns the whole screen. */

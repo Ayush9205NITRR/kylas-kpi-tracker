@@ -736,33 +736,56 @@
   const rate = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
   const show = (v) => (v == null ? "—" : v + "%");
 
-  function stepTable(cos, byLabel) {
-    const count = (list, k) => list.filter((c) => c[k]).length;
-    const line = (label, list) => ({
-      label,
-      n: count(list, "reached"),
-      steps: STEPS.map((st) => rate(count(list, st.to), count(list, st.from))),
-    });
+  /* THE SAME NUMBERS AS THE LADDER, CUT BY PERSON. It used to be built from
+     `cos` — the company list, as it stands RIGHT NOW, all time — while the
+     ladder above it counts companies that first reached a rung INSIDE the
+     period. Two definitions of the word "Reached" on one screen, and they
+     disagreed: Ayush, 2026-09-22, "Reached 3 hai par companies abhi bhi 2
+     dikha rahe hai." The ladder said 2 and this said 3, and one associate read
+     0 in one table and 1 in the other.
 
-    const people = [...new Set(cos.map((c) => byLabel(c) || "Unassigned"))].sort();
-    const rows = [line("All", cos),
-      ...(people.length > 1
-        ? people.map((p) => line(p, cos.filter((c) => (byLabel(c) || "Unassigned") === p)))
-        : [])];
+     This file had already deleted four headline tiles for precisely that
+     fault — see the note where they were removed — and left this table doing
+     the same thing underneath. Same fix: it reads the report, so the page has
+     one definition of every rung and the rows cannot drift apart.
+
+     THE STEPS COME FROM THE RUNGS TOO. The old list went reached → right POC,
+     skipping Phone picked altogether, so its first column was a two-rung jump
+     labelled as one and could not agree with the ladder's own Step conv.
+     column whatever the source. One rung to the next, all the way down. */
+  const stepPairs = () => RUNGS.slice(0, -1).map((rg, i) => [rg, RUNGS[i + 1]]);
+
+  function stepTable(r) {
+    if (!r || !r.current) return "";
+    const pairs = stepPairs();
+    const line = (label, d) => ({
+      label,
+      n: d[RUNGS[0].key] || 0,
+      steps: pairs.map(([a, b]) => rate(d[b.key] || 0, d[a.key] || 0)),
+    });
+    const people = (r.currentByOwner || []).slice()
+      .sort((a, b) => (b.sql || 0) - (a.sql || 0) || String(a.owner).localeCompare(String(b.owner)));
+    const rows = [line("All", r.current),
+      ...(people.length > 1 ? people.map((pp) => line(pp.owner || "Unassigned", pp)) : [])];
 
     return `<div class="vhead sm"><h2>Step conversion</h2>
-      <span class="vsub">Each column is one rung to the next — the five rates to benchmark against.</span></div>
-      <div class="vsteps">
+      <span class="vsub">${esc(r.current.label || "")} · one rung to the next, per person — the same
+        arrivals the ladder counts</span></div>
+      <!-- Its own class as well as the shared one. .vsteps is the table shell,
+           used by the Progress table too, so "the step conversion table" had no
+           name of its own — anything addressing it also matched a table with
+           different columns and different numbers. -->
+      <div class="vsteps stepconv">
         <table>
-          <thead><tr><th>Who</th><th class="tnum">Reached</th>${
-            STEPS.map((st) => `<th>${esc(st.label)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((r, i) => `
+          <thead><tr><th>Who</th><th class="tnum">${esc(RUNGS[0].name)}</th>${
+            pairs.map(([a, b]) => `<th>${esc(a.name)} → ${esc(b.name)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((row, i) => `
             <tr${i === 0 && rows.length > 1 ? ' class="all"' : ""}>
-              <td>${esc(r.label)}</td>
-              <td class="tnum">${r.n}</td>
-              ${r.steps.map((v) => `<td class="tnum${v != null && v > 100 ? " over" : ""}"${
+              <td>${esc(row.label)}</td>
+              <td class="tnum">${row.n}</td>
+              ${row.steps.map((v) => `<td class="tnum${v != null && v > 100 ? " over" : ""}"${
                 v != null && v > 100
-                  ? ' title="Above 100%: the rung above was recorded without the qualification data the rung below is counted from."'
+                  ? ' title="Above 100%: a company that reached this rung in an earlier period arrived at the next one inside this one. The ladder marks the same thing as carried in."'
                   : ""}>${show(v)}</td>`).join("")}
             </tr>`).join("")}</tbody>
         </table>
@@ -1484,7 +1507,7 @@
            the same six numbers. stepTable, stackedByOwner, funnelHTML and
            trendChart are all still in this file, so putting any of them back is
            one line. */
-        team ? `<div class="vsec">${stepTable(cos, (c) => c.owner)}</div>` : ""}`;
+        team ? `<div class="vsec">${stepTable(REP.data)}</div>` : ""}`;
 
     const sel = document.getElementById("dOwner");
     /* No network: the whole account is already held, so this is a filter. */
