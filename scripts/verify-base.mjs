@@ -19,6 +19,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
+import { buildLine } from "./build.mjs";
 import { diffBase, manualCount, cleanExceptExtras } from "./schema-diff.mjs";
 /* Only to tell a missing table that one repair-base run finishes from one that
    needs two — see the advice at the bottom. */
@@ -27,6 +28,10 @@ import { FOLLOWUPS } from "./schema.mjs";
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
 requireEnv("AIRTABLE_PAT", "AIRTABLE_BASE");
+
+/* WHICH COPY OF THIS REPO, before anything else is printed. A fix pulled
+   into the wrong clone produces the old output verbatim — see build.mjs. */
+console.log(`${buildLine()}\n`);
 
 const res = await fetch(`https://api.airtable.com/v0/meta/bases/${BASE}/tables`, {
   headers: { Authorization: `Bearer ${PAT}` },

@@ -46,6 +46,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
+import { buildLine } from "./build.mjs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { STAGES } from "./stages.mjs";
 
@@ -60,7 +61,10 @@ const known = new Set(STAGES);
 
 console.log(APPLY ? "Seed Stage Transitions from Call Log"
                   : "Seed Stage Transitions from Call Log — DRY RUN, nothing will be written");
-console.log(`base ${BASE}\n`);
+console.log(`base ${BASE}`);
+/* WHICH COPY OF THIS REPO. A fix can be pushed, pulled into the wrong
+   clone, and produce the old message verbatim — see build.mjs. */
+console.log(`${buildLine()}\n`);
 
 const [calls, contacts, existing] = await Promise.all([
   /* Tolerant of a missing column for the same reason the repair script is:

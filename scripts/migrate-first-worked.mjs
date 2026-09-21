@@ -58,6 +58,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
+import { buildLine } from "./build.mjs";
 import { createAirtable, listTolerant, columnsOf } from "./airtable.mjs";
 import { NOT_CONNECTED } from "./stages.mjs";
 
@@ -80,7 +81,10 @@ const earliest = (...vals) => {
 
 console.log(APPLY ? "First Worked / First Picked backfill"
                   : "First Worked / First Picked backfill — DRY RUN, nothing will be written");
-console.log(`base ${BASE}\n`);
+console.log(`base ${BASE}`);
+/* WHICH COPY OF THIS REPO. A fix can be pushed, pulled into the wrong
+   clone, and produce the old message verbatim — see build.mjs. */
+console.log(`${buildLine()}\n`);
 
 const FIELDS = ["Kylas Contact ID", "Name", "Owner", "Current Stage", "Previous Stage",
                 "Ever Picked", "KPI Rank", "KPI Rank At",

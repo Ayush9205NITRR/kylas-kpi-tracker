@@ -115,5 +115,27 @@ console.log('\n— what the migrations actually test —');
   }
 }
 
+/* ── every script a person runs by hand says which copy it is ─────────── */
+console.log('\n— the build stamp —');
+{
+  /* A fix can be pushed, pulled into the wrong clone, and print the old
+     message word for word. That happened on 2026-09-22 and cost an hour of
+     looking at the wrong question — the output gave no way to tell. Anything
+     run by hand names its branch, sha, dirty state and FOLDER, because this
+     repo has been cloned more than once on that machine and "which commit"
+     and "which directory" are different questions. */
+  const { readFileSync } = await import('node:fs');
+  const HAND_RUN = ['migrate-first-qualified', 'migrate-first-worked', 'migrate-ever-picked',
+                    'seed-transitions', 'repair-base', 'verify-base'];
+  for (const f of HAND_RUN) {
+    const src = readFileSync(new URL(`./${f}.mjs`, import.meta.url), 'utf8');
+    check(`${f} prints its build`, /buildLine\(\)/.test(src), true);
+  }
+  const { buildLine, build } = await import('./build.mjs');
+  const b = build();
+  check('the stamp names a folder', b.root, (r) => typeof r === 'string' && r.length > 1);
+  check('and reads as one line', buildLine(), (t) => !/\n/.test(t) && t.length > 10);
+}
+
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

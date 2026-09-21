@@ -27,6 +27,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
+import { buildLine } from "./build.mjs";
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
 import { diffBase } from "./schema-diff.mjs";
 
@@ -47,6 +48,10 @@ async function call(method, path, body) {
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}\n${text}`);
   return text ? JSON.parse(text) : {};
 }
+
+/* WHICH COPY OF THIS REPO, before anything else is printed. A fix pulled
+   into the wrong clone produces the old output verbatim — see build.mjs. */
+console.log(`${buildLine()}\n`);
 
 const live = await call("GET", `/bases/${BASE}/tables`);
 const byName = new Map(live.tables.map((t) => [t.name, t]));

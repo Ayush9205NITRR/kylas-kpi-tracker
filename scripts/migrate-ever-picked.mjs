@@ -44,6 +44,7 @@
    before any import that reads process.env at module scope. */
 import "./env.mjs";
 import { requireEnv } from "./env.mjs";
+import { buildLine } from "./build.mjs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { NOT_CONNECTED } from "./stages.mjs";
 
@@ -57,7 +58,10 @@ const at = createAirtable(PAT, BASE, { log: (m) => console.log("  " + m) });
 const connected = (stage) => !!stage && !NOT_CONNECTED.includes(stage);
 
 console.log(APPLY ? "Ever Picked repair" : "Ever Picked repair — DRY RUN, nothing will be written");
-console.log(`base ${BASE}\n`);
+console.log(`base ${BASE}`);
+/* WHICH COPY OF THIS REPO. A fix can be pushed, pulled into the wrong
+   clone, and produce the old message verbatim — see build.mjs. */
+console.log(`${buildLine()}\n`);
 
 const [contacts, transitions] = await Promise.all([
   /* listTolerant: Airtable rejects a whole projection for one unknown name,
