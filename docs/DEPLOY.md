@@ -6,7 +6,8 @@ waiting for DNS.
 **What you end up with.** The proxy runs on Cloudflare instead of on a laptop.
 There is no machine to keep awake, nothing to patch, and nothing to restart.
 Your team installs the Chrome extension and signs in once; after that they do
-nothing. Cost is about $5 a month.
+nothing. Start on the free tier — see part 2 — and expect either $0 or $5 a
+month.
 
 **What is verified.** Everything in parts 1–5 has been built and run against
 Cloudflare's real runtime (`workerd`) with a real D1 database — including the
@@ -21,7 +22,7 @@ what parts 1, 6 and 7 are about.
 | | |
 |---|---|
 | A domain you own | `enout.website` — you have this |
-| A Cloudflare account | free to create |
+| A Cloudflare account | free to create, and the Free plan is the right one |
 | Node on your machine | `node --version` should print 20 or higher |
 | Your Kylas API key | app.kylas.io → Setup → Integrations → API Keys |
 | Your Airtable token | the one already in your `.env.local` |
@@ -51,13 +52,29 @@ Do not continue until it says Active.
 
 ---
 
-## Part 2 · Turn on the Workers paid plan
+## Part 2 · Stay on Free
 
-Dashboard → **Workers & Pages** → **Plans** → **Workers Paid**, $5/month.
+**There are two different "plans" in Cloudflare and it is easy to pay for the
+wrong one.**
 
-The free tier caps daily writes below what 200 calls a day across your team
-produces, and the failure shows up mid-afternoon as saves that stop recording.
-Not worth discovering that way.
+The plan chooser you meet when adding a domain — Free / Pro $20 / Business
+$200 — is the plan for the **website**. It sells firewall rules, image
+optimization and CDN tuning. None of this uses any of them. **Choose Free.**
+Its own description lists what matters here: Workers, D1, DNS and SSL
+included.
+
+The **Workers** paid plan is a separate $5/month, and you probably do not need
+that either. An earlier version of this guide said you did, because the
+duplicate-guard was going to live in KV, which allows only 1,000 writes a day
+— about a third of what this team produces. It lives in D1 now, chosen for
+correctness rather than cost, and D1's free allowance is far above ~1,600
+saves a day.
+
+So deploy on Free and let the system tell you if it needs more. The one limit
+that might eventually bite is processing time on the heaviest dashboard
+queries; Cloudflare reports that plainly when it happens, and $5 fixes it
+that day. Paying in advance for a ceiling you may never reach is not
+prudence.
 
 ---
 
