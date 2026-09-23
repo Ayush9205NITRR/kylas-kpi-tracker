@@ -10,12 +10,28 @@
 import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED, MILESTONE } from "./stages.mjs";
 import { gateFor } from "./rca.mjs";
 
-/* Overridable so the mock can stand in during tests. */
-const API = process.env.AIRTABLE_BASE_URL || "https://api.airtable.com/v0";
-const GAP = Number(process.env.AIRTABLE_GAP || 220);
+/* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK, and the
+   fallback is guarded because `process` does not exist in every runtime this
+   is loaded in now. Reading it at module scope was fine while every caller was
+   a Node script; on a hosted runtime the configuration arrives as an argument,
+   and an unguarded read is either a ReferenceError or an empty object that
+   quietly sends a test suite at the real API. */
+const fromEnv = (name, fallback) => {
+  try {
+    const v = typeof process !== "undefined" && process?.env ? process.env[name] : "";
+    return v === undefined || v === "" ? fallback : v;
+  } catch { return fallback; }
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createAirtable(pat, baseId, { log = () => {} } = {}) {
+export function createAirtable(pat, baseId, {
+  log = () => {},
+  /* Overridable so the mock can stand in during tests. */
+  apiUrl = fromEnv("AIRTABLE_BASE_URL", "https://api.airtable.com/v0"),
+  gap = Number(fromEnv("AIRTABLE_GAP", 220)),
+} = {}) {
+  const API = apiUrl;
+  const GAP = gap;
   let chain = Promise.resolve();
 /* A rejected promise must not stay in the chain: `chain.then(...)` off a
    rejected chain rejects with the ORIGINAL error, so one failed request would
@@ -617,7 +633,7 @@ async function eventsFor(at, recordIds) {
    918ms on the queue, 677 vs 461 on a contact). The company list only changes
    when the sync runs, so it is worth holding. */
 const IDX = { at: 0, byRec: null, byKid: null };
-const IDX_TTL = Number(process.env.AIRTABLE_INDEX_TTL_MS || 60_000);
+const IDX_TTL = Number(fromEnv("AIRTABLE_INDEX_TTL_MS", 60_000));
 
 async function companyIndex(at, fresh) {
   if (!fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
@@ -666,7 +682,7 @@ let noCompanyRollup = false;
    contact and reopens its company should not be shown the version from before.
    Thirty seconds is longer than a double-click and shorter than a call. */
 const SCAN = { at: 0, rows: null };
-const SCAN_TTL = Number(process.env.AIRTABLE_SCAN_TTL_MS || 30_000);
+const SCAN_TTL = Number(fromEnv("AIRTABLE_SCAN_TTL_MS", 30_000));
 
 /* Called by syncContact, which is the only thing in this module that writes.
    Both caches are of rows a save can change — the contact itself, and the

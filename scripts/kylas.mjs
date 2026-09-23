@@ -3,15 +3,35 @@
 import { STAGE_ID } from "./stages.mjs";
 import { splitPhone, ISO_OF, checkEmail, splitName, e164 } from "./fields.mjs";
 
-const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
-/* Kylas throttles hard — a burst of 8 drew three 429s and even sequential calls
-   a few hundred ms apart were refused. Everything funnels through one queue. */
-const GAP = Number(process.env.KYLAS_GAP || 450);
+/* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK — and the
+   fallback is written defensively because `process` does not exist in every
+   runtime this now has to load in. Reading it at module scope was fine while
+   the only caller was a Node script and is not fine now: on a hosted runtime
+   the configuration arrives as an argument, and an unguarded process.env is
+   either a ReferenceError or, worse, an empty object that silently sends the
+   test suite at the real api.kylas.io. That is precisely what happened. */
+const fromEnv = (name, fallback) => {
+  try {
+    const v = typeof process !== "undefined" && process?.env ? process.env[name] : "";
+    return v === undefined || v === "" ? fallback : v;
+  } catch { return fallback; }
+};
 
 const CODE_BY_ID = Object.fromEntries(Object.entries(STAGE_ID).map(([code, id]) => [String(id), code]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createClient(key, { log = () => {}, shapeHint = "", onShape = () => {} } = {}) {
+export function createClient(key, {
+  log = () => {}, shapeHint = "", onShape = () => {},
+  base = fromEnv("KYLAS_BASE", "https://api.kylas.io"),
+  /* Kylas throttles hard — a burst of 8 drew three 429s and even sequential
+     calls a few hundred ms apart were refused. Everything funnels through one
+     queue, this far apart. */
+  gap = Number(fromEnv("KYLAS_GAP", 450)),
+  maxPages = Number(fromEnv("KYLAS_MAX_PAGES", 60)),         /* 12,000 companies */
+  maxWindows = Number(fromEnv("KYLAS_MAX_WINDOWS", 200)),
+} = {}) {
+  const BASE = base;
+  const GAP = gap;
   let chain = Promise.resolve();
 
 /* A rejected promise must not stay in the chain: `chain.then(...)` off a
@@ -122,7 +142,7 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
      then computed over a list that might have been missing companies, and
      nothing said so. The cap is a stop against a runaway loop, so it stays;
      hitting it is now reported as the incomplete answer it is. */
-  const MAX_PAGES = Number(process.env.KYLAS_MAX_PAGES || 60);   /* 12,000 */
+  const MAX_PAGES = maxPages;
 
   /* What the last crawl did, for the proxy to pass on. A truncated list is not
      an error — it is a correct prefix of a wrong length — so it travels
@@ -193,7 +213,7 @@ export function createClient(key, { log = () => {}, shapeHint = "", onShape = ()
   /* Walk backwards from `fromISO`, newest-first, a window at a time. Returns
      the extra rows; the caller owns de-duplication. */
   async function crawlOlderThan(fromISO, ownerId, fields, haveIds, entity = "company") {
-    const MAX_WINDOWS = Number(process.env.KYLAS_MAX_WINDOWS || 200);
+    const MAX_WINDOWS = maxWindows;
     let boundShape = boundShapeFor.get(entity);
     if (boundShape === undefined) {
       boundShape = await findBoundShape(fromISO, ownerId, fields, entity);
