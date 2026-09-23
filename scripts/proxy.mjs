@@ -27,6 +27,7 @@ import { createAirtable, syncContact, readCompanyKpis,
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
+import { fileStore } from "./store.mjs";
 
 /* WHICH BUILD IS THIS PROCESS RUNNING?
    The proxy is a long-lived process an associate starts by hand, and the
@@ -75,7 +76,12 @@ const kylas = createClient(KEY, {
 /* Which saves have already created a contact. Beside the shape hint and for the
    same reason: it is per-machine state that must outlive the process, because
    the process dying is the very thing it defends against. */
-const journal = createJournal(new URL("../.save-journal.json", import.meta.url), { log });
+/* The journal's storage, chosen by the shell rather than by the journal. On a
+   laptop that is a file beside the repo; on a hosted runtime it is a strongly
+   consistent database — see store.mjs. Keeping the choice here is what lets the
+   same save path run in both places. */
+const journal = createJournal(
+  fileStore(new URL("../.save-journal.json", import.meta.url), { log }), { log });
 
 /* Airtable is optional: without a PAT the proxy still reads and writes Kylas,
    and each save reports that the Airtable half was skipped rather than failing.
@@ -1212,7 +1218,7 @@ const routes = {
       /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
          reply was lost still carries no Kylas id, and without this it POSTs a
          second contact. */
-      const known = journal.lookup(idemKey);
+      const known = await journal.lookup(idemKey);
       if (known.state === "done") {
         c.kid = known.kid;
         result.kid = known.kid;
@@ -1237,14 +1243,14 @@ const routes = {
           c.kid = String(found.id);
           result.kid = c.kid;
           result.deduped = true;
-          journal.done(idemKey, c.kid);
+          await journal.done(idemKey, c.kid);
           await kylas.updateContact(c.kid, payload);
           result.wrote.push("adopted the contact an interrupted attempt had created");
           log(`recovered: ${c.pocName} already existed as ${c.kid} — updated instead of duplicating`);
         } else {
           /* Written BEFORE the POST. If this process dies during it, the next
              attempt finds an open entry and looks before it leaps. */
-          journal.open(idemKey);
+          await journal.open(idemKey);
           let made;
           try {
             made = await kylas.createContact(payload);
@@ -1252,12 +1258,12 @@ const routes = {
             /* Refused means nothing was made, so the key goes back to unused —
                otherwise every later retry pays for a lookup of a contact that
                does not exist. */
-            journal.forget(idemKey);
+            await journal.forget(idemKey);
             throw e;
           }
           result.kid = String(made?.id ?? "");
           result.created = true;
-          journal.done(idemKey, result.kid);
+          await journal.done(idemKey, result.kid);
           result.wrote.push("created contact");
           log(`created contact ${result.kid} (${c.pocName})`);
         }

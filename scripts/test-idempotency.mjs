@@ -123,10 +123,19 @@ await down();
 console.log(`   the console saw: ${await hung}`);
 const madeAnyway = await creates('Bela Nair');
 console.log(`   Kylas made the contact anyway: ${madeAnyway.length} (id ${madeAnyway[0]?.id})`);
-const j = JSON.parse(readFileSync(JOURNAL,'utf8'));
-console.log(`   journal says lid-bela: ${JSON.stringify(j.entries['lid:lid-bela'])}`);
+/* The journal stores one key at a time now, under a "j:" prefix, with the
+   entry itself as a string — see journal.mjs and store.mjs. What is being
+   asserted is unchanged: the attempt was written down, and it is UNFINISHED
+   (no kid), because that is what makes the retry look before it leaps. */
+const entry = (file, key) => {
+  const raw = JSON.parse(readFileSync(file,'utf8')).entries?.[`j:${key}`];
+  if (!raw) return null;
+  try { return JSON.parse(raw.v); } catch { return null; }
+};
+const j = entry(JOURNAL, 'lid:lid-bela');
+console.log(`   journal says lid-bela: ${JSON.stringify(j)}`);
 check('the interrupted attempt was written down before the POST',
-      j.entries['lid:lid-bela'] && !j.entries['lid:lid-bela'].kid);
+      !!j && !j.kid);
 
 console.log('\n   ...the outbox now retries it, exactly as it would in the morning');
 await hang(false);                  /* Kylas is answering again, and still holds Bela */
@@ -144,9 +153,9 @@ await save(contact('Cyrus Bad','lid-cyrus','9800000009'), callOf('2026-09-19T10:
   .then(()=>console.log('   (Kylas accepted it after all)'))
   .catch(e=>console.log(`   the save failed with ${e.status}`));
 await refuse('');
-const j2 = JSON.parse(readFileSync(JOURNAL,'utf8'));
-console.log(`   journal says lid-cyrus: ${JSON.stringify(j2.entries['lid:lid-cyrus'])}`);
-check('a refused create left no unfinished entry behind', !j2.entries['lid:lid-cyrus']);
+const j2 = entry(JOURNAL, 'lid:lid-cyrus');
+console.log(`   journal says lid-cyrus: ${JSON.stringify(j2)}`);
+check('a refused create left no unfinished entry behind', !j2);
 /* and the retry after the refusal creates it exactly once, not never */
 const r5 = await save(contact('Cyrus Bad','lid-cyrus','9800000009'), callOf('2026-09-19T10:16:00.000Z'));
 check('a retry after the refusal creates it', r5.created === true && !!r5.kid, `kid=${r5.kid}`);
