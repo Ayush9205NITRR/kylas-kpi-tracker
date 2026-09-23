@@ -1,0 +1,84 @@
+# How the proxy is deployed to Cloudflare. See docs/DEPLOY.md for the steps.
+#
+# THE THREE PLACEHOLDERS BELOW MUST BE FILLED IN before the first deploy, and
+# they are marked FILL ME so a half-configured file cannot be mistaken for a
+# finished one. Everything else has a working default.
+#
+# WHAT IS *NOT* IN THIS FILE, deliberately: the Kylas key and the Airtable
+# token. This file is committed to git. Secrets go in with
+#
+#   npx wrangler secret put KYLAS_KEY
+#   npx wrangler secret put AIRTABLE_PAT
+#
+# which sends them from your terminal to Cloudflare and stores them encrypted.
+# A secret written here would be in the repository history for ever, and the
+# only fix for that is a new key.
+
+name = "enout-bd-proxy"
+main = "worker/index.mjs"
+compatibility_date = "2026-09-23"
+
+# The proxy reaches Kylas and Airtable over the ordinary internet, which a
+# Worker does not do by default in every configuration. This is also what lets
+# the bundler see past any Node-shaped import in the graph.
+compatibility_flags = ["nodejs_compat"]
+
+# ── the address ────────────────────────────────────────────────────────────
+# A custom domain, not a *.workers.dev subdomain — Cloudflare Access cannot be
+# put in front of workers.dev, and without Access this has no login at all
+# while holding a Kylas key and an Airtable token.
+routes = [
+  { pattern = "bd.enout.website", custom_domain = true }
+]
+
+# ── the save journal ───────────────────────────────────────────────────────
+# D1 and not KV, and the difference is not a preference. KV is eventually
+# consistent: it can answer "no contact was created for this key" for a key
+# written a second ago in another location, and two retries of one save would
+# then both create a contact — the exact duplicate the journal exists to
+# prevent. See scripts/store.mjs.
+#
+#   npx wrangler d1 create enout-bd
+#
+# prints the database_id to paste below.
+[[d1_databases]]
+binding = "DB"
+database_name = "enout-bd"
+database_id = "FILL ME — from `npx wrangler d1 create enout-bd`"
+
+[vars]
+# Only this origin is answered. Anything else gets no CORS headers at all, so
+# the browser refuses it. Your extension's id is on chrome://extensions with
+# developer mode on, or at the end of its Web Store link.
+ALLOWED_ORIGIN = "chrome-extension://FILL ME"
+
+# Refuse any request that did not come through the Cloudflare Access login.
+# Leave this at "1". Setting it to "0" serves your CRM to anyone who finds the
+# address.
+REQUIRE_ACCESS = "1"
+
+# Which Airtable base holds the KPIs. Not a secret — the token is.
+AIRTABLE_BASE = "FILL ME — the app… id of your base"
+
+# Shown in the console's build handshake, so a stale deploy is visible rather
+# than merely suspected. Keep it equal to extension/manifest.json's version.
+VERSION = "1.5.0"
+
+# ── the nightly jobs ───────────────────────────────────────────────────────
+# TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
+# in UTC — getting this wrong by one day is the classic mistake here.
+#
+# Commented out until the jobs themselves are ported: the Worker has no
+# scheduled handler yet, and a cron firing into a Worker that cannot answer it
+# produces a daily failure in the dashboard and no sync. Uncomment together
+# with that change, not before.
+#
+# [triggers]
+# crons = [
+#   "30 20 * * *",   # 02:00 IST daily  — sync Kylas -> Airtable
+#   "0 21 * * 0",    # 02:30 IST Sunday — roll up the call log
+#   "45 18 * * *",   # 00:15 IST daily  — freeze yesterday's snapshot
+# ]
+
+[observability]
+enabled = true

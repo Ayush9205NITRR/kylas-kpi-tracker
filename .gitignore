@@ -9,3 +9,10 @@ logs/
 dist/
 apps/bd-ladder/node_modules
 apps/bd-ladder/dist
+
+# Cloudflare. .dev.vars holds the LOCAL Kylas key and Airtable token for
+# `wrangler dev` — the same class of secret as .env.local, and never committed.
+# .wrangler/ is the local D1 and cache state wrangler writes beside the config.
+.dev.vars
+.dev.vars.*
+.wrangler/
