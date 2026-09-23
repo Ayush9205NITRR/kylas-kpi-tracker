@@ -44,7 +44,13 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "enout-bd"
-database_id = "FILL ME — from `npx wrangler d1 create enout-bd`"
+database_id = "fb652db4-d37a-4f9b-8b12-a23209603982"
+
+# THE BINDING IS "DB" AND NOT WHAT `d1 create` SUGGESTS. Wrangler prints a
+# ready-made block with binding = "enout_bd", derived from the database name,
+# and pasting it whole is the obvious thing to do. The code reads env.DB, so
+# that rename would make the Worker refuse to start — correctly, but with an
+# error about a missing binding rather than about the name of one.
 
 [vars]
 # Only this origin is answered. Anything else gets no CORS headers at all, so
