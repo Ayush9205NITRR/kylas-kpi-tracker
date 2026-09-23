@@ -38,6 +38,7 @@
  */
 import { createHandlers } from "../scripts/handlers.mjs";
 import { d1Store, kvStore } from "../scripts/store.mjs";
+import { createGoogleAuth } from "../scripts/google-auth.mjs";
 
 /* Built per isolate, keyed on nothing: one Worker serves one account. The
    promise itself is cached, not the result, so ten requests arriving at a cold
@@ -58,6 +59,70 @@ function storeFor(env) {
 function handlers(env, log) {
   return (built ||= createHandlers({ env, store: storeFor(env), log })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
+}
+
+/* ── WHO IS ALLOWED TO CALL THIS ─────────────────────────────────────────
+   AUTH says how a caller proves who they are, and there is no default. A
+   server holding a Kylas key and an Airtable token must never be one
+   forgotten environment variable away from being open, and "safe unless
+   misconfigured" is the shape of every breach — so an unset AUTH refuses to
+   start rather than quietly serving everyone.
+
+     google   the extension signs in with Google and sends the ID token.
+              Verified here against Google's published keys — see
+              scripts/google-auth.mjs, and the suite beside it.
+     access   Cloudflare Access is in front and has already authenticated the
+              caller. This only checks the assertion is PRESENT, which catches
+              a DNS record pointing past the login; it does not verify the
+              signature, so it is only sound while nothing can reach the
+              origin directly.
+     none     no check at all. For a local `wrangler dev` and nothing else.
+              It says so in the log on every single request, because the one
+              way this ends badly is somebody setting it "just to test" and
+              leaving it. */
+let auth = null;
+function googleAuth(env, log) {
+  return (auth ||= createGoogleAuth({
+    clientId: env.GOOGLE_CLIENT_ID,
+    allowedDomain: env.ALLOWED_EMAIL_DOMAIN || "",
+    allowedEmails: String(env.ALLOWED_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean),
+    log,
+  }));
+}
+
+/* Returns the caller's identity, or throws something with a status. */
+async function authenticate(request, env, log) {
+  const mode = String(env.AUTH || "").toLowerCase();
+
+  if (mode === "google") {
+    const header = request.headers.get("Authorization") || "";
+    const token = /^Bearer\s+(.+)$/i.exec(header)?.[1] || "";
+    if (!token) throw Object.assign(new Error("not signed in"), { status: 401 });
+    /* The REASON is logged and the CALLER is told only that it failed: which
+       check a token tripped is useful to whoever is debugging and is a hint to
+       whoever is probing. */
+    try {
+      return await googleAuth(env, log).verify(token);
+    } catch (e) {
+      log(`! auth refused: ${e.message}`);
+      throw Object.assign(new Error("not signed in"), { status: 401 });
+    }
+  }
+
+  if (mode === "access") {
+    if (!request.headers.get("Cf-Access-Jwt-Assertion"))
+      throw Object.assign(new Error("not authenticated"), { status: 403 });
+    return { email: request.headers.get("Cf-Access-Authenticated-User-Email") || "", via: "access" };
+  }
+
+  if (mode === "none") {
+    log("! AUTH=none — this request was NOT authenticated");
+    return { email: "", via: "none" };
+  }
+
+  throw Object.assign(
+    new Error("AUTH is not set — refusing to serve. Set it to google, access, or none in wrangler.toml."),
+    { status: 500 });
 }
 
 const json = (body, status, origin) => new Response(JSON.stringify(body), {
@@ -97,11 +162,15 @@ export default {
         Vary: "Origin",
       } : undefined });
 
-    /* FAIL CLOSED. If this is meant to sit behind Access and the assertion is
-       not there, something is wrong with the deployment and the right answer
-       is to serve nothing — not to serve the CRM and hope. */
-    if (String(env.REQUIRE_ACCESS || "") === "1" && !request.headers.get("Cf-Access-Jwt-Assertion"))
-      return json({ error: "not authenticated" }, 403, origin);
+    /* BEFORE ANYTHING ELSE. Not after the route lookup, and not inside the
+       handlers: an unauthenticated request must not reach code that holds a
+       Kylas key, even code that would only have 404ed. */
+    let caller;
+    try {
+      caller = await authenticate(request, env, log);
+    } catch (e) {
+      return json({ error: e.message }, e.status || 401, origin);
+    }
 
     let routes;
     try {

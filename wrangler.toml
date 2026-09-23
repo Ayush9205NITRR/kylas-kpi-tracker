@@ -58,10 +58,35 @@ database_id = "fb652db4-d37a-4f9b-8b12-a23209603982"
 # developer mode on, or at the end of its Web Store link.
 ALLOWED_ORIGIN = "chrome-extension://infkkmfegekmocfgjlhahdlheccojkdb"
 
-# Refuse any request that did not come through the Cloudflare Access login.
-# Leave this at "1". Setting it to "0" serves your CRM to anyone who finds the
-# address.
-REQUIRE_ACCESS = "1"
+# ── who is allowed to call this ────────────────────────────────────────────
+# THERE IS NO DEFAULT. A server holding a Kylas key and an Airtable token must
+# never be one forgotten variable away from being open, so an unset AUTH
+# refuses to serve anything at all.
+#
+#   google   the extension signs in with Google and sends the ID token, which
+#            is verified here against Google's published keys. Needs
+#            GOOGLE_CLIENT_ID below. This is the one in use.
+#   access   Cloudflare Access sits in front. Free up to 50 users but requires
+#            a card on file, which is why it is not what we are using.
+#   none     no check whatsoever. `wrangler dev` only. It logs a warning on
+#            every request, because the way this ends badly is somebody
+#            setting it "just to test" and leaving it.
+AUTH = "google"
+
+# From Google Cloud Console — see docs/DEPLOY.md part 6. NOT a secret: it
+# identifies the application, it does not authorise anything. Its job here is
+# to be the `aud` every token is checked against, which is what stops a Google
+# token minted for somebody else's app being accepted as a login for this one.
+GOOGLE_CLIENT_ID = "FILL ME — the OAuth client id, ends .apps.googleusercontent.com"
+
+# Only addresses at this domain may sign in. Compared after splitting the
+# address on "@" — "evil@notenout.in" ends with "enout.in" and must not pass.
+ALLOWED_EMAIL_DOMAIN = "enout.in"
+
+# Optional, comma-separated: individual addresses outside the domain, for a
+# contractor. Every one is a person who can reach the CRM, so keep it empty
+# unless there is a name that has to be here.
+# ALLOWED_EMAILS = ""
 
 # Which Airtable base holds the KPIs. Not a secret — the token is.
 AIRTABLE_BASE = "appEwJu0bleHh9b8t"

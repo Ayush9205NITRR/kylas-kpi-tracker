@@ -59,6 +59,8 @@ const ENV = {
   AIRTABLE_BASE_URL: 'http://127.0.0.1:9901',
   VERSION: '1.5.0-worker',
   ALLOWED_ORIGIN: ORIGIN,
+  /* Explicit, because an unset AUTH now refuses to serve — see section 3. */
+  AUTH: 'none',
 };
 /* storeFor() insists on a real binding, and rightly — a journal with nowhere
    to live is how a lost reply duplicates a contact. The test supplies one by
@@ -108,16 +110,33 @@ check('the preflight is answered for the extension', pre.status === 204, `got ${
 const preEvil = await call('/save', { method: 'OPTIONS', origin: 'https://evil.example' });
 check('and refused for anyone else', preEvil.status === 403, `got ${preEvil.status}`);
 
-/* ── 3 · it fails CLOSED when the login is missing ───────────────────── */
-/* If this is meant to sit behind Access and the assertion is not there, the
-   deployment is wrong and the right answer is to serve nothing. A DNS record
-   pointing past Access must not quietly serve the CRM. */
+/* ── 3 · it fails CLOSED ─────────────────────────────────────────────── */
+/* A server holding a Kylas key must never be one forgotten variable away from
+   being open, so there is no default: AUTH unset serves nothing at all. The
+   per-mode checking itself is tested in test-google-auth.mjs, which mints its
+   own keys and actually attempts the forgeries. */
 console.log('\n3. the login gate');
-const shut = await call('/health', { env: { ...ENV, REQUIRE_ACCESS: '1' } });
-check('no Access assertion is a 403', shut.status === 403, `got ${shut.status}`);
-const open = await call('/health', { env: { ...ENV, REQUIRE_ACCESS: '1' },
+const noAuth = await call('/health', { env: { ...ENV, AUTH: '' } });
+check('AUTH unset refuses to serve', noAuth.status === 500,
+      (await noAuth.json()).error?.slice(0, 40));
+const shut = await call('/health', { env: { ...ENV, AUTH: 'access' } });
+check('AUTH=access with no assertion is a 403', shut.status === 403, `got ${shut.status}`);
+const open = await call('/health', { env: { ...ENV, AUTH: 'access' },
                                      headers: { 'Cf-Access-Jwt-Assertion': 'stub' } });
 check('with one, the request is served', open.status === 200, `got ${open.status}`);
+const noBearer = await call('/health', { env: { ...ENV, AUTH: 'google',
+                                                GOOGLE_CLIENT_ID: 'x', ALLOWED_EMAIL_DOMAIN: 'enout.in' } });
+check('AUTH=google with no token is a 401', noBearer.status === 401, `got ${noBearer.status}`);
+const junk = await call('/health', { env: { ...ENV, AUTH: 'google',
+                                            GOOGLE_CLIENT_ID: 'x', ALLOWED_EMAIL_DOMAIN: 'enout.in' },
+                                     headers: { Authorization: 'Bearer not-a-token' } });
+const junkBody = await junk.json();
+check('a junk token is a 401', junk.status === 401, `got ${junk.status}`);
+/* WHICH check a token tripped is useful to whoever is debugging and is a hint
+   to whoever is probing. It belongs in the log, not in the response. */
+check('and the reason is NOT handed to the caller',
+      !/JWT|alg|signature|kid|expired|issuer/i.test(junkBody.error || ''),
+      JSON.stringify(junkBody));
 
 /* ── 4 · a save, end to end, through the Worker ──────────────────────── */
 console.log('\n4. a save');
