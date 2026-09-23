@@ -50,7 +50,7 @@ database_id = "FILL ME — from `npx wrangler d1 create enout-bd`"
 # Only this origin is answered. Anything else gets no CORS headers at all, so
 # the browser refuses it. Your extension's id is on chrome://extensions with
 # developer mode on, or at the end of its Web Store link.
-ALLOWED_ORIGIN = "chrome-extension://FILL ME"
+ALLOWED_ORIGIN = "chrome-extension://infkkmfegekmocfgjlhahdlheccojkdb"
 
 # Refuse any request that did not come through the Cloudflare Access login.
 # Leave this at "1". Setting it to "0" serves your CRM to anyone who finds the
@@ -58,11 +58,18 @@ ALLOWED_ORIGIN = "chrome-extension://FILL ME"
 REQUIRE_ACCESS = "1"
 
 # Which Airtable base holds the KPIs. Not a secret — the token is.
-AIRTABLE_BASE = "FILL ME — the app… id of your base"
+AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 
 # Shown in the console's build handshake, so a stale deploy is visible rather
-# than merely suspected. Keep it equal to extension/manifest.json's version.
-VERSION = "1.5.0"
+# than merely suspected.
+#
+# 1.6.0 IS WHAT IS INSTALLED IN THE BROWSER, and extension/manifest.json in
+# this repo still says 1.5.0 — so the published extension is ahead of this
+# tree. Matching the INSTALLED one is what keeps the handshake quiet; matching
+# the repo would make every console permanently display "restart the proxy".
+# The mismatch itself is worth resolving separately: something was published
+# from a bumped manifest that was never committed.
+VERSION = "1.6.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
