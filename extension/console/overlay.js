@@ -327,7 +327,11 @@
   }
   if (linkEl) linkEl.onclick = async () => {
     if (API.state.online) return;
-    const next = prompt("Proxy address\n\nRun it with:  KYLAS_KEY=... node scripts/proxy.mjs", API.base);
+    const next = prompt(
+      "Server address\n\n" +
+      "The team server is  https://bd.enout.website\n" +
+      "A proxy on this machine would be  http://127.0.0.1:8787\n" +
+      "(run it with:  KYLAS_KEY=... node scripts/proxy.mjs)", API.base);
     if (next === null) return;
     setLink("busy", "Checking…");
     const ok = await API.setBase(next.trim());

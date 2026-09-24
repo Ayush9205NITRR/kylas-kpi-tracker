@@ -4,7 +4,18 @@
    proxy is not running the console keeps working on whatever it already holds,
    so a dead proxy degrades to offline rather than to a blank screen. */
 (function (global) {
-  const DEFAULT_BASE = "http://127.0.0.1:8787";
+/* THE DEFAULT IS THE SERVER, NOT A LAPTOP, and that is a product decision
+   rather than a convenience. While this was 127.0.0.1 every fresh install, and
+   anything that cleared extension storage, silently pointed the console at a
+   proxy that was not running — and the symptom was not "you have not set an
+   address", it was "Could not reach Kylas", which reads as the CRM being down.
+   That cost most of a day to find, on a machine where everything else was
+   right. It also does not scale to a team: eight people each typing a URL into
+   a prompt is eight chances for one of them to be quietly offline all week.
+
+   A localhost proxy is still fully supported — set the address and it is used
+   exactly as before. It is simply no longer what you get by accident. */
+  const DEFAULT_BASE = "https://bd.enout.website";
   let base = DEFAULT_BASE;
   let state = { online: false, reason: "not checked yet", user: null, role: "admin" };
   const listeners = new Set();

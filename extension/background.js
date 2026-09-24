@@ -85,7 +85,10 @@ async function fetchToken(interactive) {
 
 /* Silent first, interactive only if that fails. An associate signs in once and
    then, for as long as their Google session lasts, never sees a window again. */
-async function getToken({ interactive = false } = {}) {
+async function attempt({ interactive }) {
+  /* Re-checked INSIDE the queue: callers that queued behind a flow which has
+     since succeeded want its token, not another flow. This is what turns a
+     burst of requests into one sign-in. */
   if (cached && cached.exp - 120_000 > Date.now()) return cached;
   try {
     return await fetchToken(false);
@@ -93,6 +96,30 @@ async function getToken({ interactive = false } = {}) {
     if (!interactive) throw e;
     return fetchToken(true);
   }
+}
+
+/* ONE AT A TIME, ALWAYS. Chrome allows exactly one web auth flow per
+   extension, and refuses the rest with "Only one web auth flow is allowed at
+   a time" — which surfaces in the console as a failure to reach the server,
+   naming neither Google nor sign-in.
+
+   Opening the console fires several requests at once (health, the company,
+   the contact), and each one asks for a token. Without this queue each of
+   them starts its own flow, the first wins and the rest are refused, so the
+   console stays offline no matter how correct everything else is. That is
+   exactly how it shipped.
+
+   A CHAIN, not "wait for the one I found": three at once must run one after
+   another, and two of them each waiting on the same first one would still
+   overlap with each other. The same shape as journal.mjs's once() and the
+   Kylas client's request queue — this file was the one place it was missing. */
+let chain = Promise.resolve();
+function getToken({ interactive = false } = {}) {
+  const run = chain.then(() => attempt({ interactive }), () => attempt({ interactive }));
+  /* The chain keeps only the timing, never the outcome: a rejected promise
+     left in it would make every later call fail with the same stale error. */
+  chain = run.then(() => {}, () => {});
+  return run;
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
