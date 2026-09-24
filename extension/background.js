@@ -61,7 +61,18 @@ async function fetchToken(interactive) {
     ...(interactive ? { prompt: "select_account" } : { prompt: "none" }),
   });
 
-  const redirected = await chrome.identity.launchWebAuthFlow({ url, interactive });
+  /* THE TWO OPTIONS CHROME'S OWN ERROR MESSAGE NAMED, and not setting them is
+     why this hung. A silent flow loads the authorization page in a hidden
+     window and waits for it to redirect. When consent has not been given, that
+     page never redirects — so the flow sits there for Chrome's default timeout,
+     HOLDING THE ONE FLOW AN EXTENSION IS ALLOWED, and every other request fails
+     with "Only one web auth flow is allowed at a time".
+     Aborting as soon as the page has loaded, with a short ceiling, makes the
+     silent attempt fail in a second or two so the interactive one can start. */
+  const redirected = await chrome.identity.launchWebAuthFlow(interactive
+    ? { url, interactive: true }
+    : { url, interactive: false, abortOnLoadForNonInteractive: true,
+        timeoutMsForNonInteractive: 4000 });
   if (!redirected) throw new Error("sign-in was dismissed");
 
   /* The token comes back in the URL FRAGMENT, not the query string — that is
@@ -91,13 +102,30 @@ async function fetchToken(interactive) {
 const wantsAWindow = (e) => /user interaction required|not signed|consent|interaction_required/i
   .test(e?.message || "");
 
+/* Has a silent refresh ever worked here? Until one has, there is no session to
+   refresh and trying is pure cost. */
+let everSignedIn = false;
+
 async function attempt({ interactive }) {
   /* Re-checked INSIDE the queue: callers that queued behind a flow which has
      since succeeded want its token, not another flow. This is what turns a
      burst of requests into one sign-in. */
   if (cached && cached.exp - 120_000 > Date.now()) return cached;
+
+  /* NOTHING TO REFRESH YET, so do not try. A silent attempt is for renewing a
+     session that already exists; on a browser that has never signed in to this
+     app it can only fail, and the way it fails is by occupying the one
+     available flow while it waits. Straight to the window. */
+  if (!everSignedIn && interactive) {
+    const c = await fetchToken(true);
+    everSignedIn = true;
+    return c;
+  }
+
   try {
-    return await fetchToken(false);
+    const c = await fetchToken(false);
+    everSignedIn = true;
+    return c;
   } catch (e) {
     /* ESCALATE WHEN CHROME ASKS FOR IT, not only when the caller happened to
        say it was willing. Only /health asked interactively, so on a profile
