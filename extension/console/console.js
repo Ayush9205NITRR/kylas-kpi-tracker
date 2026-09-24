@@ -880,18 +880,14 @@ function renderBasic(){
      are already over there. Sitting next to the call notes it was also on
      screen for every no-answer call, which is the 65% that never gets near it. */
 
-  /* ORDER: WHAT YOU TOUCH, THEN WHAT YOU READ.
-     Identity sat first and pushed the stage and the call-back date below the
-     fold, so the two fields that are filled on EVERY call — including the 65%
-     where nobody picks up — could not be reached without scrolling. And it is
-     all a second copy: the header band above already carries the name, the
-     number, the email, the company and the role. Scrolling past a duplicate to
-     reach the only thing you came for is the cost paid 200 times a day.
-
-     The identity card keeps every field, because that is where they are
-     EDITED. It just stops being the thing in the way. */
-  W.appendChild(group("Where this stands",[sRow,rRow]));
+  /* ORDER: WHO, THEN WHERE THIS STANDS — Ayush's call, 2026-09-24.
+     From 2026-09-19 to 1.16.3 "Where this stands" came first, on the argument
+     that stage and call-back are filled on every call and identity is a copy
+     of the header band. Ayush asked for the original order back: the person
+     you are calling first, then what happened. Do not flip it again without
+     asking. */
   W.appendChild(whoCard);
+  W.appendChild(group("Where this stands",[sRow,rRow]));
 }
 
 function renderRight(){

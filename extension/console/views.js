@@ -405,10 +405,24 @@
      nothing whatever for Kylas' result window. Sending somebody to change a
      number that cannot help is worse than saying nothing. */
   const truncWarn = () => {
-    if (CACHE.building)
+    if (CACHE.building) {
+      const held = CACHE.companies.length ? " Until then these are the companies this browser last had." : "";
+      /* Say WHY it is still building, in terms of what to do about it. */
+      if (CACHE.buildLastRun == null)
+        return `<p class="vwarn">The company list has not been built yet, because the server's
+          background job has never run. Its schedule is not set up in Cloudflare: open
+          <b>Workers &amp; Pages</b> in the Cloudflare dashboard once, then run
+          <code>npx wrangler deploy</code> again.${held}</p>`;
+      if (CACHE.buildError) {
+        const plan = /subrequest/i.test(CACHE.buildError.message || "")
+          ? " Your Cloudflare account is on the Free plan, which does not allow a job this size — upgrade to Workers Paid in the Cloudflare dashboard."
+          : "";
+        return `<p class="vwarn">Building the company list from Kylas failed:
+          ${esc(CACHE.buildError.message || "")}.${plan} It is tried again every 5 minutes.${held}</p>`;
+      }
       return `<p class="vwarn">The server is building the company list from Kylas — the first
-        time takes a few minutes, and it fills in here by itself.${CACHE.companies.length
-        ? " Until then these are the companies this browser last had." : ""}</p>`;
+        time takes a few minutes, and it fills in here by itself.${held}</p>`;
+    }
     if (!CACHE.truncated) return "";
     const got = esc(String(CACHE.crawled));
     /* READ FROM THE MIRROR, the shortfall is the SYNC's, and the fix is to run
@@ -546,6 +560,8 @@
            again in a minute rather than in five. */
         if (r.building) {
           CACHE.building = true; CACHE.error = "";
+          CACHE.buildLastRun = r.lastRunSecondsAgo ?? null;
+          CACHE.buildError = r.crawlError || null;
           CACHE.at = Date.now() - FRESH_MS + 60 * 1000;
           if (r.picklists) adoptPicklists(r.picklists);
           return;

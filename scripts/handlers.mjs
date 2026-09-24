@@ -1113,8 +1113,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const crawl = await kylasCompanies.peek();
       if (!crawl) {
         log("companies: no Kylas crawl yet — the maintenance run is building it");
+        /* WHY it is still building, so the console can say something a person
+           can act on: the job has never run (its schedule is not registered),
+           or it ran and failed (and with what). */
+        const lastRun = Number((cache && (await cache.get("maintain-last-run").catch(() => null))) || 0);
+        const crawlError = cache ? JSON.parse((await cache.get("companies-crawl-error").catch(() => null)) || "null") : null;
         return { owner: all ? "all" : String(owner), companies: [], owners: ownerList(),
                  picklists: (await meta()).picklists, source: "kylas", building: true,
+                 lastRunSecondsAgo: lastRun ? Math.round((Date.now() - lastRun) / 1000) : null,
+                 crawlError,
                  kpiSource: "none", kpiError: "", kpiMatched: 0 };
       }
       for (const co of crawl.companies) {
@@ -1682,6 +1689,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      behind this server's back — the nightly sync, the weekly rollup. */
   async function maintain({ rebuild = false, only = null } = {}) {
     const out = {};
+    if (cache) await cache.put("maintain-last-run", String(Date.now()), { ttlSeconds: 30 * 86400 }).catch(() => {});
     /* Saves first: a retry waiting here is a call an associate logged. */
     /* ONE BIG PIECE OF WORK PER RUN. Cloudflare caps the outside requests
        one invocation may make (50 on the Free plan, 1,000 or more on Paid),
@@ -1707,6 +1715,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (wantFresh) await cache.delete("companies-want-fresh").catch(() => {});
       const got = await kylasCompanies({ fresh: true }).catch((e) => ({ error: e.message }));
       out.kylasCompanies = got.error ? { error: got.error } : { companies: got.companies.length };
+      /* Kept for the console's "still building" message. */
+      if (cache) {
+        if (got.error) await cache.put("companies-crawl-error",
+          JSON.stringify({ message: got.error.slice(0, 300), at: new Date().toISOString() }), { ttlSeconds: 7 * 86400 }).catch(() => {});
+        else await cache.delete("companies-crawl-error").catch(() => {});
+      }
     };
     /* A company list that does not exist yet, or that somebody asked to
        refresh, comes first: without it the console has nothing to show,

@@ -224,6 +224,9 @@ const unsyncedBody = await unsynced.json();
 check('does not crawl Kylas inside the request; says the list is being built',
       unsynced.status === 200 && unsyncedBody.building === true && unsyncedBody.source !== 'airtable',
       `${unsynced.status} building=${unsyncedBody.building} companies=${unsyncedBody.companies?.length}`);
+check('and says the background job has not run yet, so the console can say why',
+      unsyncedBody.lastRunSecondsAgo === null && unsyncedBody.crawlError === null,
+      `lastRun=${unsyncedBody.lastRunSecondsAgo} error=${JSON.stringify(unsyncedBody.crawlError)}`);
 const CR = { CRON_SYNC: '30 20 * * *', CRON_SNAPSHOT: '45 18 * * *', CRON_ROLLUP: '0 21 * * 0', CRON_MAINTAIN: '*/5 * * * *' };
 const firstRun = [];
 await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, withStore({ ...ENV, ...CR }),
