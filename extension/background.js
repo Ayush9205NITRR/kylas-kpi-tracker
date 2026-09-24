@@ -85,11 +85,6 @@ async function fetchToken(interactive) {
 
 /* Silent first, interactive only if that fails. An associate signs in once and
    then, for as long as their Google session lasts, never sees a window again. */
-/* When a window was last opened, so a failure that genuinely needs one cannot
-   turn into a window per request. */
-let lastPrompt = 0;
-const PROMPT_EVERY = 30_000;
-
 /* Chrome's way of saying "this cannot be done silently": the account is not
    signed in to Google in this profile, or consent has not been given yet.
    It is not a failure to report — it is a request for the window. */
@@ -113,10 +108,13 @@ async function attempt({ interactive }) {
        The rate limit is what keeps this honest: a window at most every 30
        seconds, so the first request of a session opens one and a burst behind
        it does not. */
-    const needed = interactive || wantsAWindow(e);
-    if (!needed) throw e;
-    if (Date.now() - lastPrompt < PROMPT_EVERY) throw e;
-    lastPrompt = Date.now();
+    /* NO RATE LIMIT HERE, and removing one is the fix rather than a risk. It
+       was added to stop a window per request, but the chain above already
+       guarantees one flow at a time — so all the limit did was suppress the
+       escalation for the next thirty seconds, leaving every request in that
+       window reporting Chrome's silent-mode error instead of asking. Which is
+       what a reload looked like: the same unreadable message, again. */
+    if (!(interactive || wantsAWindow(e))) throw e;
     return fetchToken(true);
   }
 }
@@ -153,6 +151,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     /* The reason is worth carrying back: "sign-in was dismissed" and "you are
        not signed into Google" need different things from the person reading
        it, and a bare failure tells them neither. */
-    .catch((e) => reply({ ok: false, error: e?.message || String(e) }));
+    /* TRANSLATED, because what Chrome and Google say here is written for
+       whoever wrote the extension. "User interaction required. Try setting
+       `abortOnLoadForNonInteractive`…" was shown to an associate in place of
+       their contacts. The raw text still goes to the log for whoever is
+       debugging; what comes back is a sentence about signing in. */
+    .catch((e) => {
+      const raw = e?.message || String(e);
+      console.log("sign-in failed:", raw);
+      const friendly =
+        /redirect_uri_mismatch/i.test(raw) ? "this browser's copy of the extension is not registered with Google"
+        : /user interaction required|interaction_required/i.test(raw) ? "sign in to continue"
+        : /dismissed|closed by the user|canceled|cancelled/i.test(raw) ? "sign-in was cancelled"
+        : /access_denied|not allowed|unauthorized/i.test(raw) ? "this Google account is not allowed"
+        : raw;
+      reply({ ok: false, error: friendly, raw });
+    });
   return true;                            /* the reply is async */
 });

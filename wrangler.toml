@@ -109,7 +109,7 @@ AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
