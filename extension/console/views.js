@@ -418,10 +418,10 @@
           ? " Your Cloudflare account is on the Free plan, which does not allow a job this size — upgrade to Workers Paid in the Cloudflare dashboard."
           : "";
         return `<p class="vwarn">Building the company list from Kylas failed:
-          ${esc(CACHE.buildError.message || "")}.${plan} It is tried again every 5 minutes.${held}</p>`;
+          ${esc(CACHE.buildError.message || "")}.${plan} It is tried again every minute.${held}</p>`;
       }
       return `<p class="vwarn">The server is building the company list from Kylas — the first
-        time takes a few minutes, and it fills in here by itself.${held}</p>`;
+        time takes two or three minutes, and it fills in here by itself.${held}</p>`;
     }
     if (!CACHE.truncated) return "";
     const got = esc(String(CACHE.crawled));

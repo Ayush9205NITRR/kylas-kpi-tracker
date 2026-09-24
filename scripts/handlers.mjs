@@ -1694,7 +1694,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     /* ONE BIG PIECE OF WORK PER RUN. Cloudflare caps the outside requests
        one invocation may make (50 on the Free plan, 1,000 or more on Paid),
        and a table rebuild or a Kylas crawl can each be a few hundred. So a run
-       does at most one of them; the next run, five minutes later, does the
+       does at most one of them; the next run, a minute later, does the
        next. Nothing waits on these — readers are served the copy in hand. */
     if (saves) out.saves = await saves.drain(performSave, { max: 15 }).catch((e) => ({ error: e.message }));
     if (rebuild) {
@@ -1712,6 +1712,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const wantCrawl = Date.now() - readAt < 2 * 3600 * 1000 &&
       (wantFresh || age === null || age * 1000 > COMPANY_TTL);
     const crawl = async () => {
+      /* One crawl at a time. It can outlast the minute between runs, and a
+         second one started beside it would double the load on Kylas for the
+         same answer. Held in the store with an expiry, so a crawl that died
+         does not block the next for longer than five minutes. */
+      if (cache) {
+        if (await cache.get("companies-crawl-lease").catch(() => null)) { out.kylasCompanies = { skipped: "a crawl is already running" }; return; }
+        await cache.put("companies-crawl-lease", String(Date.now()), { ttlSeconds: 300 }).catch(() => {});
+      }
+      try { await crawlNow(); } finally { if (cache) await cache.delete("companies-crawl-lease").catch(() => {}); }
+    };
+    const crawlNow = async () => {
       if (wantFresh) await cache.delete("companies-want-fresh").catch(() => {});
       const got = await kylasCompanies({ fresh: true }).catch((e) => ({ error: e.message }));
       out.kylasCompanies = got.error ? { error: got.error } : { companies: got.companies.length };

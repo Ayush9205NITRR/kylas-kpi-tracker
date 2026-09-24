@@ -109,7 +109,7 @@ AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.16.4"
+VERSION = "1.16.5"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
@@ -129,9 +129,12 @@ VERSION = "1.16.4"
 CRON_SYNC = "30 20 * * *"
 CRON_SNAPSHOT = "45 18 * * *"
 CRON_ROLLUP = "0 21 * * SUN"
-# Every five minutes: keeps the D1 copy of Airtable and the Kylas company list
-# current (scripts/mirror.mjs). Idle overnight it makes no outside request.
-CRON_MAINTAIN = "*/5 * * * *"
+# Every minute: keeps the D1 copy of Airtable and the Kylas company list
+# current (scripts/mirror.mjs), and retries saves. Every minute rather than
+# every five so a first build is ready in two or three minutes, not ten. Idle,
+# a run is a handful of database reads and no outside request — about 43,000
+# runs a month, well inside the Paid plan's 10 million requests.
+CRON_MAINTAIN = "* * * * *"
 
 # How much raw call history to keep before the weekly rollup compacts it. 30
 # days at this team's volume is ~18,000 rows; 90 would be ~54,000, which is
@@ -148,7 +151,7 @@ crons = [
   "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
   "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
   "0 21 * * SUN",  # 02:30 IST, Monday  · roll up the call log
-  "*/5 * * * *",   # every 5 minutes    · keep the D1 copies current
+  "* * * * *",     # every minute       · keep the D1 copies current
 ]
 
 [observability]
