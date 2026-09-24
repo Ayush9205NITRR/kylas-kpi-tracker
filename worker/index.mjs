@@ -137,7 +137,70 @@ const json = (body, status, origin) => new Response(JSON.stringify(body), {
   },
 });
 
+/* ── the nightly jobs ────────────────────────────────────────────────────
+   The whole point of moving off a laptop: these used to need a machine that
+   was awake at 2am, so the sync depended on somebody not shutting their lid.
+
+   ONE CRON PER JOB, told apart by the schedule that fired it. Cloudflare gives
+   the cron expression and nothing else, so it is the only thing to switch on —
+   which means the strings here and in wrangler.toml have to match exactly, and
+   a mismatch is a job that silently never runs. Hence the log line naming what
+   was matched, and the complaint when nothing was.
+
+   IMPORTED LAZILY. A scheduled Worker and a fetch Worker are the same bundle,
+   so a top-level import of the sync would be parsed on the path of every save
+   an associate makes. */
+const JOBS = {
+  sync: async (env, log) =>
+    (await import("../scripts/sync-kylas.mjs")).run({ env, log, apply: true }),
+  rollup: async (env, log) =>
+    (await import("../scripts/rollup-calls.mjs")).run({
+      env, log, apply: true, retainDays: Number(env.CALL_RETAIN_DAYS || 30) }),
+  snapshot: async (env, log) =>
+    (await import("../scripts/snapshot.mjs")).run({ env, log }),
+};
+
 export default {
+  async scheduled(event, env, ctx) {
+    const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+    const byCron = new Map([
+      [String(env.CRON_SYNC || ""), "sync"],
+      [String(env.CRON_ROLLUP || ""), "rollup"],
+      [String(env.CRON_SNAPSHOT || ""), "snapshot"],
+    ].filter(([cron]) => cron));
+    const which = byCron.get(event.cron) || "";
+
+    if (!which || !JOBS[which]) {
+      /* Naming both sides, because the failure this guards against is a
+         schedule edited in one place and not the other, and its symptom is a
+         job that simply never happens. */
+      log(`! cron "${event.cron}" matches no job. wrangler.toml has ` +
+          `CRON_SYNC=${env.CRON_SYNC || "(unset)"} CRON_ROLLUP=${env.CRON_ROLLUP || "(unset)"} ` +
+          `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"}`);
+      return;
+    }
+
+    const started = Date.now();
+    log(`cron ${event.cron} -> ${which}`);
+    /* waitUntil, so the run is not cut short when this function returns. The
+       jobs are mostly SLEEPING — both APIs are rate limited and every request
+       waits its turn — and wall time is not CPU time. */
+    ctx.waitUntil((async () => {
+      try {
+        const out = await JOBS[which](env, log);
+        log(`${which} finished in ${((Date.now() - started) / 1000).toFixed(1)}s ` +
+            `${JSON.stringify(out || {}).slice(0, 200)}`);
+      } catch (e) {
+        /* Rethrown after logging: Cloudflare counts a thrown scheduled event
+           as a failed run, and a failed run is visible in the dashboard.
+           Swallowing it here would make a broken sync look like a healthy one
+           that found nothing to do. */
+        log(`! ${which} FAILED after ${((Date.now() - started) / 1000).toFixed(1)}s: ${e.message}`);
+        throw e;
+      }
+    })());
+  },
+
   async fetch(request, env, ctx) {
     /* Cloudflare's log is the console, and a line without a timestamp is
        useless in a tail. Matching the Node shell's format so the two are

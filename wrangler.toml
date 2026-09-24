@@ -94,29 +94,36 @@ AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 # Shown in the console's build handshake, so a stale deploy is visible rather
 # than merely suspected.
 #
-# 1.6.0 IS WHAT IS INSTALLED IN THE BROWSER, and extension/manifest.json in
-# this repo still says 1.5.0 — so the published extension is ahead of this
-# tree. Matching the INSTALLED one is what keeps the handshake quiet; matching
-# the repo would make every console permanently display "restart the proxy".
-# The mismatch itself is worth resolving separately: something was published
-# from a bumped manifest that was never committed.
-VERSION = "1.6.0"
+# Keep it equal to extension/manifest.json. The console compares the two and
+# says "restart the proxy" when they differ, which is exactly right for a
+# stale deploy and pure noise when they have merely drifted.
+VERSION = "1.7.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
-# in UTC — getting this wrong by one day is the classic mistake here.
-#
-# Commented out until the jobs themselves are ported: the Worker has no
-# scheduled handler yet, and a cron firing into a Worker that cannot answer it
-# produces a daily failure in the dashboard and no sync. Uncomment together
-# with that change, not before.
-#
-# [triggers]
-# crons = [
-#   "30 20 * * *",   # 02:00 IST daily  — sync Kylas -> Airtable
-#   "0 21 * * 0",    # 02:30 IST Sunday — roll up the call log
-#   "45 18 * * *",   # 00:15 IST daily  — freeze yesterday's snapshot
-# ]
+# in UTC — getting this wrong by one day is the classic mistake here. The
+# comment beside each one is the IST time it actually fires.
+
+# WHICH SCHEDULE IS WHICH JOB. Cloudflare tells the Worker the cron expression
+# that fired and nothing else, so this is the only way to tell them apart —
+# and these strings must match the ones above CHARACTER FOR CHARACTER. A
+# mismatch is not an error anywhere: it is a job that silently never runs, so
+# the Worker logs the cron it could not place along with all three of these.
+CRON_SYNC = "30 20 * * *"
+CRON_SNAPSHOT = "45 18 * * *"
+CRON_ROLLUP = "0 21 * * 0"
+
+# How much raw call history to keep before the weekly rollup compacts it. 30
+# days at this team's volume is ~18,000 rows; 90 would be ~54,000, which is
+# over an Airtable Team base on its own.
+CALL_RETAIN_DAYS = "30"
+
+[triggers]
+crons = [
+  "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
+  "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
+  "0 21 * * 0",    # 02:30 IST, Monday  · roll up the call log
+]
 
 [observability]
 enabled = true

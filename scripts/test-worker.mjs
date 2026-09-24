@@ -200,6 +200,53 @@ check('it refuses to start rather than keeping the journal in memory',
       nostore.status === 500 && /journal/i.test(nostoreBody.error || ''),
       nostoreBody.error?.slice(0, 60));
 
+/* ── 7 · the nightly jobs ────────────────────────────────────────────── */
+/* The whole reason for moving off a laptop. Fired the way Cloudflare fires
+   them: a cron expression and nothing else, which is why the strings in
+   wrangler.toml are the only thing telling the three jobs apart. */
+console.log('\n7. the scheduled jobs');
+const CRONS = { CRON_SYNC: '30 20 * * *', CRON_SNAPSHOT: '45 18 * * *', CRON_ROLLUP: '0 21 * * 0' };
+const lines = [];
+const origLog = console.log;
+const fire = async (cron, env = { ...ENV, ...CRONS }) => {
+  lines.length = 0;
+  const waits = [];
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    await worker.scheduled({ cron, scheduledTime: Date.now() }, withStore(env),
+                            { waitUntil: (p) => waits.push(p) });
+    await Promise.allSettled(waits);
+  } finally { console.log = origLog; }
+  return lines.join('\n');
+};
+
+const syncOut = await fire(CRONS.CRON_SYNC);
+check('the sync cron runs the sync', /cron .* -> sync/.test(syncOut),
+      syncOut.split('\n')[0] || '(silent)');
+check('and it actually reached Kylas and Airtable',
+      /companies \d+\/\d+, contacts/.test(syncOut) || /sync finished/.test(syncOut),
+      syncOut.replace(/\n/g, ' | ').slice(-240));
+
+const snapOut = await fire(CRONS.CRON_SNAPSHOT);
+check('the snapshot cron runs the snapshot', /cron .* -> snapshot/.test(snapOut),
+      snapOut.split('\n')[0] || '(silent)');
+
+const rollOut = await fire(CRONS.CRON_ROLLUP);
+check('the rollup cron runs the rollup', /cron .* -> rollup/.test(rollOut),
+      rollOut.split('\n')[0] || '(silent)');
+
+/* THE FAILURE THIS GUARDS AGAINST: a schedule edited in wrangler.toml's
+   [triggers] and not in the vars beside it. Nothing errors — the job simply
+   never happens, for months, and the dashboard shows a healthy Worker. */
+const orphan = await fire('0 3 * * *');
+check('a cron matching no job says so loudly', /matches no job/.test(orphan),
+      (orphan.match(/! cron.*/) || ['(said nothing)'])[0].slice(0, 80));
+check('and names what the config actually has', /CRON_SYNC=30 20/.test(orphan));
+
+const unconfigured = await fire(CRONS.CRON_SYNC, { ...ENV });
+check('so does a cron fired with no CRON_* set at all',
+      /matches no job/.test(unconfigured));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

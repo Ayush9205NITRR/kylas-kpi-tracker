@@ -255,6 +255,12 @@ in part 6.5, or an `ALLOWED_ORIGIN` that does not match your real extension id.
 **Saves work but the dashboard is empty.** Unrelated to hosting — the Airtable
 base has not had `repair-base.mjs` run on it.
 
+**A nightly job never runs.** The schedules live in two places in
+`wrangler.toml` — `[triggers] crons` and the `CRON_*` vars that say which job
+each one is — and they must match character for character. A mismatch is not
+an error: the job simply never happens. The Worker logs `! cron "..." matches
+no job` along with all three settings, so `npx wrangler tail` names it.
+
 **Seeing yesterday's behaviour.** Compare the `version` in `/health` with the
 extension's. They come from the same number, so a mismatch means the deploy
 did not land.
@@ -263,21 +269,22 @@ did not land.
 
 ## What is not done yet
 
-Honest list, so nothing is a surprise:
-
-1. **The nightly jobs do not run on Cloudflare.** The sync, the call-log
-   rollup and the snapshot are still scripts that need a machine. They are
-   written into `wrangler.toml` as commented-out schedules and stay that way
-   until the jobs themselves are ported — a cron firing into a Worker with no
-   scheduled handler produces a daily failure and no sync. **Until then, keep
-   running them wherever they run now.** This is the last thing standing
-   between you and not needing a laptop at all.
-2. **Nobody has run this against a live Kylas account.** Everything verified
+1. **Nobody has run this against a live Kylas account.** Everything verified
    means "verified against the mocks, by a test" — a real bar, since the mocks
    reproduce Kylas' rate limiting and Airtable's rejections, and the Worker
-   itself was run on Cloudflare's own runtime with a real D1 database. It is
-   still not the same as your account.
-3. **The Airtable base has never had `repair-base.mjs` run on it.** Unrelated
-   to hosting, and still costing you on every save: `Phones` is dropped, the
-   `RCA` and `Team` tables do not exist, and every company open scans the whole
-   Contacts table for want of a rollup.
+   itself was run on Cloudflare's own runtime against a real D1 database. It
+   is still not your account.
+2. **The subrequest ceiling has not been met in anger.** A Worker may make a
+   limited number of outbound requests per invocation — far fewer on the free
+   plan than on the paid one — and a full Kylas crawl is dozens of pages plus
+   an Airtable write per ten rows. The nightly sync is incremental, so an
+   ordinary night is small; the run that will find the ceiling is the FIRST
+   one, or one after a long outage. If a scheduled run fails with a limit
+   error, the $5 plan raises it by twenty times, and the fix after that is to
+   make the job resume across invocations rather than finish in one.
+3. **The Airtable base has never had `repair-base.mjs` run on it.** Still
+   costing you on every save: `Phones` is dropped, the `RCA` and `Team` tables
+   do not exist, and every company open scans the whole Contacts table for
+   want of a rollup. The sync no longer dies without it — a missing watermark
+   column is treated as "we have nothing yet" — but it will do a full pull
+   every night instead of an incremental one until you run it.
