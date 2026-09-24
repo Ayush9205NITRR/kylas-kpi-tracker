@@ -141,7 +141,14 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
       log(`  ! the Kylas list is INCOMPLETE — ${search.total} of ${search.reportedTotal}. ` +
           `Companies missing from it will not reach Airtable.`);
 
-    const changed = all.filter((c) => !since || iso(c.updatedAt) > since);
+    /* OLDEST FIRST. The watermark is the newest "Kylas Updated At" in the
+       base, and Kylas hands the list newest first — so a run cut short after
+       writing the newest rows set the watermark past everything it had not
+       reached, and the next run skipped the rest for good. A first full pull is
+       exactly the run most likely to be cut short. Written in ascending order,
+       an interrupted run leaves the watermark where it actually stopped. */
+    const changed = all.filter((c) => !since || iso(c.updatedAt) > since)
+      .sort((a, b) => iso(a.updatedAt).localeCompare(iso(b.updatedAt)));
     const rows = (LIMIT ? changed.slice(0, LIMIT) : changed).map((c) => {
       /* The same mapper the console path uses, so the mirror cannot disagree
          with a live read about what a company's stage or source IS. */
@@ -285,6 +292,8 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
       return { seen: want.length, written: 0, moved: 0 };
     }
 
+    /* Oldest first, for the reason given at the companies. */
+    rows.sort((a, b) => String(a["Kylas Updated At"] || "").localeCompare(String(b["Kylas Updated At"] || "")));
     const done = await at.upsertMany("Contacts", "Kylas Contact ID", rows);
     log(`  wrote ${done.length}`);
     /* The transition rows carry the contact link, which needs the ids that write

@@ -39,6 +39,7 @@
 import { createHandlers } from "../scripts/handlers.mjs";
 import { d1Store, kvStore } from "../scripts/store.mjs";
 import { createGoogleAuth } from "../scripts/google-auth.mjs";
+import { createMirror } from "../scripts/mirror.mjs";
 
 /* Built per isolate, keyed on nothing: one Worker serves one account. The
    promise itself is cached, not the result, so ten requests arriving at a cold
@@ -60,7 +61,10 @@ function handlers(env, log) {
   /* cache: the same store, for the finished report. Built once from about a
      hundred pages of Airtable and read by every isolate and every associate,
      rather than rebuilt — and abandoned half-way — on each cold one. */
-  return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log })
+  /* mirror: the D1 copy of the Airtable tables the console reads, so a read
+     is a query next door instead of pages of Airtable (scripts/mirror.mjs). */
+  return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log,
+                                     mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
 
@@ -160,12 +164,22 @@ const json = (body, status, origin) => new Response(JSON.stringify(body), {
    IMPORTED LAZILY. A scheduled Worker and a fetch Worker are the same bundle,
    so a top-level import of the sync would be parsed on the path of every save
    an associate makes. */
+/* The sync and the rollup rewrite tables behind this server's back — and the
+   sync can change company rollups a delta cannot see — so each is followed by a
+   rebuild of the copies it touched. */
 const JOBS = {
-  sync: async (env, log) =>
-    (await import("../scripts/sync-kylas.mjs")).run({ env, log, apply: true }),
-  rollup: async (env, log) =>
-    (await import("../scripts/rollup-calls.mjs")).run({
-      env, log, apply: true, retainDays: Number(env.CALL_RETAIN_DAYS || 30) }),
+  sync: async (env, log) => {
+    const out = await (await import("../scripts/sync-kylas.mjs")).run({ env, log, apply: true });
+    return { ...out, after: await (await handlers(env, log)).maintain({ rebuild: true }) };
+  },
+  rollup: async (env, log) => {
+    const out = await (await import("../scripts/rollup-calls.mjs")).run({
+      env, log, apply: true, retainDays: Number(env.CALL_RETAIN_DAYS || 30) });
+    return { ...out, after: await (await handlers(env, log)).maintain({
+      rebuild: true, only: ["Call Log", "Call Rollup"] }) };
+  },
+  /* Every few minutes. Idle, it asks nothing of Airtable or Kylas. */
+  maintain: async (env, log) => (await handlers(env, log)).maintain(),
   snapshot: async (env, log) =>
     (await import("../scripts/snapshot.mjs")).run({ env, log }),
 };
@@ -177,6 +191,7 @@ export default {
       [String(env.CRON_SYNC || ""), "sync"],
       [String(env.CRON_ROLLUP || ""), "rollup"],
       [String(env.CRON_SNAPSHOT || ""), "snapshot"],
+      [String(env.CRON_MAINTAIN || ""), "maintain"],
     ].filter(([cron]) => cron));
     const which = byCron.get(event.cron) || "";
 
@@ -186,7 +201,7 @@ export default {
          job that simply never happens. */
       log(`! cron "${event.cron}" matches no job. wrangler.toml has ` +
           `CRON_SYNC=${env.CRON_SYNC || "(unset)"} CRON_ROLLUP=${env.CRON_ROLLUP || "(unset)"} ` +
-          `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"}`);
+          `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"} CRON_MAINTAIN=${env.CRON_MAINTAIN || "(unset)"}`);
       return;
     }
 
@@ -272,7 +287,11 @@ export default {
       const pending = handler(url, parsed);
       ctx?.waitUntil?.(pending.catch(() => {}));
       for (const p of building?.() || []) ctx?.waitUntil?.(p);
-      return json(await pending, 200, origin);
+      const body = await pending;
+      /* And whatever the handler left running — the D1 half of a write-through,
+         a record read back after a save. */
+      for (const p of building?.() || []) ctx?.waitUntil?.(p);
+      return json(body, 200, origin);
     } catch (e) {
       const status = e.status || 502;
       log(`! ${url.pathname} ${status} ${e.message}`);

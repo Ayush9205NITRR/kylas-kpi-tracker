@@ -29,6 +29,10 @@ export function createAirtable(pat, baseId, {
   /* Overridable so the mock can stand in during tests. */
   apiUrl = fromEnv("AIRTABLE_BASE_URL", "https://api.airtable.com/v0"),
   gap = Number(fromEnv("AIRTABLE_GAP", 220)),
+  /* Told about every successful write, with the records Airtable returned —
+     how the D1 copy (mirror.mjs) stays current without reading anything back.
+     Its failures are its own: a write that landed is never reported as failed. */
+  onWrite = null,
 } = {}) {
   const API = apiUrl;
   const GAP = gap;
@@ -37,13 +41,28 @@ export function createAirtable(pat, baseId, {
    rejected chain rejects with the ORIGINAL error, so one failed request would
    make every later one fail with the same stale message for the life of the
    process. The chain keeps only the timing, never the outcome. */
+  /* Spaced from the previous request rather than slept before every one —
+     see the same change in kylas.mjs. */
+  let last = 0;
   const queue = (fn) => {
-    const run = chain.then(() => sleep(GAP)).then(fn);
+    const run = chain.then(() => {
+      const wait = last + GAP - Date.now();
+      return wait > 0 ? sleep(wait) : null;
+    }).then(() => { last = Date.now(); return fn(); });
     chain = run.then(() => {}, () => {});
     return run;
   };
 
   async function call(method, path, body, tries = 4) {
+    const out = await send(method, path, body, tries);
+    if (onWrite && method !== "GET") {
+      try { onWrite(method, decodeURIComponent(path.slice(1).split(/[/?]/)[0]), out); }
+      catch (e) { log(`! after-write hook: ${e.message}`); }
+    }
+    return out;
+  }
+
+  async function send(method, path, body, tries) {
     return queue(async () => {
       for (let i = 0; i < tries; i++) {
         const res = await fetch(`${API}/${baseId}${path}`, {
@@ -417,7 +436,7 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   dropReadCaches();
 
   log(`airtable: ${wrote.join(", ")}`);
-  return { recordId: contactRec.id, rank, rankRose, rightPOC: hasSignal(c), discovery: isComplete(c),
+  return { recordId: contactRec.id, companyRecordId: companyRec?.id || null, rank, rankRose, rightPOC: hasSignal(c), discovery: isComplete(c),
            wrote, missing: [...missing] };
 }
 
@@ -464,12 +483,14 @@ export async function readCompanyKpis(at, { log = () => {} } = {}) {
      the right trade the one time it matters. */
   let recs;
   try {
-    recs = await at.listAll("Companies", { fields: KPI_FIELDS });
+    /* Every page — the default stops at 4,000 rows, and a KPI missing for
+       company 4,001 reads as "not reached". */
+    recs = await at.listAll("Companies", { fields: KPI_FIELDS, maxPages: 2000 });
   } catch (e) {
     if (!/UNKNOWN_FIELD_NAME|INVALID_FILTER|422/i.test(e.message)) throw e;
     log(`! airtable rejected the KPI field list (${e.message.slice(0, 120)})`);
     log(`  reading every field instead — run scripts/test-kpi-fields.mjs to find the bad name`);
-    recs = await at.listAll("Companies");
+    recs = await at.listAll("Companies", { maxPages: 2000 });
   }
   const byKylasId = new Map();
   let skipped = 0;
@@ -597,7 +618,7 @@ export async function listTolerant(at, table, opts) {
   }
 }
 
-const CONTACT_READ_FIELDS = [
+export const CONTACT_READ_FIELDS = [
   "Kylas Contact ID", "Name", "Salutation", "Designation", "LinkedIn", "Owner",
   "Kylas Owner ID",
   "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks",
@@ -636,7 +657,9 @@ const IDX = { at: 0, byRec: null, byKid: null };
 const IDX_TTL = Number(fromEnv("AIRTABLE_INDEX_TTL_MS", 60_000));
 
 async function companyIndex(at, fresh) {
-  if (!fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
+  /* A mirrored client answers from memory already, and a copy held here would
+     only be a second, staler one — another instance's write would not reach it. */
+  if (!at.mirrored && !fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
     return { byRec: IDX.byRec, byKid: IDX.byKid };
   const rows = await at.listAll("Companies",
     { fields: ["Kylas Company ID", "Name", "Owner"], pageSize: 100, maxPages: 200 });
@@ -647,7 +670,7 @@ async function companyIndex(at, fresh) {
     byRec.set(r.id, co);
     if (co.id) byKid.set(co.id, co);
   }
-  IDX.at = Date.now(); IDX.byRec = byRec; IDX.byKid = byKid;
+  if (!at.mirrored) { IDX.at = Date.now(); IDX.byRec = byRec; IDX.byKid = byKid; }
   return { byRec, byKid };
 }
 
@@ -692,10 +715,10 @@ export function dropReadCaches() {
   IDX.at = 0; IDX.byRec = null; IDX.byKid = null;
 }
 async function allContacts(at) {
-  if (SCAN.rows && Date.now() - SCAN.at < SCAN_TTL) return SCAN.rows;
+  if (!at.mirrored && SCAN.rows && Date.now() - SCAN.at < SCAN_TTL) return SCAN.rows;
   const rows = await listTolerant(at, "Contacts",
     { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 });
-  SCAN.at = Date.now(); SCAN.rows = rows;
+  if (!at.mirrored) { SCAN.at = Date.now(); SCAN.rows = rows; }
   return rows;
 }
 
@@ -769,7 +792,7 @@ export async function readQueue(at, owner) {
  * formulas are the same record — a company cannot fail to match itself. The
  * whole class of fault disappears rather than being diagnosed better.
  */
-const COMPANY_READ_FIELDS = [
+export const COMPANY_READ_FIELDS = [
   "Kylas Company ID", "Name", "Owner", "Kylas Owner ID", "Kylas Stage",
   "Source of Data", "Batch", "Account Health", "Website", "Last Called At",
   "Kylas Updated At",
@@ -817,7 +840,7 @@ export async function readCompanies(at) {
    written. A contact that has answered is not asked again — but one whose
    answer is stale because it has since moved on is not asked either, because
    gateFor only fires while it is still stuck. */
-const RCA_READ_FIELDS = [
+export const RCA_READ_FIELDS = [
   "Kylas Contact ID", "Name", "Owner", "KPI Rank", "KPI Rank At",
   "Has Signal", "Has Complete Row", "Current Stage", "Company",
 ];

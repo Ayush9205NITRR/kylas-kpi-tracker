@@ -38,8 +38,16 @@ export function createClient(key, {
    rejected chain rejects with the ORIGINAL error, so one failed request would
    make every later one fail with the same stale message for the life of the
    process. The chain keeps only the timing, never the outcome. */
+  /* The gap is measured from the previous request, not slept before every
+     one. Sleeping first cost a full gap on the FIRST request of every cold
+     instance — on a hosted runtime that is most requests — to space it from a
+     request that never happened. */
+  let last = 0;
   const call = (method, path, body) => {
-    const run = chain.then(() => sleep(GAP)).then(() => attempt(method, path, body));
+    const run = chain.then(() => {
+      const wait = last + GAP - Date.now();
+      return wait > 0 ? sleep(wait) : null;
+    }).then(() => { last = Date.now(); return attempt(method, path, body); });
     chain = run.then(() => {}, () => {});
     return run;
   };

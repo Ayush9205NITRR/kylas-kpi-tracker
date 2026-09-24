@@ -39,12 +39,13 @@ import { createAirtable, syncContact, readCompanyKpis,
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
+import { mirrored } from "./mirror.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {}, cache = null } = {}) {
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
   const STARTED = new Date().toISOString();
@@ -96,11 +97,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      That way a missing token degrades the KPIs, not the dialling. */
   const AT_PAT = env.AIRTABLE_PAT;
   const AT_BASE = env.AIRTABLE_BASE;
-  const airtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, {
+  /* TWO HANDLES ON ONE CLIENT. `rawAirtable` always asks Airtable; `airtable`
+     answers whole-table reads from the D1 copy when there is one (a hosted
+     runtime — see mirror.mjs) and is the same client when there is not. Every
+     reader uses `airtable`; only the mirror's own upkeep uses the raw one. */
+  const rawAirtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, {
     log,
     ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
     ...(env.AIRTABLE_GAP ? { gap: Number(env.AIRTABLE_GAP) } : {}),
+    ...(mirror ? { onWrite: mirror.written } : {}),
   }) : null;
+  const airtable = rawAirtable && mirror ? mirrored(rawAirtable, mirror) : rawAirtable;
   /* Say so either way. On a fresh install the absence of a warning is not a
      signal anyone can act on — it reads the same as a line that never printed. */
   if (airtable) log(`airtable: ${AT_BASE}`);
@@ -333,6 +340,59 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const companyCache = new Map();
   const COMPANY_TTL = Number(env.COMPANY_TTL_MS || 5 * 60 * 1000);
 
+  /* THE WHOLE ACCOUNT'S COMPANIES FROM KYLAS, crawled once and shared. Dozens
+     of rate-limited pages, so it is never refreshed behind a reply — the
+     scheduled job does that (maintain(), below) — and a stale list is served
+     rather than a slow one. Owner names are resolved inside, so what is kept is
+     what the console shows. */
+  const kylasCompanies = shared("kylas-companies",
+    { ttl: COMPANY_TTL, stale: 14 * 24 * 3600 * 1000, background: false }, async () => {
+      const raw = await kylas.companies();
+      const list = [];
+      for (const co of raw) {
+        const known = lookupName(co, "ownerId", co.ownerId);
+        if (known && co.ownerId) owners.set(String(co.ownerId), known);
+        /* Seed the name cache too — the contact mapper then never has to fetch
+           a company whose name already came back on this list. */
+        if (co?.id && co?.name) companyNames.set(String(co.id), co.name);
+        list.push({
+          ...toConsoleCompany(co),
+          owner: known || (await ownerName(co.ownerId)) || "",
+          ownerId: String(co.ownerId ?? ""),
+        });
+      }
+      return { companies: list, search: kylas.lastCompanySearch?.() || {} };
+    });
+
+  /* What the last Kylas → Airtable sync managed, or null if it never ran. */
+  const syncShared = shared("sync-state", { ttl: 5 * 60 * 1000, stale: 24 * 3600 * 1000 },
+    async () => (rawAirtable ? (await readSyncState(rawAirtable)) : null));
+  const syncState = () => syncShared();
+  let warnedNeverSynced = false;
+  let usersShared = null;
+
+  /* shared(), one per key, for reads that Kylas answers per company or per
+     owner. Two minutes fresh, then served while it refreshes behind the reply —
+     these are one or two requests, short enough to finish there. */
+  const companyFromKylas = new Map(), queueFromKylas = new Map();
+  function perKey(map, name, fn) {
+    if (!map.has(name)) {
+      if (map.size > 500) map.clear();
+      map.set(name, shared(name, { ttl: 2 * 60 * 1000, stale: 24 * 3600 * 1000 }, fn));
+    }
+    return map.get(name);
+  }
+
+  /* When the company list was last served from the Kylas crawl, so the
+     scheduled job refreshes it while people are using it and not overnight. */
+  let touchedCompanies = 0;
+  const touchCompanies = () => {
+    if (!cache || Date.now() - touchedCompanies < 60_000) return;
+    touchedCompanies = Date.now();
+    inFlight(cache.put("companies-read-at", String(Date.now()), { ttlSeconds: 7 * 86400 }))
+      .catch(() => {});
+  };
+
   const companyNames = new Map();
   async function companyName(id) {
     if (!id) return "";
@@ -394,13 +454,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      Only a SUCCESS is cached — a failure here means Kylas is unreachable, and
      remembering that would keep the console logged out long after it came
      back. */
-  let meCache = null;
+  /* Kept in the shared cache (see shared() below), so a fresh instance does
+     not open with a round trip to Kylas to learn what the last one knew. */
   const ME_TTL = Number(env.ME_TTL_MS || 10 * 60 * 1000);
+  let meShared = null;
   async function whoami() {
-    if (meCache && Date.now() - meCache.at < ME_TTL) return meCache.me;
-    const me = await kylas.me();
-    meCache = { at: Date.now(), me };
-    return me;
+    meShared ||= shared("kylas-me", { ttl: ME_TTL, stale: 24 * 3600 * 1000 }, () => kylas.me());
+    return meShared();
   }
 
   /* ── ANSWER NOW, REFRESH BEHIND IT ───────────────────────────────────────
@@ -423,58 +483,43 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      `stale` is how long a value may be served while being refreshed. Past it
      the value is too old to hand out — a proxy left running over a weekend
      would otherwise serve Friday's numbers instantly and refresh them into a
-     cache nobody reads. */
-  /* `persist`, when given, is a copy kept OUTSIDE this process — see kept()
-     below. On a laptop there is one long-lived process and memory is enough.
-     On a hosted runtime there is no such process: each request may land on a
-     fresh instance, and a client that stops waiting takes the work with it. The
-     report took about a minute to build from Airtable there, the console gave
-     up at thirty seconds, the half-built result was thrown away, and the next
-     request started again from nothing — so it never finished at all. With a
-     kept copy it is built once and every instance, and every associate, reads
-     the same result. */
+     cache nobody reads.
+
+     `key`, when given, replaces the clock: the value is good for exactly as
+     long as key() returns what it returned when the value was computed. With
+     the D1 copy of the tables that key is their version, so the dashboard is
+     recomputed when — and only when — a row it reads has changed, whichever
+     instance changed it. */
   /* Every build in progress, so a hosted shell can keep its request alive
      until they finish (ctx.waitUntil) rather than having them cut off the
      moment the reply is sent or the client stops waiting. */
   const building = new Set();
-  function memo(name, { ttl, stale = 30 * 60 * 1000, persist = null }, fn) {
-    let entry = null;          /* { at, value } */
+  const inFlight = (p) => {
+    const q = p.catch(() => {}).finally(() => building.delete(q));
+    building.add(q);
+    return p;
+  };
+  function memo(name, { ttl, stale = 30 * 60 * 1000, key = null }, fn) {
+    let entry = null;          /* { at, value, key } */
     let inflight = null;
-    const run = () => {
+    const run = (k = null) => {
       if (!inflight) {
         const started = Date.now();
-        inflight = fn()
-          .then(async (value) => {
-            entry = { at: Date.now(), value };
-            if (persist) await persist.put(entry).catch((e) =>
-              log(`! ${name}: built, but could not keep a copy — ${e.message.slice(0, 120)}`));
-            return value;
-          })
-          .finally(() => { building.delete(p); inflight = null; log(`  ${name}: read in ${Date.now() - started}ms`); });
-        const p = inflight.catch(() => {});
-        building.add(p);
+        inflight = inFlight(fn()
+          .then((value) => { entry = { at: Date.now(), value, key: k }; return value; })
+          .finally(() => { inflight = null; log(`  ${name}: read in ${Date.now() - started}ms`); }));
       }
       return inflight;
     };
     const f = async ({ fresh = false } = {}) => {
-      let age = entry ? Date.now() - entry.at : Infinity;
+      const k = key ? await key() : null;
+      if (k) return !fresh && entry && entry.key === k ? entry.value : run(k);
+      const age = entry ? Date.now() - entry.at : Infinity;
       if (entry && !fresh && age < ttl) return entry.value;
-      /* Another instance may have built a newer one. One read of the kept copy
-         is cheap beside rebuilding from a hundred pages of Airtable. */
-      if (persist && !fresh) {
-        const kept = await persist.get().catch(() => null);
-        if (kept && (!entry || kept.at > entry.at)) entry = kept;
-        age = entry ? Date.now() - entry.at : Infinity;
-        if (entry && age < ttl) return entry.value;
-      }
       /* Serve what we have and refresh behind it — but never swallow the error
          of a background refresh, or a base that has started refusing reads looks
          exactly like one that has not changed. */
-      /* Not on a hosted runtime: a refresh behind the reply outlives the
-         request only briefly there, and a build that takes longer than that is
-         cut off every time and never lands. The reader past the TTL waits for
-         it instead — one reader per TTL, not every one. */
-      if (entry && !fresh && !persist && age < stale) {
+      if (entry && !fresh && age < stale) {
         run().catch((e) => log(`! ${name}: background refresh failed — ${e.message.slice(0, 120)}`));
         return entry.value;
       }
@@ -496,12 +541,6 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     let lastRefresh = 0;
     f.refresh = ({ atMostEvery = 30 * 1000 } = {}) => {
       entry = null;
-      /* NOT ON A HOSTED RUNTIME. There, a rebuild started here would run inside
-         the SAVE's request — its hundred Airtable reads counted against the save,
-         competing with the save's own writes for the same rate limit, and done
-         for every call an associate logs. The kept copy stays, at most one TTL
-         old, and the next reader past that TTL rebuilds it for everyone. */
-      if (persist) return;
       if (Date.now() - lastRefresh < atMostEvery) return;
       lastRefresh = Date.now();
       run().catch((e) => log(`! ${name}: refresh failed — ${e.message.slice(0, 120)}`));
@@ -509,11 +548,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     return f;
   }
 
-  /* A value kept in the store, compressed. A few thousand calls and contacts
-     are about a megabyte of JSON, which is half of what one D1 row may hold and
-     growing every day; gzip takes it to a sixth of that. CompressionStream,
-     Blob and Response exist in both runtimes this runs in, so no Node API is
-     needed and none is used. */
+  /* A value kept in the store, compressed. A company crawl is about a
+     megabyte of JSON, half of what one D1 row may hold; gzip takes it to a
+     sixth of that. CompressionStream, Blob and Response exist in both runtimes
+     this runs in, so no Node API is needed and none is used. */
   function kept(st, key) {
     const toB64 = (bytes) => {
       let s = "";
@@ -533,14 +571,65 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           .pipeThrough(new DecompressionStream("gzip"))).text();
         return JSON.parse(text);
       },
-      async put(entry) {
+      async put(entry, ttlSeconds) {
         const gz = await new Response(new Blob([JSON.stringify(entry)]).stream()
           .pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
-        /* A day at most: a copy nobody has refreshed in a day is not worth
-           reading, and the store should not keep it for ever. */
-        await st.put(key, toB64(new Uint8Array(gz)), { ttlSeconds: 86400 });
+        await st.put(key, toB64(new Uint8Array(gz)), { ttlSeconds });
       },
     };
+  }
+
+  /* ── ONE ANSWER FOR EVERY INSTANCE ───────────────────────────────────────
+     memo() for things that come from KYLAS: who the key belongs to, the
+     picklists, the company crawl. In memory a hosted runtime forgets them
+     between requests, and each is a round trip — the crawl is dozens — so they
+     are kept in the store (D1 on the Worker) and every instance reads the one
+     copy. On a laptop the store is a file and this behaves like memo().
+
+     `background: false` is for work too long to finish behind a reply (the
+     crawl): a stale value is served as it is and the scheduled job refreshes
+     it, rather than a request starting a crawl the runtime will cut off. */
+  function shared(name, { ttl, stale = 7 * 24 * 3600 * 1000, background = true }, fn) {
+    const st = cache ? kept(cache, `shared:${name}`) : null;
+    let entry = null;          /* { at, value } */
+    let inflight = null;
+    const run = () => {
+      if (!inflight) {
+        const started = Date.now();
+        inflight = inFlight(fn()
+          .then(async (value) => {
+            entry = { at: Date.now(), value };
+            if (st) await st.put(entry, Math.ceil(stale / 1000)).catch((e) =>
+              log(`! ${name}: could not keep a copy — ${e.message.slice(0, 120)}`));
+            return value;
+          })
+          .finally(() => { inflight = null; log(`  ${name}: fetched in ${Date.now() - started}ms`); }));
+      }
+      return inflight;
+    };
+    const load = async () => {
+      if (st && (!entry || Date.now() - entry.at >= ttl)) {
+        const k = await st.get().catch(() => null);
+        if (k && (!entry || k.at > entry.at)) entry = k;
+      }
+      return entry;
+    };
+    const f = async ({ fresh = false } = {}) => {
+      if (fresh) return run();
+      await load();
+      const age = entry ? Date.now() - entry.at : Infinity;
+      if (age < ttl) return entry.value;
+      if (age < stale) {
+        if (background) run().catch((e) => log(`! ${name}: background refresh failed — ${e.message.slice(0, 120)}`));
+        return entry.value;
+      }
+      return run();
+    };
+    /* Seconds since it was fetched, or null — for the scheduled job, and for
+       a response to say how old what it is showing is. */
+    f.age = async () => { await load(); return entry ? Math.round((Date.now() - entry.at) / 1000) : null; };
+    f.peek = async () => (await load())?.value ?? null;
+    return f;
   }
 
   /* EVERYTHING THE DASHBOARD IS COMPUTED FROM, in one read.
@@ -554,32 +643,38 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      logged — does not wait on a timer. The TTL is only for rows another
      associate's proxy wrote. */
   const REPORT_TTL = Number(env.REPORT_TTL_MS || 60 * 1000);
+  const REPORT_TABLES = ["Call Log", "Call Rollup", "Stage Transitions", "Contacts", "Team"];
   const reportData = memo("report data", {
     ttl: REPORT_TTL,
-    persist: cache ? kept(cache, "cache:report-data") : null,
+    key: mirror ? () => mirror.stamp(REPORT_TABLES) : null,
   }, async () => {
     /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
        fields, so a base one repair-base behind does not have them — and Airtable
        rejects the whole projection for one unknown name, which took the ENTIRE
        report down with a raw 422 rather than costing the two metrics those
        fields feed. The dashboard should lose a column, not the page. */
+    /* EVERY PAGE. listAll stops at 40 pages unless told otherwise — 4,000
+       rows — and the call log passes that in four days at this team's volume:
+       the month's numbers were silently the first 4,000 calls. Found when the
+       D1 copy, which reads whole tables, disagreed with this path. */
+    const ALL = { pageSize: 100, maxPages: 2000 };
     const [callRows, rolledRows, transRows, contactRows, team] = await Promise.all([
-      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"] }),
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
          six weeks at this call volume. Missing this read would make every month
          older than the window read zero — history silently deleted rather than
          compacted. Tolerated when absent so a base without the table still
          reports, just without the old days. */
-      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"] })
+      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"], ...ALL })
         .catch(() => []),
-      listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"] }),
+      listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"], ...ALL }),
       /* Right POC and discovery are DATA becoming true, not a stage move, so
          they have no transition row. The closest honest timestamp is when the
          contact's rank last rose — the save that filled the fields. */
       listTolerant(airtable, "Contacts", {
         fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
-                 "First Worked At", "First Picked At"] }),
+                 "First Worked At", "First Picked At"], ...ALL }),
       /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
          Dropping non-team people in the view would leave the Team column summing
          everybody while the per-person columns beside it summed the team — two
@@ -641,9 +736,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   /* Picklists, read once. The console cannot know what an account's custom
      fields offer, and a hardcoded list quietly renders real values as blank. */
-  let metaCache = null;
-  async function meta() {
-    if (metaCache) return metaCache;
+  /* Picklists. The console cannot know what an account's custom fields offer,
+     and a hardcoded list quietly renders real values as blank. They change when
+     somebody edits the CRM's settings, so six hours is plenty. */
+  const metaShared = shared("kylas-picklists", { ttl: 6 * 3600 * 1000, stale: 30 * 24 * 3600 * 1000 }, async () => {
     const r = await kylas.raw("GET",
       "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
     const fields = Array.isArray(r) ? r : r?.content || r?.data || [];
@@ -653,10 +749,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const values = findOptions(f);
       if (key && values) picklists[key] = values;
     }
-    metaCache = { picklists, fields: fields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })) };
     log(`picklists: ${Object.keys(picklists).join(", ") || "none"}`);
-    return metaCache;
-  }
+    return { picklists, fields: fields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })) };
+  });
+  const meta = () => metaShared();
 
   /* Option arrays are nested differently per field type, so look for the shape
      rather than guessing at key names. */
@@ -698,9 +794,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         return { company: held.company, contacts: held.contacts, owners: ownerList(),
                  picklists: (await meta()).picklists, source: "airtable" };
       }
-      const [co, raw] = [await kylas.company(id), await kylas.contactsForCompany(id)];
-      const company = toConsoleCompany(co);
-      const contacts = await mapContacts(raw, company);
+      /* Kept for every instance, briefly: reopening an account nobody has
+         saved to yet was two Kylas round trips every time. Once somebody saves
+         to it, Airtable holds it and the branch above answers instead. */
+      const kc = perKey(companyFromKylas, `kylas-company:${id}`, async () => {
+        const [co, raw] = [await kylas.company(id), await kylas.contactsForCompany(id)];
+        const company = toConsoleCompany(co);
+        return { company, contacts: await mapContacts(raw, company) };
+      });
+      const { company, contacts } = await kc();
       log(`company ${id} — ${contacts.length} contact(s) from Kylas`);
       return { company, contacts, owners: ownerList(),
                picklists: (await meta()).picklists, source: "kylas" };
@@ -735,7 +837,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const ownedBy = (list) => (owner == null ? list
         : list.filter((c) => String(c.ownerId ?? "") === String(owner)));
 
-      if (hit && !fresh && Date.now() - hit.at < COMPANY_TTL) {
+      /* Seconds, not minutes, with the D1 copy: rebuilding this from it is
+         arithmetic, and a longer hold here would only hide another instance's
+         save. */
+      if (hit && !fresh && Date.now() - hit.at < (mirror ? 5000 : COMPANY_TTL)) {
         const age = Math.round((Date.now() - hit.at) / 1000);
         const companies = ownedBy(hit.body.companies);
         log(`companies for ${all ? "all owners" : owner} — ${companies.length} (cached ${age}s)`);
@@ -746,7 +851,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          company row and its KPI formulas are the same record, so the "no company
          matched Airtable" fault cannot arise rather than being reported better.
          ?keys=1 is a Kylas diagnostic and deliberately skips this. */
-      if (!url.searchParams.get("keys")) {
+      /* A BASE THAT HAS NEVER BEEN SYNCED IS NOT THE ACCOUNT. The console
+         writes a company into Airtable the first time somebody saves a call
+         there, so a base the Kylas sync has never filled still holds a handful
+         of rows — and "not empty" was the only test, so those few were served
+         as the whole company list. That is what "not pulling the existing data
+         from Kylas" was. The sync leaves a record when it runs; until it has,
+         the list comes from Kylas. */
+      const sync = READS_AIRTABLE ? await syncState() : null;
+      if (READS_AIRTABLE && !sync && !STRICT_AIRTABLE && !warnedNeverSynced) {
+        warnedNeverSynced = true;
+        log("! companies: this Airtable base has never been synced from Kylas — listing from Kylas. " +
+            "Run the sync once (docs/DEPLOY.md, part 9).");
+      }
+      if (!url.searchParams.get("keys") && (sync || STRICT_AIRTABLE)) {
         const mirror = await fromAirtable("companies", async () => {
           const list = await readCompanies(airtable);
           return list.length ? list : null;
@@ -756,7 +874,6 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
             if (co.id && co.name) companyNames.set(String(co.id), co.name);
           }
-          const sync = await readSyncState(airtable);
           const matched = mirror.filter((c) => c.kpi).length;
           /* The mirror cannot see the crawl that filled it, so the sync's own
              record of what it managed is what the truncation warning now rests
@@ -781,13 +898,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         }
       }
 
-      const raw = await kylas.companies();
-
       /* ?keys=1 reports the shape this account's company search actually returns,
          WITHOUT the values — enough to find where a missing field lives, safe to
          paste. Guessing at key names is how the name came back blank for 38
-         companies in the first place. */
+         companies in the first place. A live crawl, deliberately. */
       if (url.searchParams.get("keys")) {
+        const raw = await kylas.companies();
         const first = raw[0] || {};
         return {
           count: raw.length,
@@ -800,19 +916,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             .map(([k, v]) => [k, typeof v])),
         };
       }
-      const companies = [];
-      for (const co of raw) {
-        const known = lookupName(co, "ownerId", co.ownerId);
-        if (known && co.ownerId) owners.set(String(co.ownerId), known);
-        /* Seed the name cache too — the contact mapper then never has to fetch
-           a company whose name already came back on this list. */
-        if (co?.id && co?.name) companyNames.set(String(co.id), co.name);
-        companies.push({
-          ...toConsoleCompany(co),
-          owner: known || (await ownerName(co.ownerId)) || "",
-          ownerId: String(co.ownerId ?? ""),
-        });
+      /* The crawl is shared by every instance and refreshed by the scheduled
+         job, so this is a read of the last one — not dozens of Kylas pages while
+         an associate waits. Only the very first ever, or the Refresh button,
+         crawls here. */
+      touchCompanies();
+      const crawl = await kylasCompanies({ fresh: !!fresh });
+      for (const co of crawl.companies) {
+        if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
+        if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
+      const companies = crawl.companies.map((co) => ({ ...co }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the
@@ -844,7 +958,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          not the answer. It travels with the rows so the console can say so —
          silently serving a short list is how 19 of Arshdeep's 250 companies got
          reported as all of them. */
-      const search = kylas.lastCompanySearch?.() || {};
+      const search = crawl.search || {};
       /* TWO DIFFERENT FAULTS WITH TWO DIFFERENT FIXES, and one message used to
          cover both. Raising KYLAS_MAX_PAGES is the answer when WE stopped early;
          it does nothing at all when Kylas stops serving rows past a fixed offset
@@ -895,7 +1009,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const hit = companyCache.get("all");
       for (const c of hit?.body?.companies || []) if (c.ownerId) known.push(String(c.ownerId));
 
-      const { source, users } = await kylas.users(known);
+      const { source, users } = await (usersShared ||= shared("kylas-users",
+        { ttl: 10 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 }, () => kylas.users(known)))();
       const withRole = users.map((u) => ({
         ...u,
         role: (u.email && ADMINS.includes(u.email)) || ADMIN_IDS.includes(String(u.id))
@@ -1224,7 +1339,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         log(`queue for ${name || owner} — ${held.length} contact(s) from Airtable`);
         return { owner: String(owner), contacts: held, owners: ownerList(), source: "airtable" };
       }
-      const contacts = await mapContacts(await kylas.contactsForOwner(owner));
+      const contacts = await perKey(queueFromKylas, `kylas-queue:${owner}`,
+        async () => mapContacts(await kylas.contactsForOwner(owner)))();
       log(`queue for owner ${owner} — ${contacts.length} contact(s) from Kylas`);
       return { owner: String(owner), contacts, owners: ownerList(), source: "kylas" };
     },
@@ -1373,7 +1489,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
              rebuilt rather than patched — rebuilding is one background crawl, and
              a cache patched by hand is a second implementation of the read that
              can disagree with it. */
-          reportData.refresh();
+          /* With the D1 copy there is nothing to drop: the save's own writes
+             are already in it. What is NOT is what Airtable computed from them —
+             the contact's formulas, the company's rollups — so those two records
+             are read back, behind the reply. */
+          if (mirror) {
+            inFlight(Promise.all([
+              mirror.refetch(rawAirtable, "Contacts", [result.airtable?.recordId]),
+              mirror.refetch(rawAirtable, "Companies", [result.airtable?.companyRecordId]),
+            ])).catch(() => {});
+          } else {
+            reportData.refresh();
+          }
         } catch (e) {
           result.airtableError = e.message;
           log(`! airtable for ${result.kid}: ${e.message}`);
@@ -1484,8 +1611,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                raw: c, source: "kylas" };
     },
   };
-  /* Rebuilds the kept report now, for a scheduled job that wants it warm
-     before anybody asks. */
-  const warm = async () => { await reportData({ fresh: true }); };
-  return { routes, version: VERSION, startedAt: STARTED, warm, building: () => [...building] };
+  /* Where the copies stand — how old, how many rows — for a person checking
+     that the scheduled job is doing its work. */
+  routes["/cache-status"] = async () => ({
+    mirror: mirror ? await mirror.status() : null,
+    kylasCompaniesAgeSeconds: await kylasCompanies.age(),
+    syncedAt: (await syncState())?.at || null,
+  });
+
+  /* THE SCHEDULED UPKEEP, every few minutes. Everything a request would
+     otherwise wait for is done here instead: the D1 copy of Airtable built,
+     rebuilt or topped up (mirror.mjs), and the Kylas company crawl refreshed
+     while the console is in use. `rebuild` after a job that rewrote tables
+     behind this server's back — the nightly sync, the weekly rollup. */
+  async function maintain({ rebuild = false, only = null } = {}) {
+    const out = {};
+    if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { rebuild, only });
+    const age = await kylasCompanies.age();
+    const readAt = Number((cache && (await cache.get("companies-read-at").catch(() => null))) || 0);
+    /* Only while the list is being served FROM Kylas — once the base is
+       synced the list comes from the D1 copy and this crawl would be waste. */
+    if (Date.now() - readAt < 2 * 3600 * 1000 && (age === null || age * 1000 > COMPANY_TTL)) {
+      const got = await kylasCompanies({ fresh: true }).catch((e) => ({ error: e.message }));
+      out.kylasCompanies = got.error ? { error: got.error } : { companies: got.companies.length };
+    }
+    if (rebuild) await syncShared({ fresh: true }).catch(() => {});
+    return out;
+  }
+
+  return { routes, version: VERSION, startedAt: STARTED, maintain,
+           building: () => [...building, ...(mirror ? mirror.pending() : [])] };
 }

@@ -82,6 +82,13 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A page cap that reads as a total.** `listAll` stops at 40 pages (4,000 rows)
+unless told otherwise, and the report's reads did not say otherwise. The call
+log passes 4,000 rows in about four days at this team's volume, so a month's
+numbers were silently the first 4,000 calls. The same cap applied to the
+company KPIs. Found only because the D1 copy, which reads whole tables,
+disagreed with the direct path. Any whole-table read must pass `maxPages`.
+
 These are not hypothetical. Each one shipped, was found by a test, and cost
 real time. They recur because the codebase has three runtimes that must agree.
 
@@ -198,46 +205,47 @@ code and answers everything cheerfully. **Restart the proxy after editing
   still served and the refresh runs behind it, so only the first request of a
   process ever waits.
 
-  **On the Worker the report is different, and must stay different.** There is
-  no long-lived process, so the finished report is kept gzipped in D1
-  (`cache:report-data`) and shared by every isolate; past its TTL the reader
-  WAITS for a rebuild rather than being served stale, because a refresh behind
-  the reply is cut off by Cloudflare before a minute-long build lands. A save
-  does not rebuild it inside the save's request. The fetch handler hands the
-  build to `ctx.waitUntil`, so a console that stops waiting does not cancel it.
-  Before this, a cold report took about a minute, the console aborted at 30 s,
-  the build was thrown away, and the Dashboard said "signal is aborted without
-  reason" for ever. `test-worker.mjs` §8.
+  **On the Worker, reads come from D1, not from any of the above.** There is
+  no long-lived process there, so per-process caches are empty on most
+  requests. Three pieces replace them:
+  - **`scripts/mirror.mjs`: a copy of every Airtable table the console reads,
+    kept in D1.** It stays current three ways:
+    - write-through from every Airtable write the server makes;
+    - a delta by `LAST_MODIFIED_TIME` from the `*/5` cron, only while the
+      console is in use;
+    - a full rebuild into a new generation after the nightly sync and rollup.
+      This covers what a delta cannot see: deletions, and rollups changed by
+      another table.
 
----
+    Instances hold rows in memory and pull only rows newer than the version
+    they have seen.
+  - **`shared()` in handlers.mjs: Kylas answers kept in D1.** These are
+    `whoami`, the picklists, the company crawl, and the per-company and
+    per-owner fallbacks.
+  - **`/save` reads back the contact and company after writing**, because
+    their formulas and rollups changed from rows the write-through did not
+    return.
 
-## 5 · Open — ask Ayush, do not guess
+  Measured on workerd with 1,500 companies, 3,000 contacts and 6,000 calls, on
+  a cold instance:
+  - `/report`: 17.6 s → 0.29 s
+  - `/companies` and `/queue`: under 0.5 s
+  - Airtable reads while serving: 0
 
-1. **The team roster is live but empty on your base.** `Team` is a new table;
-   until somebody ticks it, every owner counts — which is the old behaviour, so
-   nothing breaks by ignoring it. Open the dashboard as Everyone and use the
-   **Team** button beside the ladder.
-2. **One proxy or eight?** Per-laptop works today with no code change but puts
-   the Kylas key and Airtable PAT on every machine and makes the nightly sync
-   depend on a laptop being awake. A shared proxy needs a host added to
-   `host_permissions` and **must** have Cloudflare Access or Tailscale in front
-   — it has no auth of its own. Asked three times, unanswered.
-3. **The call-back date never leaves the browser.** `nextCallDate` is
-   overlay-owned and blanked on read, so an account where the prospect said
-   "call me after the AGM" is indistinguishable from a neglected one. Needs a
-   `Next Call At` column, a writer, and a company-level rollup. This is the last
-   unbuilt piece of Ayush's own "stays in my loop until it gives me a date".
-4. **The RCA reason lists are drafts.** `docs/rca-reasons.json`, written to get
-   the mechanism working. Ayush said he would rewrite them.
-5. **Which Contact and Companies-table fields to cut.** He said he would send a
-   list; it never came. The conservative cuts already made are in the log.
-6. **`Source of Data` and `Salutation` picklists** are guesses. Offsite Timeline
-   is settled — Kylas only accepts quarters and Ayush confirmed that stands.
-7. **Google Workspace?** Decides whether the store listing can be "private to
-   your organisation", which is the right setting for an internal tool.
+  The first full build is about 60 s and runs in the cron, never in a
+  request. Tests: `test-mirror.mjs` (32), `test-worker.mjs` §6b and §8.
+
+  **`/companies` uses Airtable only once the sync has run** (the `last-sync`
+  row in Schema Migrations). The console writes a company on its first save,
+  so an unsynced base is never quite empty. Its handful of rows used to be
+  served as the whole account.
 
 ## 6 · Ayush's to-do, outside this repo
 
+- **Run the Kylas sync once from the laptop** (DEPLOY.md part 9). The live
+  base held 3 companies and 4 contacts on 2026-09-24 — the sync had never
+  filled it. Check the dry run's counts against the Airtable plan's
+  records-per-base limit first.
 - **Workers Paid ($5/month)** on the Cloudflare account. Required, not
   optional: the report needs ~100 Airtable requests in one request, and Free
   allows 50 and 10 ms of CPU.

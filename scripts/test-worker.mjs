@@ -22,7 +22,8 @@
  */
 import { spawn } from 'node:child_process';
 import worker from '../worker/index.mjs';
-import { memoryStore } from './store.mjs';
+import { d1Store } from './store.mjs';
+import { fakeD1 } from './d1-fake.mjs';
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -50,9 +51,9 @@ const done = () => kids.forEach((p) => { try { p.kill('SIGKILL'); } catch {} });
 const ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 
 /* The bindings, exactly as Cloudflare would pass them — plain data, no
-   process.env anywhere. The store stands in for the D1 binding; what is being
-   tested is that the handlers accept one, not that D1 works. */
-const store = memoryStore();
+   process.env anywhere. DB is real SQLite behind D1's interface (d1-fake.mjs),
+   so the journal and the D1 copy of Airtable run their actual SQL here. */
+const db = fakeD1();
 const ENV = {
   KYLAS_KEY: 'x', KYLAS_BASE: 'http://127.0.0.1:9900',
   AIRTABLE_PAT: 'pat_mock', AIRTABLE_BASE: 'appMOCK',
@@ -63,14 +64,9 @@ const ENV = {
   AUTH: 'none',
 };
 /* storeFor() insists on a real binding, and rightly — a journal with nowhere
-   to live is how a lost reply duplicates a contact. The test supplies one by
-   standing in for D1 rather than by weakening that rule. */
-const withStore = (env) => ({ ...env, DB: null, KV: {
-  get: (k) => store.get(k),
-  put: (k, v, o) => store.put(k, v, o && o.expirationTtl ? { ttlSeconds: o.expirationTtl } : undefined),
-  delete: (k) => store.delete(k),
-  list: async () => ({ keys: (await store.keys()).map((name) => ({ name })) }),
-} });
+   to live is how a lost reply duplicates a contact. */
+const withStore = (env) => ({ ...env, DB: db });
+const store = d1Store(db);
 
 const call = (path, { method = 'GET', body, origin = ORIGIN, env = ENV, headers = {} } = {}) =>
   worker.fetch(new Request(`https://bd.enout.website${path}`, {
@@ -213,6 +209,19 @@ check('it refuses to start rather than keeping the journal in memory',
       nostore.status === 500 && /journal/i.test(nostoreBody.error || ''),
       nostoreBody.error?.slice(0, 60));
 
+/* ── 6b · a base the sync never filled ───────────────────────────────── */
+/* The console writes a company into Airtable on its first save there, so an
+   unsynced base is never quite empty — and "not empty" used to be enough for
+   its handful of rows to be served as the whole company list. */
+console.log('\n6b. a base the Kylas sync has never filled');
+const unsynced = await (await coldWorker(3)).fetch(
+  new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
+  withStore(ENV), { waitUntil() {} });
+const unsyncedBody = await unsynced.json();
+check('lists companies from Kylas, not from its few Airtable rows',
+      unsynced.status === 200 && unsyncedBody.source !== 'airtable' && unsyncedBody.companies.length > 1,
+      `${unsynced.status} source=${unsyncedBody.source || 'kylas'} companies=${unsyncedBody.companies?.length}`);
+
 /* ── 7 · the nightly jobs ────────────────────────────────────────────── */
 /* The whole reason for moving off a laptop. Fired the way Cloudflare fires
    them: a cron expression and nothing else, which is why the strings in
@@ -260,14 +269,13 @@ const unconfigured = await fire(CRONS.CRON_SYNC, { ...ENV });
 check('so does a cron fired with no CRON_* set at all',
       /matches no job/.test(unconfigured));
 
-/* ── 8 · the report is kept, not rebuilt ─────────────────────────────── */
-/* The Dashboard's report is built from every row of four tables — about a
-   hundred Airtable pages on a real base, and about a minute. On a laptop the
-   one long-lived process remembered it. On Cloudflare every request can land
-   on a new isolate, and the console gave up at thirty seconds, so the build
-   was abandoned and restarted from nothing on every open: "signal is aborted
-   without reason", forever. The finished report is kept in the store now. */
-console.log('\n8. the report is kept across instances');
+/* ── 8 · reads that never wait on Airtable ───────────────────────────── */
+/* Every screen is computed from whole Airtable tables, and on Cloudflare every
+   request can land on a fresh instance holding nothing — so "open the
+   dashboard" re-read those tables page by page, or (1.14) waited for whoever
+   rebuilt a cached copy. The tables live in D1 now, kept current by the
+   maintenance cron and by every write this server makes. */
+console.log('\n8. the D1 copy of Airtable');
 /* The mock rate-limits like Airtable, so the counter is asked until it answers. */
 const reads = async () => {
   for (let i = 0; i < 20; i++) {
@@ -277,48 +285,49 @@ const reads = async () => {
   }
   throw new Error('the mock never reported its read count');
 };
-const REPORT_ENV = { ...ENV, REPORT_TTL_MS: '600000' };
-const reportOn = async (w, path = '/report?period=week&owner=all') => w.fetch(new Request(
-  `https://bd.enout.website${path}`, { headers: { Origin: ORIGIN } }), withStore(REPORT_ENV), { waitUntil() {} });
-const r0 = await reads();
-const first = await reportOn(await coldWorker(10));
-const firstBody = await first.json();
-const r1 = await reads();
-check('a cold instance builds the report', first.status === 200 && r1 > r0,
-      `${first.status}, ${r1 - r0} Airtable reads ${first.status !== 200 ? JSON.stringify(firstBody).slice(0, 120) : ''}`);
-check('and keeps a copy in the store', (await store.keys()).includes('cache:report-data'),
-      JSON.stringify(await store.keys()));
-const second = await reportOn(await coldWorker(11));
-const secondBody = await second.json();
-const r2 = await reads();
-check('ANOTHER cold instance answers from the kept copy with no Airtable reads',
-      second.status === 200 && r2 === r1, `${second.status}, ${r2 - r1} reads`);
-check('and gives the same numbers', JSON.stringify(secondBody.totals ?? secondBody.rows ?? null) ===
-      JSON.stringify(firstBody.totals ?? firstBody.rows ?? null));
-/* A save drops this instance's copy but must not rebuild inside the save. */
-const waited = [];
-const w12 = await coldWorker(12);
-await reportOn(w12);
-const rs = await reads();
-const saveRes = await w12.fetch(new Request('https://bd.enout.website/save', {
-  method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
-  body: JSON.stringify({ contact, call: { ...call1, at: '2026-09-23T11:00:00.000Z' } }),
-}), withStore(REPORT_ENV), { waitUntil: (p) => waited.push(p) });
-await Promise.all(waited);
-await sleep(300);
-const saveReads = (await reads()) - rs;
-check('a save does not rebuild the report on the hosted runtime', saveRes.status === 200 && saveReads < 10,
-      `${saveRes.status}, ${saveReads} reads during the save`);
-/* A client that stops waiting must not take the build with it. */
-const w13 = await coldWorker(13);
-await store.delete('cache:report-data');
+const get = async (w, path) => {
+  const held = [];
+  const r = await w.fetch(new Request(`https://bd.enout.website${path}`, { headers: { Origin: ORIGIN } }),
+                          withStore(ENV), { waitUntil: (p) => held.push(p) });
+  const body = await r.json();
+  await Promise.allSettled(held);
+  return { status: r.status, body };
+};
+const MAINT = '*/5 * * * *';
+const maintOut = await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+check('the maintenance cron runs', /-> maintain/.test(maintOut), maintOut.split('\n')[0]);
+const cs = await get(await coldWorker(20), '/cache-status');
+check('every mirrored table is in D1', cs.status === 200 && cs.body.mirror.every((t) => t.built),
+      JSON.stringify(cs.body.mirror?.filter((t) => !t.built).map((t) => t.table)));
+check('and the sync that ran in section 7 is on record', !!cs.body.syncedAt, cs.body.syncedAt);
+
+const REPORT = '/report?period=week&owner=all';
+let r0 = await reads();
+const rep1 = await get(await coldWorker(21), REPORT);
+check('a cold instance computes the dashboard with NO Airtable read',
+      rep1.status === 200 && (await reads()) === r0, `${rep1.status}, ${(await reads()) - r0} reads`);
+const rep2 = await get(await coldWorker(22), REPORT);
+check('so does the next one, with the same numbers',
+      (await reads()) === r0 && JSON.stringify(rep2.body.totals) === JSON.stringify(rep1.body.totals));
+
 const held = [];
-const resp13 = w13.fetch(new Request('https://bd.enout.website/report?period=week&owner=all',
-  { headers: { Origin: ORIGIN } }), withStore(REPORT_ENV), { waitUntil: (p) => held.push(p) });
-await sleep(20);
-check('the build is handed to waitUntil, so a disconnect does not cancel it', held.length > 0,
-      `${held.length} promise(s)`);
-await resp13;
+const saved = await (await coldWorker(23)).fetch(new Request('https://bd.enout.website/save', {
+  method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
+  body: JSON.stringify({ contact, call: { ...call1, at: new Date().toISOString() } }),
+}), withStore(ENV), { waitUntil: (p) => held.push(p) });
+await Promise.allSettled(held);
+check('a save answers', saved.status === 200, `${saved.status}`);
+r0 = await reads();
+const rep3 = await get(await coldWorker(24), REPORT);
+check('the call saved on one instance is in the next report from ANOTHER',
+      rep3.body.totals?.calls === rep1.body.totals?.calls + 1,
+      `${rep1.body.totals?.calls} -> ${rep3.body.totals?.calls}`);
+check('and that report still read nothing from Airtable', (await reads()) === r0, `${(await reads()) - r0} reads`);
+
+const synced = await get(await coldWorker(25), '/companies?owner=all');
+check('once the sync has run, the company list comes from the copy',
+      synced.body.source === 'airtable' && (await reads()) === r0,
+      `source=${synced.body.source}, ${(await reads()) - r0} reads`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 done();

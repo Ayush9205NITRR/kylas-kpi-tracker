@@ -19,6 +19,11 @@ let READS = 0;           /* GET row pages served — /__reads, so a test can tel
 let nextId = 1;
 
 const rec = () => "rec" + String(nextId++).padStart(14, "0");
+/* When each row last changed, for LAST_MODIFIED_TIME() — the D1 copy's delta
+   (mirror.mjs) asks for exactly that. Kept beside the row rather than in its
+   fields, because on the real API it is not a field either. */
+const MODIFIED = new Map();
+const touch = (r) => { MODIFIED.set(r.id, Date.now()); return r; };
 
 /* MOCK_AIRTABLE_SEED=<file.json> pre-loads rows, e.g.
      { "Companies": [ { "Kylas Company ID": "1776620", "Right POC": 1 } ] }
@@ -32,7 +37,7 @@ function seed() {
   if (!path) return;
   const data = JSON.parse(readFileSync(path, "utf8"));
   for (const [name, list] of Object.entries(data))
-    for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([{ id: rec(), fields }]);
+    for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([touch({ id: rec(), fields })]);
   console.log(`  seeded ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
 }
 seed();
@@ -48,6 +53,11 @@ function matches(row, formula, all) {
   /* IS_AFTER({Field}, 'yyyy-mm-dd') — used by /snapshots to fetch a window of
      frozen days. Without it every date filter matched nothing and the endpoint
      looked broken while actually being unsupported by the stand-in. */
+  /* IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('iso')) — a full timestamp,
+     not a day, compared against when this stand-in last wrote the row. */
+  const lm = formula.match(/^IS_AFTER\(LAST_MODIFIED_TIME\(\),\s*(?:DATETIME_PARSE\()?'([^']*)'\)?\)$/i);
+  if (lm) return (MODIFIED.get(row.id) || 0) > Date.parse(lm[1]);
+
   const after = formula.match(/^IS_AFTER\(\{([^}]+)\},\s*'(.*)'\)$/i);
   if (after) {
     const [, field, when] = after;
@@ -136,6 +146,14 @@ createServer(async (req, res) => {
   };
 
   const rows = table(name);
+
+  /* GET /Table/recXXXXXXXXXXXXXX — one record by id. */
+  const single = /^(.*)\/(rec[0-9A-Za-z]{14})$/.exec(name);
+  if (req.method === "GET" && single) {
+    const hit = table(single[1]).find((r) => r.id === single[2]);
+    READS++;
+    return hit ? json(res, 200, hit) : json(res, 404, { error: { type: "NOT_FOUND" } });
+  }
 
   if (req.method === "GET") {
     const formula = url.searchParams.get("filterByFormula");
@@ -229,6 +247,7 @@ createServer(async (req, res) => {
       const hit = rows.find((x) => x.id === r.id);
       if (!hit) return json(res, 404, { error: { type: "MODEL_ID_NOT_FOUND", message: `no record ${r.id}` } });
       hit.fields = { ...hit.fields, ...r.fields };
+      touch(hit);
       WRITES.push({ kind: "patch", table: name, id: hit.id, fields: r.fields });
       out.push(hit);
     }
@@ -243,10 +262,11 @@ createServer(async (req, res) => {
       const hit = rows.find((x) => String(x.fields[key] ?? "") === want && want !== "");
       if (hit) {
         hit.fields = { ...hit.fields, ...r.fields };
+        touch(hit);
         WRITES.push({ kind: "update", table: name, id: hit.id, fields: r.fields });
         out.push(hit);
       } else {
-        const made = { id: rec(), fields: { ...r.fields } };
+        const made = touch({ id: rec(), fields: { ...r.fields } });
         rows.push(made);
         WRITES.push({ kind: "create", table: name, id: made.id, fields: r.fields });
         out.push(made);
@@ -257,7 +277,7 @@ createServer(async (req, res) => {
 
   if (req.method === "POST") {
     const out = (body.records || []).map((r) => {
-      const made = { id: rec(), fields: { ...r.fields } };
+      const made = touch({ id: rec(), fields: { ...r.fields } });
       rows.push(made);
       WRITES.push({ kind: "create", table: name, id: made.id, fields: r.fields });
       return made;

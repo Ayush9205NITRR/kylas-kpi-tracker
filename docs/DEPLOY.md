@@ -52,7 +52,7 @@ Do not continue until it says Active.
 
 ---
 
-## Part 2 · Stay on Free
+## Part 2 · Which plans
 
 **There are two different "plans" in Cloudflare and it is easy to pay for the
 wrong one.**
@@ -227,6 +227,59 @@ With the extension updated and signed in:
 
 ---
 
+## Part 9 · Fill Airtable from Kylas, once
+
+**Why.** The console reads companies and contacts from Airtable, not Kylas:
+Airtable (and the copy of it in D1) answers in milliseconds, and Kylas'
+search is rate-limited and slow. Airtable is only worth reading once the
+Kylas sync has filled it. On 2026-09-24 the base held **3 companies and 4
+contacts**, which are the ones the console wrote itself. The sync had never
+run. Until it does, the console lists companies straight from Kylas, which is
+correct but is the slow path.
+
+The nightly cron runs the sync, but the **first** run copies the whole account
+and is too big for one Worker invocation. Run that first one from your laptop,
+in the project folder, where `.env.local` already holds the keys:
+
+```
+node --env-file=.env.local scripts/sync-kylas.mjs            # dry run: prints what it would write
+node --env-file=.env.local scripts/sync-kylas.mjs --apply    # writes it
+```
+
+**Read the dry run's counts before `--apply`.** Every Kylas company and
+contact becomes an Airtable record, and Airtable caps records per base by plan
+(the Free plan is 1,000; paid plans are much higher). Check the limit in your
+workspace's billing page. If the counts exceed it, stop and ask; do not apply.
+
+If `--apply` is interrupted, run it again. It writes oldest-first and resumes
+from where it stopped.
+
+After that the nightly cron keeps it current: a night's changes are small.
+Within five minutes of the apply finishing, the maintenance cron has copied
+the base into D1 and the Dashboard lists companies from it. To check, open the
+Dashboard: its company count should match Kylas. `npx wrangler tail` also
+shows each table's `mirror: … built — N row(s)` line.
+
+---
+
+## How reads stay fast (for whoever maintains this)
+
+- **The D1 copy of Airtable** (`scripts/mirror.mjs`). Every table the console
+  reads lives in D1 as well. Requests read D1 and never page through Airtable.
+  It stays current in three ways:
+  - every write this server makes is copied in as it happens;
+  - every 5 minutes, while someone is using the console, it picks up edits
+    made elsewhere;
+  - after the nightly sync it rebuilds everything.
+- **Kylas answers** (who the key belongs to, picklists, the company crawl)
+  are kept in D1 too, and shared by every instance.
+- **The `*/5 * * * *` cron** does all the refreshing. When nobody has used
+  the console for an hour, it makes no outside request at all.
+- **`/cache-status`** says how many rows each table holds, how old each copy
+  is, and when the sync last ran.
+
+---
+
 ## When it goes wrong
 
 **`curl` returns 404 rather than 403.** The custom domain did not attach. Check
@@ -252,6 +305,15 @@ and an address outside `ALLOWED_EMAIL_DOMAIN`.
 
 **The console says offline, but `curl` works.** Almost always the CORS settings
 in part 6.5, or an `ALLOWED_ORIGIN` that does not match your real extension id.
+
+**The Dashboard lists only a handful of companies, or opens slowly.** The
+Kylas sync has never filled Airtable (part 9). Until it has, the list comes
+from a Kylas crawl that the 5-minute cron refreshes.
+
+**Numbers look a few minutes behind an edit made directly in Airtable.**
+Expected. Edits made outside the console reach the copy within about ten
+minutes. Rollup changes caused by those edits reach it after the nightly
+rebuild. Saves made in the console show at once.
 
 **Saves work but the dashboard is empty.** Unrelated to hosting — the Airtable
 base has not had `repair-base.mjs` run on it.
