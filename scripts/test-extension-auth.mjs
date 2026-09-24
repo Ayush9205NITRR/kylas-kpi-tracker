@@ -141,7 +141,7 @@ async function serverFetch(url, opts = {}) {
       ok = p.exp * 1000 > Date.now() && /@enout\.in$/.test(p.email);
     } catch { ok = false; }
   }
-  const body = ok ? { ok: true, user: { name: 'Ayush' }, role: 'admin', version: '1.16.2',
+  const body = ok ? { ok: true, user: { name: 'Ayush' }, role: 'admin', version: '1.16.3',
                       companies: [], periods: [], contacts: [], due: [] }
                   : { error: 'not signed in' };
   return { status: ok ? 200 : 401, ok, json: async () => body };
@@ -151,7 +151,7 @@ async function serverFetch(url, opts = {}) {
 async function openConsole(base = 'https://bd.enout.website') {
   const settings = new Map([['proxy', base]]);
   const Store = { getSetting: async (k) => settings.get(k), setSetting: async (k, v) => settings.set(k, v) };
-  const chrome = { runtime: { sendMessage: (m) => worker.send(m), getManifest: () => ({ version: '1.16.2' }) } };
+  const chrome = { runtime: { sendMessage: (m) => worker.send(m), getManifest: () => ({ version: '1.16.3' }) } };
   const window = {};
   vm.runInContext(API_SRC, vm.createContext({ window, Store, chrome, fetch: serverFetch, AbortController,
     setTimeout, clearTimeout, console: quiet, Promise, JSON, URL, encodeURIComponent, Error, Set, Map, Date }),

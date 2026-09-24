@@ -217,17 +217,28 @@
         if (c.stage === "SQL_SALES_QUALIFIED_LEAD") co.pocs.sql.push(c.pocName);
       }
 
-      /* Data-driven rungs. */
+      /* ONLY CONTACTS THIS CONSOLE HAS WORKED COUNT. Opening an account loads
+         its contacts from Kylas with whatever stage Kylas holds — "Activation",
+         say — and counting that stage made every account anybody merely
+         clicked on read as picked up and reached. Airtable, which this stands
+         in for, only ever counts a stage a console save wrote, so the same rule
+         here: a contact counts once a call was logged or a stage set on it in
+         the console. Kylas' own stage still shows on the row; it just does not
+         move the funnel. */
+      const worked = co.contacts.filter((c) => c.lastCallAt || c.lastStageChangeAt);
+      const workedRung = worked.reduce((m, c) => Math.max(m, STAGE_RUNG[c.stage] || 0), 0);
+      /* Data-driven rungs. Event rows are typed in the console, so they are
+         real signal whoever's contact they sit on. */
       co.right = co.pocs.right.length > 0;
       co.discovery = co.pocs.discovery.length > 0;
-      co.picked = co.contacts.some(picked);
-      co.reached = co.contacts.some((c) => c.lastCallAt || c.lastStageChangeAt);
+      co.picked = worked.some(picked);
+      co.reached = worked.length > 0;
       /* Stage-driven rungs, each a floor on the ladder. Because KPI rank only
          rises, "is at or past" answers "ever reached" — a no-show still counts
          as booked, which is what Ayush means by "regardless of outcome". */
-      co.booked = co.rung >= MILESTONE.sqlMeetingBooked.floor;
-      co.done = co.rung >= MILESTONE.sqlMeetingDone.floor;
-      co.sql = co.rung >= MILESTONE.sql.floor;
+      co.booked = workedRung >= MILESTONE.sqlMeetingBooked.floor;
+      co.done = workedRung >= MILESTONE.sqlMeetingDone.floor;
+      co.sql = workedRung >= MILESTONE.sql.floor;
 
       /* AIRTABLE WINS. Everything above this line is the same rule set
          expressed in JavaScript, and it exists only for a company Airtable has
