@@ -308,10 +308,10 @@ const reads = async () => {
   }
   throw new Error('the mock never reported its read count');
 };
-const get = async (w, path) => {
+const get = async (w, path, extra = {}) => {
   const held = [];
   const r = await w.fetch(new Request(`https://bd.enout.website${path}`, { headers: { Origin: ORIGIN } }),
-                          withStore(ENV), { waitUntil: (p) => held.push(p) });
+                          withStore({ ...ENV, ...extra }), { waitUntil: (p) => held.push(p) });
   const body = await r.json();
   await Promise.allSettled(held);
   return { status: r.status, body };
@@ -437,11 +437,17 @@ check('and the console reads it back', fe?.status === 'depri' && fe?.reason === 
 await post(await coldWorker(40), '/focus', { companyId: String(contact.companyId), status: 'normal', previous: 'depri' });
 const readF2 = await get(await coldWorker(41), '/focus');
 check('Restore takes it off the list', !readF2.body.focus?.[String(contact.companyId)], JSON.stringify(readF2.body.focus));
-await post(await coldWorker(42), '/research', { companyId: String(contact.companyId), companyName: 'Seats',
-  values: { industry: 'Furniture', season: 'Q3' }, updatedBy: 'test' });
-const readR = await get(await coldWorker(43), `/research?companyId=${contact.companyId}`);
-check('research saves and reads back for the card', readR.body.research?.industry === 'Furniture' && readR.body.research?.season === 'Q3',
-      JSON.stringify(readR.body).slice(0, 100));
+/* Research is the team's curated Company List (another base), read-only. */
+await fetch('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', { method: 'POST',
+  headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
+  body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': String(contact.companyId),
+    'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }] } }] }) });
+const readR = await get(await coldWorker(43), `/research?companyId=${contact.companyId}`, { RESEARCH_BASE: 'appRESEARCH' });
+check('the card reads the curated Company List row, flattened',
+      readR.body.found && readR.body.fields?.['No. of Employees (kylas)'] === '51-200' &&
+      readR.body.fields?.['Total Funding'] === '8500000' && readR.body.fields?.['Latest Funding Type'] === 'Series A' &&
+      /airtable\.com\/appRESEARCH\//.test(readR.body.url || ''),
+      JSON.stringify(readR.body).slice(0, 160));
 
 /* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */
 /* Cloudflare counts every outside request AND every database query an

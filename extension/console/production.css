@@ -966,3 +966,7 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .acctable .co .dp{font-style:normal;font-size:var(--t-meta);color:var(--amber);background:var(--amberSoft);border-radius:999px;padding:0 7px}
 @media (max-width:760px){.focusl .dtab .vr{grid-template-columns:1fr 1fr}}
 .rsec>.f,.rsec>.g2{margin-bottom:12px}.rsec>.f:last-child{margin-bottom:0}
+/* the focus-list card in the second pane */
+#s-focus .fctl{border-bottom:0;padding-bottom:0;margin-bottom:0}
+a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
+.rlist a{color:var(--blue)}

@@ -228,12 +228,15 @@ from `/v1/entities/company/fields`) is read into quarters too, and the
 Accounts view shows the union. It is NOT on the call card any more (Ayush,
 2026-09-24): an account fact, not a contact field.
 
-**Focus lists and research live on the call card** (1.19), in "the account"
-card at the bottom of the right column: ★ Focus / Not picked / Deprioritize
-(with a reason) and the 15 research fields in four sections. Both are the
-Airtable Focus / Research tables the BD Ladder app uses; `GET /focus` and
-`GET /research?companyId=` read them. The Accounts view has the team's Focus
-lists above the table, a list-status filter, and Restore for dropped accounts.
+**Focus lists and research on the call card** (1.19.3). The focus control
+(★ Focus / Not picked / Deprioritize with a reason, Airtable Focus table) is
+its own card in the SECOND pane, under "Where this stands". Research is the
+team's own curated row — Company Database (`RESEARCH_BASE`) → "Company List",
+keyed by "Kylas Company Id" — shown read-only in the THIRD pane in four
+sections, the ten fields Ayush named, with "Open in Airtable". The Worker's
+AIRTABLE_PAT needs read access to that base. The Accounts view has no focus
+panel (it did not survive a BD with 100 picks); the focus filter lists every
+focus account, each BD's, the deprioritized and the rest.
 
 **A save's Airtable writes used to wait on each other** (fixed 1.19.1). The
 client waited for each reply before sending the next request, so a save was

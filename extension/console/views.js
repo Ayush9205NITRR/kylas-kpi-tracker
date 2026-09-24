@@ -1731,7 +1731,7 @@
                 /* the condition, as in Airtable's text filter */
                 srcOp: "any", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
-                focus: "", depriOpen: false };
+                focus: "" };
   const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
@@ -1743,7 +1743,11 @@
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsite &&
         (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
-    if (skip !== "focus" && ACC.focus && focusOf(co) !== ACC.focus) return false;
+    if (skip !== "focus" && ACC.focus) {
+      const [want, who] = ACC.focus.split(/:(.*)/s);
+      if (focusOf(co) !== want) return false;
+      if (who !== undefined && (co.owner || "Unassigned") !== who) return false;
+    }
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
     if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
     return true;
@@ -1931,65 +1935,27 @@
     </select>`;
   }
 
-  /* FOCUS LISTS — which accounts each BD has picked to work (★), and which
-     they dropped and why. The status is set on the call card; this is where a
-     manager reads it across the team. Names open the company; Restore takes
-     a dropped account back to "not picked". (focus.js) */
+  /* FOCUS LISTS, AS A FILTER. Which accounts each BD has picked to work (★)
+     and which they dropped — set on the call card. A panel listing them all
+     was tried and does not survive a BD with a hundred picks, so it is one
+     select beside the others: every focus account, one BD's, the dropped
+     ones, or the rest. The table then shows them with every other filter
+     still applying. (focus.js) */
   function focusSelect(all) {
     const pool = all.filter((c) => accMatch(c, "focus"));
-    const n = { focus: 0, normal: 0, depri: 0 };
-    for (const c of pool) n[focusOf(c)]++;
-    const opt = (v, l) => `<option value="${v}"${ACC.focus === v ? " selected" : ""}>${l}</option>`;
-    return `<select id="accFocus" aria-label="Focus list">
-      ${opt("", "Any list status")}${opt("focus", `★ On a focus list (${n.focus})`)}
-      ${opt("normal", `Not picked (${n.normal})`)}${opt("depri", `Deprioritized (${n.depri})`)}</select>`;
+    const n = { focus: 0, normal: 0, depri: 0 }, byOwner = new Map();
+    for (const c of pool) {
+      const f = focusOf(c);
+      n[f]++;
+      if (f === "focus") { const o = c.owner || "Unassigned"; byOwner.set(o, (byOwner.get(o) || 0) + 1); }
+    }
+    const opt = (v, l) => `<option value="${esc(v)}"${ACC.focus === v ? " selected" : ""}>${esc(l)}</option>`;
+    const first = (o) => String(o).split(/\s+/)[0];
+    return `<select id="accFocus" aria-label="Focus list"${ACC.focus ? ' class="on"' : ""}>
+      ${opt("", "Any focus status")}${opt("focus", `★ On a focus list (${n.focus})`)}
+      ${[...byOwner].sort((a, b) => b[1] - a[1]).map(([o, k]) => opt(`focus:${o}`, `\u00a0\u00a0★ ${first(o)}’s focus (${k})`)).join("")}
+      ${opt("depri", `Deprioritized (${n.depri})`)}${opt("normal", `Not picked (${n.normal})`)}</select>`;
   }
-  function focusHTML(all) {
-    if (!global.Focus) return "";
-    const byId = new Map(all.map((c) => [String(c.id), c]));
-    const ents = Object.values(Focus.map).map((f) => {
-      const c = byId.get(String(f.companyId));
-      return { f, id: String(f.companyId), name: c?.name || f.companyName || `#${f.companyId}`,
-               owner: c?.owner || f.ownerName || "Unassigned", stage: c ? (label(stageOf(c)) || "") : "" };
-    }).filter((e) => !ACC.owner || e.owner === ACC.owner);
-    const foc = ents.filter((e) => e.f.status === "focus");
-    const dep = ents.filter((e) => e.f.status === "depri")
-      .sort((a, b) => String(b.f.setAt).localeCompare(String(a.f.setAt)));
-    if (!Focus.loaded) return `<div class="card focusl"><div class="exhead"><h2>Focus lists</h2>
-      <p>${Focus.error ? esc(Focus.error) : "Reading focus lists…"}</p></div></div>`;
-    const week = dep.filter((e) => daysSince(e.f.setAt) !== null && daysSince(e.f.setAt) <= 7).length;
-    const rc = {};
-    for (const e of dep) rc[e.f.reason || "No reason"] = (rc[e.f.reason || "No reason"] || 0) + 1;
-    const top = Object.entries(rc).sort((a, b) => b[1] - a[1])[0];
-    const owners = [...new Set([...foc, ...dep].map((e) => e.owner))].sort();
-    const item = (e, sub) => `<li><button type="button" data-open="${esc(e.id)}">${esc(e.name)}</button>${
-      sub ? `<span>${esc(sub)}</span>` : ""}</li>`;
-    const cards = owners.map((o) => {
-      const mf = foc.filter((e) => e.owner === o), md = dep.filter((e) => e.owner === o);
-      return `<article class="fcard"><header><h3>${esc(o)}</h3>
-          <span class="tag">★ ${mf.length}</span>${md.length ? `<span class="tag warn">${md.length} dropped</span>` : ""}</header>
-        ${mf.length ? `<ul>${mf.slice(0, 6).map((e) => item(e, e.stage)).join("")}${
-          mf.length > 6 ? `<li class="more">+${mf.length - 6} more — filter “★ On a focus list”</li>` : ""}</ul>`
-          : `<p class="vnote">Nothing picked yet.</p>`}
-        ${md.length ? `<div class="flbl">Deprioritized</div><ul>${md.slice(0, 4).map((e) => item(e, e.f.reason)).join("")}</ul>` : ""}
-      </article>`;
-    }).join("");
-    return `<div class="card focusl">
-      <div class="exhead"><h2>Focus lists</h2>
-        <p>${foc.length || dep.length
-          ? `<b>${foc.length}</b> account${foc.length === 1 ? "" : "s"} on focus lists, <b>${dep.length}</b> deprioritized${
-              week ? ` — ${week} in the last 7 days` : ""}.${top && top[1] > 1 ? ` Most common reason for dropping one: ${esc(top[0])} (${top[1]}).` : ""}`
-          : "Nobody has picked or dropped an account yet. Do it from the call card: ★ Focus, or Deprioritize with a reason."}</p></div>
-      ${cards ? `<div class="fgrid">${cards}</div>` : ""}
-      ${dep.length ? `<button type="button" class="gbtn sm" id="depriToggle">${ACC.depriOpen ? "Hide" : "Show"} every deprioritized account (${dep.length})</button>
-        ${ACC.depriOpen ? `<div class="dtab"><div class="vr vh"><span>Company</span><span>BD</span><span>Reason</span><span>Note</span><span>When</span><span></span></div>
-          ${dep.slice(0, 200).map((e) => `<div class="vr"><span><button type="button" class="lnk" data-open="${esc(e.id)}">${esc(e.name)}</button></span>
-            <span>${esc(e.owner)}</span><span>${esc(e.f.reason || "—")}</span><span class="mut">${esc(e.f.note || "")}</span>
-            <span>${esc(ago(e.f.setAt))}</span><span><button type="button" class="gbtn sm" data-restore="${esc(e.id)}">Restore</button></span></div>`).join("")}
-        </div>` : ""}` : ""}
-    </div>`;
-  }
-  const ago = (iso) => { const d = daysSince(iso); return d === null ? "" : d === 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`; };
 
   function explorerHTML(all, owners) {
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
@@ -2054,7 +2020,7 @@
             const d = daysSince(c.lastCalledAt), k = kpiOf(c);
             return `<div class="vr" data-id="${esc(c.id)}">
               <span class="co">${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
-                focusOf(c) === "depri" ? ` <i class="dp">deprioritized</i>` : ""}</span>
+                focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}</span>
               <span>${esc(label(stageOf(c)) || "—")}</span>
               <span>${esc(c.owner || "—")}</span>
               <span>${esc(c.source || "—")}</span>
@@ -2457,7 +2423,7 @@
       </div>
       ${chipStrip(rows, all)}
       ${rcaStrip()}
-      ${VIEW_MODE === "accounts" ? famsHTML(all) + focusHTML(all) + explorerHTML(all, ownerNames)
+      ${VIEW_MODE === "accounts" ? famsHTML(all) + explorerHTML(all, ownerNames)
         : VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
@@ -2632,17 +2598,9 @@
     global.__srcRedraw = redraw;
     on("accOffsite", "change", (e) => { ACC.offsite = e.target.value; ACC.limit = 100; redraw(); });
     on("accFocus", "change", (e) => { ACC.focus = e.target.value; ACC.limit = 100; redraw(); });
-    on("depriToggle", "click", () => { ACC.depriOpen = !ACC.depriOpen; redraw(); });
-    host.querySelectorAll(".focusl [data-open]").forEach((b) => b.addEventListener("click", () =>
-      global.openCompanyFromView?.(b.dataset.open, b.textContent || "")));
-    host.querySelectorAll(".focusl [data-restore]").forEach((b) => b.addEventListener("click", async () => {
-      b.disabled = true;
-      try { await Focus.set(b.dataset.restore, { status: "normal", companyName: Focus.entry(b.dataset.restore)?.companyName || "" }); }
-      catch (e) { b.disabled = false; alert("Not restored — " + (e.message || e)); }
-    }));
     /* Focus lists load on their own and change from the call card: repaint
        this view when they do, if it is the one on screen. Bound once. */
-    global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".focusl")) redraw(); };
+    global.__focusRedraw = () => { if (host.isConnected && host.querySelector("#accFocus")) redraw(); };
     if (global.Focus && !global.__focusBound) { global.__focusBound = true; Focus.onChange(() => global.__focusRedraw?.()); }
     global.Focus?.load();
     on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });

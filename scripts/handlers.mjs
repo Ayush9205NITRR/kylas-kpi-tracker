@@ -110,6 +110,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     ...(mirror ? { onWrite: mirror.written } : {}),
   }) : null;
   const airtable = rawAirtable && mirror ? mirrored(rawAirtable, mirror) : rawAirtable;
+  /* THE CURATED RESEARCH lives in another base the team already keeps — the
+     "Company List" in Company Database, one row per company keyed by its
+     Kylas id, with industry, size, funding, the V/W scores and the rest.
+     Read-only from here: it is edited in Airtable. The same token; it needs
+     read access to that base too. */
+  const RESEARCH_BASE = env.RESEARCH_BASE || "";
+  const RESEARCH_TABLE = env.RESEARCH_TABLE || "Company List";
+  const researchAt = AT_PAT && RESEARCH_BASE ? createAirtable(AT_PAT, RESEARCH_BASE, {
+    log,
+    ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
+  }) : null;
   /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
      Hosted runtime only — on a laptop there is nothing to gain. */
   const saves = db ? createSaveQueue({ db, log }) : null;
@@ -457,6 +468,37 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      owner. Two minutes fresh, then served while it refreshes behind the reply —
      these are one or two requests, short enough to finish there. */
   const companyFromKylas = new Map(), queueFromKylas = new Map();
+  /* One company's row of the curated research, flattened: lookups come back
+     as arrays, selects as { name }. Held half an hour — it is curated by
+     hand, not changing under the associate's feet. */
+  /* The fields the team curates for research (Ayush, 2026-09-24), and
+     nothing else. "Boolean Post link" has three homes in that table; the
+     first one filled wins. */
+  const RESEARCH_LIST_FIELDS = ["Kylas Company Id", "linkedin - Appollo",
+    "Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)",
+    "Total Funding", "Latest Funding Amount", "Latest Funding Type", "Source - Concatenate",
+    "Account Pipeline Stage", "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee"];
+  const flat = (v) => Array.isArray(v) ? [...new Set(v.map(flat).filter((x) => x !== "" && x != null))].join(", ")
+    : v && typeof v === "object" ? (v.name ?? v.url ?? "") : (v ?? "");
+  const researchRows = new Map();
+  function curatedResearch(id) {
+    const key = `research:${id}`;
+    if (!researchRows.has(key)) {
+      if (researchRows.size > 500) researchRows.clear();
+      researchRows.set(key, shared(key, { ttl: 30 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 }, async () => {
+        const rows = await listTolerant(researchAt, RESEARCH_TABLE, {
+          fields: RESEARCH_LIST_FIELDS, formula: `{Kylas Company Id} = '${String(id).replace(/'/g, "\\'")}'`,
+          pageSize: 1, maxPages: 1 });
+        const r = rows[0];
+        if (!r) return { found: false };
+        const fields = {};
+        for (const [k, v] of Object.entries(r.fields || {})) { const x = flat(v); if (x !== "") fields[k] = x; }
+        return { found: true, recordId: r.id, fields };
+      }));
+    }
+    return researchRows.get(key)();
+  }
+
   function perKey(map, name, fn) {
     if (!map.has(name)) {
       if (map.size > 500) map.clear();
@@ -1596,9 +1638,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/research": async (url, body) => {
       const askId = url.searchParams.get("companyId");
       if (askId && !body?.companyId) {
-        if (!airtable) return { configured: false, research: null };
-        const all = await readResearch(airtable);
-        return { configured: true, research: all[String(askId)] || null };
+        if (!researchAt) return { configured: false, research: null };
+        try {
+          const got = await curatedResearch(askId);
+          return { configured: true, base: RESEARCH_BASE, table: RESEARCH_TABLE, ...got,
+                   url: got.recordId ? `https://airtable.com/${RESEARCH_BASE}/${encodeURIComponent(RESEARCH_TABLE)}/${got.recordId}` : "" };
+        } catch (e) {
+          /* The usual cause: the token was made for the KPI base only. */
+          const denied = /40[134]|permission|not ?found|NOT_AUTHORIZED|INVALID_PERMISSIONS/i.test(e.message);
+          return { configured: true, error: denied
+            ? "The server's Airtable token cannot read the Company Database base. In Airtable → Developer hub → your token, add that base (read access is enough)."
+            : e.message.slice(0, 200) };
+        }
       }
       if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
       if (!body.companyId)
