@@ -489,6 +489,11 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .msel-name{overflow-wrap:anywhere}
 .msel-n{font-variant-numeric:tabular-nums;color:var(--text3)}
 .msel-empty{margin:6px 8px;color:var(--text3);font-size:var(--t-label)}
+.msel-hint{margin:4px 8px;color:var(--text2);font-size:var(--t-meta)}
+.msel-op{width:100%;padding:6px 8px;border:1px solid var(--line2);border-radius:6px;
+  background:var(--panel);color:var(--text);font:inherit;font-size:var(--t-label);font-weight:var(--w-med)}
+.msel-opt.ro{cursor:default}
+.msel-opt.ro:hover{background:transparent}
 .msel-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px 0;
   border-top:1px solid var(--line);color:var(--text2);font-size:var(--t-meta)}
 

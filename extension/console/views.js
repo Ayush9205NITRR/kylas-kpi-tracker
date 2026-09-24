@@ -1726,7 +1726,9 @@
      filters — "Apollo and LinkedIn but not Referral" is an ordinary question. */
   const ACC = { stage: null, stageLabel: "", sources: new Set(), kpis: new Set(),
                 fresh: new Set(), owner: "", sort: "recent", limit: 100, offsite: "",
-                srcOpen: false, srcFind: "", srcScroll: 0 };
+                srcOpen: false, srcFind: "", srcScroll: 0,
+                /* the condition, as in Airtable's text filter */
+                srcOp: "any", srcText: "" };
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
      options WOULD give rather than counting only what is already selected —
@@ -1734,7 +1736,7 @@
   function accMatch(co, skip) {
     if (skip !== "stage" && ACC.stage && stageOf(co) !== ACC.stage) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
-    if (skip !== "source" && ACC.sources.size && !ACC.sources.has(co.source || "—")) return false;
+    if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsite &&
         (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
@@ -1813,19 +1815,52 @@
      holds (under the other filters), picked values pinned to the top, and a
      Clear. Ticking applies at once, as in Airtable. */
   const srcName = (v) => (v === "—" ? "No source" : v);
+  /* The conditions Source of Data can be filtered by. It is free text, so
+     "contains" matters as much as picking values: "GPTW" is in a hundred
+     differently-spelled sources. */
+  const SRC_OPS = {
+    any: "is any of", none: "is none of", contains: "contains", notcontains: "does not contain",
+    empty: "is empty", notempty: "is not empty",
+  };
+  function sourceMatches(src) {
+    const v = String(src || "");
+    const t = ACC.srcText.trim().toLowerCase();
+    switch (ACC.srcOp) {
+      case "any": return !ACC.sources.size || ACC.sources.has(v || "—");
+      case "none": return !ACC.sources.size || !ACC.sources.has(v || "—");
+      case "contains": return !t || v.toLowerCase().includes(t);
+      case "notcontains": return !t || !v.toLowerCase().includes(t);
+      case "empty": return !v.trim();
+      case "notempty": return !!v.trim();
+      default: return true;
+    }
+  }
+  const srcActive = () => (ACC.srcOp === "any" || ACC.srcOp === "none") ? ACC.sources.size > 0
+    : (ACC.srcOp === "contains" || ACC.srcOp === "notcontains") ? !!ACC.srcText.trim() : true;
+
+  /* SOURCE OF DATA, the way Airtable's own filter works: a button that says
+     what the filter is, and a panel with the condition on top. "is any of" /
+     "is none of" give a searchable checklist with counts, picked values
+     pinned first; "contains" / "does not contain" take text and show which
+     values it matches; "is empty" / "is not empty" need nothing else. Every
+     change applies at once. */
   function sourcePicker(all, sources) {
     const cnt = new Map();
     for (const c of all.filter((c) => accMatch(c, "source"))) cnt.set(c.source || "—", (cnt.get(c.source || "—") || 0) + 1);
     const sel = ACC.sources;
+    const op = ACC.srcOp;
     const ranked = [...sources].sort((a, b) => (sel.has(b) - sel.has(a))
       || (cnt.get(b) || 0) - (cnt.get(a) || 0) || String(a).localeCompare(String(b)));
-    const summary = !sel.size ? "All" : sel.size === 1 ? srcName([...sel][0]) : `${sel.size} selected`;
-    return `<div class="msel" id="srcPick">
-      <button type="button" class="msel-btn${sel.size ? " on" : ""}" id="srcBtn"
-        aria-haspopup="true" aria-expanded="${ACC.srcOpen}">
-        <span class="msel-k">Source of Data</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
-      </button>
-      ${ACC.srcOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by Source of Data">
+    const text = ACC.srcText.trim();
+    const summary = !srcActive() ? "All"
+      : op === "any" ? (sel.size === 1 ? srcName([...sel][0]) : `any of ${sel.size}`)
+      : op === "none" ? (sel.size === 1 ? `not ${srcName([...sel][0])}` : `none of ${sel.size}`)
+      : op === "contains" ? `contains “${text}”`
+      : op === "notcontains" ? `doesn’t contain “${text}”`
+      : SRC_OPS[op];
+    let list;
+    if (op === "any" || op === "none") {
+      list = `
         <input id="srcFind" class="msel-find" type="search" placeholder="Find a source…"
           aria-label="Find a source" autocomplete="off" value="${esc(ACC.srcFind)}">
         <div class="msel-list" id="srcList">
@@ -1835,7 +1870,36 @@
           <p class="msel-empty" id="srcNoMatch" hidden>No source matches.</p>
         </div>
         <div class="msel-foot"><span>${sel.size ? `${sel.size} of ${ranked.length} selected` : `${ranked.length} sources`}</span>
-          <button type="button" class="gbtn sm" id="srcClear"${sel.size ? "" : " disabled"}>Clear</button></div>
+          <button type="button" class="gbtn sm" id="srcClear"${sel.size ? "" : " disabled"}>Clear</button></div>`;
+    } else if (op === "contains" || op === "notcontains") {
+      const t = text.toLowerCase();
+      const hit = t ? ranked.filter((v) => v !== "—" && v.toLowerCase().includes(t)) : [];
+      const body = !t
+        ? `<p class="msel-empty">Type to see which sources ${op === "contains" ? "match" : "are left out"}.</p>`
+        : hit.length
+          ? `<p class="msel-hint">${hit.length} source${hit.length === 1 ? "" : "s"} contain “${esc(text)}”${op === "notcontains" ? " — these are left out" : ""}:</p>` +
+            hit.map((v) => `<div class="msel-opt ro"><span></span><span class="msel-name">${esc(v)}</span><span class="msel-n">${cnt.get(v) || 0}</span></div>`).join("")
+          : `<p class="msel-empty">No source contains “${esc(text)}”.</p>`;
+      list = `
+        <input id="srcText" class="msel-find" type="text" placeholder="Type text, e.g. GPTW"
+          aria-label="Source of Data ${esc(SRC_OPS[op])}" autocomplete="off" value="${esc(ACC.srcText)}">
+        <div class="msel-list msel-preview" id="srcList">${body}</div>
+        <div class="msel-foot"><span>${t ? "Not case-sensitive" : ""}</span>
+          <button type="button" class="gbtn sm" id="srcClear"${t ? "" : " disabled"}>Clear</button></div>`;
+    } else {
+      list = `<p class="msel-hint">Accounts whose Source of Data is ${op === "empty" ? "blank" : "filled in"}.</p>
+        <div class="msel-foot"><span></span><button type="button" class="gbtn sm" id="srcClear">Clear</button></div>`;
+    }
+    return `<div class="msel" id="srcPick">
+      <button type="button" class="msel-btn${srcActive() ? " on" : ""}" id="srcBtn"
+        aria-haspopup="true" aria-expanded="${ACC.srcOpen}">
+        <span class="msel-k">Source of Data</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.srcOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by Source of Data">
+        <select id="srcOp" class="msel-op" aria-label="Condition">
+          ${Object.entries(SRC_OPS).map(([k, v]) => `<option value="${k}"${op === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
+        </select>
+        ${list}
       </div>` : ""}
     </div>`;
   }
@@ -1873,7 +1937,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size || ACC.offsite;
+    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2435,7 +2499,8 @@
     /* ── the Source of Data picker ── */
     const srcList = document.getElementById("srcList");
     const findSrc = () => {
-      if (!srcList) return;
+      /* Only the checklist is searched; the "contains" preview is not. */
+      if (!srcList || !document.getElementById("srcFind")) return;
       const q = ACC.srcFind.trim().toLowerCase();
       let shown = 0;
       srcList.querySelectorAll(".msel-opt").forEach((o) => {
@@ -2445,11 +2510,15 @@
       const none = document.getElementById("srcNoMatch");
       if (none) none.hidden = shown > 0;
     };
-    if (ACC.srcOpen && srcList) {
-      /* Re-opened by a redraw after a tick: put the reader back where they were. */
+    if (ACC.srcOpen) {
+      /* Re-opened by a redraw: put the reader back where they were. */
       findSrc();
-      srcList.scrollTop = ACC.srcScroll;
-      document.getElementById("srcFind")?.focus({ preventScroll: true });
+      if (srcList) srcList.scrollTop = ACC.srcScroll;
+      const box = document.getElementById("srcText") || document.getElementById("srcFind");
+      if (box) {
+        box.focus({ preventScroll: true });
+        try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* not a text box */ }
+      }
     }
     on("srcBtn", "click", () => { ACC.srcOpen = !ACC.srcOpen; ACC.srcScroll = 0; if (!ACC.srcOpen) ACC.srcFind = ""; redraw(); });
     on("srcFind", "input", (e) => { ACC.srcFind = e.target.value; findSrc(); });
@@ -2459,13 +2528,27 @@
       if (cb.checked) ACC.sources.add(v); else ACC.sources.delete(v);
       ACC.srcScroll = srcList.scrollTop; ACC.limit = 100; redraw();
     }));
-    on("srcClear", "click", () => { ACC.sources.clear(); ACC.limit = 100; redraw(); });
+    on("srcClear", "click", () => {
+      ACC.sources.clear(); ACC.srcText = "";
+      if (ACC.srcOp === "empty" || ACC.srcOp === "notempty") ACC.srcOp = "any";
+      ACC.limit = 100; redraw();
+    });
+    on("srcOp", "change", (e) => { ACC.srcOp = e.target.value; ACC.srcScroll = 0; ACC.limit = 100; redraw(); });
+    /* Applied as you type, a moment after the last key. The table redraws
+       underneath, and the field gets the focus and caret back. */
+    let srcTimer = null;
+    on("srcText", "input", (e) => {
+      ACC.srcText = e.target.value;
+      clearTimeout(srcTimer);
+      srcTimer = setTimeout(() => { ACC.limit = 100; redraw(); }, 250);
+    });
+    on("srcText", "keydown", (e) => { if (e.key === "Escape") { ACC.srcOpen = false; redraw(); } });
     /* A click anywhere else closes it, as a dropdown should. Bound once. */
     if (!global.__srcOutside) {
       global.__srcOutside = true;
       document.addEventListener("mousedown", (e) => {
         if (!ACC.srcOpen || e.target.closest?.("#srcPick")) return;
-        ACC.srcOpen = false; ACC.srcFind = "";
+        ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
         global.__srcRedraw?.();
       });
     }
