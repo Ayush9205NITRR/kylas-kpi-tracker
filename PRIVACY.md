@@ -1,6 +1,6 @@
 # Privacy policy — Enout BD Call Console
 
-_Last updated: 19 September 2026_
+_Last updated: 24 September 2026_
 
 This is the privacy policy for the **Enout BD Call Console** Chrome extension, published by Enout
 for use by its own business development team.
@@ -8,8 +8,9 @@ for use by its own business development team.
 ## The short version
 
 The extension sends nothing to us. It has no analytics, no telemetry, no crash reporting and no
-account system. Its only network destination is a helper process running on the user's own
-computer, at `http://127.0.0.1`.
+account system. It sends data to exactly one destination: a server operated by Enout itself, at
+`https://bd.enout.website` — or, where an associate runs one, a helper process on their own
+computer at `http://127.0.0.1`. It contacts no other remote host.
 
 ## What the extension handles
 
@@ -32,18 +33,30 @@ It reads no other page content, and it reads nothing at all on any site other th
 ## What it does not handle
 
 No health information. No financial or payment information. No passwords or credentials — the
-organisation's Kylas API key and Airtable token are held by the local helper process and are never
+organisation's Kylas API key and Airtable token are held by Enout's own server and are never
 placed in the browser. No location. No personal communications. No browsing history: the extension
 is inert on every site except the CRM, and it does not record which pages a user visits.
 
 ## Where the data goes
 
-One place: a helper process the organisation runs on the associate's own machine, or on a machine
-inside its own network. From there it is written to the organisation's own **Kylas CRM** and its
-own **Airtable** base, which are the systems the data came from and belongs to.
-
+One place: a server the organisation operates at `bd.enout.website`, hosted on Cloudflare Workers.
+From there it is written to the organisation's own **Kylas CRM** and its own **Airtable** base,
+which are the systems the data came from and belongs to. Cloudflare acts only as the host of that
+server; the organisation controls it.
 No data is transmitted to Enout as the extension's publisher, to any server we operate, or to any
 third party. There is no advertising, no profiling and no resale of any kind.
+
+## Signing in
+
+Because the server above is reachable over the internet and holds the organisation's CRM
+credentials, it must know who is calling it. The extension asks the associate to **sign in with
+Google**, using Chrome's built-in identity support, and sends the resulting sign-in token with each
+request. The server checks that token against Google's published keys and that the address belongs
+to the organisation's domain; if it does not, the request is refused.
+
+This is the only use of the `identity` permission. What is obtained is the associate's own work
+email address and name, used solely for that check. It is not stored by the extension, not recorded
+for analytics, and not shared with anyone.
 
 ## What is stored in the browser
 

@@ -36,15 +36,16 @@ footer{max-width:46rem;margin:22px auto 0;color:var(--faint);font-size:13px;text
 
 <main>
 <h1>Privacy policy — Enout BD Call Console</h1>
-<p class="up">Last updated 19 September 2026</p>
+<p class="up">Last updated 24 September 2026</p>
 
 <p class="lede">This is the privacy policy for the <strong>Enout BD Call Console</strong> Chrome
 extension, published by Enout for use by its own business development team.</p>
 
 <h2>The short version</h2>
 <p>The extension sends nothing to us. It has no analytics, no telemetry, no crash reporting and no
-account system. Its only network destination is a helper process running on the user's own
-computer, at <code>http://127.0.0.1</code>.</p>
+account system. It sends data to exactly one destination: a server operated by Enout itself, at
+<code>https://bd.enout.website</code> — or, where an associate runs one, a helper process on their
+own computer at <code>http://127.0.0.1</code>. It contacts no other remote host.</p>
 
 <h2>What the extension handles</h2>
 <p>While an associate is logging a call, the console holds the details of the CRM contact they are
@@ -65,17 +66,31 @@ site other than <code>app.kylas.io</code>.</p>
 
 <h2>What it does not handle</h2>
 <p>No health information. No financial or payment information. No passwords or credentials — the
-organisation's Kylas API key and Airtable token are held by the local helper process and are never
+organisation's Kylas API key and Airtable token are held by Enout's own server and are never
 placed in the browser. No location. No personal communications. No browsing history: the extension
 is inert on every site except the CRM, and it does not record which pages a user visits.</p>
 
 <h2>Where the data goes</h2>
-<p>One place: a helper process the organisation runs on the associate's own machine, or on a
-machine inside its own network. From there it is written to the organisation's own
-<strong>Kylas CRM</strong> and its own <strong>Airtable</strong> base, which are the systems the
-data came from and belongs to.</p>
+<p>One place: a server the organisation operates at <code>bd.enout.website</code>, hosted on
+Cloudflare Workers. From there it is written to the organisation's own <strong>Kylas CRM</strong>
+and its own <strong>Airtable</strong> base, which are the systems the data came from and belongs
+to. Cloudflare acts only as the host of that server; the organisation controls it. An associate
+may alternatively run the same helper on their own computer, in which case nothing leaves their
+machine except the writes to Kylas and Airtable.</p>
 <p>No data is transmitted to Enout as the extension's publisher, to any server we operate, or to
 any third party. There is no advertising, no profiling and no resale of any kind.</p>
+
+<h2>Signing in</h2>
+<p>Because the server above is reachable over the internet and holds the organisation's CRM
+credentials, it must know who is calling it. The extension therefore asks the associate to
+<strong>sign in with Google</strong>, using Chrome's built-in identity support, and sends the
+resulting sign-in token with each request. The server checks that token against Google's published
+keys and that the address belongs to the organisation's domain; if it does not, the request is
+refused.</p>
+<p>This is the only use of the <code>identity</code> permission. What is obtained is the associate's
+own work email address and name, used solely for that check. It is not stored by the extension, not
+recorded anywhere for analytics, and not shared with anyone. Nobody outside the organisation can
+sign in.</p>
 
 <h2>What is stored in the browser</h2>
 <p><code>chrome.storage</code> holds the associate's working state: the contacts currently being
