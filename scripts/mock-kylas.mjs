@@ -63,6 +63,10 @@ const COMPANIES = {
     id: 1776620, name: "seats", ownerId: 74725,
     customFieldValues: {
       cfBatch: "B-11", cfPipelineStageBd: id("CNC_COULD_NOT_CONNECT"),
+      /* The company picklist "Offsite Timeline (BD - New)". The internal name
+         here is invented on purpose: the server must find the field by its
+         label, never by a guessed name. */
+      cfOffsiteTimelineBdNew: 9103,
       cfSourceOfData: "COLD_CALLING", cfAccountHealthBd: "AMBER",
       cfLastCalledAtDate: "2026-04-17", cfWebsite: "http://www.seats.aero",
     },
@@ -287,8 +291,16 @@ createServer(async (req, res) => {
     /* sort=updatedAt,asc — oldest first, which is how a client reads the far
        end of a result window. MOCK_IGNORE_ASC=1 ignores the direction, so the
        client's check that it really got older rows can be tested. */
-    if (/updatedAt,asc/i.test(url.searchParams.get("sort") || "") && process.env.MOCK_IGNORE_ASC !== "1")
+    const sortBy = url.searchParams.get("sort") || "";
+    if (/updatedAt,asc/i.test(sortBy) && process.env.MOCK_IGNORE_ASC !== "1")
       out.reverse();
+    /* id ascending — a second order a client can reach the far end by.
+       MOCK_ONLY_ID_ASC=1 honours this and ignores updatedAt,asc, which is the
+       account where only a different field gets past the window. */
+    if (/^id,(asc|desc)$/i.test(sortBy) && process.env.MOCK_NO_ID_SORT !== "1") {
+      out = [...out].sort((a, b) => Number(a.id) - Number(b.id));
+      if (/desc$/i.test(sortBy)) out.reverse();
+    }
     /* MOCK_NO_BOUND=1 refuses every updatedAt rule, as a search that cannot
        filter on it would. */
     if (process.env.MOCK_NO_BOUND === "1" && rules.some((r) => r.field === "updatedAt"))
@@ -325,6 +337,23 @@ createServer(async (req, res) => {
        rather than the fixture. */
     return json(res, 200, { content: slice.map(withOwner),
                             totalElements: out.length, page: pg, size });
+  }
+
+  /* Company fields, for the Offsite Timeline picklist that lives on the
+     company. Two offsite-looking fields, as an account that replaced one is
+     likely to have: the "(BD - New)" one is the live one. */
+  if (p === "/v1/entities/company/fields") {
+    return json(res, 200, { content: [
+      { name: "cfOffsiteTimeline", displayName: "Offsite Timeline (old)", type: "TEXT_FIELD" },
+      { name: "cfOffsiteTimelineBdNew", displayName: "Offsite Timeline (BD - New)", type: "PICK_LIST",
+        picklist: { picklistValues: [
+          { id: 9101, name: "JAN_MAR", displayName: "Jan - Mar" },
+          { id: 9102, name: "APR_JUN", displayName: "Apr - Jun" },
+          { id: 9103, name: "JUL_SEP", displayName: "Jul - Sep" },
+          { id: 9104, name: "OCT_DEC", displayName: "Oct - Dec" },
+        ] } },
+      { name: "cfBatch", displayName: "Batch", type: "TEXT_FIELD" },
+    ] });
   }
 
   if (p === "/v1/entities/contact/fields") {
@@ -390,6 +419,19 @@ createServer(async (req, res) => {
       return true;
     }
     return json(res, 200, made);
+  }
+
+  /* A company update. Strict about being sent the WHOLE record, as a PUT
+     that replaces it would be: a body without the name is refused rather than
+     wiping it, so a client that sends only the changed field fails loudly. */
+  const coPut = p.match(/^\/v1\/companies\/(\d+)$/);
+  if (coPut && req.method === "PUT") {
+    const body = JSON.parse(await text(req));
+    if (!COMPANIES[coPut[1]]) return json(res, 404, { message: "no such company" });
+    if (!body.name) return json(res, 400, { code: "001001", message: "name is required" });
+    COMPANIES[coPut[1]] = { ...COMPANIES[coPut[1]], ...body, updatedAt: new Date().toISOString() };
+    WRITES.push({ kind: "company-update", id: Number(coPut[1]), body });
+    return json(res, 200, COMPANIES[coPut[1]]);
   }
 
   const put = p.match(/^\/v1\/contacts\/(\d+)$/);

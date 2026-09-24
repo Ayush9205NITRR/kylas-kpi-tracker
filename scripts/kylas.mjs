@@ -386,35 +386,59 @@ export function createClient(key, {
        the rule, or whose bulk-imported companies share one timestamp; this
        needs neither. On Ayush's account the windows added nothing and 7,926 of
        17,926 were missing — this is what closes that. */
-    let reversePages = 0;
+    let reversePages = 0, reverseSort = "";
     if (shortBy > 0 && all.length) {
-      log(`company search: still ${shortBy} short — reading the list oldest-first to reach the rest`);
+      /* THE OTHER END, BY WHICHEVER ORDER THIS ACCOUNT HONOURS. updatedAt
+         ascending first — the mirror of the pass above. If the search ignores
+         that (the first page brings nothing new), try other fields ascending:
+         any order that reaches the far end of the list works, because all that
+         matters is that it starts from the other side of the 10,000. */
+      /* Both directions of each: which end of the list an order starts from is
+         not something this code can know for a given account. */
+      const REVERSE = ["updatedAt,asc", "createdAt,asc", "createdAt,desc", "id,asc", "id,desc",
+                       "name,asc", "name,desc"];
       const seenIds = new Set(all.map((c) => String(c.id)));
-      let rfull = true, added = 0;
-      for (let p = 0; rfull && p < MAX_PAGES; p++) {
-        const next = rows(await call("POST", page(p, "company", "asc"), shape.body(ownerId)));
-        reversePages++;
-        rfull = next.length === PAGE;
-        let fresh = 0;
-        for (const c of next) {
-          if (seenIds.has(String(c.id))) continue;
-          seenIds.add(String(c.id)); all.push(c); added++; fresh++;
-        }
-        /* A search that ignored the sort returns the newest again: nothing new
-           on the first page means the other end is not reachable this way. */
-        if (p === 0 && !fresh && next.length) {
-          log(`! company search: the oldest-first read returned only companies already held — ` +
-              `this account's search ignores the sort direction`);
-          break;
-        }
+      let added = 0;
+      for (const order of REVERSE) {
         if (reportedTotal != null && all.length >= reportedTotal) break;
+        log(`company search: ${reportedTotal - all.length} short — reading the list sorted ${order}`);
+        let rfull = true, got = 0, dry = 0;
+        for (let p = 0; rfull && p < MAX_PAGES; p++) {
+          let next;
+          try { next = rows(await call("POST", pageBy(p, order), shape.body(ownerId))); }
+          catch (e) {
+            if (![400, 404, 500].includes(e.status)) throw e;
+            log(`  sort ${order} refused (${e.status}) — trying the next order`);
+            break;
+          }
+          reversePages++;
+          rfull = next.length === PAGE;
+          let fresh = 0;
+          for (const c of next) {
+            if (seenIds.has(String(c.id))) continue;
+            seenIds.add(String(c.id)); all.push(c); added++; got++; fresh++;
+          }
+          /* Nothing new on the first page: this order is ignored, or starts
+             where the first pass did. Move to the next one. */
+          if (p === 0 && !fresh) { log(`  sort ${order} brought nothing new — trying the next order`); break; }
+          /* Three pages running with nothing new: this order is walking ground
+             already covered. Stop spending Kylas requests on it. */
+          dry = fresh ? 0 : dry + 1;
+          if (dry >= 3) { log(`  sort ${order} stopped adding — trying the next order`); break; }
+          if (reportedTotal != null && all.length >= reportedTotal) break;
+        }
+        if (got) reverseSort = reverseSort ? `${reverseSort} + ${order}` : order;
       }
       shortBy = reportedTotal - all.length;
-      log(`company search: oldest-first added ${added} across ${reversePages} page(s)` +
+      if (!added)
+        log(`! company search: no other sort order reached past the first ${all.length} — ` +
+            `this account's search ignores them all`);
+      log(`company search: the other end added ${added} across ${reversePages} page(s)` +
+          (reverseSort ? ` (sorted ${reverseSort})` : "") +
           (shortBy > 0 ? ` — still ${shortBy} short` : " — the list is complete"));
     }
 
-    lastSearch = { pages, total: all.length, windows, windowStalled, windowUsable, reversePages,
+    lastSearch = { pages, total: all.length, windows, windowStalled, windowUsable, reversePages, reverseSort,
                    reportedTotal,
                    short: shortBy > 0 ? shortBy : 0,
                    hitOurCap: full && pages >= MAX_PAGES,
@@ -446,6 +470,8 @@ export function createClient(key, {
      the entity is a parameter rather than a second copy of the crawl. */
   const page = (n, entity = "company", dir = "desc") =>
     `/v1/search/${entity}?sort=updatedAt,${dir}&page=${n}&size=${PAGE}`;
+  const pageBy = (n, order, entity = "company") =>
+    `/v1/search/${entity}?sort=${order}&page=${n}&size=${PAGE}`;
 
   return {
     raw: call,
@@ -634,6 +660,11 @@ export function createClient(key, {
 
     createContact: (body) => call("POST", "/v1/contacts", body),
     updateContact: (id, body) => call("PUT", `/v1/contacts/${id}`, body),
+    /* Sent the WHOLE company, read just before — see writeCompanyOffsite() in
+       handlers.mjs for why a partial body is not risked here. */
+    updateCompany: (id, body) => call("PUT", `/v1/companies/${id}`, body),
+    companyFields: () => call("GET",
+      "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200"),
     createCallLog: (body) => call("POST", "/v1/call-logs/", body),
   };
 }

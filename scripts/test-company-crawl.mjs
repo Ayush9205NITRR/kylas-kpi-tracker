@@ -45,17 +45,22 @@ check("every company is reached", r.list.length === total && ids(r.list).size ==
       `${r.list.length} of ${total}`);
 check("and it is not reported as short", r.search.short === 0 && !r.search.hitTheirCeiling,
       `short=${r.search.short}`);
-check("by reading oldest-first", r.search.reversePages > 0 && r.lines.some((l) => /oldest-first added/.test(l)),
-      r.lines.find((l) => /oldest-first added/.test(l)));
+check("by reading the list from the other end", r.search.reversePages > 0 && r.lines.some((l) => /the other end added/.test(l)),
+      r.lines.find((l) => /the other end added/.test(l)));
 
 console.log("\n2. bulk-imported companies sharing one timestamp (the window crawl stalls)");
 r = await crawl({ MOCK_SAME_STAMP: "1" }, 9932);
 check("every company is reached", r.list.length === r.search.reportedTotal, `${r.list.length} of ${r.search.reportedTotal}`);
 check("no duplicates", ids(r.list).size === r.list.length);
 
-console.log("\n3. a search that ignores the sort direction");
+console.log("\n3. a search that ignores updatedAt ascending but honours another order");
 r = await crawl({ MOCK_NO_BOUND: "1", MOCK_IGNORE_ASC: "1" }, 9933);
-check("stops after one page instead of reading the same rows again", r.search.reversePages === 1, `${r.search.reversePages} page(s)`);
+check("still reaches every company, by the next order that works",
+      r.list.length === r.search.reportedTotal && r.search.short === 0, `${r.list.length} of ${r.search.reportedTotal}, sorted ${r.search.reverseSort}`);
+
+console.log("\n3b. a search that ignores every order");
+r = await crawl({ MOCK_NO_BOUND: "1", MOCK_IGNORE_ASC: "1", MOCK_NO_ID_SORT: "1" }, 9935);
+check("tries each order once instead of reading the same rows again", r.search.reversePages <= 7, `${r.search.reversePages} page(s)`);
 check("and says the list is still short, by how much", r.search.short > 0 && r.search.hitTheirCeiling,
       `short=${r.search.short}`);
 
