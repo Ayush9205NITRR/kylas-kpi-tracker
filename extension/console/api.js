@@ -43,14 +43,21 @@
      console at a public server without the sign-in coming with it. */
   const isLocal = () => /^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(base);
 
+  /* A token for the next request. `interactive` is passed by exactly ONE
+     caller — signIn(), which runs because a person clicked. Every data request
+     is silent: it gets the token held, or one silent refresh, or "not signed
+     in". See the rules at the top of background.js; the short version is that
+     a data request which could open a window turned six requests into six
+     windows, one after another. */
   async function token({ interactive = false } = {}) {
     if (isLocal()) return "";
     const res = await chrome.runtime.sendMessage({ type: "enout-token", interactive })
-      .catch(() => null);
+      .catch((e) => ({ ok: false, code: "error", error: `the extension's background did not answer (${e?.message || e})` }));
     if (!res?.ok) {
       const err = new Error(res?.error || "not signed in");
       err.status = 401;
       err.needsSignIn = true;
+      err.code = res?.code || "";
       throw err;
     }
     signedInAs = res.email || "";
@@ -58,11 +65,13 @@
   }
   let signedInAs = "";
 
-  async function req(path, { timeout = 12000, method = "GET", body, interactive = false } = {}) {
+  /* No `interactive` option, and its absence is the point: nothing that loads
+     data can open a sign-in window. */
+  async function req(path, { timeout = 12000, method = "GET", body } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     try {
-      const jwt = await token({ interactive });
+      const jwt = await token();
       const res = await fetch(base + path, {
         signal: ctl.signal, method,
         headers: {
@@ -73,13 +82,14 @@
       });
       /* A 401 means the token was refused, not that the request was wrong.
          The commonest cause is the mundane one — it expired while the console
-         sat open — so throw the cached one away and ask once more, this time
-         letting Google show a window if it has to. Once: a second 401 after a
-         fresh token is a real refusal, and retrying it forever would put a
-         sign-in window in front of somebody on every call. */
+         sat open — so throw the held one away and try ONE silent refresh.
+         Silent: this used to ask interactively, which put a Google window in
+         front of an associate in the middle of a call because a token had
+         quietly aged out. If the refresh cannot be done silently, the answer
+         is "not signed in" and the "sign in" badge, not a surprise. */
       if (res.status === 401 && !isLocal() && !path.startsWith("/__retry")) {
         await chrome.runtime.sendMessage({ type: "enout-token", forget: true }).catch(() => {});
-        const fresh = await token({ interactive: true });
+        const fresh = await token();
         const again = await fetch(base + path, {
           signal: ctl.signal, method,
           headers: {
@@ -107,11 +117,19 @@
         err.problems = payload?.problems || null;
         throw err;
       }
-      if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
+      if (!state.online || state.needsSignIn) {
+        state = { ...state, online: true, reason: "", needsSignIn: false, signInCode: "" }; announce();
+      }
       return payload;
     } catch (e) {
       const reason = e.name === "AbortError" ? "proxy timed out" : e.message;
-      if (state.online || state.reason !== reason) { state = { ...state, online: false, reason }; announce(); }
+      /* needsSignIn is what lets the badge say "sign in" and mean it, instead
+         of "offline" and a prompt for a server address that was never wrong. */
+      const needsSignIn = !!e.needsSignIn;
+      if (state.online || state.reason !== reason || state.needsSignIn !== needsSignIn) {
+        state = { ...state, online: false, reason, needsSignIn, signInCode: e.code || "" };
+        announce();
+      }
       throw e;
     } finally {
       clearTimeout(timer);
@@ -135,11 +153,9 @@
 
     async health() {
       try {
-        /* INTERACTIVE, and only here. Opening the console is the one moment
-           an associate expects to be asked to sign in; a window appearing
-           mid-call because a token quietly expired is not. Everywhere else
-           refreshes silently and only escalates on a 401. */
-        const r = await req("/health", { timeout: 4000, interactive: true });
+        /* Silent, like every other request. When there is no token, the
+           badge says "sign in" and the person clicks it — see signIn(). */
+        const r = await req("/health", { timeout: 4000 });
         /* The proxy holds one Kylas key and Kylas says whose it is. That is the
            identity the views scope to — an associate sees their own numbers,
            an admin can switch to the team. */
@@ -175,11 +191,21 @@
     /* Who Google says is using this console. Empty on localhost, where there
        is no sign-in to speak of. */
     get signedInAs() { return signedInAs; },
-    /* Asks for a sign-in window even if a silent refresh would have failed
-       quietly — for a "sign in" affordance to call. */
+    /* THE ONLY PLACE A SIGN-IN WINDOW IS ASKED FOR, and it runs because
+       somebody clicked. The held token is dropped first so that clicking is
+       also how you switch Google accounts. Returns the health answer on
+       success and null on failure, with the reason in API.state. */
+    get needsSignIn() { return !!state.needsSignIn; },
     async signIn() {
+      if (isLocal()) return API.health();
       await chrome.runtime.sendMessage({ type: "enout-token", forget: true }).catch(() => {});
-      await token({ interactive: true });
+      try {
+        await token({ interactive: true });
+      } catch (e) {
+        state = { ...state, online: false, reason: e.message, needsSignIn: true, signInCode: e.code || "" };
+        announce();
+        return null;
+      }
       return API.health();
     },
     get role() { return state.role || "admin"; },

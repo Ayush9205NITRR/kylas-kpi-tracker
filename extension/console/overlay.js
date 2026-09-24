@@ -322,11 +322,32 @@
     linkEl.className = "link " + k;
     linkEl.textContent = k === "on" ? "Kylas"
       : k === "stale" ? "old proxy"
+      : k === "signin" ? "sign in"
       : k === "busy" ? "…" : "offline";
     linkEl.title = k === "stale" ? API.staleNote : (title || "");
   }
+  /* The state the badge should show for whatever API.state says now. Not
+     signed in is its own state, not a kind of offline: the server is fine and
+     the address is right, and offering to change the address — which is what
+     "offline" did — sent people looking for a fault that was not there. */
+  const linkFor = (st) => st.online ? ["on", `Kylas · ${st.user?.name || "connected"}`]
+    : st.needsSignIn ? ["signin", `Sign in with Google to continue — ${st.reason}`]
+    : ["off", `Server unreachable — ${st.reason}. Click to change the address.`];
+
   if (linkEl) linkEl.onclick = async () => {
     if (API.state.online) return;
+    /* THE ONE THING IN THE CONSOLE THAT OPENS A GOOGLE WINDOW, because a person
+       clicked it. On success the console reloads, so every panel that failed
+       for want of a token fetches again with one — rather than each needing its
+       own retry, and rather than half the screen staying stale. Nothing typed
+       is lost: the console keeps its working state in extension storage. */
+    if (API.state.needsSignIn) {
+      setLink("busy", "Waiting for Google sign-in…");
+      const ok = await API.signIn();
+      if (ok) { location.reload(); return; }
+      setLink(...linkFor(API.state));
+      return;
+    }
     const next = prompt(
       "Server address\n\n" +
       "The team server is  https://bd.enout.website\n" +
@@ -334,19 +355,16 @@
       "(run it with:  KYLAS_KEY=... node scripts/proxy.mjs)", API.base);
     if (next === null) return;
     setLink("busy", "Checking…");
-    const ok = await API.setBase(next.trim());
-    setLink(ok ? "on" : "off", ok ? `Kylas · ${ok.user?.name || ""}` : API.state.reason);
+    await API.setBase(next.trim());
+    setLink(...linkFor(API.state));
   };
 
-  API.onChange((st) => setLink(st.online ? "on" : "off",
-    st.online ? `Kylas · ${st.user?.name || "connected"}`
-              : `Proxy unreachable — ${st.reason}. Click to change the address.`));
+  API.onChange((st) => setLink(...linkFor(st)));
 
   (async () => {
     await API.configure();
-    const ok = await API.health();
-    setLink(ok ? "on" : "off", ok ? `Kylas · ${ok.user?.name || ""}`
-      : `Proxy unreachable — ${API.state.reason}. Click to change the address.`);
+    await API.health();
+    setLink(...linkFor(API.state));
   })();
 
   /* ── console → host page ─────────────────── */
