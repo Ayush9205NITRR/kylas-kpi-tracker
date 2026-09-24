@@ -446,7 +446,9 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
 
-.explorer{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.explorer{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;
+  /* .card clips its contents; the Source of Data panel has to hang below it. */
+  overflow:visible}
 .exhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .exhead h2{margin:0;font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);letter-spacing:-.012em}
 .exhead .exn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
@@ -462,6 +464,34 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .chip:hover{border-color:var(--blueLine)}
 .chip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 .chip.zero{opacity:.45}
+/* ── a multi-select dropdown, Airtable-style (Source of Data) ── */
+.msel{position:relative}
+.msel-btn{display:inline-flex;align-items:center;gap:8px;height:100%;min-height:34px;padding:6px 10px;
+  border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);color:var(--text);
+  font:inherit;font-size:var(--t-label);cursor:pointer;max-width:280px}
+.msel-btn:hover{border-color:var(--blueLine)}
+.msel-btn.on{border-color:var(--blue);background:var(--blueSoft)}
+.msel-k{color:var(--text2)}
+.msel-v{font-weight:var(--w-med);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msel-caret{color:var(--text3)}
+.msel-pop{position:absolute;z-index:30;top:calc(100% + 4px);left:0;width:320px;max-width:calc(100vw - 32px);
+  display:grid;gap:6px;padding:8px;background:var(--panel);border:1px solid var(--line2);
+  border-radius:var(--r);box-shadow:var(--sh)}
+.msel-find{width:100%;padding:7px 9px;border:1px solid var(--line2);border-radius:6px;
+  font:inherit;font-size:var(--t-label);background:var(--panel2);color:var(--text)}
+.msel-find:focus{outline:2px solid var(--blueLine);outline-offset:0;border-color:var(--blue)}
+.msel-list{max-height:280px;overflow-y:auto;display:grid;gap:1px}
+.msel-opt{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;padding:6px 8px;
+  border-radius:6px;cursor:pointer;font-size:var(--t-label)}
+.msel-opt:hover{background:var(--panel3)}
+.msel-opt.on{background:var(--blueSoft)}
+.msel-opt input{accent-color:var(--blue);margin:0}
+.msel-name{overflow-wrap:anywhere}
+.msel-n{font-variant-numeric:tabular-nums;color:var(--text3)}
+.msel-empty{margin:6px 8px;color:var(--text3);font-size:var(--t-label)}
+.msel-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px 0;
+  border-top:1px solid var(--line);color:var(--text2);font-size:var(--t-meta)}
+
 .chip .k{font-variant-numeric:tabular-nums;color:var(--text3)}
 .chip[aria-pressed="true"] .k{color:var(--onBlue);opacity:.8}
 .chip .sw{width:9px;height:9px;border-radius:2px;flex:none}
@@ -481,7 +511,7 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .kpi.rn{color:var(--text3)}
 .acctable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   overflow:clip;margin-top:12px}
-.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .95fr .9fr;gap:14px;
+.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .7fr .95fr .9fr;gap:14px;
   padding:8px 14px;border-bottom:1px solid var(--line);align-items:center;font-size:var(--t-label);
   cursor:pointer}
 .acctable .vr:last-child{border-bottom:0}

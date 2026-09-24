@@ -145,7 +145,7 @@
          every row rendered as its own id even when Kylas had sent the name.
          The fallback is applied once, after seeding. */
       if (!by.has(id)) by.set(id, {
-        id, name: "", contacts: [],
+        id, name: "", contacts: [], offsite: [],
         source: "", owner: "", ownerId: "", batch: "", health: "", lastCalledAt: null,
         rung: 0, stage: "", kylasStage: "", lastQualityAt: null, modes: {},
         pocs: { right: [], discovery: [], sql: [] },
@@ -161,6 +161,7 @@
                                  "health", "lastCalledAt", "kylasStage"])
         if (!co[k] && seed[k]) co[k] = seed[k];
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
+      if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
       return co;
     };
 
@@ -171,7 +172,8 @@
       if (!co?.id) continue;
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
-                           lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi });
+                           lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
+                           offsite: co.offsite });
     }
 
     for (const c of data) {
@@ -185,6 +187,8 @@
     for (const co of by.values()) {
       for (const c of co.contacts) {
         if (!co.source && c.source) co.source = c.source;
+        /* Typed on this browser's call card, possibly not saved yet. */
+        if (c.offsiteTimeline && !co.offsite.includes(c.offsiteTimeline)) co.offsite.push(c.offsiteTimeline);
         if (!co.owner && c.owner) co.owner = c.owner;
 
         /* The company sits at the best rung any of its POCs has reached. */
@@ -1721,7 +1725,8 @@
   /* Filter state for the explorer. A SET per dimension, same as the board's
      filters — "Apollo and LinkedIn but not Referral" is an ordinary question. */
   const ACC = { stage: null, stageLabel: "", sources: new Set(), kpis: new Set(),
-                fresh: new Set(), owner: "", sort: "recent", limit: 100 };
+                fresh: new Set(), owner: "", sort: "recent", limit: 100, offsite: "",
+                srcOpen: false, srcFind: "", srcScroll: 0 };
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
      options WOULD give rather than counting only what is already selected —
@@ -1730,6 +1735,8 @@
     if (skip !== "stage" && ACC.stage && stageOf(co) !== ACC.stage) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && ACC.sources.size && !ACC.sources.has(co.source || "—")) return false;
+    if (skip !== "offsite" && ACC.offsite &&
+        (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
     if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
     return true;
@@ -1790,12 +1797,70 @@
       const v = key === "source" ? (c.source || "—") : key === "kpi" ? kpiOf(c) : freshOf(c);
       cnt.set(v, (cnt.get(v) || 0) + 1);
     }
-    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${values.map((v) => {
+    const chip = (v) => {
       const n = cnt.get(v) || 0;
       return `<button class="chip${n ? "" : " zero"}" type="button" data-f="${key}" data-v="${esc(String(v))}"
         aria-pressed="${set.has(v)}">${swatch ? swatch(v) : ""}${esc(labelOf(v))}<span class="k tnum">${n}</span></button>`;
-    }).join("")}</div>`;
+    };
+    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${values.map(chip).join("")}</div>`;
   };
+
+  /* SOURCE OF DATA, the way Airtable's own filter works. It is free text in
+     Kylas, so a full account carries hundreds of distinct values: one chip each
+     buried the table under a screen of them, and a native select cannot pick
+     more than one or be searched. So a button that says what is picked, and a
+     panel with a search box, a checkbox per value with how many accounts it
+     holds (under the other filters), picked values pinned to the top, and a
+     Clear. Ticking applies at once, as in Airtable. */
+  const srcName = (v) => (v === "—" ? "No source" : v);
+  function sourcePicker(all, sources) {
+    const cnt = new Map();
+    for (const c of all.filter((c) => accMatch(c, "source"))) cnt.set(c.source || "—", (cnt.get(c.source || "—") || 0) + 1);
+    const sel = ACC.sources;
+    const ranked = [...sources].sort((a, b) => (sel.has(b) - sel.has(a))
+      || (cnt.get(b) || 0) - (cnt.get(a) || 0) || String(a).localeCompare(String(b)));
+    const summary = !sel.size ? "All" : sel.size === 1 ? srcName([...sel][0]) : `${sel.size} selected`;
+    return `<div class="msel" id="srcPick">
+      <button type="button" class="msel-btn${sel.size ? " on" : ""}" id="srcBtn"
+        aria-haspopup="true" aria-expanded="${ACC.srcOpen}">
+        <span class="msel-k">Source of Data</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.srcOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by Source of Data">
+        <input id="srcFind" class="msel-find" type="search" placeholder="Find a source…"
+          aria-label="Find a source" autocomplete="off" value="${esc(ACC.srcFind)}">
+        <div class="msel-list" id="srcList">
+          ${ranked.map((v) => `<label class="msel-opt${sel.has(v) ? " on" : ""}" data-name="${esc(srcName(v).toLowerCase())}">
+            <input type="checkbox" data-src="${esc(v)}"${sel.has(v) ? " checked" : ""}>
+            <span class="msel-name">${esc(srcName(v))}</span><span class="msel-n">${cnt.get(v) || 0}</span></label>`).join("")}
+          <p class="msel-empty" id="srcNoMatch" hidden>No source matches.</p>
+        </div>
+        <div class="msel-foot"><span>${sel.size ? `${sel.size} of ${ranked.length} selected` : `${ranked.length} sources`}</span>
+          <button type="button" class="gbtn sm" id="srcClear"${sel.size ? "" : " disabled"}>Clear</button></div>
+      </div>` : ""}
+    </div>`;
+  }
+
+  /* OFFSITE TIMELINE — when the prospect said their next offsite is. A
+     contact field, rolled up: a company matches a quarter if any of its
+     contacts named it. The quarter to call now is the one coming up. */
+  const OFFSITE_LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
+  const offLabel = (v) => OFFSITE_LABEL[v] || String(v || "").replace(/_/g, " ");
+  function offsiteSelect(all) {
+    const pool = all.filter((c) => accMatch(c, "offsite"));
+    const cnt = new Map();
+    let none = 0;
+    for (const c of pool) {
+      if (!(c.offsite || []).length) none++;
+      for (const v of c.offsite || []) cnt.set(v, (cnt.get(v) || 0) + 1);
+    }
+    const order = Object.keys(OFFSITE_LABEL);
+    const vals = [...cnt.keys()].sort((a, b) => ((order.indexOf(a) + 1) || 99) - ((order.indexOf(b) + 1) || 99));
+    return `<select id="accOffsite" aria-label="Offsite timeline">
+      <option value="">Any offsite timeline</option>
+      ${vals.map((v) => `<option value="${esc(v)}"${ACC.offsite === v ? " selected" : ""}>${esc(offLabel(v))} (${cnt.get(v)})</option>`).join("")}
+      <option value="none"${ACC.offsite === "none" ? " selected" : ""}>Not known yet (${none})</option>
+    </select>`;
+  }
 
   function explorerHTML(all, owners) {
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
@@ -1808,7 +1873,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size;
+    const any = ACC.stage || ACC.owner || ACC.sources.size || ACC.kpis.size || ACC.fresh.size || ACC.offsite;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -1845,15 +1910,16 @@
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
+          ${sourcePicker(all, sources)}
+          ${offsiteSelect(all)}
         </div>
-        ${chipRow(all, "Source", "source", sources, (v) => v, ACC.sources)}
         ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
           (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
         ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
           (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
         <div class="acctable">
           <div class="vr vh"><span>Company</span><span>Pipeline stage</span><span>Owner</span>
-            <span>Source</span><span>KPI status</span><span>Last call</span></div>
+            <span>Source of Data</span><span>Offsite</span><span>KPI status</span><span>Last call</span></div>
           ${shown.length ? shown.map((c) => {
             const d = daysSince(c.lastCalledAt), k = kpiOf(c);
             return `<div class="vr" data-id="${esc(c.id)}">
@@ -1861,6 +1927,7 @@
               <span>${esc(label(stageOf(c)) || "—")}</span>
               <span>${esc(c.owner || "—")}</span>
               <span>${esc(c.source || "—")}</span>
+              <span>${(c.offsite || []).length ? esc(c.offsite.map(offLabel).join(", ")) : "—"}</span>
               <span><i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i></span>
               <span class="lc"><i class="f-${freshOf(c)}"></i>${
                 d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}</span>
@@ -1883,7 +1950,7 @@
   const AXES = [
     { key: "state",  label: "KPI state" },
     { key: "stage",  label: "Pipeline stage" },
-    { key: "source", label: "Source" },
+    { key: "source", label: "Source of Data" },
   ];
   let GROUP_BY = "state";
 
@@ -2027,7 +2094,7 @@
       const o = CACHE.owners.find((x) => String(x.id) === String(FILTERS.owner));
       add("owner", "", `Allotted to: ${o?.name || FILTERS.owner}`);
     }
-    for (const [key, name, lab] of [["source", "Source", label],
+    for (const [key, name, lab] of [["source", "Source of Data", label],
                                     ["stage", "Stage", label],
                                     ["kpi", "KPI", (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k]]) {
       const st = FILTERS[key];
@@ -2365,11 +2432,51 @@
       if (set.has(val)) set.delete(val); else set.add(val);
       ACC.limit = 100; redraw();
     }));
+    /* ── the Source of Data picker ── */
+    const srcList = document.getElementById("srcList");
+    const findSrc = () => {
+      if (!srcList) return;
+      const q = ACC.srcFind.trim().toLowerCase();
+      let shown = 0;
+      srcList.querySelectorAll(".msel-opt").forEach((o) => {
+        o.hidden = !!q && !o.dataset.name.includes(q);
+        if (!o.hidden) shown++;
+      });
+      const none = document.getElementById("srcNoMatch");
+      if (none) none.hidden = shown > 0;
+    };
+    if (ACC.srcOpen && srcList) {
+      /* Re-opened by a redraw after a tick: put the reader back where they were. */
+      findSrc();
+      srcList.scrollTop = ACC.srcScroll;
+      document.getElementById("srcFind")?.focus({ preventScroll: true });
+    }
+    on("srcBtn", "click", () => { ACC.srcOpen = !ACC.srcOpen; ACC.srcScroll = 0; if (!ACC.srcOpen) ACC.srcFind = ""; redraw(); });
+    on("srcFind", "input", (e) => { ACC.srcFind = e.target.value; findSrc(); });
+    on("srcFind", "keydown", (e) => { if (e.key === "Escape") { ACC.srcOpen = false; ACC.srcFind = ""; redraw(); } });
+    srcList?.querySelectorAll("input[data-src]").forEach((cb) => cb.addEventListener("change", () => {
+      const v = cb.dataset.src;
+      if (cb.checked) ACC.sources.add(v); else ACC.sources.delete(v);
+      ACC.srcScroll = srcList.scrollTop; ACC.limit = 100; redraw();
+    }));
+    on("srcClear", "click", () => { ACC.sources.clear(); ACC.limit = 100; redraw(); });
+    /* A click anywhere else closes it, as a dropdown should. Bound once. */
+    if (!global.__srcOutside) {
+      global.__srcOutside = true;
+      document.addEventListener("mousedown", (e) => {
+        if (!ACC.srcOpen || e.target.closest?.("#srcPick")) return;
+        ACC.srcOpen = false; ACC.srcFind = "";
+        global.__srcRedraw?.();
+      });
+    }
+    global.__srcRedraw = redraw;
+    on("accOffsite", "change", (e) => { ACC.offsite = e.target.value; ACC.limit = 100; redraw(); });
     on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
     on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = "";
+      ACC.srcOpen = false; ACC.srcFind = "";
       ACC.limit = 100; redraw();
     });
 

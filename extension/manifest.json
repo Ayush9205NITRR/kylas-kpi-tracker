@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "Enout BD Call Console",
   "description": "Cold-call data-entry console overlaid on Kylas CRM.",
-  "version": "1.16.5",
+  "version": "1.17.0",
   "permissions": [
     "storage",
-    "identity"
+    "identity",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://bd.enout.website/*",

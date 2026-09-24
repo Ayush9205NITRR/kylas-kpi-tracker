@@ -307,6 +307,9 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     "Kylas Owner ID": String(c.ownerId || ""),
     "Source of Data": c.source || "",
     Remarks: c.remarks || "",
+    /* Captured on the call card and, until 1.17, saved nowhere at all. A base
+       without the column drops it and says so (upsertTolerant). */
+    "Offsite Timeline": c.offsiteTimeline || "",
     "Current Stage": c.stage || "",
     "Previous Stage": prev?.fields?.["Current Stage"] && prev.fields["Current Stage"] !== c.stage
       ? prev.fields["Current Stage"] : (prev?.fields?.["Previous Stage"] || ""),
@@ -597,7 +600,7 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
     source: f["Source of Data"] || "",
     nextCallDate: "", nextCallTime: "",
     remarks: f.Remarks || "",
-    offsiteTimeline: "",
+    offsiteTimeline: f["Offsite Timeline"] || "",
     owner: f.Owner || "",
     ownerId: String(f["Kylas Owner ID"] || ""),
     /* Airtable HAS these, unlike Kylas. A first load on a new machine gets the
@@ -636,7 +639,7 @@ export async function listTolerant(at, table, opts) {
 export const CONTACT_READ_FIELDS = [
   "Kylas Contact ID", "Name", "Salutation", "Designation", "LinkedIn", "Owner",
   "Kylas Owner ID",
-  "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks",
+  "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks", "Offsite Timeline",
   "Current Stage", "KPI Rank", "Kylas Updated At",
   "Vendor Info", "Mode of Meeting", "Service Offering", "Flagged", "Exit Reason",
   "Company",

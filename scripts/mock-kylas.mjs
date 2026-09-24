@@ -102,7 +102,12 @@ if (process.env.MOCK_MANY) {
       updatedAt: process.env.MOCK_SAME_STAMP === "1"
         ? new Date(Date.UTC(2026, 8, 18, 12, 0)).toISOString()
         : new Date(Date.UTC(2026, 8, 18, 12, 0) - i * 60_000).toISOString(),
-      customFieldValues: { cfSourceOfData: i % 3 ? "Round-Robin" : "Apollo",
+      /* MOCK_MANY_SOURCES=<n> spreads the bulk companies over n distinct
+         free-text sources, as the real account's hundreds of values are —
+         the case that buried the accounts table under a screen of chips. */
+      customFieldValues: { cfSourceOfData: process.env.MOCK_MANY_SOURCES
+                             ? (i % 5 === 0 ? "Round-Robin" : `Source ${i % Number(process.env.MOCK_MANY_SOURCES)}`)
+                             : i % 3 ? "Round-Robin" : "Apollo",
                            cfBatch: `Batch${(i % 2) + 1}` } };
   }
 }
@@ -279,6 +284,15 @@ createServer(async (req, res) => {
        would be walking an arbitrary order and its "oldest seen" cursor would
        mean nothing. */
     out = [...out].sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+    /* sort=updatedAt,asc — oldest first, which is how a client reads the far
+       end of a result window. MOCK_IGNORE_ASC=1 ignores the direction, so the
+       client's check that it really got older rows can be tested. */
+    if (/updatedAt,asc/i.test(url.searchParams.get("sort") || "") && process.env.MOCK_IGNORE_ASC !== "1")
+      out.reverse();
+    /* MOCK_NO_BOUND=1 refuses every updatedAt rule, as a search that cannot
+       filter on it would. */
+    if (process.env.MOCK_NO_BOUND === "1" && rules.some((r) => r.field === "updatedAt"))
+      return json(res, 400, { message: "Unsupported field updatedAt" });
     /* A company carries its owner's name in its own idNameStore, same as a
        contact does. Company 903 deliberately has no custom fields at all. */
     const withOwner = (c) => ({ ...c, metaData: { idNameStore: {

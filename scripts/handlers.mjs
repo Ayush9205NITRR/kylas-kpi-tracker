@@ -368,6 +368,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { companies: list, search: kylas.lastCompanySearch?.() || {} };
     });
 
+  /* OFFSITE TIMELINE PER COMPANY, from its contacts. It is a contact field —
+     what one person at the account said about their next offsite — and the
+     accounts list filters on it, so each company carries every value its
+     contacts gave. Read from the D1 copy, so it costs no Airtable request once
+     the copy exists; before that it is simply absent rather than slow. */
+  async function offsiteByCompany() {
+    if (!airtable) return new Map();
+    try {
+      const [contacts, cos] = await Promise.all([
+        listTolerant(airtable, "Contacts", { fields: ["Company", "Offsite Timeline"], pageSize: 100, maxPages: 2000 }),
+        airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
+      ]);
+      const kidOf = new Map(cos.map((r) => [r.id, String(r.fields?.["Kylas Company ID"] || "")]));
+      const out = new Map();
+      for (const r of contacts) {
+        const v = r.fields?.["Offsite Timeline"];
+        const kid = kidOf.get((r.fields?.Company || [])[0]);
+        if (!v || !kid) continue;
+        if (!out.has(kid)) out.set(kid, new Set());
+        out.get(kid).add(v);
+      }
+      return out;
+    } catch (e) {
+      log(`  offsite timeline: not available yet (${e.message.slice(0, 80)})`);
+      return new Map();
+    }
+  }
+
   /* What the last Kylas → Airtable sync managed, or null if it never ran. */
   const syncShared = shared("sync-state", { ttl: 5 * 60 * 1000, stale: 24 * 3600 * 1000 },
     async () => (rawAirtable ? (await readSyncState(rawAirtable)) : null));
@@ -567,10 +595,26 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out;
     };
+    /* IN PIECES WHEN IT IS BIG. One D1 value is capped at about 2 MB, and the
+       company list of a 17,926-company account compresses to around a
+       megabyte and grows with the account. Past PART characters it is split
+       across `${key}#0..n`, and the key itself holds "parts:n". The parts are
+       written before the pointer, so a reader never follows it to half a copy. */
+    const PART = Number(env.KEPT_PART_CHARS || 700_000);
     return {
       async get() {
-        const raw = await st.get(key);
+        let raw = await st.get(key);
         if (!raw) return null;
+        const m = /^parts:(\d+)$/.exec(raw);
+        if (m) {
+          const pieces = [];
+          for (let i = 0; i < Number(m[1]); i++) {
+            const p = await st.get(`${key}#${i}`);
+            if (p == null) return null;            /* a part expired: treat as absent */
+            pieces.push(p);
+          }
+          raw = pieces.join("");
+        }
         const text = await new Response(new Blob([fromB64(raw)]).stream()
           .pipeThrough(new DecompressionStream("gzip"))).text();
         return JSON.parse(text);
@@ -578,7 +622,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       async put(entry, ttlSeconds) {
         const gz = await new Response(new Blob([JSON.stringify(entry)]).stream()
           .pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
-        await st.put(key, toB64(new Uint8Array(gz)), { ttlSeconds });
+        const b64 = toB64(new Uint8Array(gz));
+        if (b64.length <= PART) { await st.put(key, b64, { ttlSeconds }); return; }
+        const n = Math.ceil(b64.length / PART);
+        for (let i = 0; i < n; i++)
+          await st.put(`${key}#${i}`, b64.slice(i * PART, (i + 1) * PART), { ttlSeconds });
+        await st.put(key, `parts:${n}`, { ttlSeconds });
       },
     };
   }
@@ -1052,6 +1101,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           return list.length ? list : null;
         });
         if (mirror) {
+          const offsite = await offsiteByCompany();
+          for (const co of mirror) co.offsite = [...(offsite.get(String(co.id)) || [])];
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
             if (co.id && co.name) companyNames.set(String(co.id), co.name);
@@ -1128,7 +1179,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const companies = crawl.companies.map((co) => ({ ...co }));
+      const offsite = await offsiteByCompany();
+      const companies = crawl.companies.map((co) => ({ ...co, offsite: [...(offsite.get(String(co.id)) || [])] }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the

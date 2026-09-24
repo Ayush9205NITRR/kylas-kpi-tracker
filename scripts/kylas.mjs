@@ -378,7 +378,43 @@ export function createClient(key, {
       }
     }
 
-    lastSearch = { pages, total: all.length, windows, windowStalled, windowUsable,
+    /* STILL SHORT: READ IT OLDEST-FIRST. The result window caps how FAR into
+       one ordering the search will go, not which records it will return — so
+       the same search sorted the other way serves the oldest 10,000. Together
+       the two ends cover twice the window (20,000) with no filter rule at all.
+       The updatedAt windows above can fail on an account whose search ignores
+       the rule, or whose bulk-imported companies share one timestamp; this
+       needs neither. On Ayush's account the windows added nothing and 7,926 of
+       17,926 were missing — this is what closes that. */
+    let reversePages = 0;
+    if (shortBy > 0 && all.length) {
+      log(`company search: still ${shortBy} short — reading the list oldest-first to reach the rest`);
+      const seenIds = new Set(all.map((c) => String(c.id)));
+      let rfull = true, added = 0;
+      for (let p = 0; rfull && p < MAX_PAGES; p++) {
+        const next = rows(await call("POST", page(p, "company", "asc"), shape.body(ownerId)));
+        reversePages++;
+        rfull = next.length === PAGE;
+        let fresh = 0;
+        for (const c of next) {
+          if (seenIds.has(String(c.id))) continue;
+          seenIds.add(String(c.id)); all.push(c); added++; fresh++;
+        }
+        /* A search that ignored the sort returns the newest again: nothing new
+           on the first page means the other end is not reachable this way. */
+        if (p === 0 && !fresh && next.length) {
+          log(`! company search: the oldest-first read returned only companies already held — ` +
+              `this account's search ignores the sort direction`);
+          break;
+        }
+        if (reportedTotal != null && all.length >= reportedTotal) break;
+      }
+      shortBy = reportedTotal - all.length;
+      log(`company search: oldest-first added ${added} across ${reversePages} page(s)` +
+          (shortBy > 0 ? ` — still ${shortBy} short` : " — the list is complete"));
+    }
+
+    lastSearch = { pages, total: all.length, windows, windowStalled, windowUsable, reversePages,
                    reportedTotal,
                    short: shortBy > 0 ? shortBy : 0,
                    hitOurCap: full && pages >= MAX_PAGES,
@@ -408,8 +444,8 @@ export function createClient(key, {
 
   /* Both searches page the same way and both meet the same result window, so
      the entity is a parameter rather than a second copy of the crawl. */
-  const page = (n, entity = "company") =>
-    `/v1/search/${entity}?sort=updatedAt,desc&page=${n}&size=${PAGE}`;
+  const page = (n, entity = "company", dir = "desc") =>
+    `/v1/search/${entity}?sort=updatedAt,${dir}&page=${n}&size=${PAGE}`;
 
   return {
     raw: call,

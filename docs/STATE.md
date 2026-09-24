@@ -82,6 +82,24 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A result window read as the end of the list.** Kylas' company search serves
+10,000 rows and stops, while reporting the true total (17,926 on Ayush's
+account). The updatedAt-window crawl meant to reach the rest added nothing
+there. Now the crawl reads the same search oldest-first as well: the window
+caps how far into one ordering it goes, so the two ends cover 20,000 with no
+filter rule. `test-company-crawl.mjs` covers:
+- a search that refuses the rule;
+- bulk-import identical timestamps;
+- a search that ignores the sort (reported, not looped).
+
+**A field captured and saved nowhere.** Offsite Timeline was on the call card
+from the start, but it was never read from Kylas and never written to Kylas or
+Airtable, so it lived only in one browser. Since 1.17 it is written to the
+Contacts table's `Offsite Timeline` column (run repair-base to add it) and
+rolled up per company for the accounts filter. It is not yet written to Kylas:
+the `cfOffsiteTimeline` picklist's expected value format is unverified, and a
+rejected value would fail the whole save.
+
 **Heavy work inside a request.** `/companies` ran the whole Kylas crawl inline
 when there was no copy yet. Past Kylas' 10,000-row window that is 100+
 requests, and Cloudflare refused it: "Too many subrequests by single Worker
