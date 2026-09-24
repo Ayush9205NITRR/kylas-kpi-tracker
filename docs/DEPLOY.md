@@ -153,39 +153,53 @@ If you get anything else, see *When it goes wrong* below.
 
 ---
 
-## Part 6 · Put the login in front
+## Part 6 · Sign-in with Google
 
-Dashboard → **Zero Trust** → **Access** → **Applications** → **Add an
-application** → **Self-hosted**.
+Cloudflare Access would have done this, but it asks for a card on file even on
+its free tier. So the Worker checks identity itself: the extension signs the
+associate in with Google, and the Worker verifies the resulting token against
+Google's published keys. Nothing to pay for, and nobody has to install
+anything.
 
-1. **Application name**: `BD Call Console`
-2. **Session duration**: 24 hours is reasonable. Shorter means signing in more.
-3. **Domain**: `bd.enout.website`
-4. Add a policy:
-   - **Name**: `Enout staff`
-   - **Action**: Allow
-   - **Include** → **Emails ending in** → `@enout.in`
-5. Under **Settings → CORS**, allow your extension's origin
-   (`chrome-extension://…`), allow credentials, and allow the `GET`, `POST`
-   and `OPTIONS` methods. Without this the browser blocks the extension before
-   the request is even sent.
+At **console.cloud.google.com**, with a project selected:
 
-**How people sign in.** If you have Google Workspace on enout.in, add Google
-as an identity provider under **Settings → Authentication** and they click
-"Sign in with Google". If you do not, Cloudflare's built-in **One-time PIN**
-needs no setup at all — it emails a six-digit code. Either is fine.
+**Branding** — app name `Enout BD Call Console`, your address as support
+email.
 
-Test it: open `https://bd.enout.website/health` in a browser. You should be
-asked to sign in, and afterwards see the JSON.
+**Audience** — **Internal** if you have Google Workspace on enout.in: only
+your organisation can sign in, and there is no warning screen. **External**
+otherwise, with each associate added under Test users; it works, but they each
+click past a "Google hasn't verified this app" screen once.
 
----
+**Data Access → Add or remove scopes** — add `openid`,
+`.../auth/userinfo.email` and `.../auth/userinfo.profile`. All non-sensitive,
+so no Google review.
+
+**Clients → Create client**
+- Application type: **Web application** — NOT "Chrome Extension". The Worker
+  verifies a signed ID token, which is the web sign-in flow; a Chrome
+  Extension client returns an opaque access token that the verifier rejects.
+- Authorized redirect URI, exactly, trailing slash included:
+  `https://infkkmfegekmocfgjlhahdlheccojkdb.chromiumapp.org/`
+
+That address is Chrome's own callback for extension sign-in, derived from the
+extension's id.
+
+Copy the **Client ID** into `GOOGLE_CLIENT_ID` in `wrangler.toml` — already
+done for the current one. It is not a secret: it names the application rather
+than authorising anything, and its job is to be the value every token is
+checked against, so that a Google token minted for somebody else's app cannot
+be used as a login here. The client **secret** beside it is not used and
+should not be copied anywhere.
+
+Redeploy after any change here: `npx wrangler deploy`.
 
 ## Part 7 · Update the extension
 
 The published extension only knows how to talk to a laptop. One line changes.
 
-1. In `extension/manifest.json`, add `"https://bd.enout.website/*"` to
-   `host_permissions`, and raise `version`.
+1. Already done: `host_permissions` carries `https://bd.enout.website/*`, the
+   `identity` permission is added, and the version is 1.7.0.
 2. Build it: `scripts/package-extension.sh`
 3. Upload the zip at **chrome.google.com/webstore/devconsole** → your item →
    **Package** → **Upload new package**, and submit.
@@ -195,7 +209,8 @@ While you wait, everything keeps working on localhost exactly as it does now.
 
 When the update ships, each associate clicks the connection badge in the
 console once and points it at `https://bd.enout.website`. After that it is
-remembered.
+remembered, and opening the console asks them to sign in with Google — once,
+then silently for as long as their Google session lasts.
 
 ---
 
@@ -223,6 +238,17 @@ duplicate-guard in memory, where a restart would lose it.
 **500, "Set KYLAS_KEY".** The secret did not save. Run
 `npx wrangler secret list` to see what it actually has.
 
+**500, "AUTH is not set".** Deliberate: there is no default, because a server
+holding these credentials must not be one forgotten variable away from being
+open. Set `AUTH` in `wrangler.toml` and redeploy.
+
+**401 "not signed in" in the console.** The token was refused. The reason is
+in the Worker's log rather than the response — deliberately, since naming the
+failed check helps whoever is probing as much as whoever is debugging. Run
+`npx wrangler tail` and look for `! auth refused:`. The usual causes are a
+`GOOGLE_CLIENT_ID` that does not match the one the extension was built with,
+and an address outside `ALLOWED_EMAIL_DOMAIN`.
+
 **The console says offline, but `curl` works.** Almost always the CORS settings
 in part 6.5, or an `ALLOWED_ORIGIN` that does not match your real extension id.
 
@@ -239,18 +265,19 @@ did not land.
 
 Honest list, so nothing is a surprise:
 
-1. **The nightly jobs do not run on Cloudflare yet.** The sync, the call-log
+1. **The nightly jobs do not run on Cloudflare.** The sync, the call-log
    rollup and the snapshot are still scripts that need a machine. They are
-   written into `wrangler.toml` as commented-out schedules, and they stay
-   commented out until the jobs themselves are ported — a cron firing into a
-   Worker that cannot answer it produces a daily failure and no sync. **Until
-   then, keep running them wherever they run now.**
-2. **The Access token's signature is not verified.** `REQUIRE_ACCESS` checks
-   the assertion is *present*, which catches a misconfigured route or a DNS
-   record pointing past the login. It would not stop someone who could reach
-   the Worker's origin directly. So do not publish this on a second hostname
-   that bypasses Access.
-3. **Nobody has run this against a live Kylas account.** Every "it works" above
-   means "it works against the mocks, verified by a test" — a real bar, since
-   the mocks reproduce Kylas' rate limiting and Airtable's rejections, but not
-   the same as your account.
+   written into `wrangler.toml` as commented-out schedules and stay that way
+   until the jobs themselves are ported — a cron firing into a Worker with no
+   scheduled handler produces a daily failure and no sync. **Until then, keep
+   running them wherever they run now.** This is the last thing standing
+   between you and not needing a laptop at all.
+2. **Nobody has run this against a live Kylas account.** Everything verified
+   means "verified against the mocks, by a test" — a real bar, since the mocks
+   reproduce Kylas' rate limiting and Airtable's rejections, and the Worker
+   itself was run on Cloudflare's own runtime with a real D1 database. It is
+   still not the same as your account.
+3. **The Airtable base has never had `repair-base.mjs` run on it.** Unrelated
+   to hosting, and still costing you on every save: `Phones` is dropped, the
+   `RCA` and `Team` tables do not exist, and every company open scans the whole
+   Contacts table for want of a rollup.
