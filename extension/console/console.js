@@ -606,7 +606,18 @@ function renderScope(){
 }
 
 function render(){
-  renderCallbar();renderQueue();renderPace();renderBasic();renderRight();validate();
+  renderCallbar();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
+}
+/* Research has its own pane to the right of the events when the screen is
+   wide enough (or as the third tab when it is narrow); in between it sits at
+   the top of the events pane. */
+const RES_PANE=matchMedia("(min-width:1281px), (max-width:960px)");
+const researchInPane=()=>RES_PANE.matches;
+RES_PANE.addEventListener?.("change",()=>{if(DATA[cur])render();});
+function renderResearchPane(){
+  const X=document.getElementById("formX");if(!X)return;
+  X.innerHTML="";
+  if(researchInPane())X.appendChild(researchCard(rec()));
 }
 
 /* Every section is a card: header band, then body. Structure does the
@@ -964,7 +975,8 @@ const RES_ALL=RESEARCH_SECTIONS.flatMap(s=>s.f);
 function researchCard(a){
   const id=String(a.companyId||"");
   const c=el("section","card");c.id="s-research";
-  if(RES_FOR!==id){RES_FOR=id;RES_OPEN=false;}
+  /* Its own pane has the room: open. Folded when it shares the events pane. */
+  if(RES_FOR!==id){RES_FOR=id;RES_OPEN=researchInPane();}
   c.appendChild(el("div","cardH",`<h2>Account research</h2><span class="sub"></span>`));
   const b=el("div","cardB grp");c.appendChild(b);
   if(!id){b.appendChild(el("p","rs-note","Link this contact to a company to see its research."));return c;}
@@ -1086,10 +1098,14 @@ function renderRight(){
   document.getElementById("phR").textContent=n?n+(n===1?" event":" events"):"nothing yet";
   document.getElementById("tabCount").textContent=n?String(n):"";
 
+  /* Account research lives in its own pane to the right (renderResearchPane).
+     Only when there is no room for that pane does it sit here, first, folded
+     to one line so it costs the empty call almost nothing. */
+  if(!researchInPane())F.appendChild(researchCard(a));
+
   if(a.stage==="Could Not Connect"){
     F.appendChild(group("No answer",[el("p","skipnote",
       "Nobody picked up — nothing to write down here. Pick a day to try again on the left, then hit <kbd>↵</kbd>.")]));
-    F.appendChild(researchCard(a));
     return;
   }
 
@@ -1122,8 +1138,6 @@ function renderRight(){
   g3.appendChild(field("How are you meeting them?","f-mm",isReq(a,"f-mm"),
     select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
   F.appendChild(g3c);
-  /* The account, last: it is the same for every contact at the company. */
-  F.appendChild(researchCard(a));
 }
 
 /* One chip per event type, one card per chip. Tapping a lit chip removes its

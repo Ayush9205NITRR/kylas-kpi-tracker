@@ -970,3 +970,8 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 #s-focus .fctl{border-bottom:0;padding-bottom:0;margin-bottom:0}
 a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .rlist a{color:var(--blue)}
+/* research in its own (narrow) pane: one column, and the pane already says
+   what it is */
+#formX .rlist{grid-template-columns:1fr}
+#formX #s-research>.cardH h2{display:none}
+#formX{padding-left:16px;padding-right:16px}

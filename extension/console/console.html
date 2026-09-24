@@ -56,6 +56,7 @@
       <div class="tabbar" role="tablist">
         <button role="tab" data-tab="basic" aria-selected="true">Basic info</button>
         <button role="tab" data-tab="more" aria-selected="false">Event &amp; vendor <span class="n" id="tabCount"></span></button>
+        <button role="tab" data-tab="research" aria-selected="false">Research</button>
       </div>
       <div class="split" id="split" data-tab="basic">
         <section class="pane" id="paneL">
@@ -65,6 +66,12 @@
         <section class="pane" id="paneR">
           <div class="ph">Event &amp; vendor<span class="c" id="phR"></span></div>
           <div class="pscroll" id="scrollR"><div class="pwrap" id="formR"></div></div>
+        </section>
+        <!-- The account's research, to the right of the events: read before
+             the call, never typed into. Its own pane when there is room. -->
+        <section class="pane" id="paneX">
+          <div class="ph">Account research<span class="c" id="phX"></span></div>
+          <div class="pscroll" id="scrollX"><div class="pwrap" id="formX"></div></div>
         </section>
       </div>
     </div>

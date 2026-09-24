@@ -66,7 +66,9 @@ const COMPANIES = {
       /* The company picklist "Offsite Timeline (BD - New)". The internal name
          here is invented on purpose: the server must find the field by its
          label, never by a guessed name. */
-      cfOffsiteTimelineBdNew: 9103,
+      /* MOCK_OFFSITE_KEY: the internal key Kylas gave the field, which need
+         not say "offsite" — the console finds it by its label. */
+      [process.env.MOCK_OFFSITE_KEY || "cfOffsiteTimelineBdNew"]: 9103,
       cfSourceOfData: "COLD_CALLING", cfAccountHealthBd: "AMBER",
       cfLastCalledAtDate: "2026-04-17", cfWebsite: "http://www.seats.aero",
     },
@@ -350,7 +352,7 @@ createServer(async (req, res) => {
   if (p === "/v1/entities/company/fields") {
     return json(res, 200, { content: [
       { name: "cfOffsiteTimeline", displayName: "Offsite Timeline (old)", type: "TEXT_FIELD" },
-      { name: "cfOffsiteTimelineBdNew", displayName: "Offsite Timeline (BD - New)", type: "PICK_LIST",
+      { name: process.env.MOCK_OFFSITE_KEY || "cfOffsiteTimelineBdNew", displayName: "Offsite Timeline (BD - New)", type: "PICK_LIST",
         picklist: { picklistValues: [
           { id: 9101, name: "JAN_MAR", displayName: "Jan - Mar" },
           { id: 9102, name: "APR_JUN", displayName: "Apr - Jun" },

@@ -364,8 +364,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const kylasCompanies = shared("kylas-companies",
     { ttl: COMPANY_TTL, stale: 14 * 24 * 3600 * 1000, background: false }, async () => {
       const raw = await kylas.companies();
+      /* Kylas' own Offsite Timeline field(s), found by LABEL — the internal
+         key of "Offsite Timeline (BD - New)" need not say "offsite". */
+      const offKeys = new Set(((await companyFieldsShared().catch(() => null))?.offsite || []).map((f) => f.name));
       const list = [];
       for (const co of raw) {
+        const cf = co?.customFieldValues || {};
         const known = lookupName(co, "ownerId", co.ownerId);
         if (known && co.ownerId) owners.set(String(co.ownerId), known);
         /* Seed the name cache too — the contact mapper then never has to fetch
@@ -373,18 +377,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co?.id && co?.name) companyNames.set(String(co.id), co.name);
         list.push({
           ...toConsoleCompany(co),
+          offsiteRaw: Object.fromEntries(Object.entries(cf).filter(([k, v]) =>
+            (offKeys.has(k) || /offsite/i.test(k)) && v != null && v !== "")),
           owner: known || (await ownerName(co.ownerId)) || "",
           ownerId: String(co.ownerId ?? ""),
         });
       }
+      const carrying = list.filter((c) => Object.keys(c.offsiteRaw).length).length;
+      log(`companies crawl: ${carrying} of ${list.length} carry Kylas' Offsite Timeline` +
+          (offKeys.size ? ` (field ${[...offKeys].join(", ")})` : " — no company field labelled Offsite was found"));
       return { companies: list, search: kylas.lastCompanySearch?.() || {} };
     });
 
-  /* OFFSITE TIMELINE PER COMPANY, from its contacts. It is a contact field —
-     what one person at the account said about their next offsite — and the
-     accounts list filters on it, so each company carries every value its
-     contacts gave. Read from the D1 copy, so it costs no Airtable request once
-     the copy exists; before that it is simply absent rather than slow. */
   /* OFFSITE TIMELINE, DERIVED — per company, the quarters its contacts'
      offsite rows name in their Timeline, Past and Now (scripts/offsite.mjs).
      Nobody types it; it follows the event rows. Held until one of the three
@@ -1880,6 +1884,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     kylasCompaniesAgeSeconds: await kylasCompanies.age(),
     syncedAt: (await syncState())?.at || null,
     saves: saves ? await saves.backlog() : null,
+    /* Why the Accounts view's offsite filter is empty, when it is: which
+       Kylas company fields look like it, and whether the crawl carries them. */
+    offsite: await (async () => {
+      const spec = await companyFieldsShared().catch((e) => ({ error: e.message }));
+      const crawl = await kylasCompanies.peek().catch(() => null);
+      const withRaw = (crawl?.companies || []).filter((c) => c.offsiteRaw && Object.keys(c.offsiteRaw).length);
+      return {
+        fields: spec.error ? { error: spec.error.slice(0, 200) }
+          : spec.offsite.map((f) => ({ name: f.name, label: f.label, options: f.options.map((o) => `${o.id}=${o.label}`) })),
+        crawled: crawl?.companies?.length ?? null,
+        carryAValue: withRaw.length,
+        examples: withRaw.slice(0, 3).map((c) => ({ id: c.id, raw: c.offsiteRaw })),
+      };
+    })(),
   });
 
   /* THE SCHEDULED UPKEEP, every few minutes. Everything a request would

@@ -225,7 +225,9 @@ same file through `scripts/offsite.mjs`; `test-offsite.mjs` pins the parser.
 There is no Airtable column for it any more. Since 1.19.2 Kylas' own company
 field ("Offsite Timeline (BD - New)", a picklist — its option ids are named
 from `/v1/entities/company/fields`) is read into quarters too, and the
-Accounts view shows the union. It is NOT on the call card any more (Ayush,
+Accounts view shows the union. The field is found by its LABEL (its internal
+key need not contain "offsite"); `/cache-status` → `offsite` and the crawl's
+log line say which field was found and how many companies carry a value. It is NOT on the call card any more (Ayush,
 2026-09-24): an account fact, not a contact field.
 
 **Focus lists and research on the call card** (1.19.3). The focus control
@@ -233,7 +235,9 @@ Accounts view shows the union. It is NOT on the call card any more (Ayush,
 its own card in the SECOND pane, under "Where this stands". Research is the
 team's own curated row — Company Database (`RESEARCH_BASE`) → "Company List",
 keyed by "Kylas Company Id" — shown read-only in the THIRD pane in four
-sections, the ten fields Ayush named, with "Open in Airtable". The Worker's
+sections, the ten fields Ayush named, with "Open in Airtable". Since 1.19.4 it is
+its own pane to the RIGHT of Event & vendor (over 1280px wide; top of the
+events pane from 960 to 1280; a third tab below 960). The Worker's
 AIRTABLE_PAT needs read access to that base. The Accounts view has no focus
 panel (it did not survive a BD with 100 picks); the focus filter lists every
 focus account, each BD's, the deprioritized and the rest.

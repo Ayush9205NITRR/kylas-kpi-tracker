@@ -36,6 +36,9 @@ Do not undo these without asking. Each was arrived at after a rejected alternati
 1. **Split screen, everything on one page.** Contact left, events right, each scrolling
    independently, tabs below 960px. A wizard / stepper / one-question-per-screen flow was built and
    rejected — a real conversation jumps around and a stepper forces backwards navigation.
+   Since 2026-09-24 (Ayush) a third, narrower pane — **Account research**, read-only — sits to
+   the right of the events when the console is wider than 1280px; between 960 and 1280 it
+   folds into the top of the events pane, and below 960 it is a third tab.
 2. **Budget, timeline and pax stay free text.** They hold what the prospect actually said —
    "approx 8L, not signed off". Never convert to dropdowns or range pickers.
 3. **Event detail is a fill-in-the-blank sentence**, not four labelled boxes:
