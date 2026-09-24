@@ -433,6 +433,29 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     if (OFFSITE_QUARTERS.includes(s.toUpperCase())) return [s.toUpperCase()];
     return quartersOf(s.replace(/_/g, " "));
   };
+  /* THE SAME FIELD, AS THE TEAM'S COMPANY LIST HOLDS IT. The Kylas → Airtable
+     field map copies Kylas' cfOffsiteTimeline into Company List → "Offsite
+     Timeline" ("Jul - Sep"); ~170 rows have one. Read whole (only the filled
+     ones, two pages) and kept half an hour, so the Accounts view shows it even
+     before a Kylas crawl that carries the field. */
+  const listOffsiteShared = shared("company-list-offsite", { ttl: 30 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 }, async () => {
+    const rows = await researchAt.listAll(RESEARCH_TABLE, {
+      fields: ["Kylas Company Id", "Offsite Timeline"], formula: "NOT({Offsite Timeline} = '')",
+      pageSize: 100, maxPages: 60 });
+    const out = {};
+    for (const r of rows) {
+      const kid = String(r.fields?.["Kylas Company Id"] || "").trim();
+      const q = quartersLoose(flat(r.fields?.["Offsite Timeline"]));
+      if (kid && q.length) out[kid] = [...new Set([...(out[kid] || []), ...q])];
+    }
+    return out;
+  });
+  const listOffsite = async () => {
+    if (!researchAt) return new Map();
+    try { return new Map(Object.entries(await listOffsiteShared()).map(([k, v]) => [k, new Set(v)])); }
+    catch (e) { log(`  offsite from Company List: not available (${e.message.slice(0, 80)})`); return new Map(); }
+  };
+
   async function kylasOffsite(companies) {
     if (!companies.some((c) => c.offsiteRaw && Object.keys(c.offsiteRaw).length)) return new Map();
     const spec = await companyFieldsShared().catch(() => ({ offsite: [] }));
@@ -1287,9 +1310,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (mirror) {
           /* Kylas' own field rides on the crawl, when there is one. */
           const crawlNow = await kylasCompanies.peek().catch(() => null);
-          const [offsite, fromKylas] = await Promise.all([offsiteByCompany(), kylasOffsite(crawlNow?.companies || [])]);
+          const [offsite, fromKylas, fromList] = await Promise.all([offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite()]);
           for (const co of mirror) co.offsite = OFFSITE_QUARTERS.filter((q) =>
-            offsite.get(String(co.id))?.has(q) || fromKylas.get(String(co.id))?.has(q));
+            [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
             if (co.id && co.name) companyNames.set(String(co.id), co.name);
@@ -1369,9 +1392,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const [offsite, fromKylas] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies)]);
+      const [offsite, fromKylas, fromList] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite()]);
       const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
-        offsite: OFFSITE_QUARTERS.filter((q) => offsite.get(String(co.id))?.has(q) || fromKylas.get(String(co.id))?.has(q)) }));
+        offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))) }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the

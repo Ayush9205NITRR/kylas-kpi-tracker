@@ -65,6 +65,10 @@ function matches(row, formula, all) {
     return v !== "" && v.slice(0, 10) > when.slice(0, 10);
   }
 
+  /* NOT({Field} = '') — "is filled", as Airtable reads it. */
+  const filled = formula.match(/^NOT\(\{([^}]+)\}\s*=\s*''\)$/i);
+  if (filled) { const v = row.fields[filled[1]]; return v != null && v !== "" && !(Array.isArray(v) && !v.length); }
+
   const m = formula.match(/^\{([^}]+)\}\s*=\s*'(.*)'$/);
   if (!m) return false;
   const [, field, want] = m;

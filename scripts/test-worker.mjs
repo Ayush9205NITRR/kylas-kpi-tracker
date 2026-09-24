@@ -449,6 +449,16 @@ check('the card reads the curated Company List row, flattened',
       /airtable\.com\/appRESEARCH\//.test(readR.body.url || ''),
       JSON.stringify(readR.body).slice(0, 160));
 
+/* The Company List's own "Offsite Timeline" (Kylas cfOffsiteTimeline, copied
+   by the team's field map) reaches the accounts list too. */
+await fetch('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', { method: 'POST',
+  headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
+  body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': '903', 'Offsite Timeline': 'Apr - Jun' } }] }) });
+const offList = await get(await coldWorker(44), '/companies?owner=all', { RESEARCH_BASE: 'appRESEARCH' });
+const shore = (offList.body.companies || []).find((c) => String(c.id) === '903');
+check('the accounts list reads Offsite Timeline from the Company List', shore?.offsite?.includes('APR_JUN'),
+      JSON.stringify(shore?.offsite));
+
 /* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */
 /* Cloudflare counts every outside request AND every database query an
    invocation makes, and refuses past a cap: 50 on the Free plan. The Kylas

@@ -227,7 +227,10 @@ field ("Offsite Timeline (BD - New)", a picklist — its option ids are named
 from `/v1/entities/company/fields`) is read into quarters too, and the
 Accounts view shows the union. The field is found by its LABEL (its internal
 key need not contain "offsite"); `/cache-status` → `offsite` and the crawl's
-log line say which field was found and how many companies carry a value. It is NOT on the call card any more (Ayush,
+log line say which field was found and how many companies carry a value. Since
+1.19.5 the Company List's "Offsite Timeline" column is read as well — the
+team's Kylas Field Map copies Kylas `cfOffsiteTimeline` (company) into it,
+~170 rows filled — so the filter works before a crawl carries the field. It is NOT on the call card any more (Ayush,
 2026-09-24): an account fact, not a contact field.
 
 **Focus lists and research on the call card** (1.19.3). The focus control
