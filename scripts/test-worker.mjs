@@ -190,6 +190,17 @@ check('a malformed body is a 400, not a 502', bad.status === 400, `got ${bad.sta
    entry, which is the closest thing to a cold isolate available here. */
 const coldWorker = async (n) => (await import(`../worker/index.mjs?cold=${n}`)).default;
 
+/* The privacy policy is the one page anyone can open — the Web Store needs its URL. */
+{
+  const { readFileSync } = await import('node:fs');
+  const served = (await import('../worker/privacy.mjs')).default;
+  check('worker/privacy.mjs matches PRIVACY.md (run scripts/gen-privacy.mjs)',
+        served === readFileSync(new URL('../PRIVACY.md', import.meta.url), 'utf8'));
+  const pr = await (await coldWorker(0)).fetch(new Request('https://bd.enout.website/privacy'), withStore({ ...ENV, AUTH: 'google' }), {});
+  const html = await pr.text();
+  check('/privacy is public HTML, no sign-in', pr.status === 200 && /<h1>Privacy policy/.test(html) && !/<script/i.test(html), `status ${pr.status}`);
+}
+
 const noKey = await (await coldWorker(1)).fetch(
   new Request('https://bd.enout.website/health', { headers: { Origin: ORIGIN } }),
   withStore({ ...ENV, KYLAS_KEY: '' }), {});

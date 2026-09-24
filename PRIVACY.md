@@ -1,6 +1,6 @@
 # Privacy policy — Enout BD Call Console
 
-_Last updated: 24 September 2026_
+_Last updated: 25 September 2026_
 
 This is the privacy policy for the **Enout BD Call Console** Chrome extension, published by Enout
 for use by its own business development team.
@@ -41,7 +41,9 @@ is inert on every site except the CRM, and it does not record which pages a user
 
 One place: a server the organisation operates at `bd.enout.website`, hosted on Cloudflare Workers.
 From there it is written to the organisation's own **Kylas CRM** and its own **Airtable** base,
-which are the systems the data came from and belongs to. Cloudflare acts only as the host of that
+which are the systems the data came from and belongs to. The same server also records an
+associate's focus-list choices (which accounts they picked or dropped, and why) in that Airtable
+base, and shows read-only account research from the organisation's own Airtable. Cloudflare acts only as the host of that
 server; the organisation controls it.
 No data is transmitted to Enout as the extension's publisher, to any server we operate, or to any
 third party. There is no advertising, no profiling and no resale of any kind.
@@ -61,8 +63,10 @@ for analytics, and not shared with anyone.
 ## What is stored in the browser
 
 `chrome.storage` holds the associate's working state: the contacts currently being worked, notes
-typed but not yet saved, a local log of calls made, and preferences such as the chosen grouping
-and density. This exists so a refresh or a closed tab does not lose notes taken during a live
+typed but not yet saved, a local log of calls made, calls queued while the server is unreachable,
+a copy of the list of companies allotted to them (name, owner, pipeline stage, source, last-call
+date — up to about 18,000 companies, which is why the extension asks for `unlimitedStorage`), and
+preferences such as the chosen grouping and density. This exists so a refresh or a closed tab does not lose notes taken during a live
 call, and so that saves made while the helper is unreachable can be queued and sent when it
 returns.
 

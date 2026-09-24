@@ -40,6 +40,7 @@ import { createHandlers } from "../scripts/handlers.mjs";
 import { d1Store, kvStore } from "../scripts/store.mjs";
 import { createGoogleAuth } from "../scripts/google-auth.mjs";
 import { createMirror } from "../scripts/mirror.mjs";
+import PRIVACY from "./privacy.mjs";
 
 /* Built per isolate, keyed on nothing: one Worker serves one account. The
    promise itself is cached, not the result, so ten requests arriving at a cold
@@ -250,6 +251,13 @@ export default {
         Vary: "Origin",
       } : undefined });
 
+    /* THE PRIVACY POLICY, public. The Chrome Web Store needs a URL anyone can
+       open, and it holds nothing but PRIVACY.md — so it is answered before
+       sign-in, and it is the only thing that is. */
+    if (url.pathname === "/privacy" && request.method === "GET")
+      return new Response(privacyPage(PRIVACY), {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" } });
+
     /* BEFORE ANYTHING ELSE. Not after the route lookup, and not inside the
        handlers: an unauthenticated request must not reach code that holds a
        Kylas key, even code that would only have 404ed. */
@@ -309,3 +317,34 @@ export default {
     }
   },
 };
+
+/* Just enough Markdown for PRIVACY.md: headings, lists, paragraphs, bold,
+   italics, code. Escaped first, so nothing in the file is taken as HTML. */
+function privacyPage(md) {
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/(^|\W)_(.+?)_(?=\W|$)/g, "$1<i>$2</i>");
+  const out = [];
+  let para = [], list = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${inline(para.join(" "))}</p>`);
+    if (list.length) out.push(`<ul>${list.map((l) => `<li>${inline(l)}</li>`).join("")}</ul>`);
+    para = []; list = [];
+  };
+  for (const line of md.split("\n")) {
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    const li = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (li) { if (para.length) { const p = para; para = []; out.push(`<p>${inline(p.join(" "))}</p>`); } list.push(li[1]); continue; }
+    if (!line.trim()) { flush(); continue; }
+    if (list.length) flush();
+    para.push(line.trim());
+  }
+  flush();
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy policy — Enout BD Call Console</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#1C1B2E;background:#fff}
+h1{font-size:28px}h2{font-size:20px;margin-top:32px}code{background:#F5F5F8;padding:1px 4px;border-radius:4px}
+@media(prefers-color-scheme:dark){body{background:#12111B;color:#ECEBF5}code{background:#211F2F}}</style>
+</head><body>${out.join("\n")}</body></html>`;
+}
