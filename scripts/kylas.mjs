@@ -878,5 +878,9 @@ export function toConsoleCompany(co) {
     source: stageCode(cf.cfSourceOfData),
     batch: pick(cf.cfBatch, null),
     website: pick(cf.cfWebsite, co?.website, null),
+    /* Kylas' own Offsite Timeline field(s) on the company, as stored — a
+       picklist id, an option object or text. The handlers turn them into
+       quarters with the field's options, which only they have. */
+    offsiteRaw: Object.fromEntries(Object.entries(cf).filter(([k, v]) => /offsite/i.test(k) && v != null && v !== "")),
   };
 }

@@ -2609,7 +2609,14 @@
       clearTimeout(srcTimer);
       srcTimer = setTimeout(() => { ACC.limit = 100; redraw(); }, 250);
     });
-    on("srcText", "keydown", (e) => { if (e.key === "Escape") { ACC.srcOpen = false; redraw(); } });
+    /* Enter applies it now and closes, as Airtable does; Escape closes too.
+       Either way the text typed is kept. */
+    on("srcText", "keydown", (e) => {
+      if (e.key !== "Escape" && e.key !== "Enter") return;
+      e.preventDefault();
+      clearTimeout(srcTimer);
+      ACC.srcText = e.target.value; ACC.srcOpen = false; ACC.limit = 100; redraw();
+    });
     /* A click anywhere else closes it, as a dropdown should. Bound once. */
     if (!global.__srcOutside) {
       global.__srcOutside = true;

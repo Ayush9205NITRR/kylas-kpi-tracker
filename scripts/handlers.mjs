@@ -41,7 +41,7 @@ import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from ".
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
-import { offsiteOf } from "./offsite.mjs";
+import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -402,6 +402,42 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     }
     return out;
   });
+  /* KYLAS' OWN OFFSITE TIMELINE — the company field "Offsite Timeline
+     (BD - New)", a picklist. The search hands back an option id, so the
+     field's options are read once (six hours) to name it; the name, or text
+     typed into an older text field, is read into quarters the same way the
+     event rows are. */
+  const companyFieldsShared = shared("kylas-company-fields", { ttl: 6 * 3600 * 1000, stale: 30 * 24 * 3600 * 1000 }, async () => {
+    const r = await kylas.companyFields();
+    const fields = Array.isArray(r) ? r : r?.content || r?.data || [];
+    return { offsite: fields.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`))
+      .map((f) => ({ name: f.name, label: f.displayName || "", options: findOptions(f) || [] })) };
+  });
+  const quartersLoose = (t) => {
+    const s = String(t ?? "").trim();
+    if (OFFSITE_QUARTERS.includes(s.toUpperCase())) return [s.toUpperCase()];
+    return quartersOf(s.replace(/_/g, " "));
+  };
+  async function kylasOffsite(companies) {
+    if (!companies.some((c) => c.offsiteRaw && Object.keys(c.offsiteRaw).length)) return new Map();
+    const spec = await companyFieldsShared().catch(() => ({ offsite: [] }));
+    const out = new Map();
+    for (const c of companies) {
+      const q = new Set();
+      for (const [k, v] of Object.entries(c.offsiteRaw || {})) {
+        const opts = spec.offsite.find((f) => f.name === k)?.options || [];
+        for (const x of Array.isArray(v) ? v : [v]) {
+          let t = x && typeof x === "object" ? (x.displayName ?? x.name ?? x.value ?? x.id) : x;
+          const opt = opts.find((o) => String(o.id) === String(t) || o.code === t);
+          if (opt) t = `${opt.code} ${opt.label}`;
+          for (const k2 of quartersLoose(t)) q.add(k2);
+        }
+      }
+      if (q.size) out.set(String(c.id), q);
+    }
+    return out;
+  }
+
   async function offsiteByCompany() {
     if (!airtable) return new Map();
     try { return await offsiteShared(); } catch (e) {
@@ -1203,8 +1239,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           return list.length ? list : null;
         });
         if (mirror) {
-          const offsite = await offsiteByCompany();
-          for (const co of mirror) co.offsite = [...(offsite.get(String(co.id)) || [])];
+          /* Kylas' own field rides on the crawl, when there is one. */
+          const crawlNow = await kylasCompanies.peek().catch(() => null);
+          const [offsite, fromKylas] = await Promise.all([offsiteByCompany(), kylasOffsite(crawlNow?.companies || [])]);
+          for (const co of mirror) co.offsite = OFFSITE_QUARTERS.filter((q) =>
+            offsite.get(String(co.id))?.has(q) || fromKylas.get(String(co.id))?.has(q));
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
             if (co.id && co.name) companyNames.set(String(co.id), co.name);
@@ -1284,8 +1323,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const offsite = await offsiteByCompany();
-      const companies = crawl.companies.map((co) => ({ ...co, offsite: [...(offsite.get(String(co.id)) || [])] }));
+      const [offsite, fromKylas] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies)]);
+      const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
+        offsite: OFFSITE_QUARTERS.filter((q) => offsite.get(String(co.id))?.has(q) || fromKylas.get(String(co.id))?.has(q)) }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the

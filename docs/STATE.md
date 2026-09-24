@@ -222,7 +222,11 @@ reads the quarters out of the Timeline on offsite rows (event type blank or
 containing "offsite"), Past and Now. "Q3" is a calendar quarter; with "FY" in
 the text it is the Indian financial year (Q1 = Apr–Jun). The Worker imports the
 same file through `scripts/offsite.mjs`; `test-offsite.mjs` pins the parser.
-There is no Airtable column for it any more.
+There is no Airtable column for it any more. Since 1.19.2 Kylas' own company
+field ("Offsite Timeline (BD - New)", a picklist — its option ids are named
+from `/v1/entities/company/fields`) is read into quarters too, and the
+Accounts view shows the union. It is NOT on the call card any more (Ayush,
+2026-09-24): an account fact, not a contact field.
 
 **Focus lists and research live on the call card** (1.19), in "the account"
 card at the bottom of the right column: ★ Focus / Not picked / Deprioritize

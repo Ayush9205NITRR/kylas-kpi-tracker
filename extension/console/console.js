@@ -186,24 +186,9 @@ const qualOf=a=>hasSignal(a)?"Right POC":"MQL";
 /* swap just the badge — re-rendering the call bar would steal focus mid-typing */
 function refreshQual(){
   const a=rec(),q=qualOf(a),n=document.querySelector(".qual");
-  paintOffsite(a);
   if(!n)return;
   n.textContent=q;n.className="qual "+(q==="MQL"?"mql":"poc");
   renderQueue();
-}
-/* OFFSITE TIMELINE IS DERIVED, never typed — like MQL → Right POC. It is the
-   quarters the offsite rows' Timeline names, Past and Now (offsite.js), so it
-   follows the sentence as it is written. */
-function offsiteHTML(a){
-  const q=Offsite.offsiteOf(a);
-  if(!q.length)return `<span class="ot-none">Not known yet — write a month or quarter in an offsite row's “when?”</span>`;
-  const said=rowsOf(a).filter(r=>Offsite.isOffsiteRow(r)&&Offsite.quartersOf(r.timeline).length).map(r=>r.timeline.trim());
-  return q.map(k=>`<span class="ot-q">${esc(Offsite.LABEL[k]||k)}</span>`).join("")+
-    `<span class="ot-from">from “${esc([...new Set(said)].join("”, “"))}”</span>`;
-}
-function paintOffsite(a){
-  const n=document.getElementById("f-ot");
-  if(n)n.innerHTML=offsiteHTML(a);
 }
 const rec=()=>{const a=DATA[cur];
   for(const r of [...(a.past||[]),...(a.current||[])]) if(!r.rowKey)r.rowKey=rowKey();if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
@@ -1125,8 +1110,9 @@ function renderRight(){
   const g3=el("div","cardB grp");g3c.appendChild(g3);
   g3.appendChild(field("Who handles this for them today?","f-vi",isReq(a,"f-vi"),
     select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
-  const ot=el("div","ot");ot.id="f-ot";ot.tabIndex=-1;ot.innerHTML=offsiteHTML(a);
-  g3.appendChild(field("Offsite timeline","f-ot",false,ot));
+  /* No Offsite timeline here (Ayush, 2026-09-24): it is an ACCOUNT fact,
+     read from the event rows' "when?" and Kylas' own company field, and shown
+     on the Accounts view — not one more field on a contact's card. */
 
   const lab=el("label","cb1"+(a.serviceOffering?" on":""));
   lab.style.marginBottom="0";
@@ -1349,9 +1335,9 @@ function missing(){
   /* ONCE THE ACCOUNT IS LIVE, THE FOLLOW-UP IS NOT OPTIONAL.
      Ayush, 2026-09-19: "whenever someone selects a stage at or above
      Activation, Next Call Date must be filled... otherwise we cannot properly
-     fix the next follow-up." The same for the offsite timeline — those are the
-     two things that decide when this account is worth touching again, and an
-     account at MQL with neither is one nobody will pick back up.
+     fix the next follow-up." The offsite timeline used to be required here
+     too; since 2026-09-24 it is not on the card at all — it is derived from
+     the event rows and Kylas' company field, so there is nothing to type.
 
      EXIT STAGES ARE EXCLUDED even though they sit above the floor. Closing
      Loops - Low Value is rung 21 and Not Interested is a dead end; demanding a
@@ -1360,7 +1346,6 @@ function missing(){
      collecting anything. */
   if (rung(a) >= MILESTONE.engaged.floor && !EXIT_STAGES.includes(a.stage)) {
     need(!a.nextCallDate, "A day to call back", "f-next");
-    need(!Offsite.offsiteOf(a).length, "Offsite timeline", "f-ot");
   }
   return m;
 }
