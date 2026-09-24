@@ -36,6 +36,7 @@ export function createAirtable(pat, baseId, {
 } = {}) {
   const API = apiUrl;
   const GAP = gap;
+  const STUCK_MS = 60_000;
   let chain = Promise.resolve();
 /* A rejected promise must not stay in the chain: `chain.then(...)` off a
    rejected chain rejects with the ORIGINAL error, so one failed request would
@@ -49,7 +50,11 @@ export function createAirtable(pat, baseId, {
       const wait = last + GAP - Date.now();
       return wait > 0 ? sleep(wait) : null;
     }).then(() => { last = Date.now(); return fn(); });
-    chain = run.then(() => {}, () => {});
+    /* The next request waits for this one — but not for ever. A request that
+       was cancelled mid-flight (its caller went away) may never settle on a
+       hosted runtime, and without a limit it would hold every later request
+       on this client with it. */
+    chain = Promise.race([run.then(() => {}, () => {}), sleep(STUCK_MS)]);
     return run;
   };
 
@@ -69,6 +74,9 @@ export function createAirtable(pat, baseId, {
           method,
           headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json" },
           body: body ? JSON.stringify(body) : undefined,
+          /* A request that never answers must fail, not hang: the retry logic and
+             the save journal know what to do with a failure. */
+          signal: AbortSignal.timeout(30_000),
         });
         const text = await res.text();
         if (res.status === 429) { const w = 1000 * 2 ** i; log(`airtable 429, waiting ${w}ms`); await sleep(w); continue; }

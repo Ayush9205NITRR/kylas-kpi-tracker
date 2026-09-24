@@ -1375,6 +1375,7 @@ async function flushOutbox(){
   const n=await API.drain(
     (job,res)=>{
       const a=find(job);if(!a)return;
+      if(res?.queued){a.syncError=null;a.syncedAt=new Date().toISOString();trackJob(a,res);return;}
       if(res?.kid&&!a.kid){a.kid=String(res.kid);a.pendingCreate=false;}
       a.syncError=res?.rejected
         ?"rejected: "+((res.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||res.error)
@@ -1388,20 +1389,81 @@ async function flushOutbox(){
   return n;
 }
 
+/* ── saves the server has taken but not yet carried out ───────────────
+   The server now answers a save as soon as it is stored, and sends it on to
+   Kylas and Airtable behind the reply — 3.5 s of waiting at two rate-limited
+   APIs that the associate no longer sits through. What that reply cannot carry
+   is the outcome: the new contact's Kylas id, an Airtable column it had to
+   drop, a value Kylas refused after all. So each queued save is remembered
+   here, by the job id the server gave it, and asked about until it settles.
+   Kept on disk, so closing the console does not lose track of one. */
+let JOBS={};
+const saveJobs=()=>Store.setSetting("saveJobs",JOBS).catch(()=>{});
+const recordFor=(j)=>DATA.find(a=>j.lid&&a.lid===j.lid)||DATA.find(a=>j.kid&&String(a.kid)===String(j.kid));
+function trackJob(a,res){
+  if(!res?.queued||!res.job)return false;
+  JOBS[res.job]={lid:a?.lid||"",kid:a?.kid||"",name:a?.pocName||"",at:Date.now()};
+  saveJobs();watchJobs();
+  return true;
+}
+let watching=false;
+async function watchJobs(){
+  if(watching)return;
+  watching=true;
+  try{
+    while(Object.keys(JOBS).length){
+      /* Quick at first — most saves are done in a few seconds — then patient,
+         for one that is waiting out a retry. */
+      const oldest=Math.min(...Object.values(JOBS).map(j=>j.at));
+      const age=Date.now()-oldest;
+      await new Promise(r=>setTimeout(r,age<30e3?2000:age<5*60e3?15e3:60e3));
+      let res;
+      try{res=await API.saveStatus(Object.keys(JOBS));}catch{continue;}
+      let changed=false;
+      for(const [id,st] of Object.entries(res.jobs||{})){
+        const j=JOBS[id];if(!j)continue;
+        const a=recordFor(j);
+        if(st.state==="done"){
+          if(a)applySaved(a,st.result||{});
+          delete JOBS[id];changed=true;
+        }else if(st.state==="dead"){
+          const e=st.error||{};
+          const why=(e.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||e.message||"Kylas refused it";
+          if(a)a.syncError=(e.status>=400&&e.status<500?"rejected: ":"not saved to Kylas: ")+why;
+          toast(`${j.name||"A contact"} NOT saved to Kylas — ${why}`,a?()=>{cur=DATA.indexOf(a);render();}:undefined);
+          delete JOBS[id];changed=true;
+        }else if(st.state==="queued"&&st.retryAt){
+          /* Kylas or Airtable did not answer; the server will try again. Said
+             on the row, not as an error — nothing is lost. */
+          if(a){a.syncError=`waiting for Kylas — retrying at ${new Date(st.retryAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`;changed=true;}
+        }else if(st.state==="unknown"&&Date.now()-j.at>24*3600e3){
+          delete JOBS[id];changed=true;
+        }
+      }
+      if(changed){saveJobs();persist();renderQueue();}
+    }
+  }finally{watching=false;}
+}
+
 let warnedMissing=false;
-async function syncToKylas(a,call){
-  a.syncing=true;renderQueue();
-  await flushOutbox().catch(()=>{});
-  const res=await API.queueSave(a,call);
-  a.syncing=false;
-  if(res.ok){
+/* What a finished save tells the record — from a direct reply, or from the
+   status of a queued one. */
+function applySaved(a,res){
     /* ANY id coming back, not only one from a create. When the proxy recognises
        a retry of a save it already carried out, it answers with the id it made
        last time and `created:false` — and a record that took that answer as
        "no id for you" stayed pending and offered itself for creation again on
        the next save. The question is whether this record has an id, not which
        request earned it. */
-    if(res.kid&&!a.kid){a.kid=String(res.kid);a.pendingCreate=false;}
+    if(res.kid&&!a.kid){
+      a.kid=String(res.kid);a.pendingCreate=false;
+      /* A queued save learns its Kylas id seconds after the reply, and the
+         company may have been re-read from the server in between — bringing
+         the new contact in as a second record. Keep this one (it carries what
+         the associate typed) and drop the copy. */
+      const dup=DATA.findIndex(x=>x!==a&&String(x.kid)===a.kid);
+      if(dup>-1){DATA.splice(dup,1);if(cur>dup)cur--;}
+    }
     a.syncedAt=new Date().toISOString();
     /* Airtable is where the KPIs come from, so its failure has to surface even
        though Kylas took the write. */
@@ -1416,6 +1478,21 @@ async function syncToKylas(a,call){
       warnedMissing=true;
       toast(`Airtable is missing ${res.airtable.missing.join(", ")} — saved without it. Run repair-base.mjs.`);
     }
+    if(res.created)toast(`${a.pocName} created in Kylas`);
+}
+
+async function syncToKylas(a,call){
+  a.syncing=true;renderQueue();
+  await flushOutbox().catch(()=>{});
+  const res=await API.queueSave(a,call);
+  a.syncing=false;
+  if(res.ok&&res.queued){
+    /* Stored on the server, which is what "saved" means to the associate. The
+       outcome follows in a few seconds; watchJobs() writes it onto the row. */
+    a.syncedAt=new Date().toISOString();a.syncError=null;
+    trackJob(a,res);
+  }else if(res.ok){
+    applySaved(a,res);
   }else{
     a.syncError=res.error||"not sent";
   }
@@ -1429,7 +1506,6 @@ async function syncToKylas(a,call){
     toast(`${a.pocName} NOT saved to Kylas — ${why}`,()=>{cur=DATA.indexOf(a);render();jump("f-ph");});
   }
   else if(!res.ok)toast(`${a.pocName} saved locally — Kylas unreachable, queued`);
-  else if(res.created)toast(`${a.pocName} created in Kylas`);
 }
 
 async function boot(){
@@ -1450,5 +1526,8 @@ async function boot(){
      "keep dialling, it will go when the link is back" true without the
      associate having to save something else to trigger it. */
   flushOutbox().catch(()=>{});
+  /* Saves queued on the server before the console was last closed. */
+  JOBS=(await Store.getSetting("saveJobs"))||{};
+  watchJobs();
 }
 boot();

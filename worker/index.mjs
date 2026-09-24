@@ -63,7 +63,7 @@ function handlers(env, log) {
      rather than rebuilt — and abandoned half-way — on each cold one. */
   /* mirror: the D1 copy of the Airtable tables the console reads, so a read
      is a query next door instead of pages of Airtable (scripts/mirror.mjs). */
-  return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log,
+  return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log, db: env.DB || null,
                                      mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
@@ -286,12 +286,22 @@ export default {
          report is kept for the next request instead of thrown away. */
       const pending = handler(url, parsed);
       ctx?.waitUntil?.(pending.catch(() => {}));
-      for (const p of building?.() || []) ctx?.waitUntil?.(p);
-      const body = await pending;
-      /* And whatever the handler left running — the D1 half of a write-through,
-         a record read back after a save. */
-      for (const p of building?.() || []) ctx?.waitUntil?.(p);
-      return json(body, 200, origin);
+      /* EVERYTHING LEFT RUNNING, UNTIL THERE IS NOTHING LEFT — including work
+         that other background work starts later (a queued save starts its
+         Airtable writes, which start the read-back of two records). Work not
+         covered here is cancelled when the request ends, and on this runtime a
+         cancelled request's half-finished fetch is never settled: anything
+         queued behind it on the same client waits for ever. That jammed the
+         whole instance's Airtable access the first time it happened. */
+      ctx?.waitUntil?.((async () => {
+        await pending.catch(() => {});
+        for (let i = 0; i < 20; i++) {
+          const left = building?.() || [];
+          if (!left.length) break;
+          await Promise.allSettled(left);
+        }
+      })());
+      return json(await pending, 200, origin);
     } catch (e) {
       const status = e.status || 502;
       log(`! ${url.pathname} ${status} ${e.message}`);

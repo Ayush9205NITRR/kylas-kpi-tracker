@@ -32,6 +32,7 @@ export function createClient(key, {
 } = {}) {
   const BASE = base;
   const GAP = gap;
+  const STUCK_MS = 60_000;
   let chain = Promise.resolve();
 
 /* A rejected promise must not stay in the chain: `chain.then(...)` off a
@@ -48,7 +49,8 @@ export function createClient(key, {
       const wait = last + GAP - Date.now();
       return wait > 0 ? sleep(wait) : null;
     }).then(() => { last = Date.now(); return attempt(method, path, body); });
-    chain = run.then(() => {}, () => {});
+    /* Not for ever — see the same line in airtable.mjs. */
+    chain = Promise.race([run.then(() => {}, () => {}), sleep(STUCK_MS)]);
     return run;
   };
 
@@ -58,6 +60,9 @@ export function createClient(key, {
         method,
         headers: { "api-key": key, "Content-Type": "application/json" },
         body: body ? JSON.stringify(body) : undefined,
+        /* A request that never answers must fail, not hang: the retry logic and
+           the save journal know what to do with a failure. */
+        signal: AbortSignal.timeout(30_000),
       });
       const text = await res.text();
       if (res.status === 429) {

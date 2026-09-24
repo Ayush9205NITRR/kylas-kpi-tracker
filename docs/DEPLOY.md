@@ -276,7 +276,26 @@ shows each table's `mirror: … built — N row(s)` line.
 - **The `*/5 * * * *` cron** does all the refreshing. When nobody has used
   the console for an hour, it makes no outside request at all.
 - **`/cache-status`** says how many rows each table holds, how old each copy
-  is, and when the sync last ran.
+  is, when the sync last ran, and how many saves are queued, done or dead.
+
+## How saves stay fast (1.16)
+
+- **Answered as soon as they are stored.** A save goes into a queue in D1
+  (`scripts/save-queue.mjs`) and the console gets its reply in about 10 ms.
+  Kylas and Airtable receive it behind the reply, in the same couple of seconds
+  as before; nobody waits for that part any more.
+- **Saves for one contact run in order, one at a time**, so a new contact is
+  created in Kylas exactly once however fast the saves come.
+- **Failures:**
+  - A value Kylas refuses (400/404/409/422) is final. The console shows it on
+    the row.
+  - Anything else is retried from the 5-minute job: at 1 min, 5 min, 15 min,
+    1 h, 3 h and 6 h, then given up and reported on the row.
+- **The console asks how each save went.** It polls `/save-status` and fills in
+  the Kylas id, or the reason a save failed, when it arrives. It remembers what
+  it is waiting for, so closing the console loses nothing.
+- **Consoles older than 1.16** don't send `queue: true`, so they still get the
+  finished save in the reply, exactly as before.
 
 ---
 

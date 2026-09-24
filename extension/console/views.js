@@ -474,6 +474,14 @@
       if (rep && typeof rep === "object") for (const [k, v] of Object.entries(rep)) DISK.report[k] = v;
       const rca = await Store.getSetting("rcaCache");
       if (rca && typeof rca === "object") for (const [k, v] of Object.entries(rca)) DISK.rca[k] = v;
+      /* The team roster and the trend chart too — the last two screens that
+         opened on a spinner. Shown at once, asked again behind it. */
+      const team = await Store.getSetting("teamCache");
+      if (team?.list && !TEAM.list.length) {
+        TEAM.list = team.list; TEAM.owners = team.owners || []; TEAM.configured = team.configured !== false;
+      }
+      const snap = await Store.getSetting("snapCache");
+      if (snap?.rows && !SNAP.rows && snap.days === SNAP.days) SNAP.rows = snap.rows;
     } catch { /* storage is a convenience here, never a dependency */ }
   }
 
@@ -738,7 +746,7 @@
   const SNAP = { days: 60, rows: null, error: "", loading: false };
 
   function trendChart() {
-    if (SNAP.loading) return `<p class="vnote">Loading the trend…</p>`;
+    if (SNAP.loading && !SNAP.rows) return `<p class="vnote">Loading the trend…</p>`;
     if (SNAP.error) return `<p class="vnote">No trend yet — ${esc(SNAP.error)}.</p>`;
     const rows = SNAP.rows || [];
     if (rows.length < 2)
@@ -793,12 +801,18 @@
   };
 
   function ensureSnapshots(onReady) {
-    if (SNAP.rows || SNAP.error || SNAP.loading) return;
+    /* Once a session, even when a stored copy is already on screen. */
+    if (SNAP.fetched || SNAP.error || SNAP.loading) return;
     SNAP.loading = true;
+    const held = !!SNAP.rows;
     API.snapshots(SNAP.days)
-      .then((r) => { SNAP.rows = r.snapshots || []; SNAP.error = r.reason || ""; })
-      .catch((e) => { SNAP.error = e.message; })
-      .finally(() => { SNAP.loading = false; onReady(); });
+      .then((r) => {
+        SNAP.rows = r.snapshots || []; SNAP.error = r.reason || "";
+        Store.setSetting("snapCache", { days: SNAP.days, rows: SNAP.rows }).catch(() => {});
+      })
+      /* A failed refresh keeps the stored copy rather than replacing it with an error. */
+      .catch((e) => { if (!held) SNAP.error = e.message; })
+      .finally(() => { SNAP.loading = false; SNAP.fetched = true; onReady(); });
   }
 
   /* ── the period report ─────────────────────────────────────────────── */
@@ -997,14 +1011,20 @@
   const TEAM = { list: [], owners: [], at: 0, loading: false, error: "", configured: true };
 
   function ensureTeam(repaint) {
-    if (TEAM.loading || (TEAM.at && Date.now() - TEAM.at < SWR_TTL)) return TEAM.loading;
+    const held = TEAM.list.length > 0;
+    if (TEAM.loading || (TEAM.at && Date.now() - TEAM.at < SWR_TTL)) return TEAM.loading && !held;
     TEAM.loading = true;
     API.team()
-      .then((r) => { TEAM.list = r.team || []; TEAM.owners = r.owners || [];
-                     TEAM.configured = r.configured !== false; TEAM.error = ""; })
-      .catch((e) => { TEAM.error = e.message; })
+      .then((r) => {
+        TEAM.list = r.team || []; TEAM.owners = r.owners || [];
+        TEAM.configured = r.configured !== false; TEAM.error = "";
+        Store.setSetting("teamCache", { list: TEAM.list, owners: TEAM.owners, configured: TEAM.configured })
+          .catch(() => {});
+      })
+      .catch((e) => { if (!held) TEAM.error = e.message; })
       .finally(() => { TEAM.loading = false; TEAM.at = Date.now(); repaint?.(); });
-    return true;
+    /* Holding a stored roster? Then nothing is "loading" as far as the view is concerned. */
+    return !held;
   }
 
   function openTeamSheet(repaint) {

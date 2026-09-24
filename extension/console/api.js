@@ -250,7 +250,13 @@
     /* Who the funnel counts, and every name it could count. */
     team: () => req("/team", { timeout: 20000 }),
     teamSave: (team) => req("/team-save", { method: "POST", body: { team }, timeout: 20000 }),
-    save: (contact, call) => req("/save", { method: "POST", body: { contact, call }, timeout: 20000 }),
+    /* queue: true — "answer once it is safe, I will ask how it went". The
+       server stores the save and replies at once; Kylas and Airtable get it
+       behind the reply (scripts/save-queue.mjs). A server without a queue
+       ignores the flag and answers with the finished save, as before. */
+    save: (contact, call) => req("/save", { method: "POST", body: { contact, call, queue: true }, timeout: 20000 }),
+    /* How queued saves went: { jobs: { id: { state, result, error, retryAt } } }. */
+    saveStatus: (ids) => req(`/save-status?ids=${encodeURIComponent(ids.join(","))}`, { timeout: 15000 }),
   };
 
   /* ── outbox ──────────────────────────────────────────────────────────

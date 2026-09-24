@@ -82,6 +82,19 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**Background work nobody waited for jams the instance.** On Workers, anything
+still running when a request ends is cancelled. A cancelled fetch is never
+settled, and the Airtable and Kylas clients each keep ONE queue per instance,
+so every later call on that instance waited behind it for ever. It happened
+the first time a queued save started its post-save read-back after the
+request's `waitUntil` list had been taken. Two fixes:
+- `worker/index.mjs` keeps each request alive until `building()` is empty,
+  looping to catch work that other work starts.
+- The client queues stop waiting on any one request after 60 s, and every
+  fetch has a 30 s timeout.
+
+Any new background work must go through `inFlight()`.
+
 **A page cap that reads as a total.** `listAll` stops at 40 pages (4,000 rows)
 unless told otherwise, and the report's reads did not say otherwise. The call
 log passes 4,000 rows in about four days at this team's volume, so a month's

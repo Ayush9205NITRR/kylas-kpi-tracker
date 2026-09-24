@@ -40,12 +40,13 @@ import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
+import { createSaveQueue } from "./save-queue.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null } = {}) {
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
   const STARTED = new Date().toISOString();
@@ -108,6 +109,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     ...(mirror ? { onWrite: mirror.written } : {}),
   }) : null;
   const airtable = rawAirtable && mirror ? mirrored(rawAirtable, mirror) : rawAirtable;
+  /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
+     Hosted runtime only — on a laptop there is nothing to gain. */
+  const saves = db ? createSaveQueue({ db, log }) : null;
   /* Say so either way. On a fresh install the absence of a warning is not a
      signal anyone can act on — it reads the same as a line that never printed. */
   if (airtable) log(`airtable: ${AT_BASE}`);
@@ -769,6 +773,184 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     return null;
   }
 
+  /* One save, carried out: Kylas, then Airtable, then the call log. What the
+     queue runs in the background, and what an older console still waits for. */
+  async function performSave(body) {
+      const raw = body.contact;
+      if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
+
+      /* THE KEY THAT MAKES A RETRY SAFE. Only a contact with no Kylas id can be
+         duplicated, so only that case needs one.
+
+         `lid` is the console's own local id for a contact it invented: stable
+         across every retry of that save, different for two different POCs. The
+         fallback is for a job queued by an older build, which has no lid — name
+         and number together identify one person closely enough to be worth far
+         more than nothing, and a genuine second POC on a shared landline has a
+         different name.
+
+         A save that already HAS a kid needs no key: repeating a PUT writes the
+         same record twice, which is the same record. */
+      const idemKey = raw.kid ? "" :
+        (raw.lid ? `lid:${raw.lid}`
+                 : `poc:${(raw.pocName || "").trim().toLowerCase()}|` +
+                   `${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`);
+      /* Serialised per key: a double-click, or a drain racing a save, must not
+         have two creates in the air at once — both would find the journal empty. */
+      return journal.once(idemKey, async () => {
+
+      /* VALIDATE BEFORE WRITING. Kylas answers a bad field with a 400 that names
+         neither the field nor the rule, and the associate loses the whole save
+         over it. The same rules run in the console, so this is the backstop for
+         an older extension or a queued outbox job, not the first line of
+         defence. A 422 carries the field list back; the console shows it.
+
+         An existing contact may legitimately have no phone number on it — the
+         rule is there to stop a NEW one being created uncallable. */
+      const gate = checkContact(raw, { allowNoPhone: !!raw.kid });
+      if (!gate.ok) {
+        log(`! /save rejected ${raw.pocName || raw.kid}: ` +
+            gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; "));
+        throw Object.assign(new Error(gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; ")),
+                            { status: 422, problems: gate.problems });
+      }
+      /* Write the NORMALISED copy: split phone numbers, lowercased emails, the
+         name already split the way Kylas wants it. */
+      const c = gate.contact;
+      if (gate.problems.length) log(`  /save note: ${gate.problems.map((p) => p.why).join("; ")}`);
+
+      /* The block is for a human reading the record, so use the name they know. */
+      const stageLabel = STAGE_LABEL[c.stage] || c.stage || "";
+      const result = { kid: c.kid || null, created: false, wrote: [] };
+
+      /* Remarks: read what is there first so a human's own text survives. */
+      let existing = "";
+      if (c.kid) {
+        try { existing = (await kylas.contact(c.kid))?.remarks || ""; }
+        catch { /* a failed read should not block the write */ }
+      }
+      const remarks = mergeRemarks(existing, renderRemarks(c, { stageLabel }));
+      const payload = toKylasContact(c, { remarks });
+
+      if (!c.kid) {
+        /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
+           reply was lost still carries no Kylas id, and without this it POSTs a
+           second contact. */
+        const known = await journal.lookup(idemKey);
+        if (known.state === "done") {
+          c.kid = known.kid;
+          result.kid = known.kid;
+          result.deduped = true;
+          await kylas.updateContact(c.kid, payload);
+          result.wrote.push("updated contact (already created by an earlier attempt)");
+          log(`deduped: ${c.pocName} was already created as ${c.kid} — updated instead`);
+        } else {
+          /* An attempt that started and never finished. Kylas may or may not hold
+             the contact; the only way to find out is to look. findExisting knows
+             where: it needs no company, so a POC invented from the queue rather
+             than a company page is covered too. */
+          let found = null;
+          if (known.state === "open") {
+            log(`an earlier attempt to create ${c.pocName} never finished — checking Kylas first`);
+            found = await findExisting(c, known.at).catch((e) => {
+              log(`  could not check (${e.message}) — creating, a duplicate is possible`);
+              return null;
+            });
+          }
+          if (found) {
+            c.kid = String(found.id);
+            result.kid = c.kid;
+            result.deduped = true;
+            await journal.done(idemKey, c.kid);
+            await kylas.updateContact(c.kid, payload);
+            result.wrote.push("adopted the contact an interrupted attempt had created");
+            log(`recovered: ${c.pocName} already existed as ${c.kid} — updated instead of duplicating`);
+          } else {
+            /* Written BEFORE the POST. If this process dies during it, the next
+               attempt finds an open entry and looks before it leaps. */
+            await journal.open(idemKey);
+            let made;
+            try {
+              made = await kylas.createContact(payload);
+            } catch (e) {
+              /* Refused means nothing was made, so the key goes back to unused —
+                 otherwise every later retry pays for a lookup of a contact that
+                 does not exist. */
+              await journal.forget(idemKey);
+              throw e;
+            }
+            result.kid = String(made?.id ?? "");
+            result.created = true;
+            await journal.done(idemKey, result.kid);
+            result.wrote.push("created contact");
+            log(`created contact ${result.kid} (${c.pocName})`);
+          }
+        }
+      } else {
+        await kylas.updateContact(c.kid, payload);
+        result.wrote.push("updated contact");
+        log(`updated contact ${c.kid} (${c.pocName})`);
+      }
+
+      /* Airtable is the authoritative store, so a failure here is reported to the
+         console rather than swallowed — the associate needs to know the KPI data
+         did not land, even though Kylas did. */
+      if (airtable) {
+        try {
+          /* createdHere comes from THIS side, not the console's. The console sets
+             it when it believes the contact is new, and while the proxy is down it
+             believes that on every save of the same contact — two offline calls
+             then drain as two Call Log rows both claiming the create, and
+             snapshot.mjs counts "Contacts Added" straight off that flag, so one
+             new POC read as two. Only one of those saves actually POSTed to Kylas,
+             and only this side knows which. */
+          result.airtable = await syncContact(
+            airtable, { ...c, kid: result.kid },
+            body.call ? { ...body.call, createdHere: result.created } : body.call,
+            { log });
+          /* THE DASHBOARD MUST SEE THE CALL THAT WAS JUST LOGGED.
+             Its four tables are cached, and a minute of staleness is fine for
+             another associate's rows and not fine for your own: an associate who
+             logs a call and opens the dashboard to check it landed is the exact
+             reader this whole store exists for. Dropped rather than patched —
+             rebuilt rather than patched — rebuilding is one background crawl, and
+             a cache patched by hand is a second implementation of the read that
+             can disagree with it. */
+          /* With the D1 copy there is nothing to drop: the save's own writes
+             are already in it. What is NOT is what Airtable computed from them —
+             the contact's formulas, the company's rollups — so those two records
+             are read back, behind the reply. */
+          if (mirror) {
+            inFlight(Promise.all([
+              mirror.refetch(rawAirtable, "Contacts", [result.airtable?.recordId]),
+              mirror.refetch(rawAirtable, "Companies", [result.airtable?.companyRecordId]),
+            ])).catch(() => {});
+          } else {
+            reportData.refresh();
+          }
+        } catch (e) {
+          result.airtableError = e.message;
+          log(`! airtable for ${result.kid}: ${e.message}`);
+        }
+      } else {
+        result.airtableSkipped = true;
+      }
+
+      if (body.call && result.kid) {
+        try {
+          await kylas.createCallLog(toKylasCallLog({ ...c, kid: result.kid }, body.call));
+          result.wrote.push("logged call");
+        } catch (e) {
+          /* The contact is already saved; losing the call log is recoverable and
+             must not make the associate think the save failed. */
+          result.callLogError = e.message;
+          log(`! call log for ${result.kid}: ${e.message}`);
+        }
+      }
+      return result;
+      });
+  }
+
   const routes = {
     "/meta": async () => meta(),
 
@@ -1348,180 +1530,40 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     /* One save from the console becomes up to three Kylas calls. Ordered so that
        a failure part-way leaves the contact correct rather than half-written:
        the record first, then its call log. */
+    /* A save, answered once it is SAFE rather than once it is DONE — see
+       save-queue.mjs. Only for a console that says it understands the reply
+       ({queue: true}); an older build still gets the save carried out before
+       the answer, because it needs the Kylas id back in that answer. */
     "/save": async (url, body) => {
+      if (!saves || !body.queue) return performSave(body);
       const raw = body.contact;
       if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
-
-      /* THE KEY THAT MAKES A RETRY SAFE. Only a contact with no Kylas id can be
-         duplicated, so only that case needs one.
-
-         `lid` is the console's own local id for a contact it invented: stable
-         across every retry of that save, different for two different POCs. The
-         fallback is for a job queued by an older build, which has no lid — name
-         and number together identify one person closely enough to be worth far
-         more than nothing, and a genuine second POC on a shared landline has a
-         different name.
-
-         A save that already HAS a kid needs no key: repeating a PUT writes the
-         same record twice, which is the same record. */
-      const idemKey = raw.kid ? "" :
-        (raw.lid ? `lid:${raw.lid}`
-                 : `poc:${(raw.pocName || "").trim().toLowerCase()}|` +
-                   `${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`);
-      /* Serialised per key: a double-click, or a drain racing a save, must not
-         have two creates in the air at once — both would find the journal empty. */
-      return journal.once(idemKey, async () => {
-
-      /* VALIDATE BEFORE WRITING. Kylas answers a bad field with a 400 that names
-         neither the field nor the rule, and the associate loses the whole save
-         over it. The same rules run in the console, so this is the backstop for
-         an older extension or a queued outbox job, not the first line of
-         defence. A 422 carries the field list back; the console shows it.
-
-         An existing contact may legitimately have no phone number on it — the
-         rule is there to stop a NEW one being created uncallable. */
+      /* Checked here, before queueing, so a value Kylas would refuse is
+         refused NOW — with the field named — rather than minutes later. */
       const gate = checkContact(raw, { allowNoPhone: !!raw.kid });
       if (!gate.ok) {
-        log(`! /save rejected ${raw.pocName || raw.kid}: ` +
-            gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; "));
-        throw Object.assign(new Error(gate.problems.filter((p) => p.blocking).map((p) => p.why).join("; ")),
-                            { status: 422, problems: gate.problems });
+        const blocking = gate.problems.filter((p) => p.blocking);
+        log(`! /save rejected ${raw.pocName || raw.kid}: ` + blocking.map((p) => p.why).join("; "));
+        throw Object.assign(new Error(blocking.map((p) => p.why).join("; ")), { status: 422, problems: gate.problems });
       }
-      /* Write the NORMALISED copy: split phone numbers, lowercased emails, the
-         name already split the way Kylas wants it. */
-      const c = gate.contact;
-      if (gate.problems.length) log(`  /save note: ${gate.problems.map((p) => p.why).join("; ")}`);
+      /* Saves of one contact run in order, one at a time. The console's local
+         id is the one name a contact has from its first save to its last. */
+      const key = raw.lid ? `lid:${raw.lid}` : raw.kid ? `kid:${raw.kid}`
+        : `poc:${(raw.pocName || "").trim().toLowerCase()}|${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`;
+      const { queue: _q, ...job } = body;
+      const id = await saves.enqueue(key, job);
+      inFlight(saves.run(id, performSave));
+      log(`save queued ${id} for ${raw.pocName || raw.kid || "?"}`);
+      return { queued: true, job: id, kid: raw.kid || null };
+    },
 
-      /* The block is for a human reading the record, so use the name they know. */
-      const stageLabel = STAGE_LABEL[c.stage] || c.stage || "";
-      const result = { kid: c.kid || null, created: false, wrote: [] };
-
-      /* Remarks: read what is there first so a human's own text survives. */
-      let existing = "";
-      if (c.kid) {
-        try { existing = (await kylas.contact(c.kid))?.remarks || ""; }
-        catch { /* a failed read should not block the write */ }
-      }
-      const remarks = mergeRemarks(existing, renderRemarks(c, { stageLabel }));
-      const payload = toKylasContact(c, { remarks });
-
-      if (!c.kid) {
-        /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
-           reply was lost still carries no Kylas id, and without this it POSTs a
-           second contact. */
-        const known = await journal.lookup(idemKey);
-        if (known.state === "done") {
-          c.kid = known.kid;
-          result.kid = known.kid;
-          result.deduped = true;
-          await kylas.updateContact(c.kid, payload);
-          result.wrote.push("updated contact (already created by an earlier attempt)");
-          log(`deduped: ${c.pocName} was already created as ${c.kid} — updated instead`);
-        } else {
-          /* An attempt that started and never finished. Kylas may or may not hold
-             the contact; the only way to find out is to look. findExisting knows
-             where: it needs no company, so a POC invented from the queue rather
-             than a company page is covered too. */
-          let found = null;
-          if (known.state === "open") {
-            log(`an earlier attempt to create ${c.pocName} never finished — checking Kylas first`);
-            found = await findExisting(c, known.at).catch((e) => {
-              log(`  could not check (${e.message}) — creating, a duplicate is possible`);
-              return null;
-            });
-          }
-          if (found) {
-            c.kid = String(found.id);
-            result.kid = c.kid;
-            result.deduped = true;
-            await journal.done(idemKey, c.kid);
-            await kylas.updateContact(c.kid, payload);
-            result.wrote.push("adopted the contact an interrupted attempt had created");
-            log(`recovered: ${c.pocName} already existed as ${c.kid} — updated instead of duplicating`);
-          } else {
-            /* Written BEFORE the POST. If this process dies during it, the next
-               attempt finds an open entry and looks before it leaps. */
-            await journal.open(idemKey);
-            let made;
-            try {
-              made = await kylas.createContact(payload);
-            } catch (e) {
-              /* Refused means nothing was made, so the key goes back to unused —
-                 otherwise every later retry pays for a lookup of a contact that
-                 does not exist. */
-              await journal.forget(idemKey);
-              throw e;
-            }
-            result.kid = String(made?.id ?? "");
-            result.created = true;
-            await journal.done(idemKey, result.kid);
-            result.wrote.push("created contact");
-            log(`created contact ${result.kid} (${c.pocName})`);
-          }
-        }
-      } else {
-        await kylas.updateContact(c.kid, payload);
-        result.wrote.push("updated contact");
-        log(`updated contact ${c.kid} (${c.pocName})`);
-      }
-
-      /* Airtable is the authoritative store, so a failure here is reported to the
-         console rather than swallowed — the associate needs to know the KPI data
-         did not land, even though Kylas did. */
-      if (airtable) {
-        try {
-          /* createdHere comes from THIS side, not the console's. The console sets
-             it when it believes the contact is new, and while the proxy is down it
-             believes that on every save of the same contact — two offline calls
-             then drain as two Call Log rows both claiming the create, and
-             snapshot.mjs counts "Contacts Added" straight off that flag, so one
-             new POC read as two. Only one of those saves actually POSTed to Kylas,
-             and only this side knows which. */
-          result.airtable = await syncContact(
-            airtable, { ...c, kid: result.kid },
-            body.call ? { ...body.call, createdHere: result.created } : body.call,
-            { log });
-          /* THE DASHBOARD MUST SEE THE CALL THAT WAS JUST LOGGED.
-             Its four tables are cached, and a minute of staleness is fine for
-             another associate's rows and not fine for your own: an associate who
-             logs a call and opens the dashboard to check it landed is the exact
-             reader this whole store exists for. Dropped rather than patched —
-             rebuilt rather than patched — rebuilding is one background crawl, and
-             a cache patched by hand is a second implementation of the read that
-             can disagree with it. */
-          /* With the D1 copy there is nothing to drop: the save's own writes
-             are already in it. What is NOT is what Airtable computed from them —
-             the contact's formulas, the company's rollups — so those two records
-             are read back, behind the reply. */
-          if (mirror) {
-            inFlight(Promise.all([
-              mirror.refetch(rawAirtable, "Contacts", [result.airtable?.recordId]),
-              mirror.refetch(rawAirtable, "Companies", [result.airtable?.companyRecordId]),
-            ])).catch(() => {});
-          } else {
-            reportData.refresh();
-          }
-        } catch (e) {
-          result.airtableError = e.message;
-          log(`! airtable for ${result.kid}: ${e.message}`);
-        }
-      } else {
-        result.airtableSkipped = true;
-      }
-
-      if (body.call && result.kid) {
-        try {
-          await kylas.createCallLog(toKylasCallLog({ ...c, kid: result.kid }, body.call));
-          result.wrote.push("logged call");
-        } catch (e) {
-          /* The contact is already saved; losing the call log is recoverable and
-             must not make the associate think the save failed. */
-          result.callLogError = e.message;
-          log(`! call log for ${result.kid}: ${e.message}`);
-        }
-      }
-      return result;
-      });
+    /* Where queued saves stand: done (with the result a direct save would
+       have returned), still queued (with when it tries again), or dead (with
+       why). The console asks until each of its saves is settled. */
+    "/save-status": async (url) => {
+      if (!saves) return { jobs: {} };
+      const ids = String(url.searchParams.get("ids") || "").split(",").map((x) => x.trim()).filter(Boolean);
+      return { jobs: await saves.status(ids) };
     },
 
     /* ── RCA ────────────────────────────────────────────────────────────
@@ -1617,6 +1659,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     mirror: mirror ? await mirror.status() : null,
     kylasCompaniesAgeSeconds: await kylasCompanies.age(),
     syncedAt: (await syncState())?.at || null,
+    saves: saves ? await saves.backlog() : null,
   });
 
   /* THE SCHEDULED UPKEEP, every few minutes. Everything a request would
@@ -1626,6 +1669,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      behind this server's back — the nightly sync, the weekly rollup. */
   async function maintain({ rebuild = false, only = null } = {}) {
     const out = {};
+    /* Saves first: a retry waiting here is a call an associate logged. */
+    if (saves) out.saves = await saves.drain(performSave).catch((e) => ({ error: e.message }));
     if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { rebuild, only });
     const age = await kylasCompanies.age();
     const readAt = Number((cache && (await cache.get("companies-read-at").catch(() => null))) || 0);

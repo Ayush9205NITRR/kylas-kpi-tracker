@@ -329,6 +329,52 @@ check('once the sync has run, the company list comes from the copy',
       synced.body.source === 'airtable' && (await reads()) === r0,
       `source=${synced.body.source}, ${(await reads()) - r0} reads`);
 
+/* ── 9 · saves answered before Kylas and Airtable have them ──────────── */
+/* A save waits its turn at two rate-limited APIs — about 3.5 s live. A
+   console that asks for it ({queue: true}) is answered once the save is in
+   D1, and the rest runs behind the reply. */
+console.log('\n9. queued saves');
+const kylasWrites = async () =>
+  (await (await fetch('http://127.0.0.1:9900/__writes', { headers: { 'api-key': 'x' } })).json()).writes;
+const post = async (w, path, body) => {
+  const heldQ = [];
+  const t = performance.now();
+  const r = await w.fetch(new Request(`https://bd.enout.website${path}`, {
+    method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }), withStore(ENV), { waitUntil: (p) => heldQ.push(p) });
+  const ms = performance.now() - t;
+  return { status: r.status, body: await r.json(), ms, settle: () => Promise.allSettled(heldQ) };
+};
+const qContact = { ...contact, lid: 'wk-q1', pocName: 'Queued Person',
+  phones: [{ type: 'MOBILE', cc: '+91', value: '9800009991', primary: true }],
+  current: [{ rowKey: 'wk-q-row', eventType: 'Offsite', budget: '5L', timeline: '', pax: '', remarks: '' }] };
+const before9 = (await kylasWrites()).length;
+/* Two saves of the same brand-new contact, on two instances, back to back —
+   the case that duplicates a contact if the queue does not keep them in order. */
+const qa = await post(await coldWorker(30), '/save', { contact: qContact, call: { ...call1, at: new Date().toISOString() }, queue: true });
+const qb = await post(await coldWorker(31), '/save', { contact: qContact, call: { ...call1, at: new Date(Date.now() + 1000).toISOString() }, queue: true });
+check('a queued save is answered without waiting for Kylas', qa.status === 200 && qa.body.queued && !!qa.body.job,
+      `${qa.status} ${Math.round(qa.ms)}ms ${JSON.stringify(qa.body).slice(0, 80)}`);
+await Promise.all([qa.settle(), qb.settle()]);
+/* The second may have been held behind the first; the maintenance run is what
+   picks up anything a reply's background time did not finish. */
+await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+const st9 = await get(await coldWorker(32), `/save-status?ids=${qa.body.job},${qb.body.job}`);
+const ja = st9.body.jobs?.[qa.body.job], jb = st9.body.jobs?.[qb.body.job];
+check('both saves are done', ja?.state === 'done' && jb?.state === 'done', JSON.stringify(st9.body).slice(0, 200));
+check('the status carries the Kylas id a direct save would have returned', !!ja?.result?.kid, ja?.result?.kid);
+const creates = (await kylasWrites()).slice(before9).filter((w) => w.kind === 'create' &&
+  JSON.stringify(w.body).includes('Queued'));
+check('the contact was created in Kylas exactly once', creates.length === 1 && jb?.result?.kid === ja?.result?.kid,
+      `${creates.length} create(s), kids ${ja?.result?.kid} / ${jb?.result?.kid}`);
+const refused = await post(await coldWorker(33), '/save', { contact: { ...qContact, lid: 'wk-q2', kid: '', phones: [] }, queue: true });
+check('a save Kylas would refuse is refused now, not queued', refused.status === 422 && !refused.body.queued,
+      `${refused.status} ${refused.body.error?.slice(0, 60)}`);
+const legacy = await post(await coldWorker(34), '/save', { contact: { ...qContact, lid: 'wk-q3', pocName: 'Legacy Person',
+  phones: [{ type: 'MOBILE', cc: '+91', value: '9800009993', primary: true }] }, call: { ...call1, at: new Date().toISOString() } });
+check('an older console (no queue flag) still gets the finished save', legacy.status === 200 && !legacy.body.queued && !!legacy.body.kid,
+      JSON.stringify(legacy.body).slice(0, 80));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);
