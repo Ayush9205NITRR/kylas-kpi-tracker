@@ -115,6 +115,9 @@
         const err = new Error(payload?.error || `proxy returned ${res.status}`);
         err.status = res.status;
         err.problems = payload?.problems || null;
+        /* "Still copying your data" is the server working, not the server
+           down — it must not turn the badge to offline. */
+        err.building = !!payload?.building;
         throw err;
       }
       if (!state.online || state.needsSignIn) {
@@ -130,6 +133,7 @@
           "building this; try again in a minute"), { timedOut: true });
       }
       const e = e0;
+      if (e.building) throw e;
       const reason = e.message;
       /* needsSignIn is what lets the badge say "sign in" and mean it, instead
          of "offline" and a prompt for a server address that was never wrong. */

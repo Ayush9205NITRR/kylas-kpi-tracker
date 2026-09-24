@@ -87,6 +87,15 @@ let r0 = await reads();
 const early = await atA.listAll("Contacts", { fields: ["Name", "Owner"] });
 check("an unbuilt table still answers", early.length === 130, `${early.length} rows`);
 check("…from Airtable", (await reads()) > r0);
+/* But not page after page: until the copy exists, a request may read only a
+   few pages of a table directly. Past that it says the copy is coming rather
+   than making a hundred requests in one Cloudflare invocation. */
+const tight = mirrored(rawA, A, { directPages: 1 });
+let refused = null;
+try { await tight.listAll("Contacts", { fields: ["Name"] }); } catch (e) { refused = e; }
+check("a big unbuilt table is refused with 'still copying', not read page by page",
+      refused?.status === 503 && refused?.building === true, refused?.message?.slice(0, 70));
+check("a small one is still read directly", (await tight.listAll("Team", { fields: ["Name"] })).length === 1);
 
 console.log("\n2. the scheduled job builds every table");
 const built = await A.maintain(rawA);

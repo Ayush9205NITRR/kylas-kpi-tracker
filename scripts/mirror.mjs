@@ -389,7 +389,12 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
 
 /* An Airtable client that answers whole-table reads from the copy. Same shape
    as createAirtable's, so every reader in airtable.mjs uses it unchanged. */
-export function mirrored(at, mirror) {
+/* `directPages`: until a table is copied, how many pages a request may read
+   from Airtable directly. Cloudflare caps one invocation at 50 outside
+   requests and queries on the Free plan (1,000+ on Paid), and a screen can read
+   five tables — so a big table waits for its copy, and says so, rather than
+   being read page by page inside somebody's request. */
+export function mirrored(at, mirror, { directPages = 5 } = {}) {
   return {
     ...at,
     mirrored: true,
@@ -411,6 +416,10 @@ export function mirrored(at, mirror) {
           }
         }
       }
+      /* Not answerable from the copy yet. A filtered read is small (by key);
+         a whole mirrored table is read directly only while it is small. */
+      if (keep && !opts.formula)
+        return at.listAll(table, { ...opts, maxPages: Math.min(opts.maxPages ?? 40, directPages), throwIfMore: true });
       return at.listAll(table, opts);
     },
   };

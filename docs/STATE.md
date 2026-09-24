@@ -90,6 +90,14 @@ saves' retries run in the 5-minute job, one heavy piece per run.
 `test-worker.mjs` §10 counts every route's outside requests and database
 queries on a cold instance and fails any above 50.
 
+The same fault had a second door: before a table's D1 copy existed, a
+request read it straight from Airtable, page after page, which is 100+ pages
+on a synced base. Now `mirrored()` lets a request read at most 5 pages of an
+uncopied table. Past that it answers 503 `{building: true}` ("still
+copying"). The console shows that message and does not treat it as the
+server being offline. Measured on 1,500 companies, 3,000 contacts and 6,000
+calls, uncopied: worst request 37.
+
 **Background work nobody waited for jams the instance.** On Workers, anything
 still running when a request ends is cancelled. A cancelled fetch is never
 settled, and the Airtable and Kylas clients each keep ONE queue per instance,

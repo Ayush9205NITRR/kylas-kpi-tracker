@@ -305,7 +305,7 @@ export default {
     } catch (e) {
       const status = e.status || 502;
       log(`! ${url.pathname} ${status} ${e.message}`);
-      return json({ error: e.message, problems: e.problems }, status, origin);
+      return json({ error: e.message, problems: e.problems, ...(e.building ? { building: true } : {}) }, status, origin);
     }
   },
 };

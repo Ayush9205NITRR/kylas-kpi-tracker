@@ -147,7 +147,10 @@ export function createAirtable(pat, baseId, {
        `fields` is not an optimisation: a company row carries ~30 computed
        fields and we want a named handful, so asking for them by name also
        documents which ones the dashboard depends on. */
-    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40 } = {}) {
+    /* `throwIfMore`: past maxPages, fail rather than return a prefix. For a
+       caller that must not read a big table page by page (a request on a
+       hosted runtime, before the D1 copy exists) and would rather say so. */
+    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40, throwIfMore = false } = {}) {
       const out = [];
       let offset = "";
       for (let p = 0; p < maxPages; p++) {
@@ -159,6 +162,10 @@ export function createAirtable(pat, baseId, {
         (r?.records || []).forEach((x) => out.push(x));
         offset = r?.offset || "";
         if (!offset) break;
+        if (throwIfMore && p === maxPages - 1)
+          throw Object.assign(new Error(`The server is still copying ${table} from Airtable ` +
+            `(more than ${maxPages * pageSize} rows). This fills in by itself within a few minutes.`),
+            { status: 503, building: true });
       }
       return out;
     },
