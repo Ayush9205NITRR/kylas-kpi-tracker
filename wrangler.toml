@@ -109,9 +109,14 @@ VERSION = "1.7.0"
 # and these strings must match the ones above CHARACTER FOR CHARACTER. A
 # mismatch is not an error anywhere: it is a job that silently never runs, so
 # the Worker logs the cron it could not place along with all three of these.
+#
+# DAY OF WEEK IS A NAME, NOT A ZERO. Cloudflare rejects "0" for Sunday outright
+# — "invalid cron string", at deploy time — even though it is ordinary crontab.
+# Worse, it rejects it AFTER applying the schedules it did accept and does not
+# roll those back, so a deploy can half-succeed. SUN is unambiguous everywhere.
 CRON_SYNC = "30 20 * * *"
 CRON_SNAPSHOT = "45 18 * * *"
-CRON_ROLLUP = "0 21 * * 0"
+CRON_ROLLUP = "0 21 * * SUN"
 
 # How much raw call history to keep before the weekly rollup compacts it. 30
 # days at this team's volume is ~18,000 rows; 90 would be ~54,000, which is
@@ -122,7 +127,7 @@ CALL_RETAIN_DAYS = "30"
 crons = [
   "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
   "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
-  "0 21 * * 0",    # 02:30 IST, Monday  · roll up the call log
+  "0 21 * * SUN",  # 02:30 IST, Monday  · roll up the call log
 ]
 
 [observability]
