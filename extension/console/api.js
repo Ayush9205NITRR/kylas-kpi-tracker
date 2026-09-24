@@ -20,15 +20,73 @@
     catch { return ""; }
   };
 
-  async function req(path, { timeout = 12000, method = "GET", body } = {}) {
+  /* ── proving who is calling ───────────────────────────────────────────
+     A proxy on 127.0.0.1 needs no login: nothing but this machine can reach
+     it, and asking an associate to sign in to their own laptop would be
+     ceremony. A proxy on the internet holds a Kylas key and needs one on every
+     request.
+
+     So the rule is the address, not a setting: anything not on localhost is
+     asked to prove itself. That way the local path keeps working exactly as it
+     always has, with no Google involved, and nobody can accidentally point the
+     console at a public server without the sign-in coming with it. */
+  const isLocal = () => /^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(base);
+
+  async function token({ interactive = false } = {}) {
+    if (isLocal()) return "";
+    const res = await chrome.runtime.sendMessage({ type: "enout-token", interactive })
+      .catch(() => null);
+    if (!res?.ok) {
+      const err = new Error(res?.error || "not signed in");
+      err.status = 401;
+      err.needsSignIn = true;
+      throw err;
+    }
+    signedInAs = res.email || "";
+    return res.token;
+  }
+  let signedInAs = "";
+
+  async function req(path, { timeout = 12000, method = "GET", body, interactive = false } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     try {
+      const jwt = await token({ interactive });
       const res = await fetch(base + path, {
         signal: ctl.signal, method,
-        headers: body ? { "content-type": "application/json" } : undefined,
+        headers: {
+          ...(body ? { "content-type": "application/json" } : {}),
+          ...(jwt ? { authorization: `Bearer ${jwt}` } : {}),
+        },
         body: body ? JSON.stringify(body) : undefined,
       });
+      /* A 401 means the token was refused, not that the request was wrong.
+         The commonest cause is the mundane one — it expired while the console
+         sat open — so throw the cached one away and ask once more, this time
+         letting Google show a window if it has to. Once: a second 401 after a
+         fresh token is a real refusal, and retrying it forever would put a
+         sign-in window in front of somebody on every call. */
+      if (res.status === 401 && !isLocal() && !path.startsWith("/__retry")) {
+        await chrome.runtime.sendMessage({ type: "enout-token", forget: true }).catch(() => {});
+        const fresh = await token({ interactive: true });
+        const again = await fetch(base + path, {
+          signal: ctl.signal, method,
+          headers: {
+            ...(body ? { "content-type": "application/json" } : {}),
+            ...(fresh ? { authorization: `Bearer ${fresh}` } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const p = await again.json().catch(() => null);
+        if (!again.ok) {
+          const err = new Error(p?.error || `proxy returned ${again.status}`);
+          err.status = again.status;
+          err.needsSignIn = again.status === 401;
+          throw err;
+        }
+        if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
+        return p;
+      }
       /* Deliberately not named `body` — that is the request payload above, and
          shadowing it here throws before the fetch ever runs. */
       const payload = await res.json().catch(() => null);
@@ -66,7 +124,11 @@
 
     async health() {
       try {
-        const r = await req("/health", { timeout: 4000 });
+        /* INTERACTIVE, and only here. Opening the console is the one moment
+           an associate expects to be asked to sign in; a window appearing
+           mid-call because a token quietly expired is not. Everywhere else
+           refreshes silently and only escalates on a 401. */
+        const r = await req("/health", { timeout: 4000, interactive: true });
         /* The proxy holds one Kylas key and Kylas says whose it is. That is the
            identity the views scope to — an associate sees their own numbers,
            an admin can switch to the team. */
@@ -98,6 +160,16 @@
         announce();
         return r;
       } catch { return null; }
+    },
+    /* Who Google says is using this console. Empty on localhost, where there
+       is no sign-in to speak of. */
+    get signedInAs() { return signedInAs; },
+    /* Asks for a sign-in window even if a silent refresh would have failed
+       quietly — for a "sign in" affordance to call. */
+    async signIn() {
+      await chrome.runtime.sendMessage({ type: "enout-token", forget: true }).catch(() => {});
+      await token({ interactive: true });
+      return API.health();
     },
     get role() { return state.role || "admin"; },
     get isAdmin() { return (state.role || "admin") === "admin"; },

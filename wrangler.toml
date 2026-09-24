@@ -77,7 +77,7 @@ AUTH = "google"
 # identifies the application, it does not authorise anything. Its job here is
 # to be the `aud` every token is checked against, which is what stops a Google
 # token minted for somebody else's app being accepted as a login for this one.
-GOOGLE_CLIENT_ID = "FILL ME — the OAuth client id, ends .apps.googleusercontent.com"
+GOOGLE_CLIENT_ID = "669836874556-44qeevcfed96d839lo86jp2quusm1m7d.apps.googleusercontent.com"
 
 # Only addresses at this domain may sign in. Compared after splitting the
 # address on "@" — "evil@notenout.in" ends with "enout.in" and must not pass.
