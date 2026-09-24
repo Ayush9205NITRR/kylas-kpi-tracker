@@ -53,10 +53,22 @@ database_id = "fb652db4-d37a-4f9b-8b12-a23209603982"
 # error about a missing binding rather than about the name of one.
 
 [vars]
-# Only this origin is answered. Anything else gets no CORS headers at all, so
-# the browser refuses it. Your extension's id is on chrome://extensions with
+# Only these origins are answered. Anything else gets no CORS headers at all,
+# so the browser refuses it. An extension's id is on chrome://extensions with
 # developer mode on, or at the end of its Web Store link.
-ALLOWED_ORIGIN = "chrome-extension://infkkmfegekmocfgjlhahdlheccojkdb"
+#
+# TWO OF THEM, AND THE SECOND ONE COST A DAY. A copy of an extension loaded
+# unpacked gets a DIFFERENT id from the published one — they are the same code
+# and, to everything that checks an id, two different extensions. So an
+# unpacked copy is refused by this server AND by Google's redirect-uri check,
+# and the errors name neither the id nor the fact that there are two.
+#
+#   infkkm…  the published extension, from the Chrome Web Store
+#   abgnfh…  Ayush's local unpacked copy, for testing before a release
+#
+# Remove the second when the local copy is no longer used. Every id here is a
+# build of this extension that can reach the CRM.
+ALLOWED_ORIGIN = "chrome-extension://infkkmfegekmocfgjlhahdlheccojkdb,chrome-extension://abgnfhfbhiafcdakdgdmagjnilkiifgk"
 
 # ── who is allowed to call this ────────────────────────────────────────────
 # THERE IS NO DEFAULT. A server holding a Kylas key and an Airtable token must
