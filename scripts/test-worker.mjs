@@ -107,6 +107,19 @@ check('any other origin gets NO allow header at all',
       eve.headers.get('Access-Control-Allow-Origin') || '(none)');
 const pre = await call('/save', { method: 'OPTIONS' });
 check('the preflight is answered for the extension', pre.status === 204, `got ${pre.status}`);
+/* THE ASSERTION THAT WAS MISSING, and its absence shipped a console that
+   could not reach the server at all. Sending Authorization makes every
+   request non-simple, so the browser preflights and then refuses to send the
+   real request unless the preflight names that header. Nothing 401s, nothing
+   logs, and fetch rejects with "Failed to fetch". */
+check('and the preflight allows the Authorization header',
+      /authorization/i.test(pre.headers.get('Access-Control-Allow-Headers') || ''),
+      pre.headers.get('Access-Control-Allow-Headers') || '(none)');
+check('and content-type, which a POST body needs',
+      /content-type/i.test(pre.headers.get('Access-Control-Allow-Headers') || ''));
+check('and it is cached, so this is not a round trip per request',
+      Number(pre.headers.get('Access-Control-Max-Age') || 0) > 0,
+      pre.headers.get('Access-Control-Max-Age') || '(none)');
 const preEvil = await call('/save', { method: 'OPTIONS', origin: 'https://evil.example' });
 check('and refused for anyone else', preEvil.status === 403, `got ${preEvil.status}`);
 

@@ -125,12 +125,19 @@ async function authenticate(request, env, log) {
     { status: 500 });
 }
 
+/* AUTHORIZATION HAS TO BE IN Allow-Headers. Sending that header is what makes
+   a request non-simple, so the browser sends a preflight first and refuses to
+   send the real one unless the preflight names every header it is about to
+   use. Leaving it out does not produce a 401 or a CORS message in the
+   response — the request never leaves the browser at all, and `fetch` rejects
+   with the maximally unhelpful "Failed to fetch". Which is exactly how this
+   shipped. */
 const json = (body, status, origin) => new Response(JSON.stringify(body), {
   status,
   headers: {
     "content-type": "application/json",
     ...(origin ? { "Access-Control-Allow-Origin": origin,
-                   "Access-Control-Allow-Headers": "content-type",
+                   "Access-Control-Allow-Headers": "content-type, authorization",
                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                    "Access-Control-Allow-Credentials": "true",
                    Vary: "Origin" } : {}),
@@ -218,7 +225,7 @@ export default {
     if (request.method === "OPTIONS")
       return new Response(null, { status: origin ? 204 : 403, headers: origin ? {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Headers": "content-type",
+        "Access-Control-Allow-Headers": "content-type, authorization",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Max-Age": "86400",

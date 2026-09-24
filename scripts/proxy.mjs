@@ -80,7 +80,9 @@ const server = createServer(async (req, res) => {
   /* A localhost dev proxy with no secrets in its responses; the extension's
      origin is a generated id, so echoing is simpler than allow-listing. */
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
-  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  /* authorization is not sent to a localhost proxy, but the two shells
+     answering differently is a difference somebody has to rediscover. */
+  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
