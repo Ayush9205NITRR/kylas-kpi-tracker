@@ -85,6 +85,17 @@ async function fetchToken(interactive) {
 
 /* Silent first, interactive only if that fails. An associate signs in once and
    then, for as long as their Google session lasts, never sees a window again. */
+/* When a window was last opened, so a failure that genuinely needs one cannot
+   turn into a window per request. */
+let lastPrompt = 0;
+const PROMPT_EVERY = 30_000;
+
+/* Chrome's way of saying "this cannot be done silently": the account is not
+   signed in to Google in this profile, or consent has not been given yet.
+   It is not a failure to report — it is a request for the window. */
+const wantsAWindow = (e) => /user interaction required|not signed|consent|interaction_required/i
+  .test(e?.message || "");
+
 async function attempt({ interactive }) {
   /* Re-checked INSIDE the queue: callers that queued behind a flow which has
      since succeeded want its token, not another flow. This is what turns a
@@ -93,7 +104,19 @@ async function attempt({ interactive }) {
   try {
     return await fetchToken(false);
   } catch (e) {
-    if (!interactive) throw e;
+    /* ESCALATE WHEN CHROME ASKS FOR IT, not only when the caller happened to
+       say it was willing. Only /health asked interactively, so on a profile
+       that had never signed in, every OTHER request reported "User
+       interaction required" verbatim and no window was ever opened — a dead
+       console quoting an instruction meant for the programmer.
+
+       The rate limit is what keeps this honest: a window at most every 30
+       seconds, so the first request of a session opens one and a burst behind
+       it does not. */
+    const needed = interactive || wantsAWindow(e);
+    if (!needed) throw e;
+    if (Date.now() - lastPrompt < PROMPT_EVERY) throw e;
+    lastPrompt = Date.now();
     return fetchToken(true);
   }
 }
