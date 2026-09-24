@@ -1729,7 +1729,10 @@
                 fresh: new Set(), owner: "", sort: "recent", limit: 100, offsite: "",
                 srcOpen: false, srcFind: "", srcScroll: 0,
                 /* the condition, as in Airtable's text filter */
-                srcOp: "any", srcText: "" };
+                srcOp: "any", srcText: "",
+                /* "" | "focus" | "normal" | "depri" — the focus-list status */
+                focus: "", depriOpen: false };
+  const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
      options WOULD give rather than counting only what is already selected —
@@ -1740,6 +1743,7 @@
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsite &&
         (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
+    if (skip !== "focus" && ACC.focus && focusOf(co) !== ACC.focus) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
     if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
     return true;
@@ -1927,6 +1931,66 @@
     </select>`;
   }
 
+  /* FOCUS LISTS — which accounts each BD has picked to work (★), and which
+     they dropped and why. The status is set on the call card; this is where a
+     manager reads it across the team. Names open the company; Restore takes
+     a dropped account back to "not picked". (focus.js) */
+  function focusSelect(all) {
+    const pool = all.filter((c) => accMatch(c, "focus"));
+    const n = { focus: 0, normal: 0, depri: 0 };
+    for (const c of pool) n[focusOf(c)]++;
+    const opt = (v, l) => `<option value="${v}"${ACC.focus === v ? " selected" : ""}>${l}</option>`;
+    return `<select id="accFocus" aria-label="Focus list">
+      ${opt("", "Any list status")}${opt("focus", `★ On a focus list (${n.focus})`)}
+      ${opt("normal", `Not picked (${n.normal})`)}${opt("depri", `Deprioritized (${n.depri})`)}</select>`;
+  }
+  function focusHTML(all) {
+    if (!global.Focus) return "";
+    const byId = new Map(all.map((c) => [String(c.id), c]));
+    const ents = Object.values(Focus.map).map((f) => {
+      const c = byId.get(String(f.companyId));
+      return { f, id: String(f.companyId), name: c?.name || f.companyName || `#${f.companyId}`,
+               owner: c?.owner || f.ownerName || "Unassigned", stage: c ? (label(stageOf(c)) || "") : "" };
+    }).filter((e) => !ACC.owner || e.owner === ACC.owner);
+    const foc = ents.filter((e) => e.f.status === "focus");
+    const dep = ents.filter((e) => e.f.status === "depri")
+      .sort((a, b) => String(b.f.setAt).localeCompare(String(a.f.setAt)));
+    if (!Focus.loaded) return `<div class="card focusl"><div class="exhead"><h2>Focus lists</h2>
+      <p>${Focus.error ? esc(Focus.error) : "Reading focus lists…"}</p></div></div>`;
+    const week = dep.filter((e) => daysSince(e.f.setAt) !== null && daysSince(e.f.setAt) <= 7).length;
+    const rc = {};
+    for (const e of dep) rc[e.f.reason || "No reason"] = (rc[e.f.reason || "No reason"] || 0) + 1;
+    const top = Object.entries(rc).sort((a, b) => b[1] - a[1])[0];
+    const owners = [...new Set([...foc, ...dep].map((e) => e.owner))].sort();
+    const item = (e, sub) => `<li><button type="button" data-open="${esc(e.id)}">${esc(e.name)}</button>${
+      sub ? `<span>${esc(sub)}</span>` : ""}</li>`;
+    const cards = owners.map((o) => {
+      const mf = foc.filter((e) => e.owner === o), md = dep.filter((e) => e.owner === o);
+      return `<article class="fcard"><header><h3>${esc(o)}</h3>
+          <span class="tag">★ ${mf.length}</span>${md.length ? `<span class="tag warn">${md.length} dropped</span>` : ""}</header>
+        ${mf.length ? `<ul>${mf.slice(0, 6).map((e) => item(e, e.stage)).join("")}${
+          mf.length > 6 ? `<li class="more">+${mf.length - 6} more — filter “★ On a focus list”</li>` : ""}</ul>`
+          : `<p class="vnote">Nothing picked yet.</p>`}
+        ${md.length ? `<div class="flbl">Deprioritized</div><ul>${md.slice(0, 4).map((e) => item(e, e.f.reason)).join("")}</ul>` : ""}
+      </article>`;
+    }).join("");
+    return `<div class="card focusl">
+      <div class="exhead"><h2>Focus lists</h2>
+        <p>${foc.length || dep.length
+          ? `<b>${foc.length}</b> account${foc.length === 1 ? "" : "s"} on focus lists, <b>${dep.length}</b> deprioritized${
+              week ? ` — ${week} in the last 7 days` : ""}.${top && top[1] > 1 ? ` Most common reason for dropping one: ${esc(top[0])} (${top[1]}).` : ""}`
+          : "Nobody has picked or dropped an account yet. Do it from the call card: ★ Focus, or Deprioritize with a reason."}</p></div>
+      ${cards ? `<div class="fgrid">${cards}</div>` : ""}
+      ${dep.length ? `<button type="button" class="gbtn sm" id="depriToggle">${ACC.depriOpen ? "Hide" : "Show"} every deprioritized account (${dep.length})</button>
+        ${ACC.depriOpen ? `<div class="dtab"><div class="vr vh"><span>Company</span><span>BD</span><span>Reason</span><span>Note</span><span>When</span><span></span></div>
+          ${dep.slice(0, 200).map((e) => `<div class="vr"><span><button type="button" class="lnk" data-open="${esc(e.id)}">${esc(e.name)}</button></span>
+            <span>${esc(e.owner)}</span><span>${esc(e.f.reason || "—")}</span><span class="mut">${esc(e.f.note || "")}</span>
+            <span>${esc(ago(e.f.setAt))}</span><span><button type="button" class="gbtn sm" data-restore="${esc(e.id)}">Restore</button></span></div>`).join("")}
+        </div>` : ""}` : ""}
+    </div>`;
+  }
+  const ago = (iso) => { const d = daysSince(iso); return d === null ? "" : d === 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`; };
+
   function explorerHTML(all, owners) {
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
     const SORTS = { recent: "Last call, newest", stale: "Last call, oldest",
@@ -1938,7 +2002,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite;
+    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focus;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -1977,6 +2041,7 @@
           </select>
           ${sourcePicker(all, sources)}
           ${offsiteSelect(all)}
+          ${focusSelect(all)}
         </div>
         ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
           (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
@@ -1988,7 +2053,8 @@
           ${shown.length ? shown.map((c) => {
             const d = daysSince(c.lastCalledAt), k = kpiOf(c);
             return `<div class="vr" data-id="${esc(c.id)}">
-              <span class="co">${esc(c.name)}</span>
+              <span class="co">${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
+                focusOf(c) === "depri" ? ` <i class="dp">deprioritized</i>` : ""}</span>
               <span>${esc(label(stageOf(c)) || "—")}</span>
               <span>${esc(c.owner || "—")}</span>
               <span>${esc(c.source || "—")}</span>
@@ -2391,7 +2457,7 @@
       </div>
       ${chipStrip(rows, all)}
       ${rcaStrip()}
-      ${VIEW_MODE === "accounts" ? famsHTML(all) + explorerHTML(all, ownerNames)
+      ${VIEW_MODE === "accounts" ? famsHTML(all) + focusHTML(all) + explorerHTML(all, ownerNames)
         : VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
@@ -2558,11 +2624,25 @@
     }
     global.__srcRedraw = redraw;
     on("accOffsite", "change", (e) => { ACC.offsite = e.target.value; ACC.limit = 100; redraw(); });
+    on("accFocus", "change", (e) => { ACC.focus = e.target.value; ACC.limit = 100; redraw(); });
+    on("depriToggle", "click", () => { ACC.depriOpen = !ACC.depriOpen; redraw(); });
+    host.querySelectorAll(".focusl [data-open]").forEach((b) => b.addEventListener("click", () =>
+      global.openCompanyFromView?.(b.dataset.open, b.textContent || "")));
+    host.querySelectorAll(".focusl [data-restore]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await Focus.set(b.dataset.restore, { status: "normal", companyName: Focus.entry(b.dataset.restore)?.companyName || "" }); }
+      catch (e) { b.disabled = false; alert("Not restored — " + (e.message || e)); }
+    }));
+    /* Focus lists load on their own and change from the call card: repaint
+       this view when they do, if it is the one on screen. Bound once. */
+    global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".focusl")) redraw(); };
+    if (global.Focus && !global.__focusBound) { global.__focusBound = true; Focus.onChange(() => global.__focusRedraw?.()); }
+    global.Focus?.load();
     on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
     on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = "";
+      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focus = "";
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });

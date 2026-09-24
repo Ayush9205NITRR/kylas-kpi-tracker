@@ -224,6 +224,13 @@ the text it is the Indian financial year (Q1 = Apr–Jun). The Worker imports th
 same file through `scripts/offsite.mjs`; `test-offsite.mjs` pins the parser.
 There is no Airtable column for it any more.
 
+**Focus lists and research live on the call card** (1.19), in "the account"
+card at the bottom of the right column: ★ Focus / Not picked / Deprioritize
+(with a reason) and the 15 research fields in four sections. Both are the
+Airtable Focus / Research tables the BD Ladder app uses; `GET /focus` and
+`GET /research?companyId=` read them. The Accounts view has the team's Focus
+lists above the table, a list-status filter, and Restore for dropped accounts.
+
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's
 code and answers everything cheerfully. **Restart the proxy after editing

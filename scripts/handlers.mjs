@@ -1502,7 +1502,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     },
 
     /* A BD picking an account, or dropping it with a reason. */
+    /* GET: every company's list status, { focus: { kylasId: {...} } }, for
+       the console's Focus lists and the ★ on the call card. POST sets one. */
     "/focus": async (_url, body) => {
+      if (!body || !Object.keys(body).length) {
+        if (!airtable) return { configured: false, focus: {} };
+        return { configured: true, focus: await readFocus(airtable) };
+      }
       if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
       const status = String(body.status || "");
       if (!["focus", "normal", "depri"].includes(status))

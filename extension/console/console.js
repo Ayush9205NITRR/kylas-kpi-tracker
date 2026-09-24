@@ -901,39 +901,52 @@ function renderBasic(){
      asking. */
   W.appendChild(whoCard);
   W.appendChild(group("Where this stands",[sRow,rRow]));
-  W.appendChild(researchCard(a));
 }
 
-/* ── ACCOUNT RESEARCH ─────────────────────────────────────────────────
-   The fifteen things worth knowing about a company before dialling it,
-   curated once per ACCOUNT (not per contact) and kept in Airtable's Research
-   table — the same rows the BD Ladder app reads and writes. Collapsed to the
-   one line that matters before a call, so the 85% no-answer case pays nothing
-   for it; the full list and the form are one tap away. */
-const RESEARCH=[
-  {k:"industry",l:"Industry"},
-  {k:"size",l:"Employees",o:["","1–50","51–200","201–500","501–1,000","1,001–5,000","5,000+"]},
-  {k:"hq",l:"HQ city"},
-  {k:"offices",l:"Other offices",ph:"Cities / plants / regional offices"},
-  {k:"funding",l:"Funding / ownership",ph:"Series C, Mar 2026 · listed · family-owned"},
-  {k:"revenue",l:"Revenue band",ph:"₹100–500 Cr"},
-  {k:"events",l:"Known events",ph:"Annual offsite in Goa, dealer meet in Jaipur…",long:1},
-  {k:"season",l:"Event season",ph:"Q3 FY27 / Oct–Dec"},
-  {k:"decides",l:"Who decides events",ph:"CHRO, Admin head, Marketing"},
-  {k:"vendor",l:"Current agency",ph:"Name, or 'none found'"},
-  {k:"trigger",l:"Recent trigger",ph:"Funding, new office, hiring spree, award",long:1},
-  {k:"links",l:"Website / LinkedIn"},
-  {k:"v",l:"V-score",half:1},
-  {k:"w",l:"W-score",half:1},
-  {k:"notes",l:"Research notes",long:1}];
+/* ── THE ACCOUNT: FOCUS LIST AND RESEARCH ───────────────────────────────
+   Everything here is about the COMPANY, not the person on the line, so it
+   sits on the right under the events, and is the same whichever contact at
+   the company is open.
+
+   Focus list: ★ Focus / Not picked / Deprioritize (with a reason), one status
+   per company, kept in Airtable's Focus table (focus.js).
+
+   Research: the fifteen things worth knowing before dialling, curated once
+   per account in Airtable's Research table — the rows the BD Ladder app reads
+   and writes. Four sections, so a long form reads as four short ones.
+   Collapsed to one line, so the 85% no-answer case pays nothing for it. */
+const RESEARCH_SECTIONS=[
+  {t:"The company",f:[
+    {k:"industry",l:"Industry"},
+    {k:"size",l:"Employees",o:["","1–50","51–200","201–500","501–1,000","1,001–5,000","5,000+"]},
+    {k:"hq",l:"HQ city"},
+    {k:"offices",l:"Other offices",ph:"Cities / plants / regional offices"}]},
+  {t:"Money & fit",f:[
+    {k:"funding",l:"Funding / ownership",ph:"Series C, Mar 2026 · listed · family-owned"},
+    {k:"revenue",l:"Revenue band",ph:"₹100–500 Cr"},
+    {k:"v",l:"V-score",half:1},
+    {k:"w",l:"W-score",half:1}]},
+  {t:"Their events",f:[
+    {k:"events",l:"Known events",ph:"Annual offsite in Goa, dealer meet in Jaipur…",long:1},
+    {k:"season",l:"Event season",ph:"Q3 FY27 / Oct–Dec"},
+    {k:"decides",l:"Who decides events",ph:"CHRO, Admin head, Marketing"},
+    {k:"vendor",l:"Current agency",ph:"Name, or 'none found'"}]},
+  {t:"Why now",f:[
+    {k:"trigger",l:"Recent trigger",ph:"Funding, new office, hiring spree, award",long:1},
+    {k:"links",l:"Website / LinkedIn"},
+    {k:"notes",l:"Research notes",long:1}]}];
+const RESEARCH=RESEARCH_SECTIONS.flatMap(s=>s.f);
 /* companyId -> { row, state: "loading"|"ok"|"error", error } */
 const RES=new Map();
 /* What the card is showing: "snap" (one line), "all" (every field), "edit". */
 let RES_VIEW="snap", RES_FOR="", RES_DRAFT=null, RES_SAVING=false;
+/* The Deprioritize form, open or not, and what is typed in it. */
+let FOC_FORM=null;
+const hasAPI=()=>typeof API!=="undefined"&&API&&typeof API.research==="function";
 function loadResearch(id){
   if(!id||RES.has(id))return;
   RES.set(id,{state:"loading"});
-  if(!global_API()){RES.set(id,{state:"error",error:"Research needs the server."});return;}
+  if(!hasAPI()){RES.set(id,{state:"error",error:"Research needs the server."});return;}
   API.research(id).then(r=>{
     RES.set(id,r&&r.configured===false
       ?{state:"error",error:"Airtable is not configured on the server, so there is no Research table to read."}
@@ -941,30 +954,76 @@ function loadResearch(id){
   }).catch(e=>RES.set(id,{state:"error",error:e.message||String(e)}))
     .finally(()=>paintResearch());
 }
-const global_API=()=>typeof API!=="undefined"&&API&&typeof API.research==="function";
 function researchSnap(R){
   const top=[R.industry,R.size&&R.size+" people",R.hq&&"HQ "+R.hq].filter(Boolean).map(esc).join(" · ");
   const more=[["Known for",R.events],["Season",R.season],["Decides",R.decides],["Agency",R.vendor],["Trigger",R.trigger]]
     .filter(([,v])=>String(v||"").trim()).map(([k,v])=>`<span><b>${k}:</b> ${esc(v)}</span>`).join("");
   return (top?`<p class="rs-top">${top}</p>`:"")+(more?`<p class="rs-more">${more}</p>`:"");
 }
+const filledIn=(R,list)=>list.filter(f=>String(R[f.k]||"").trim()).length;
+/* ★ Focus / Not picked / Deprioritize, for the company this contact is at. */
+function focusControl(a,id){
+  const w=el("div","fctl");
+  const st=Focus.of(id),E=Focus.entry(id);
+  const seg=el("div","fseg");seg.setAttribute("role","group");seg.setAttribute("aria-label","Focus list");
+  const who=(a.owner||"").split(/\s+/)[0];
+  [["focus","★ Focus"],["normal","Not picked"],["depri","Deprioritize"]].forEach(([k,l])=>{
+    const b=el("button",null,l);b.type="button";b.setAttribute("aria-pressed",String(st===k&&!(k==="depri"&&FOC_FORM)));
+    if(k==="depri"&&FOC_FORM)b.setAttribute("aria-pressed","true");
+    b.onclick=()=>{
+      if(k==="depri"){FOC_FORM=FOC_FORM?null:{reason:E?.reason||Focus.REASONS[0],note:E?.note||""};paintResearch();return;}
+      FOC_FORM=null;
+      if(st===k){paintResearch();return;}
+      setFocusFor(a,id,{status:k});
+    };
+    seg.appendChild(b);
+  });
+  w.appendChild(el("span","flbl",esc(who?who+"’s list":"Focus list")));
+  w.appendChild(seg);
+  if(FOC_FORM){
+    const f=el("div","fform");
+    const r=el("select","in");r.setAttribute("aria-label","Why deprioritize");
+    r.innerHTML=Focus.REASONS.map(x=>`<option${x===FOC_FORM.reason?" selected":""}>${esc(x)}</option>`).join("");
+    r.onchange=e=>FOC_FORM.reason=e.target.value;
+    const n=el("input","in");n.type="text";n.placeholder="One line on why (optional)";n.value=FOC_FORM.note;
+    n.setAttribute("aria-label","Note");n.oninput=e=>FOC_FORM.note=e.target.value;
+    const go=el("button","pbtn","Deprioritize");go.type="button";
+    go.onclick=()=>{const {reason,note}=FOC_FORM;FOC_FORM=null;setFocusFor(a,id,{status:"depri",reason,note});};
+    const no=el("button","gbtn","Cancel");no.type="button";no.onclick=()=>{FOC_FORM=null;paintResearch();};
+    f.append(r,n,no,go);w.appendChild(f);
+  }else if(st==="focus"&&E){
+    w.appendChild(el("p","fnote",E.setAt?`On the focus list since ${esc(dayAgo(E.setAt))}.`:"On the focus list."));
+  }else if(st==="depri"&&E){
+    w.appendChild(el("p","fnote",`<b>Deprioritized ${esc(dayAgo(E.setAt))}</b> — ${esc(E.reason||"no reason given")}${E.note?`: “${esc(E.note)}”`:""}`));
+  }else if(Focus.error){
+    w.appendChild(el("p","fnote",esc(Focus.error)));
+  }
+  return w;
+}
+async function setFocusFor(a,id,{status,reason="",note=""}){
+  try{
+    await Focus.set(id,{status,reason,note,companyName:a.company||"",ownerName:a.owner||"",setBy:ME||""});
+    toast(status==="focus"?"On the focus list.":status==="depri"?"Deprioritized.":"Taken off the list.");
+  }catch(e){toast("Not saved — "+(e.message||e));}
+}
 function researchCard(a){
   const id=String(a.companyId||"");
   const c=el("section","card");c.id="s-research";
-  if(RES_FOR!==id){RES_FOR=id;RES_VIEW="snap";RES_DRAFT=null;}
+  if(RES_FOR!==id){RES_FOR=id;RES_VIEW="snap";RES_DRAFT=null;FOC_FORM=null;}
   if(!id){
-    c.appendChild(el("div","cardH","<h2>Account research</h2>"));
-    c.appendChild(el("div","cardB grp",`<p class="rs-note">Link this contact to a company to see its research.</p>`));
+    c.appendChild(el("div","cardH","<h2>The account</h2>"));
+    c.appendChild(el("div","cardB grp",`<p class="rs-note">Link this contact to a company to see its focus status and research.</p>`));
     return c;
   }
   loadResearch(id);
+  Focus.load();
   const st=RES.get(id)||{state:"loading"};
   const R=(st.row)||{};
-  const filled=RESEARCH.filter(f=>String(R[f.k]||"").trim()).length;
+  const filled=filledIn(R,RESEARCH);
   const when=R.updatedAt?` · updated ${esc(dayAgo(R.updatedAt))}`:"";
-  const h=el("div","cardH",`<h2>Account research</h2><span class="sub">${st.state==="ok"?`${filled} of ${RESEARCH.length} filled${when}`:st.state==="loading"?"loading…":""}</span>`);
-  c.appendChild(h);
+  c.appendChild(el("div","cardH",`<h2>${Focus.of(id)==="focus"?'<span class="fstar">★</span> ':""}${esc(a.company||"The account")}</h2><span class="sub">${st.state==="ok"?`research ${filled} of ${RESEARCH.length}${when}`:st.state==="loading"?"loading…":""}</span>`));
   const b=el("div","cardB grp");c.appendChild(b);
+  b.appendChild(focusControl(a,id));
   if(st.state==="loading"&&RES_VIEW!=="edit"){b.appendChild(el("p","rs-note","Reading this company's research…"));return c;}
   if(st.state==="error"&&RES_VIEW!=="edit"){b.appendChild(el("p","rs-note",esc(st.error)));return c;}
 
@@ -978,10 +1037,14 @@ function researchCard(a){
         :input(fid,RES_DRAFT[f.k],f.ph||"",set);
       return field(f.l,fid,false,ctrl);
     };
-    let pair=[];
-    for(const f of RESEARCH){
-      if(f.half){pair.push(one(f));if(pair.length===2){const g=el("div","g2");pair.forEach(n=>g.appendChild(n));form.appendChild(g);pair=[];}}
-      else form.appendChild(one(f));
+    for(const sec of RESEARCH_SECTIONS){
+      const fs=el("fieldset","rsec");fs.appendChild(el("legend",null,esc(sec.t)));
+      let pair=[];
+      for(const f of sec.f){
+        if(f.half){pair.push(one(f));if(pair.length===2){const g=el("div","g2");pair.forEach(n=>g.appendChild(n));fs.appendChild(g);pair=[];}}
+        else fs.appendChild(one(f));
+      }
+      form.appendChild(fs);
     }
     const foot=el("div","rs-foot");
     const cancel=el("button","gbtn","Cancel");cancel.type="button";
@@ -1005,18 +1068,25 @@ function researchCard(a){
   }
 
   if(RES_VIEW==="all"){
-    b.appendChild(el("dl","rlist",RESEARCH.map(f=>{const v=String(R[f.k]||"").trim();
-      return `<div><dt>${esc(f.l)}</dt><dd class="${v?"":"no"}">${v?esc(v):"—"}</dd></div>`;}).join("")));
+    for(const sec of RESEARCH_SECTIONS){
+      const n=filledIn(R,sec.f);
+      b.appendChild(el("h3","rsec-h",`${esc(sec.t)}<span>${n} of ${sec.f.length}</span>`));
+      b.appendChild(el("dl","rlist",sec.f.map(f=>{const v=String(R[f.k]||"").trim();
+        return `<div class="${f.long?"wide":""}"><dt>${esc(f.l)}</dt><dd class="${v?"":"no"}">${v?esc(v):"—"}</dd></div>`;}).join("")));
+    }
   }else{
     b.appendChild(el("div","rsnap",filled?researchSnap(R):`<p class="rs-note">No research on this company yet.</p>`));
+    /* Which of the four sections are still empty, at a glance. */
+    b.appendChild(el("p","rsec-meter",RESEARCH_SECTIONS.map(sec=>{const n=filledIn(R,sec.f);
+      return `<span class="${n===sec.f.length?"full":n?"some":""}">${esc(sec.t)} ${n}/${sec.f.length}</span>`;}).join("")));
   }
   const acts=el("div","rs-foot");
   if(filled){
-    const more=el("button","gbtn sm",RES_VIEW==="all"?"Show less":"Show all "+RESEARCH.length);more.type="button";
+    const more=el("button","gbtn sm",RES_VIEW==="all"?"Show less":"Show all research");more.type="button";
     more.onclick=()=>{RES_VIEW=RES_VIEW==="all"?"snap":"all";paintResearch();};
     acts.appendChild(more);
   }
-  const ed=el("button","gbtn sm",filled?"Edit":"Add research");ed.type="button";
+  const ed=el("button","gbtn sm",filled?"Edit research":"Add research");ed.type="button";
   ed.onclick=()=>{RES_VIEW="edit";RES_DRAFT=null;paintResearch();document.getElementById("r-industry")?.focus();};
   acts.appendChild(ed);
   b.appendChild(acts);
@@ -1028,6 +1098,7 @@ function paintResearch(){
   if(!old||cur==null||!DATA[cur])return;
   old.replaceWith(researchCard(rec()));
 }
+if(typeof Focus!=="undefined")Focus.onChange(()=>paintResearch());
 function dayAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
   return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";
@@ -1042,6 +1113,7 @@ function renderRight(){
   if(a.stage==="Could Not Connect"){
     F.appendChild(group("No answer",[el("p","skipnote",
       "Nobody picked up — nothing to write down here. Pick a day to try again on the left, then hit <kbd>↵</kbd>.")]));
+    F.appendChild(researchCard(a));
     return;
   }
 
@@ -1073,6 +1145,8 @@ function renderRight(){
   g3.appendChild(field("How are you meeting them?","f-mm",isReq(a,"f-mm"),
     select("f-mm",MODE_OF_MEETING,a.modeOfMeeting,v=>a.modeOfMeeting=v)));
   F.appendChild(g3c);
+  /* The account, last: it is the same for every contact at the company. */
+  F.appendChild(researchCard(a));
 }
 
 /* One chip per event type, one card per chip. Tapping a lit chip removes its

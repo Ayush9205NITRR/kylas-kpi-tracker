@@ -253,6 +253,9 @@
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     /* Who the funnel counts, and every name it could count. */
     team: () => req("/team", { timeout: 20000 }),
+    /* Every company's focus-list status, and setting one. */
+    focusAll: () => req("/focus", { timeout: 20000 }),
+    setFocus: (body) => req("/focus", { method: "POST", body, timeout: 20000 }),
     /* A company's account research, and saving it. */
     research: (companyId) => req(`/research?companyId=${encodeURIComponent(companyId)}`, { timeout: 20000 }),
     saveResearch: (companyId, companyName, values, updatedBy) => req("/research",

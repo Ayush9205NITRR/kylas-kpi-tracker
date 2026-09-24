@@ -426,6 +426,23 @@ const seats = (offCos.body.companies || []).find((c) => String(c.id) === String(
 check('the accounts list derives Jul–Sep from the row\'s "Q3"', seats?.offsite?.includes('JUL_SEP'),
       JSON.stringify(seats?.offsite));
 
+/* ── 9c · focus lists and research, read and written ─────────────────── */
+console.log('\n9c. focus lists and research');
+const setF = await post(await coldWorker(38), '/focus', { companyId: String(contact.companyId), companyName: 'Seats',
+  status: 'depri', reason: 'Too small / not a fit', note: 'one office', ownerName: 'Shreya', setBy: 'test' });
+check('a BD can deprioritize an account, with a reason', setF.status === 200 && setF.body.ok, JSON.stringify(setF.body).slice(0, 80));
+const readF = await get(await coldWorker(39), '/focus');
+const fe = readF.body.focus?.[String(contact.companyId)];
+check('and the console reads it back', fe?.status === 'depri' && fe?.reason === 'Too small / not a fit', JSON.stringify(fe));
+await post(await coldWorker(40), '/focus', { companyId: String(contact.companyId), status: 'normal', previous: 'depri' });
+const readF2 = await get(await coldWorker(41), '/focus');
+check('Restore takes it off the list', !readF2.body.focus?.[String(contact.companyId)], JSON.stringify(readF2.body.focus));
+await post(await coldWorker(42), '/research', { companyId: String(contact.companyId), companyName: 'Seats',
+  values: { industry: 'Furniture', season: 'Q3' }, updatedBy: 'test' });
+const readR = await get(await coldWorker(43), `/research?companyId=${contact.companyId}`);
+check('research saves and reads back for the card', readR.body.research?.industry === 'Furniture' && readR.body.research?.season === 'Q3',
+      JSON.stringify(readR.body).slice(0, 100));
+
 /* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */
 /* Cloudflare counts every outside request AND every database query an
    invocation makes, and refuses past a cap: 50 on the Free plan. The Kylas
