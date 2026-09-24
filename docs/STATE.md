@@ -231,6 +231,19 @@ Airtable Focus / Research tables the BD Ladder app uses; `GET /focus` and
 `GET /research?companyId=` read them. The Accounts view has the team's Focus
 lists above the table, a list-status filter, and Restore for dropped accounts.
 
+**A save's Airtable writes used to wait on each other** (fixed 1.19.1). The
+client waited for each reply before sending the next request, so a save was
+seven ~350 ms round trips in a row, and Kylas went first even when Airtable
+did not need it. Now requests are spaced by START (Airtable's limit is a
+rate, 5/s, not a concurrency), `syncContact` sends what does not depend on
+what, event rows go ten to a request, and Airtable runs beside Kylas for a
+contact that already has a Kylas id. Measured on workerd, mocks at 350 ms
+(Airtable) / 200 ms (Kylas), 6,000 companies: save landed 3.8 s → 2.1 s
+(existing contact), 3.0 s → 2.1 s (new); the dashboard counts it ~0.1 s
+later. `/ladder` is memoised on the mirror stamp: 422 ms → 12 ms warm. The
+floor now is Airtable's rate limit. `MOCK_LATENCY_MS` / `MOCK_TRACE` on both
+mocks reproduce this.
+
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's
 code and answers everything cheerfully. **Restart the proxy after editing

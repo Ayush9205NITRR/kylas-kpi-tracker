@@ -1625,11 +1625,13 @@ async function watchJobs(){
   watching=true;
   try{
     while(Object.keys(JOBS).length){
-      /* Quick at first — most saves are done in a few seconds — then patient,
-         for one that is waiting out a retry. */
-      const oldest=Math.min(...Object.values(JOBS).map(j=>j.at));
-      const age=Date.now()-oldest;
-      await new Promise(r=>setTimeout(r,age<30e3?2000:age<5*60e3?15e3:60e3));
+      /* Quick at first — a save lands in about a second, and asking is a
+         7 ms read — then patient, for one that is waiting out a retry.
+         Timed by the NEWEST job, so a fresh save is not polled slowly just
+         because an older one is stuck in a retry. */
+      const newest=Math.max(...Object.values(JOBS).map(j=>j.at));
+      const age=Date.now()-newest;
+      await new Promise(r=>setTimeout(r,age<10e3?750:age<30e3?2000:age<5*60e3?15e3:60e3));
       let res;
       try{res=await API.saveStatus(Object.keys(JOBS));}catch{continue;}
       let changed=false;

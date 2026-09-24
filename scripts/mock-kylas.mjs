@@ -180,7 +180,12 @@ const json = (res, code, body) => {
   res.end(JSON.stringify(body));
 };
 
+/* MOCK_LATENCY_MS: what a round trip to the real Kylas costs, so a benchmark
+   against this mock measures the pipeline and not localhost. Off by default. */
+const LATENCY = Number(process.env.MOCK_LATENCY_MS || 0);
 createServer(async (req, res) => {
+  if (process.env.MOCK_TRACE) console.log(`${Date.now()} ${req.method} ${decodeURIComponent(req.url).slice(0, 90)}`);
+  if (LATENCY) await new Promise((r) => setTimeout(r, LATENCY));
   const url = new URL(req.url, `http://${req.headers.host}`);
   const now = Date.now();
   recent = recent.filter((t) => now - t < 1000);

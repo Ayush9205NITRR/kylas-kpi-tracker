@@ -36,26 +36,20 @@ export function createAirtable(pat, baseId, {
 } = {}) {
   const API = apiUrl;
   const GAP = gap;
-  const STUCK_MS = 60_000;
-  let chain = Promise.resolve();
-/* A rejected promise must not stay in the chain: `chain.then(...)` off a
-   rejected chain rejects with the ORIGINAL error, so one failed request would
-   make every later one fail with the same stale message for the life of the
-   process. The chain keeps only the timing, never the outcome. */
-  /* Spaced from the previous request rather than slept before every one —
-     see the same change in kylas.mjs. */
-  let last = 0;
+  /* SPACED BY START, NOT BY FINISH. Airtable's limit is five requests a
+     second per base — a rate, not a concurrency. Waiting for each answer
+     before sending the next made every request cost a full round trip
+     (~350 ms from the edge) even when it did not depend on the one before:
+     a save was seven of them end to end, three seconds. Now each request
+     starts GAP after the previous one started, and the caller decides what
+     actually has to wait for what. Nothing here can hold later requests
+     hostage, so a request that never settles only fails itself. */
+  let nextAt = 0;
   const queue = (fn) => {
-    const run = chain.then(() => {
-      const wait = last + GAP - Date.now();
-      return wait > 0 ? sleep(wait) : null;
-    }).then(() => { last = Date.now(); return fn(); });
-    /* The next request waits for this one — but not for ever. A request that
-       was cancelled mid-flight (its caller went away) may never settle on a
-       hosted runtime, and without a limit it would hold every later request
-       on this client with it. */
-    chain = Promise.race([run.then(() => {}, () => {}), sleep(STUCK_MS)]);
-    return run;
+    const now = Date.now();
+    const start = Math.max(now, nextAt);
+    nextAt = start + GAP;
+    return (start > now ? sleep(start - now) : Promise.resolve()).then(fn);
   };
 
   async function call(method, path, body, tries = 4) {
@@ -232,6 +226,25 @@ export async function upsertTolerant(at, table, mergeOn, fields) {
   throw new Error(`${table}: gave up dropping unknown fields (${dropped.join(", ")})`);
 }
 
+/* upsertTolerant for a batch: a column the base lacks is dropped from every
+   record, and the batch sent again. */
+export async function upsertManyTolerant(at, table, mergeOn, list) {
+  let send = list;
+  const dropped = [];
+  const names = new Set(list.flatMap((f) => Object.keys(f)));
+  for (let i = 0; i <= names.size; i++) {
+    try {
+      return { recs: await at.upsertMany(table, mergeOn, send), dropped };
+    } catch (e) {
+      const which = unknownField(e);
+      if (!which || which === mergeOn || !names.has(which) || dropped.includes(which)) throw e;
+      send = send.map(({ [which]: _gone, ...rest }) => rest);
+      dropped.push(which);
+    }
+  }
+  throw new Error(`${table}: gave up dropping unknown fields (${dropped.join(", ")})`);
+}
+
 /* ── the rules, stated once ─────────────────────────────────────────── */
 const filled = (v) => String(v || "").trim() !== "";
 const rowsOf = (c) => [
@@ -259,23 +272,31 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
     return rec;
   };
 
-  /* 1 · company */
-  let companyRec = null;
-  if (c.companyId) {
-    companyRec = await put("Companies", "Kylas Company ID", {
+  /* ORDER BY DEPENDENCY, NOT BY HABIT. The contact needs the company's
+     record (its link) and the contact's previous state (its rank may only
+     rise); everything after needs the contact's record. Nothing else waits
+     on anything, so those three reads/writes go out together, and so do the
+     four after the contact. The client still spaces them to Airtable's rate
+     limit — this only stops each one waiting for the last one's answer. */
+
+  /* 1 · company, the contact as it stands, and its event rows as they stand */
+  const companyP = c.companyId ? put("Companies", "Kylas Company ID", {
       "Kylas Company ID": String(c.companyId),
       Name: c.company || `Company ${c.companyId}`,
       /* Carried so the dashboard can attribute this company without going back
          to Kylas for it. Only written when known — an upsert with a blank owner
          would wipe one that an earlier save got right. */
       ...(c.owner ? { Owner: c.owner } : {}),
-    });
-    wrote.push("company");
-  }
-
+    }) : Promise.resolve(null);
   /* 2 · the contact's existing rank, because the rank may only ever rise */
-  let prev = null;
-  if (c.kid) prev = await at.find("Contacts", `{Kylas Contact ID} = '${esc(c.kid)}'`);
+  const prevP = c.kid ? at.find("Contacts", `{Kylas Contact ID} = '${esc(c.kid)}'`) : Promise.resolve(null);
+  /* Held for step 4: which rows this contact already has, so one deleted in
+     the console can be deleted here. Only needs the Kylas id. */
+  const heldP = c.kid
+    ? at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(c.kid)}'`).catch(() => [])
+    : Promise.resolve([]);
+  const [companyRec, prev] = await Promise.all([companyP, prevP]);
+  if (companyRec) wrote.push("company");
   const prevRank = Number(prev?.fields?.["KPI Rank"] || 0);
   const computed = STAGE_RUNG[c.stage] || 0;
   const rank = Math.max(prevRank, computed);
@@ -378,10 +399,14 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   wrote.push("contact");
   if (!contactRec) throw new Error("Airtable did not return the contact record");
 
-  /* 4 · event rows, matched on the key the overlay assigns */
+  /* 4-6 · event rows, the call and the stage move: independent of each
+     other, so sent together. */
+  const after = [];
+
+  /* 4 · event rows, matched on the key the overlay assigns — ten to a request */
   const rows = rowsOf(c).filter((r) => r.rowKey);
-  for (const r of rows) {
-    await put("Event Rows", "Row Key", {
+  if (rows.length) after.push((async () => {
+    const { dropped } = await upsertManyTolerant(at, "Event Rows", "Row Key", rows.map((r) => ({
       "Row Key": r.rowKey,
       Period: r.period,
       "Event Type": r.eventType || "",
@@ -390,20 +415,21 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       Pax: r.pax || "",
       Remarks: r.remarks || "",
       Contact: [contactRec.id],
-    });
-  }
+    })));
+    dropped.forEach((f) => missing.add(`Event Rows.${f}`));
+    wrote.push(`${rows.length} event row(s)`);
+  })());
   /* A row deleted in the console must go here too, or a stale one keeps
      counting toward Right POC forever. */
-  if (c.kid) {
-    const held = await at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(c.kid)}'`).catch(() => []);
+  if (c.kid) after.push((async () => {
+    const held = await heldP;
     const keep = new Set(rows.map((r) => r.rowKey));
     const stale = held.filter((h) => h.fields["Row Key"] && !keep.has(h.fields["Row Key"])).map((h) => h.id);
     if (stale.length) { await at.remove("Event Rows", stale); wrote.push(`removed ${stale.length} stale row(s)`); }
-  }
-  if (rows.length) wrote.push(`${rows.length} event row(s)`);
+  })());
 
   /* 5 · the call, append-only and idempotent on its key */
-  if (call) {
+  if (call) after.push((async () => {
     const key = `${call.at}-${c.kid || c.pocName}`;
     await put("Call Log", "Key", {
       Key: key,
@@ -417,11 +443,11 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       Contact: [contactRec.id],
     });
     wrote.push("call log");
-  }
+  })());
 
   /* 6 · the transition, only when the stage actually moved */
   const from = prev?.fields?.["Current Stage"] || "";
-  if (from !== c.stage && c.stage) {
+  if (from !== c.stage && c.stage) after.push((async () => {
     const at_ = call?.at || new Date().toISOString();
     await put("Stage Transitions", "Key", {
       Key: `${c.kid || c.pocName}-${at_}`,
@@ -437,7 +463,14 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       Contact: [contactRec.id],
     });
     wrote.push(`transition ${STAGE_LABEL[from] || from || "new"} -> ${STAGE_LABEL[c.stage] || c.stage}`);
-  }
+  })());
+
+  /* Every one settles before this reports: a failure in any of them fails
+     the save (and the queue retries it — every write here is an upsert on a
+     key, so a retry repeats nothing), but only after the others have landed. */
+  const settled = await Promise.allSettled(after);
+  const failed = settled.find((r) => r.status === "rejected");
+  if (failed) throw failed.reason;
 
   /* Said EVERY save, not once at startup: this is the line that tells whoever
      is watching the proxy why a field they can see in the console is not in the
