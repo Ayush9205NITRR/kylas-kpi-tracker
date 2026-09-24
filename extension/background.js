@@ -102,6 +102,8 @@ const SAY = {
                   "(its redirect URI is missing from the OAuth client)",
   denied: "Google refused this account",
   bad_reply: "Google's reply did not match the request: click “sign in” to try again",
+  no_google: "could not reach Google to sign in: check the internet connection, then click " +
+             "“sign in” again",
 };
 const failure = (code, raw) => Object.assign(new Error(SAY[code] || raw), { code, raw: raw || SAY[code] });
 
@@ -114,6 +116,9 @@ function classify(e) {
     return failure("sign_in_needed", raw);
   if (/did not approve|cancel|closed|dismissed/i.test(raw)) return failure("cancelled", raw);
   if (/access_denied/i.test(raw)) return failure("denied", raw);
+  /* Chrome's words for "the sign-in page never arrived": wifi, a captive
+     portal, a firewall. Nothing to do with the extension or the account. */
+  if (/could not be loaded|ERR_[A-Z_]+|network/i.test(raw)) return failure("no_google", raw);
   return Object.assign(new Error(raw), { code: "error", raw });
 }
 

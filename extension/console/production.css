@@ -30,6 +30,12 @@ body.framed .ovOnly{display:inline-block}
    bar and the only thing that can fix what is wrong — not amber, which says
    "something is broken" when nothing is. */
 .link.signin{background:var(--blue);border-color:var(--blue);color:var(--onBlue);cursor:pointer}
+/* The same call to action, on a Dashboard banner. Same accent as the badge,
+   because it does the same thing. */
+.vsign{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.vsignbtn{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.vsignbtn:disabled{opacity:.7;cursor:progress}
+.vsignwhy:empty{display:none}
 /* Connected, but to a proxy running a different build. Amber, because this is
    the same class of fact as offline — what is on screen cannot be trusted —
    and not a style choice. Reads as its own state, never as "on". */

@@ -7,6 +7,15 @@
    though every one of those facts is established on a contact underneath it. */
 (function (global) {
 
+  /* NOT SIGNED IN IS NOT AN OUTAGE, and must not read like one. The server is
+     up and the address is right; "Could not reach Kylas" sent people hunting
+     for a fault that was not there. The button is here because the console's
+     "sign in" badge is hidden behind the Dashboard — see signInNow() in
+     overlay.js, which is what clicking it runs. */
+  const signInNote = (what) => `<p class="vwarn vsign">Not signed in — ${esc(what)}.
+      <button type="button" class="gbtn sm vsignbtn" data-signin>Sign in with Google</button>
+      <span class="vsignwhy"></span></p>`;
+
   /* ── the four metrics, per company ─────────────────────────────────── */
   const filled = (v) => String(v || "").trim() !== "";
   const rowsOf = (c) => [...(c.past || []), ...(c.current || [])];
@@ -1158,7 +1167,8 @@
             esc(l.label)}</button>`).join("")}</span>
       </div>`;
 
-    if (REP.error) return head + `<p class="vwarn">Could not build the report — ${esc(REP.error)}.</p>`;
+    if (REP.error) return head + (API.needsSignIn ? signInNote("the report needs a sign-in to build")
+      : `<p class="vwarn">Could not build the report — ${esc(REP.error)}.</p>`);
     if (loading && !r) return head + `<p class="vnote">Reading the history…</p>`;
     if (!r || !r.periods.length) return head + `<p class="vnote">No history in this window yet.</p>`;
 
@@ -1396,8 +1406,10 @@
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
       </div>
-      ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
-        Showing only the companies this browser holds, so these counts are not your real funnel.</p>` : ""}
+      ${CACHE.error ? (API.needsSignIn
+        ? signInNote("showing only the companies this browser holds, so these counts are not your real funnel")
+        : `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
+        Showing only the companies this browser holds, so these counts are not your real funnel.</p>`) : ""}
       ${truncWarn()}
       ${/* THE FOUR TILES ARE GONE, and the ladder is why. They counted companies
            sitting at a rung RIGHT NOW, all time; the ladder counts companies
@@ -2198,8 +2210,10 @@
         <!-- rows painted by paint(), so the window applies to the first
              render as well as to every filter change -->
       </div>`}
-      ${CACHE.error ? `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
-        This is only what the browser holds, not everything allotted to you.</p>` : ""}
+      ${CACHE.error ? (API.needsSignIn
+        ? signInNote("this is only what the browser holds, not everything allotted to you")
+        : `<p class="vwarn">Could not reach Kylas — ${esc(CACHE.error)}.
+        This is only what the browser holds, not everything allotted to you.</p>`) : ""}
       ${truncWarn()}
       ${VIEW_MODE === "board"
         ? `<p class="vnote">Every company sits in exactly one column, and inside a column the coldest

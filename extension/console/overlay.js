@@ -334,20 +334,46 @@
     : st.needsSignIn ? ["signin", `Sign in with Google to continue — ${st.reason}`]
     : ["off", `Server unreachable — ${st.reason}. Click to change the address.`];
 
+  /* THE ONE THING IN THE CONSOLE THAT OPENS A GOOGLE WINDOW, because a person
+     clicked it — the badge, or a "Sign in with Google" button on a Dashboard
+     banner. Both come here, so there is one sign-in path and not two.
+
+     THE BUTTONS EXIST BECAUSE THE BADGE CANNOT BE SEEN FROM THE DASHBOARD. The
+     Dashboard covers the console's top bar, so "click sign in at the top of the
+     console" pointed at something that was not on screen — on the first page an
+     associate lands on each morning.
+
+     On success the console reloads, so every panel that failed for want of a
+     token fetches again with one, rather than each needing its own retry and
+     half the screen staying stale. Nothing typed is lost: the console keeps its
+     working state in extension storage. */
+  async function signInNow(btn) {
+    const label = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "Waiting for Google…"; }
+    setLink("busy", "Waiting for Google sign-in…");
+    const ok = await API.signIn();
+    if (ok) { location.reload(); return; }
+    setLink(...linkFor(API.state));
+    if (btn) {
+      btn.disabled = false; btn.textContent = label;
+      /* Said beside the button, because on the Dashboard the badge that would
+         otherwise carry the reason is out of sight. */
+      const why = btn.parentElement?.querySelector(".vsignwhy");
+      if (why) why.textContent = API.state.reason;
+    }
+  }
+  /* Delegated, so a banner painted by any view at any time is live without
+     that view knowing sign-in exists. */
+  document.addEventListener("click", (e) => {
+    const b = e.target?.closest?.("[data-signin]");
+    if (!b) return;
+    e.preventDefault();
+    signInNow(b);
+  });
+
   if (linkEl) linkEl.onclick = async () => {
     if (API.state.online) return;
-    /* THE ONE THING IN THE CONSOLE THAT OPENS A GOOGLE WINDOW, because a person
-       clicked it. On success the console reloads, so every panel that failed
-       for want of a token fetches again with one — rather than each needing its
-       own retry, and rather than half the screen staying stale. Nothing typed
-       is lost: the console keeps its working state in extension storage. */
-    if (API.state.needsSignIn) {
-      setLink("busy", "Waiting for Google sign-in…");
-      const ok = await API.signIn();
-      if (ok) { location.reload(); return; }
-      setLink(...linkFor(API.state));
-      return;
-    }
+    if (API.state.needsSignIn) { await signInNow(); return; }
     const next = prompt(
       "Server address\n\n" +
       "The team server is  https://bd.enout.website\n" +

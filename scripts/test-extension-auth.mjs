@@ -46,6 +46,7 @@ const google = {
   delay: 15,
   lifetime: 3600,            // seconds a minted token is valid for
   wrongNonce: false,
+  unreachable: false,        // the sign-in page cannot be loaded at all
 };
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const mint = (nonce) => `${b64({ alg: 'RS256', kid: 'k' })}.` +
@@ -70,6 +71,7 @@ async function launchWebAuthFlow(opts) {
   stats.flows++; stats.inFlight++;
   stats.maxConcurrent = Math.max(stats.maxConcurrent, stats.inFlight);
   try {
+    if (google.unreachable) { await sleep(5); throw new Error('Authorization page could not be loaded.'); }
     const u = new URL(opts.url);
     const nonce = u.searchParams.get('nonce');
     const registered = google.registered && u.searchParams.get('redirect_uri') === REDIRECT;
@@ -139,7 +141,7 @@ async function serverFetch(url, opts = {}) {
       ok = p.exp * 1000 > Date.now() && /@enout\.in$/.test(p.email);
     } catch { ok = false; }
   }
-  const body = ok ? { ok: true, user: { name: 'Ayush' }, role: 'admin', version: '1.12.0',
+  const body = ok ? { ok: true, user: { name: 'Ayush' }, role: 'admin', version: '1.13.0',
                       companies: [], periods: [], contacts: [], due: [] }
                   : { error: 'not signed in' };
   return { status: ok ? 200 : 401, ok, json: async () => body };
@@ -149,7 +151,7 @@ async function serverFetch(url, opts = {}) {
 async function openConsole(base = 'https://bd.enout.website') {
   const settings = new Map([['proxy', base]]);
   const Store = { getSetting: async (k) => settings.get(k), setSetting: async (k, v) => settings.set(k, v) };
-  const chrome = { runtime: { sendMessage: (m) => worker.send(m), getManifest: () => ({ version: '1.12.0' }) } };
+  const chrome = { runtime: { sendMessage: (m) => worker.send(m), getManifest: () => ({ version: '1.13.0' }) } };
   const window = {};
   vm.runInContext(API_SRC, vm.createContext({ window, Store, chrome, fetch: serverFetch, AbortController,
     setTimeout, clearTimeout, console: quiet, Promise, JSON, URL, encodeURIComponent, Error, Set, Map, Date }),
@@ -280,7 +282,16 @@ who = await API.signIn();
 check('is refused, and not kept', who === null && !session.has('enoutToken'), API.state.reason);
 google.wrongNonce = false;
 
-console.log('\n11. a proxy on this machine');
+console.log('\n11. Google cannot be reached at all');
+session.clear(); restartWorker(); google.unreachable = true; resetStats();
+API = await openConsole();
+who = await API.signIn();
+check('says to check the connection, not something about the extension', who === null &&
+  /check the internet connection/.test(API.state.reason), API.state.reason);
+check('and still asks for a sign-in rather than an address', API.needsSignIn === true);
+google.unreachable = false;
+
+console.log('\n12. a proxy on this machine');
 resetStats();
 const local = await openConsole('http://127.0.0.1:8787');
 r = await burst(local);
