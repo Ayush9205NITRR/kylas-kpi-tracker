@@ -41,6 +41,7 @@ import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from ".
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
+import { offsiteOf } from "./offsite.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -373,24 +374,37 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      accounts list filters on it, so each company carries every value its
      contacts gave. Read from the D1 copy, so it costs no Airtable request once
      the copy exists; before that it is simply absent rather than slow. */
+  /* OFFSITE TIMELINE, DERIVED — per company, the quarters its contacts'
+     offsite rows name in their Timeline, Past and Now (scripts/offsite.mjs).
+     Nobody types it; it follows the event rows. Held until one of the three
+     tables it reads changes, because /companies asks on every open. */
+  const offsiteShared = memo("offsite timeline", {
+    ttl: 5 * 60 * 1000,
+    key: mirror ? () => mirror.stamp(["Event Rows", "Contacts", "Companies"]) : null,
+  }, async () => {
+    const [rows, contacts, cos] = await Promise.all([
+      listTolerant(airtable, "Event Rows", { fields: ["Event Type", "Timeline", "Contact", "Removed At"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Contacts", { fields: ["Company"], pageSize: 100, maxPages: 2000 }),
+      airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
+    ]);
+    const kidOf = new Map(cos.map((r) => [r.id, String(r.fields?.["Kylas Company ID"] || "")]));
+    const companyOf = new Map(contacts.map((r) => [r.id, kidOf.get((r.fields?.Company || [])[0]) || ""]));
+    const out = new Map();
+    for (const r of rows) {
+      const f = r.fields || {};
+      if (f["Removed At"]) continue;
+      const kid = companyOf.get((f.Contact || [])[0]);
+      if (!kid) continue;
+      const q = offsiteOf({ current: [{ eventType: f["Event Type"] || "", timeline: f.Timeline || "" }] });
+      if (!q.length) continue;
+      if (!out.has(kid)) out.set(kid, new Set());
+      for (const k of q) out.get(kid).add(k);
+    }
+    return out;
+  });
   async function offsiteByCompany() {
     if (!airtable) return new Map();
-    try {
-      const [contacts, cos] = await Promise.all([
-        listTolerant(airtable, "Contacts", { fields: ["Company", "Offsite Timeline"], pageSize: 100, maxPages: 2000 }),
-        airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
-      ]);
-      const kidOf = new Map(cos.map((r) => [r.id, String(r.fields?.["Kylas Company ID"] || "")]));
-      const out = new Map();
-      for (const r of contacts) {
-        const v = r.fields?.["Offsite Timeline"];
-        const kid = kidOf.get((r.fields?.Company || [])[0]);
-        if (!v || !kid) continue;
-        if (!out.has(kid)) out.set(kid, new Set());
-        out.get(kid).add(v);
-      }
-      return out;
-    } catch (e) {
+    try { return await offsiteShared(); } catch (e) {
       log(`  offsite timeline: not available yet (${e.message.slice(0, 80)})`);
       return new Map();
     }
@@ -1161,7 +1175,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          new crawl on the next run. */
       touchCompanies();
       if (fresh && cache) inFlight(cache.put("companies-want-fresh", "1", { ttlSeconds: 3600 })).catch(() => {});
-      const crawl = await kylasCompanies.peek();
+      let crawl = await kylasCompanies.peek();
+      /* The local proxy has no shared store and no subrequest cap: there,
+         crawl here as it always did. */
+      if (!crawl && !cache) crawl = await kylasCompanies({ fresh: true }).catch(() => null);
       if (!crawl) {
         log("companies: no Kylas crawl yet — the maintenance run is building it");
         /* WHY it is still building, so the console can say something a person
@@ -1502,7 +1519,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { ok: true, ...res };
     },
 
-    "/research": async (_url, body) => {
+    /* GET ?companyId= reads one company's research (the call card's
+       Research block); POST writes it. */
+    "/research": async (url, body) => {
+      const askId = url.searchParams.get("companyId");
+      if (askId && !body?.companyId) {
+        if (!airtable) return { configured: false, research: null };
+        const all = await readResearch(airtable);
+        return { configured: true, research: all[String(askId)] || null };
+      }
       if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
       if (!body.companyId)
         throw Object.assign(new Error("companyId is required"), { status: 400 });

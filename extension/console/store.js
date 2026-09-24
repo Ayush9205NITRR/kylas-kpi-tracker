@@ -6,7 +6,8 @@
    replacing the bodies here, not touching console.js. */
 (function (global) {
   const KEY = { contacts: "enout.contacts", drafts: "enout.drafts", log: "enout.calllog",
-                settings: "enout.settings", snaps: "enout.snapshots" };
+                settings: "enout.settings", snaps: "enout.snapshots",
+                setting: "enout.setting." };
   const hasChrome = typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
 
   const get = (k) =>
@@ -18,6 +19,31 @@
     hasChrome
       ? new Promise((res) => chrome.storage.local.set({ [k]: v }, res))
       : Promise.resolve(localStorage.setItem(k, JSON.stringify(v)));
+
+  const remove = (k) =>
+    hasChrome
+      ? new Promise((res) => chrome.storage.local.remove(k, res))
+      : Promise.resolve(localStorage.removeItem(k));
+
+  /* The old single settings object, split into one key per setting, once.
+     A key already written the new way wins over the old copy. */
+  let migrating = null;
+  const migrated = () => (migrating ||= (async () => {
+    const old = await get(KEY.settings);
+    if (!old || typeof old !== "object") return;
+    for (const [k, v] of Object.entries(old))
+      if ((await get(KEY.setting + k)) == null) await set(KEY.setting + k, v);
+    await remove(KEY.settings);
+  })().catch(() => {}));
+
+  /* Every setting's name, for export and wipe. */
+  async function settingKeys() {
+    await migrated();
+    const all = hasChrome
+      ? Object.keys(await new Promise((res) => chrome.storage.local.get(null, res)))
+      : Object.keys(localStorage);
+    return all.filter((k) => k.startsWith(KEY.setting)).map((k) => k.slice(KEY.setting.length));
+  }
 
   let writing = null, pending = null;
   /* Collapse bursts of keystrokes into one write, and never let two writes race. */
@@ -62,12 +88,12 @@
     },
     async loadLog() { return (await get(KEY.log)) || []; },
 
-    async getSetting(k) { return ((await get(KEY.settings)) || {})[k]; },
-    async setSetting(k, v) {
-      const o = (await get(KEY.settings)) || {};
-      o[k] = v;
-      return set(KEY.settings, o);
-    },
+    /* ONE STORAGE KEY PER SETTING. They used to share one object, and the
+       company list (10,000 rows, megabytes) is a setting — so reading
+       "density" parsed the whole list, three times on every filter tick,
+       which is most of why ticking a Source took half a second to show. */
+    async getSetting(k) { await migrated(); return get(KEY.setting + k); },
+    async setSetting(k, v) { await migrated(); return set(KEY.setting + k, v); },
 
     /* ── daily freeze ────────────────────────────────────────────────────
        A day's numbers are counted once, after the day is over, and then never
@@ -141,17 +167,19 @@
       return {
         exportedAt: new Date().toISOString(),
         contacts: (await get(KEY.contacts)) || [],
-        settings: (await get(KEY.settings)) || {},
+        settings: await (async () => {
+          const o = {};
+          for (const k of await settingKeys()) o[k] = await get(KEY.setting + k);
+          return o;
+        })(),
         snapshots: (await get(KEY.snaps)) || {},
         drafts: (await get(KEY.drafts)) || {},
         callLog: (await get(KEY.log)) || [],
       };
     },
     async wipe() {
-      for (const k of Object.values(KEY)) {
-        if (hasChrome) await new Promise((r) => chrome.storage.local.remove(k, r));
-        else localStorage.removeItem(k);
-      }
+      for (const k of await settingKeys()) await remove(KEY.setting + k);
+      for (const k of Object.values(KEY)) await remove(k);
     },
   };
 

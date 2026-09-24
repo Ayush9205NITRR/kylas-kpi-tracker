@@ -26,7 +26,6 @@ const METRICS=[
    plausible is worse than an empty one: an associate picks "Google" from it and
    writes a value the account does not use. */
 let SOURCES=[""];
-let OFFSITE_TIMELINE=["","JAN_MAR","APR_JUN","JUL_SEP","OCT_DEC"];
 let OWNERS=[""];
 function addOwners(names){
   for(const n of names){ if(n&&!OWNERS.includes(n))OWNERS.push(n); }
@@ -42,7 +41,6 @@ function adoptPicklists(picklists){
      picklist got back in — that field is a different question with different
      values. */
   const src=take("cfSourceOfData","sourceOfData"); if(src)SOURCES=src;
-  const off=take("cfOffsiteTimeline","offsiteTimeline");    if(off)OFFSITE_TIMELINE=off;
   for(const list of Object.values(picklists))
     for(const o of list) if(o.code&&o.label&&!LABEL[o.code])LABEL[o.code]=o.label;
 }
@@ -188,9 +186,24 @@ const qualOf=a=>hasSignal(a)?"Right POC":"MQL";
 /* swap just the badge — re-rendering the call bar would steal focus mid-typing */
 function refreshQual(){
   const a=rec(),q=qualOf(a),n=document.querySelector(".qual");
+  paintOffsite(a);
   if(!n)return;
   n.textContent=q;n.className="qual "+(q==="MQL"?"mql":"poc");
   renderQueue();
+}
+/* OFFSITE TIMELINE IS DERIVED, never typed — like MQL → Right POC. It is the
+   quarters the offsite rows' Timeline names, Past and Now (offsite.js), so it
+   follows the sentence as it is written. */
+function offsiteHTML(a){
+  const q=Offsite.offsiteOf(a);
+  if(!q.length)return `<span class="ot-none">Not known yet — write a month or quarter in an offsite row's “when?”</span>`;
+  const said=rowsOf(a).filter(r=>Offsite.isOffsiteRow(r)&&Offsite.quartersOf(r.timeline).length).map(r=>r.timeline.trim());
+  return q.map(k=>`<span class="ot-q">${esc(Offsite.LABEL[k]||k)}</span>`).join("")+
+    `<span class="ot-from">from “${esc([...new Set(said)].join("”, “"))}”</span>`;
+}
+function paintOffsite(a){
+  const n=document.getElementById("f-ot");
+  if(n)n.innerHTML=offsiteHTML(a);
 }
 const rec=()=>{const a=DATA[cur];
   for(const r of [...(a.past||[]),...(a.current||[])]) if(!r.rowKey)r.rowKey=rowKey();if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
@@ -888,6 +901,136 @@ function renderBasic(){
      asking. */
   W.appendChild(whoCard);
   W.appendChild(group("Where this stands",[sRow,rRow]));
+  W.appendChild(researchCard(a));
+}
+
+/* ── ACCOUNT RESEARCH ─────────────────────────────────────────────────
+   The fifteen things worth knowing about a company before dialling it,
+   curated once per ACCOUNT (not per contact) and kept in Airtable's Research
+   table — the same rows the BD Ladder app reads and writes. Collapsed to the
+   one line that matters before a call, so the 85% no-answer case pays nothing
+   for it; the full list and the form are one tap away. */
+const RESEARCH=[
+  {k:"industry",l:"Industry"},
+  {k:"size",l:"Employees",o:["","1–50","51–200","201–500","501–1,000","1,001–5,000","5,000+"]},
+  {k:"hq",l:"HQ city"},
+  {k:"offices",l:"Other offices",ph:"Cities / plants / regional offices"},
+  {k:"funding",l:"Funding / ownership",ph:"Series C, Mar 2026 · listed · family-owned"},
+  {k:"revenue",l:"Revenue band",ph:"₹100–500 Cr"},
+  {k:"events",l:"Known events",ph:"Annual offsite in Goa, dealer meet in Jaipur…",long:1},
+  {k:"season",l:"Event season",ph:"Q3 FY27 / Oct–Dec"},
+  {k:"decides",l:"Who decides events",ph:"CHRO, Admin head, Marketing"},
+  {k:"vendor",l:"Current agency",ph:"Name, or 'none found'"},
+  {k:"trigger",l:"Recent trigger",ph:"Funding, new office, hiring spree, award",long:1},
+  {k:"links",l:"Website / LinkedIn"},
+  {k:"v",l:"V-score",half:1},
+  {k:"w",l:"W-score",half:1},
+  {k:"notes",l:"Research notes",long:1}];
+/* companyId -> { row, state: "loading"|"ok"|"error", error } */
+const RES=new Map();
+/* What the card is showing: "snap" (one line), "all" (every field), "edit". */
+let RES_VIEW="snap", RES_FOR="", RES_DRAFT=null, RES_SAVING=false;
+function loadResearch(id){
+  if(!id||RES.has(id))return;
+  RES.set(id,{state:"loading"});
+  if(!global_API()){RES.set(id,{state:"error",error:"Research needs the server."});return;}
+  API.research(id).then(r=>{
+    RES.set(id,r&&r.configured===false
+      ?{state:"error",error:"Airtable is not configured on the server, so there is no Research table to read."}
+      :{state:"ok",row:(r&&r.research)||null});
+  }).catch(e=>RES.set(id,{state:"error",error:e.message||String(e)}))
+    .finally(()=>paintResearch());
+}
+const global_API=()=>typeof API!=="undefined"&&API&&typeof API.research==="function";
+function researchSnap(R){
+  const top=[R.industry,R.size&&R.size+" people",R.hq&&"HQ "+R.hq].filter(Boolean).map(esc).join(" · ");
+  const more=[["Known for",R.events],["Season",R.season],["Decides",R.decides],["Agency",R.vendor],["Trigger",R.trigger]]
+    .filter(([,v])=>String(v||"").trim()).map(([k,v])=>`<span><b>${k}:</b> ${esc(v)}</span>`).join("");
+  return (top?`<p class="rs-top">${top}</p>`:"")+(more?`<p class="rs-more">${more}</p>`:"");
+}
+function researchCard(a){
+  const id=String(a.companyId||"");
+  const c=el("section","card");c.id="s-research";
+  if(RES_FOR!==id){RES_FOR=id;RES_VIEW="snap";RES_DRAFT=null;}
+  if(!id){
+    c.appendChild(el("div","cardH","<h2>Account research</h2>"));
+    c.appendChild(el("div","cardB grp",`<p class="rs-note">Link this contact to a company to see its research.</p>`));
+    return c;
+  }
+  loadResearch(id);
+  const st=RES.get(id)||{state:"loading"};
+  const R=(st.row)||{};
+  const filled=RESEARCH.filter(f=>String(R[f.k]||"").trim()).length;
+  const when=R.updatedAt?` · updated ${esc(dayAgo(R.updatedAt))}`:"";
+  const h=el("div","cardH",`<h2>Account research</h2><span class="sub">${st.state==="ok"?`${filled} of ${RESEARCH.length} filled${when}`:st.state==="loading"?"loading…":""}</span>`);
+  c.appendChild(h);
+  const b=el("div","cardB grp");c.appendChild(b);
+  if(st.state==="loading"&&RES_VIEW!=="edit"){b.appendChild(el("p","rs-note","Reading this company's research…"));return c;}
+  if(st.state==="error"&&RES_VIEW!=="edit"){b.appendChild(el("p","rs-note",esc(st.error)));return c;}
+
+  if(RES_VIEW==="edit"){
+    if(!RES_DRAFT)RES_DRAFT=Object.fromEntries(RESEARCH.map(f=>[f.k,R[f.k]||""]));
+    const form=el("form","rform");
+    const one=f=>{
+      const fid="r-"+f.k,set=v=>{RES_DRAFT[f.k]=v;};
+      const ctrl=f.o?(()=>{const s=el("select","in");s.id=fid;s.innerHTML=f.o.map(o=>`<option value="${esc(o)}"${o===RES_DRAFT[f.k]?" selected":""}>${o||"—"}</option>`).join("");s.onchange=e=>set(e.target.value);return s;})()
+        :f.long?textarea(fid,RES_DRAFT[f.k],f.ph||"",set)
+        :input(fid,RES_DRAFT[f.k],f.ph||"",set);
+      return field(f.l,fid,false,ctrl);
+    };
+    let pair=[];
+    for(const f of RESEARCH){
+      if(f.half){pair.push(one(f));if(pair.length===2){const g=el("div","g2");pair.forEach(n=>g.appendChild(n));form.appendChild(g);pair=[];}}
+      else form.appendChild(one(f));
+    }
+    const foot=el("div","rs-foot");
+    const cancel=el("button","gbtn","Cancel");cancel.type="button";
+    cancel.onclick=()=>{RES_VIEW="snap";RES_DRAFT=null;paintResearch();};
+    const save=el("button","pbtn",RES_SAVING?"Saving…":"Save research");save.type="submit";save.disabled=RES_SAVING;
+    foot.append(cancel,save);form.appendChild(foot);
+    form.onsubmit=async ev=>{
+      ev.preventDefault();
+      if(RES_SAVING)return;
+      RES_SAVING=true;paintResearch();
+      const values=Object.fromEntries(RESEARCH.map(f=>[f.k,String(RES_DRAFT[f.k]||"").trim()]));
+      try{
+        await API.saveResearch(id,a.company||"",values,ME||"");
+        RES.set(id,{state:"ok",row:{...values,updatedAt:new Date().toISOString()}});
+        RES_VIEW="snap";RES_DRAFT=null;toast("Research saved.");
+      }catch(e){toast("Research not saved — "+(e.message||e));}
+      finally{RES_SAVING=false;paintResearch();}
+    };
+    b.appendChild(form);
+    return c;
+  }
+
+  if(RES_VIEW==="all"){
+    b.appendChild(el("dl","rlist",RESEARCH.map(f=>{const v=String(R[f.k]||"").trim();
+      return `<div><dt>${esc(f.l)}</dt><dd class="${v?"":"no"}">${v?esc(v):"—"}</dd></div>`;}).join("")));
+  }else{
+    b.appendChild(el("div","rsnap",filled?researchSnap(R):`<p class="rs-note">No research on this company yet.</p>`));
+  }
+  const acts=el("div","rs-foot");
+  if(filled){
+    const more=el("button","gbtn sm",RES_VIEW==="all"?"Show less":"Show all "+RESEARCH.length);more.type="button";
+    more.onclick=()=>{RES_VIEW=RES_VIEW==="all"?"snap":"all";paintResearch();};
+    acts.appendChild(more);
+  }
+  const ed=el("button","gbtn sm",filled?"Edit":"Add research");ed.type="button";
+  ed.onclick=()=>{RES_VIEW="edit";RES_DRAFT=null;paintResearch();document.getElementById("r-industry")?.focus();};
+  acts.appendChild(ed);
+  b.appendChild(acts);
+  return c;
+}
+/* Only this card, so an answer arriving mid-call never moves the focus. */
+function paintResearch(){
+  const old=document.getElementById("s-research");
+  if(!old||cur==null||!DATA[cur])return;
+  old.replaceWith(researchCard(rec()));
+}
+function dayAgo(iso){
+  const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
+  return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";
 }
 
 function renderRight(){
@@ -910,8 +1053,8 @@ function renderRight(){
   const g3=el("div","cardB grp");g3c.appendChild(g3);
   g3.appendChild(field("Who handles this for them today?","f-vi",isReq(a,"f-vi"),
     select("f-vi",VENDOR_INFO,a.vendorInfo,v=>a.vendorInfo=v)));
-  g3.appendChild(field("Offsite timeline","f-ot",false,
-    select("f-ot",OFFSITE_TIMELINE,a.offsiteTimeline,v=>a.offsiteTimeline=v)));
+  const ot=el("div","ot");ot.id="f-ot";ot.tabIndex=-1;ot.innerHTML=offsiteHTML(a);
+  g3.appendChild(field("Offsite timeline","f-ot",false,ot));
 
   const lab=el("label","cb1"+(a.serviceOffering?" on":""));
   lab.style.marginBottom="0";
@@ -1143,7 +1286,7 @@ function missing(){
      collecting anything. */
   if (rung(a) >= MILESTONE.engaged.floor && !EXIT_STAGES.includes(a.stage)) {
     need(!a.nextCallDate, "A day to call back", "f-next");
-    need(!a.offsiteTimeline, "Offsite timeline", "f-ot");
+    need(!Offsite.offsiteOf(a).length, "Offsite timeline", "f-ot");
   }
   return m;
 }

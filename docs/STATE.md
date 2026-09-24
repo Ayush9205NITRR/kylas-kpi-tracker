@@ -66,6 +66,8 @@ node scripts/test-ladder-migration.mjs   # 33 · stage ladder remaps
 node scripts/test-idempotency.mjs        # 17 · starts its own stack. The template to copy.
 node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: the save
                                          #      survives it, and the backfill repairs it
+node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of event-row text
+node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
 ```
 
 `test-idempotency.mjs` is the one to imitate for anything new: it spawns its own
@@ -206,6 +208,21 @@ the fixed cost before optimising the variable one.
 weeks because mock-airtable resolved `{X (from Link)}` by hand. A stand-in that
 is kinder than production does not test production. It now returns 422 for a
 formula naming a field the table does not have.
+
+**One storage key holding everything.** Every console setting lived in one
+`enout.settings` object, and the 10,000-company list is a setting — so reading
+`density` parsed megabytes, three times per filter tick. Ticking a Source took
+400–750 ms to show and read as "the filter does nothing". Since 1.18 each
+setting is its own key (`enout.setting.<name>`, migrated once); a tick is ~90 ms.
+The same release stopped a click outside the Source panel from resetting a
+"contains" filter.
+
+**Offsite Timeline is derived, never typed** (1.18). `extension/console/offsite.js`
+reads the quarters out of the Timeline on offsite rows (event type blank or
+containing "offsite"), Past and Now. "Q3" is a calendar quarter; with "FY" in
+the text it is the Indian financial year (Q1 = Apr–Jun). The Worker imports the
+same file through `scripts/offsite.mjs`; `test-offsite.mjs` pins the parser.
+There is no Airtable column for it any more.
 
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's

@@ -407,22 +407,23 @@ const legacy = await post(await coldWorker(34), '/save', { contact: { ...qContac
 check('an older console (no queue flag) still gets the finished save', legacy.status === 200 && !legacy.body.queued && !!legacy.body.kid,
       JSON.stringify(legacy.body).slice(0, 80));
 
-/* ── 9b · offsite timeline, saved and rolled up to the company ─────────── */
-/* It was captured on the call card and saved nowhere. Now it is written to
-   Airtable with the contact, and the accounts list carries it per company. */
-console.log('\n9b. offsite timeline');
+/* ── 9b · offsite timeline, derived from the event rows ─────────────── */
+/* Nobody types it. The contact's offsite row says "Q3", so the company's
+   offsite timeline is Jul–Sep — read out of Event Rows, not a column of its
+   own that a base behind on repair-base would refuse. */
+console.log('\n9b. offsite timeline, derived');
 const heldO = [];
 const offRes = await (await coldWorker(36)).fetch(new Request('https://bd.enout.website/save', {
   method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
-  body: JSON.stringify({ contact: { ...contact, offsiteTimeline: 'JUL_SEP' }, call: { ...call1, at: new Date().toISOString() } }),
+  body: JSON.stringify({ contact, call: { ...call1, at: new Date().toISOString() } }),
 }), withStore(ENV), { waitUntil: (p) => heldO.push(p) });
 await Promise.allSettled(heldO);
 const atWrites = (await (await fetch('http://127.0.0.1:9901/__writes', { headers: { Authorization: 'Bearer x' } })).json()).writes;
-check('a save writes Offsite Timeline to the contact in Airtable', offRes.status === 200 &&
-      atWrites.some((w) => w.table === 'Contacts' && w.fields?.['Offsite Timeline'] === 'JUL_SEP'));
+check('a save writes no Offsite Timeline column', offRes.status === 200 &&
+      !atWrites.some((w) => w.fields && 'Offsite Timeline' in w.fields));
 const offCos = await get(await coldWorker(37), '/companies?owner=all');
 const seats = (offCos.body.companies || []).find((c) => String(c.id) === String(contact.companyId));
-check('and the accounts list carries it on the company', seats?.offsite?.includes('JUL_SEP'),
+check('the accounts list derives Jul–Sep from the row\'s "Q3"', seats?.offsite?.includes('JUL_SEP'),
       JSON.stringify(seats?.offsite));
 
 /* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */

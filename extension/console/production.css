@@ -889,3 +889,21 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 /* Whose numbers these are, when the viewer cannot change it. */
 .vrole{font-size:var(--t-meta);color:var(--text3);border:1px solid var(--line2);
   border-radius:11px;padding:3px 9px;align-self:center;cursor:help}
+
+/* ── account research (call card, left) ───────────────────────────── */
+.rsnap .rs-top{margin:0 0 4px;font-size:var(--t-body);font-weight:var(--w-strong);color:var(--text)}
+.rsnap .rs-more{margin:0;font-size:var(--t-label);color:var(--text2);display:flex;flex-wrap:wrap;gap:4px 14px}
+.rsnap .rs-more b{font-weight:var(--w-med);color:var(--text3)}
+.rs-note{margin:0;font-size:var(--t-label);color:var(--text3)}
+.rs-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.rlist{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px 20px}
+.rlist>div{min-width:0}
+.rlist dt{font-size:var(--t-meta);color:var(--text3);text-transform:uppercase;letter-spacing:.04em}
+.rlist dd{margin:2px 0 0;font-size:var(--t-label);color:var(--text);overflow-wrap:anywhere}
+.rlist dd.no{color:var(--text3)}
+.rform .g2{margin-bottom:14px}
+/* the derived offsite timeline on the card */
+.ot{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;min-height:34px;padding-top:4px}
+.ot .ot-q{border:1px solid var(--line2);border-radius:999px;padding:2px 10px;font-size:var(--t-label);
+  font-weight:var(--w-med);color:var(--text);background:var(--panel2)}
+.ot .ot-from,.ot .ot-none{font-size:var(--t-meta);color:var(--text3)}

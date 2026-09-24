@@ -187,8 +187,9 @@
     for (const co of by.values()) {
       for (const c of co.contacts) {
         if (!co.source && c.source) co.source = c.source;
-        /* Typed on this browser's call card, possibly not saved yet. */
-        if (c.offsiteTimeline && !co.offsite.includes(c.offsiteTimeline)) co.offsite.push(c.offsiteTimeline);
+        /* Derived from the event rows on this browser's card, possibly not
+           saved yet — the same rule the server applies (offsite.js). */
+        for (const q of global.Offsite ? Offsite.offsiteOf(c) : []) if (!co.offsite.includes(q)) co.offsite.push(q);
         if (!co.owner && c.owner) co.owner = c.owner;
 
         /* The company sits at the best rung any of its POCs has reached. */
@@ -1904,9 +1905,9 @@
     </div>`;
   }
 
-  /* OFFSITE TIMELINE — when the prospect said their next offsite is. A
-     contact field, rolled up: a company matches a quarter if any of its
-     contacts named it. The quarter to call now is the one coming up. */
+  /* OFFSITE TIMELINE — the quarters a company's offsite rows name in their
+     Timeline, Past and Now, derived (offsite.js) rather than typed. A company
+     matches a quarter if any of its contacts' rows named it. */
   const OFFSITE_LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
   const offLabel = (v) => OFFSITE_LABEL[v] || String(v || "").replace(/_/g, " ");
   function offsiteSelect(all) {
@@ -2548,7 +2549,10 @@
       global.__srcOutside = true;
       document.addEventListener("mousedown", (e) => {
         if (!ACC.srcOpen || e.target.closest?.("#srcPick")) return;
-        ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
+        /* Closing keeps the filter, as Airtable does. This used to reset the
+           condition and its text, so "contains GPTW" vanished the moment you
+           clicked the table to look at what it found. */
+        ACC.srcOpen = false; ACC.srcFind = "";
         global.__srcRedraw?.();
       });
     }
@@ -2559,7 +2563,7 @@
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
       ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = "";
-      ACC.srcOpen = false; ACC.srcFind = "";
+      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });
 

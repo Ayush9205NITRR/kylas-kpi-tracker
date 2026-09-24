@@ -55,9 +55,9 @@ try {
    is exactly the state in which a retry duplicates a contact. */
 const store = fileStore(new URL("../.save-journal.json", import.meta.url), { log });
 
-let routes;
+let routes, maintain;
 try {
-  ({ routes } = await createHandlers({ env: { ...process.env, VERSION }, store, log }));
+  ({ routes, maintain } = await createHandlers({ env: { ...process.env, VERSION }, store, log }));
 } catch (e) {
   /* A misconfiguration, not a crash — say which one, and nothing else. The
      handlers throw rather than exit precisely so this can be one sentence
@@ -137,3 +137,15 @@ server.listen(PORT, "127.0.0.1", () => {
   log(`proxy on http://127.0.0.1:${PORT} — build ${VERSION}`);
   log(`routes: ${Object.keys(routes).join("  ")}`);
 });
+
+/* The Worker's once-a-minute cron, locally. /companies never crawls Kylas
+   inline any more; without this the list here would say "building" forever. */
+let maintaining = false;
+const tick = async () => {
+  if (maintaining || !maintain) return;
+  maintaining = true;
+  try { await maintain(); } catch (e) { log(`! maintain: ${e.message}`); }
+  finally { maintaining = false; }
+};
+setTimeout(tick, 1000);
+setInterval(tick, 60_000).unref();

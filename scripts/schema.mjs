@@ -118,9 +118,6 @@ export const TABLES = [
       { name: "Salutation", type: "singleLineText" },
       { name: "Source of Data", type: "singleLineText" },
       { name: "Remarks", type: "multilineText" },
-      /* When the prospect's next offsite is, as the associate heard it
-         (JAN_MAR … OCT_DEC). Was held only in the browser until 1.17. */
-      { name: "Offsite Timeline", type: "singleLineText" },
       { name: "Owner", type: "singleLineText" },
       { name: "Current Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Previous Stage", type: "singleSelect", options: sel(...STAGES) },

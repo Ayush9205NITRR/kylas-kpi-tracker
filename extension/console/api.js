@@ -253,6 +253,10 @@
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     /* Who the funnel counts, and every name it could count. */
     team: () => req("/team", { timeout: 20000 }),
+    /* A company's account research, and saving it. */
+    research: (companyId) => req(`/research?companyId=${encodeURIComponent(companyId)}`, { timeout: 20000 }),
+    saveResearch: (companyId, companyName, values, updatedBy) => req("/research",
+      { method: "POST", body: { companyId, companyName, values, updatedBy }, timeout: 20000 }),
     teamSave: (team) => req("/team-save", { method: "POST", body: { team }, timeout: 20000 }),
     /* queue: true — "answer once it is safe, I will ask how it went". The
        server stores the save and replies at once; Kylas and Airtable get it
