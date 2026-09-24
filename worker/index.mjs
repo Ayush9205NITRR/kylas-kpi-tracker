@@ -57,7 +57,10 @@ function storeFor(env) {
 }
 
 function handlers(env, log) {
-  return (built ||= createHandlers({ env, store: storeFor(env), log })
+  /* cache: the same store, for the finished report. Built once from about a
+     hundred pages of Airtable and read by every isolate and every associate,
+     rather than rebuilt — and abandoned half-way — on each cold one. */
+  return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
 
@@ -242,9 +245,9 @@ export default {
       return json({ error: e.message }, e.status || 401, origin);
     }
 
-    let routes;
+    let routes, building;
     try {
-      ({ routes } = await handlers(env, log));
+      ({ routes, building } = await handlers(env, log));
     } catch (e) {
       log(`! could not start: ${e.message}`);
       return json({ error: e.message }, 500, origin);
@@ -262,7 +265,14 @@ export default {
           catch { throw Object.assign(new Error("the request body is not valid JSON"), { status: 400 }); }
         }
       }
-      return json(await handler(url, parsed), 200, origin);
+      /* A request whose client stopped waiting is cancelled by Cloudflare,
+         and the report build inside it with it. Registered here, the work
+         runs on (Cloudflare allows it a further thirty seconds) and a finished
+         report is kept for the next request instead of thrown away. */
+      const pending = handler(url, parsed);
+      ctx?.waitUntil?.(pending.catch(() => {}));
+      for (const p of building?.() || []) ctx?.waitUntil?.(p);
+      return json(await pending, 200, origin);
     } catch (e) {
       const status = e.status || 502;
       log(`! ${url.pathname} ${status} ${e.message}`);

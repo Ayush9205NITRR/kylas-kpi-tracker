@@ -6,8 +6,8 @@ waiting for DNS.
 **What you end up with.** The proxy runs on Cloudflare instead of on a laptop.
 There is no machine to keep awake, nothing to patch, and nothing to restart.
 Your team installs the Chrome extension and signs in once; after that they do
-nothing. Start on the free tier — see part 2 — and expect either $0 or $5 a
-month.
+nothing. Cost: the Cloudflare zone is Free; the **Workers Paid plan ($5 a
+month) is required** — see part 2.
 
 **What is verified.** Everything in parts 1–5 has been built and run against
 Cloudflare's real runtime (`workerd`) with a real D1 database — including the
@@ -63,18 +63,19 @@ optimization and CDN tuning. None of this uses any of them. **Choose Free.**
 Its own description lists what matters here: Workers, D1, DNS and SSL
 included.
 
-The **Workers** paid plan is a separate $5/month, and you probably do not need
-that either. An earlier version of this guide said you did, because the
-duplicate-guard was going to live in KV, which allows only 1,000 writes a day
-— about a third of what this team produces. It lives in D1 now, chosen for
-correctness rather than cost, and D1's free allowance is far above ~1,600
-saves a day.
+The **Workers Paid** plan ($5/month, Workers & Pages → Plans) IS needed. An
+earlier version of this guide said deploy on Free and wait to be told; that
+was wrong, and the Dashboard is what proved it. Building the team report reads
+every row of four Airtable tables — around a hundred requests to Airtable at
+this team's size — in one request, and the Free plan allows 50 outbound
+requests and 10 ms of processing per request. On Free the report cannot be
+built at all. Paid raises both far past what this needs.
 
-So deploy on Free and let the system tell you if it needs more. The one limit
-that might eventually bite is processing time on the heaviest dashboard
-queries; Cloudflare reports that plainly when it happens, and $5 fixes it
-that day. Paying in advance for a ceiling you may never reach is not
-prudence.
+What $5 does not change: the report still takes up to a minute to build from
+Airtable. The Worker keeps the finished report in the D1 database and shares
+it for `REPORT_TTL_MS` (15 minutes), so one person per window waits for it and
+everyone else gets it at once. D1 and the save journal fit in the included
+allowance.
 
 ---
 

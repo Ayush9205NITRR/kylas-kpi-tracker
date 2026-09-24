@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 const PORT = Number(process.env.PORT || 9901);
 const TABLES = {};                    // name -> [{id, fields}]
 const WRITES = [];
+let READS = 0;           /* GET row pages served — /__reads, so a test can tell a cache hit from a crawl */
 let nextId = 1;
 
 const rec = () => "rec" + String(nextId++).padStart(14, "0");
@@ -100,11 +101,13 @@ createServer(async (req, res) => {
 
   if (parts.length < 2) {
     if (!/^\/__/.test(url.pathname)) console.log(`404 ${req.method} ${url.pathname} parts=${JSON.stringify(parts)}`);
+    if (url.pathname === "/__reads") return json(res, 200, { reads: READS });
     if (url.pathname === "/__writes") return json(res, 200, { writes: WRITES, tables: TABLES });
     if (url.pathname === "/__reset") { WRITES.length = 0; for (const k of Object.keys(TABLES)) delete TABLES[k]; return json(res, 200, { ok: true }); }
     return json(res, 404, { error: "not found" });
   }
   const name = decodeURIComponent(parts.slice(1).join("/"));
+  if (req.method === "GET") READS++;
 
   /* MOCK_AIRTABLE_404=<table>[,<table>] makes those tables absent.
      This stand-in CREATES a table on first touch, which is convenient for the

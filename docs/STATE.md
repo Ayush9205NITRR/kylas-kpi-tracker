@@ -189,7 +189,7 @@ code and answers everything cheerfully. **Restart the proxy after editing
   |---|---|---|---|
   | `/v1/users/me` | `whoami()`, proxy | 10 min | restart |
   | company crawl | `companyCache`, proxy | 5 min | `?fresh=1` |
-  | dashboard's four tables | `reportData`, proxy | 60 s | a save, `?fresh=1` |
+  | dashboard's four tables | `reportData`, proxy | 60 s (15 min on the Worker, kept in D1) | a save (Node only), `?fresh=1` |
   | Companies index | `IDX`, airtable.mjs | 60 s | a save |
   | Contacts scan (no-rollup fallback) | `SCAN`, airtable.mjs | 30 s | a save |
 
@@ -197,6 +197,17 @@ code and answers everything cheerfully. **Restart the proxy after editing
   version from before their own call. Past the fresh window the held value is
   still served and the refresh runs behind it, so only the first request of a
   process ever waits.
+
+  **On the Worker the report is different, and must stay different.** There is
+  no long-lived process, so the finished report is kept gzipped in D1
+  (`cache:report-data`) and shared by every isolate; past its TTL the reader
+  WAITS for a rebuild rather than being served stale, because a refresh behind
+  the reply is cut off by Cloudflare before a minute-long build lands. A save
+  does not rebuild it inside the save's request. The fetch handler hands the
+  build to `ctx.waitUntil`, so a console that stops waiting does not cancel it.
+  Before this, a cold report took about a minute, the console aborted at 30 s,
+  the build was thrown away, and the Dashboard said "signal is aborted without
+  reason" for ever. `test-worker.mjs` §8.
 
 ---
 
@@ -226,6 +237,13 @@ code and answers everything cheerfully. **Restart the proxy after editing
    your organisation", which is the right setting for an internal tool.
 
 ## 6 · Ayush's to-do, outside this repo
+
+- **Workers Paid ($5/month)** on the Cloudflare account. Required, not
+  optional: the report needs ~100 Airtable requests in one request, and Free
+  allows 50 and 10 ms of CPU.
+- **Open Workers & Pages once** in the dashboard so the account gets its
+  workers.dev subdomain; until then the cron triggers do not register (error
+  10063) and the nightly sync does not run in the cloud.
 
 - **Rotate the Airtable PAT** — `pat7TsKhwZPyqTMG5…` was pasted in plain text in
   a chat. Never committed (verified), but treat it as burned.

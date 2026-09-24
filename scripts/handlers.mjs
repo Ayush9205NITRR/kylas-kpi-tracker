@@ -44,7 +44,7 @@ import { createJournal } from "./journal.mjs";
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {} } = {}) {
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
   const STARTED = new Date().toISOString();
@@ -424,25 +424,57 @@ export async function createHandlers({ env = {}, store, log = () => {} } = {}) {
      the value is too old to hand out — a proxy left running over a weekend
      would otherwise serve Friday's numbers instantly and refresh them into a
      cache nobody reads. */
-  function memo(name, { ttl, stale = 30 * 60 * 1000 }, fn) {
+  /* `persist`, when given, is a copy kept OUTSIDE this process — see kept()
+     below. On a laptop there is one long-lived process and memory is enough.
+     On a hosted runtime there is no such process: each request may land on a
+     fresh instance, and a client that stops waiting takes the work with it. The
+     report took about a minute to build from Airtable there, the console gave
+     up at thirty seconds, the half-built result was thrown away, and the next
+     request started again from nothing — so it never finished at all. With a
+     kept copy it is built once and every instance, and every associate, reads
+     the same result. */
+  /* Every build in progress, so a hosted shell can keep its request alive
+     until they finish (ctx.waitUntil) rather than having them cut off the
+     moment the reply is sent or the client stops waiting. */
+  const building = new Set();
+  function memo(name, { ttl, stale = 30 * 60 * 1000, persist = null }, fn) {
     let entry = null;          /* { at, value } */
     let inflight = null;
     const run = () => {
       if (!inflight) {
         const started = Date.now();
         inflight = fn()
-          .then((value) => { entry = { at: Date.now(), value }; return value; })
-          .finally(() => { inflight = null; log(`  ${name}: read in ${Date.now() - started}ms`); });
+          .then(async (value) => {
+            entry = { at: Date.now(), value };
+            if (persist) await persist.put(entry).catch((e) =>
+              log(`! ${name}: built, but could not keep a copy — ${e.message.slice(0, 120)}`));
+            return value;
+          })
+          .finally(() => { building.delete(p); inflight = null; log(`  ${name}: read in ${Date.now() - started}ms`); });
+        const p = inflight.catch(() => {});
+        building.add(p);
       }
       return inflight;
     };
     const f = async ({ fresh = false } = {}) => {
-      const age = entry ? Date.now() - entry.at : Infinity;
+      let age = entry ? Date.now() - entry.at : Infinity;
       if (entry && !fresh && age < ttl) return entry.value;
+      /* Another instance may have built a newer one. One read of the kept copy
+         is cheap beside rebuilding from a hundred pages of Airtable. */
+      if (persist && !fresh) {
+        const kept = await persist.get().catch(() => null);
+        if (kept && (!entry || kept.at > entry.at)) entry = kept;
+        age = entry ? Date.now() - entry.at : Infinity;
+        if (entry && age < ttl) return entry.value;
+      }
       /* Serve what we have and refresh behind it — but never swallow the error
          of a background refresh, or a base that has started refusing reads looks
          exactly like one that has not changed. */
-      if (entry && !fresh && age < stale) {
+      /* Not on a hosted runtime: a refresh behind the reply outlives the
+         request only briefly there, and a build that takes longer than that is
+         cut off every time and never lands. The reader past the TTL waits for
+         it instead — one reader per TTL, not every one. */
+      if (entry && !fresh && !persist && age < stale) {
         run().catch((e) => log(`! ${name}: background refresh failed — ${e.message.slice(0, 120)}`));
         return entry.value;
       }
@@ -464,11 +496,51 @@ export async function createHandlers({ env = {}, store, log = () => {} } = {}) {
     let lastRefresh = 0;
     f.refresh = ({ atMostEvery = 30 * 1000 } = {}) => {
       entry = null;
+      /* NOT ON A HOSTED RUNTIME. There, a rebuild started here would run inside
+         the SAVE's request — its hundred Airtable reads counted against the save,
+         competing with the save's own writes for the same rate limit, and done
+         for every call an associate logs. The kept copy stays, at most one TTL
+         old, and the next reader past that TTL rebuilds it for everyone. */
+      if (persist) return;
       if (Date.now() - lastRefresh < atMostEvery) return;
       lastRefresh = Date.now();
       run().catch((e) => log(`! ${name}: refresh failed — ${e.message.slice(0, 120)}`));
     };
     return f;
+  }
+
+  /* A value kept in the store, compressed. A few thousand calls and contacts
+     are about a megabyte of JSON, which is half of what one D1 row may hold and
+     growing every day; gzip takes it to a sixth of that. CompressionStream,
+     Blob and Response exist in both runtimes this runs in, so no Node API is
+     needed and none is used. */
+  function kept(st, key) {
+    const toB64 = (bytes) => {
+      let s = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(s);
+    };
+    const fromB64 = (b64) => {
+      const bin = atob(b64); const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    };
+    return {
+      async get() {
+        const raw = await st.get(key);
+        if (!raw) return null;
+        const text = await new Response(new Blob([fromB64(raw)]).stream()
+          .pipeThrough(new DecompressionStream("gzip"))).text();
+        return JSON.parse(text);
+      },
+      async put(entry) {
+        const gz = await new Response(new Blob([JSON.stringify(entry)]).stream()
+          .pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+        /* A day at most: a copy nobody has refreshed in a day is not worth
+           reading, and the store should not keep it for ever. */
+        await st.put(key, toB64(new Uint8Array(gz)), { ttlSeconds: 86400 });
+      },
+    };
   }
 
   /* EVERYTHING THE DASHBOARD IS COMPUTED FROM, in one read.
@@ -482,7 +554,10 @@ export async function createHandlers({ env = {}, store, log = () => {} } = {}) {
      logged — does not wait on a timer. The TTL is only for rows another
      associate's proxy wrote. */
   const REPORT_TTL = Number(env.REPORT_TTL_MS || 60 * 1000);
-  const reportData = memo("report data", { ttl: REPORT_TTL }, async () => {
+  const reportData = memo("report data", {
+    ttl: REPORT_TTL,
+    persist: cache ? kept(cache, "cache:report-data") : null,
+  }, async () => {
     /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
        fields, so a base one repair-base behind does not have them — and Airtable
        rejects the whole projection for one unknown name, which took the ENTIRE
@@ -1409,5 +1484,8 @@ export async function createHandlers({ env = {}, store, log = () => {} } = {}) {
                raw: c, source: "kylas" };
     },
   };
-  return { routes, version: VERSION, startedAt: STARTED };
+  /* Rebuilds the kept report now, for a scheduled job that wants it warm
+     before anybody asks. */
+  const warm = async () => { await reportData({ fresh: true }); };
+  return { routes, version: VERSION, startedAt: STARTED, warm, building: () => [...building] };
 }

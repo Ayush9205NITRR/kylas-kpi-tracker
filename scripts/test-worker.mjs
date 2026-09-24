@@ -260,6 +260,66 @@ const unconfigured = await fire(CRONS.CRON_SYNC, { ...ENV });
 check('so does a cron fired with no CRON_* set at all',
       /matches no job/.test(unconfigured));
 
+/* ── 8 · the report is kept, not rebuilt ─────────────────────────────── */
+/* The Dashboard's report is built from every row of four tables — about a
+   hundred Airtable pages on a real base, and about a minute. On a laptop the
+   one long-lived process remembered it. On Cloudflare every request can land
+   on a new isolate, and the console gave up at thirty seconds, so the build
+   was abandoned and restarted from nothing on every open: "signal is aborted
+   without reason", forever. The finished report is kept in the store now. */
+console.log('\n8. the report is kept across instances');
+/* The mock rate-limits like Airtable, so the counter is asked until it answers. */
+const reads = async () => {
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch('http://127.0.0.1:9901/__reads', { headers: { Authorization: 'Bearer x' } });
+    if (r.ok) return (await r.json()).reads;
+    await sleep(250);
+  }
+  throw new Error('the mock never reported its read count');
+};
+const REPORT_ENV = { ...ENV, REPORT_TTL_MS: '600000' };
+const reportOn = async (w, path = '/report?period=week&owner=all') => w.fetch(new Request(
+  `https://bd.enout.website${path}`, { headers: { Origin: ORIGIN } }), withStore(REPORT_ENV), { waitUntil() {} });
+const r0 = await reads();
+const first = await reportOn(await coldWorker(10));
+const firstBody = await first.json();
+const r1 = await reads();
+check('a cold instance builds the report', first.status === 200 && r1 > r0,
+      `${first.status}, ${r1 - r0} Airtable reads ${first.status !== 200 ? JSON.stringify(firstBody).slice(0, 120) : ''}`);
+check('and keeps a copy in the store', (await store.keys()).includes('cache:report-data'),
+      JSON.stringify(await store.keys()));
+const second = await reportOn(await coldWorker(11));
+const secondBody = await second.json();
+const r2 = await reads();
+check('ANOTHER cold instance answers from the kept copy with no Airtable reads',
+      second.status === 200 && r2 === r1, `${second.status}, ${r2 - r1} reads`);
+check('and gives the same numbers', JSON.stringify(secondBody.totals ?? secondBody.rows ?? null) ===
+      JSON.stringify(firstBody.totals ?? firstBody.rows ?? null));
+/* A save drops this instance's copy but must not rebuild inside the save. */
+const waited = [];
+const w12 = await coldWorker(12);
+await reportOn(w12);
+const rs = await reads();
+const saveRes = await w12.fetch(new Request('https://bd.enout.website/save', {
+  method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
+  body: JSON.stringify({ contact, call: { ...call1, at: '2026-09-23T11:00:00.000Z' } }),
+}), withStore(REPORT_ENV), { waitUntil: (p) => waited.push(p) });
+await Promise.all(waited);
+await sleep(300);
+const saveReads = (await reads()) - rs;
+check('a save does not rebuild the report on the hosted runtime', saveRes.status === 200 && saveReads < 10,
+      `${saveRes.status}, ${saveReads} reads during the save`);
+/* A client that stops waiting must not take the build with it. */
+const w13 = await coldWorker(13);
+await store.delete('cache:report-data');
+const held = [];
+const resp13 = w13.fetch(new Request('https://bd.enout.website/report?period=week&owner=all',
+  { headers: { Origin: ORIGIN } }), withStore(REPORT_ENV), { waitUntil: (p) => held.push(p) });
+await sleep(20);
+check('the build is handed to waitUntil, so a disconnect does not cancel it', held.length > 0,
+      `${held.length} promise(s)`);
+await resp13;
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

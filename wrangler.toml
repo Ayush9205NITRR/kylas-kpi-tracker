@@ -109,7 +109,7 @@ AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
@@ -134,6 +134,14 @@ CRON_ROLLUP = "0 21 * * SUN"
 # days at this team's volume is ~18,000 rows; 90 would be ~54,000, which is
 # over an Airtable Team base on its own.
 CALL_RETAIN_DAYS = "30"
+
+# How long the finished Dashboard report is served before it is rebuilt from
+# Airtable. It is kept in the D1 database above and shared by everyone, so one
+# rebuild per window, whoever opens the Dashboard first — about a hundred
+# Airtable reads, and the one person who triggers it waits for it. A call just
+# logged shows once the window has passed. Shorter is fresher and costs more of
+# Airtable's monthly API allowance.
+REPORT_TTL_MS = "900000"
 
 [triggers]
 crons = [

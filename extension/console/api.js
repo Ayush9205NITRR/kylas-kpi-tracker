@@ -121,8 +121,16 @@
         state = { ...state, online: true, reason: "", needsSignIn: false, signInCode: "" }; announce();
       }
       return payload;
-    } catch (e) {
-      const reason = e.name === "AbortError" ? "proxy timed out" : e.message;
+    } catch (e0) {
+      /* "signal is aborted without reason" is the browser's text for our own
+         timeout, and it reached the Dashboard verbatim. A slow answer is not a
+         dead server either, so it does not flip the badge to offline. */
+      if (e0.name === "AbortError") {
+        throw Object.assign(new Error("the server took too long to answer — it may still be " +
+          "building this; try again in a minute"), { timedOut: true });
+      }
+      const e = e0;
+      const reason = e.message;
       /* needsSignIn is what lets the badge say "sign in" and mean it, instead
          of "offline" and a prompt for a server address that was never wrong. */
       const needsSignIn = !!e.needsSignIn;
@@ -220,14 +228,14 @@
        because it can be 200 rows, so the views cache it. */
     companies: (owner, fresh) => req(
       `/companies?owner=${encodeURIComponent(owner || "")}${fresh ? "&fresh=1" : ""}`,
-      { timeout: 60000 }),
+      { timeout: 150000 }),
     /* The same numbers by day, week or month, with each period's change on the
        one before. */
     report: (period = "week", owner = "", from = "", to = "") => req(
       `/report?period=${encodeURIComponent(period)}` +
       (owner ? `&owner=${encodeURIComponent(owner)}` : "") +
       (from ? `&from=${encodeURIComponent(from)}` : "") +
-      (to ? `&to=${encodeURIComponent(to)}` : ""), { timeout: 30000 }),
+      (to ? `&to=${encodeURIComponent(to)}` : ""), { timeout: 150000 }),
     /* Why the company join found nothing. Only asked for when it did, because
        it reads every Companies row in the base. */
     kpiDebug: () => req("/kpi-debug", { timeout: 30000 }),
