@@ -325,6 +325,26 @@ and an address outside `ALLOWED_EMAIL_DOMAIN`.
 **The console says offline, but `curl` works.** Almost always the CORS settings
 in part 6.5, or an `ALLOWED_ORIGIN` that does not match your real extension id.
 
+**"Too many subrequests by single Worker invocation".** Cloudflare caps the
+outside requests and database queries one invocation may make: 50 on the Free
+plan, far more on Workers Paid. Since 1.16.1 no console request comes near 50
+(the heaviest, a save, is about 40; `test-worker.mjs` §10 holds every route
+under it). But the background work is hundreds of requests per run on an
+account this size, and Free refuses it:
+- the Kylas company crawl;
+- copying a table into D1;
+- the nightly sync.
+
+Seeing this error in the console means an extension or server older than
+1.16.1. Seeing it in `npx wrangler tail` from a scheduled run means the
+account is still on Free. **Upgrade to Workers Paid** (part 2).
+
+**"The server is building the company list from Kylas".** Expected once,
+after a deploy on a base the sync has not filled: the 5-minute job crawls
+Kylas in the background and the list appears by itself. If it is still there
+after 15 minutes, check `npx wrangler tail` for the reason, usually the
+Free-plan limit above.
+
 **The Dashboard lists only a handful of companies, or opens slowly.** The
 Kylas sync has never filled Airtable (part 9). Until it has, the list comes
 from a Kylas crawl that the 5-minute cron refreshes.

@@ -1102,8 +1102,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          job, so this is a read of the last one — not dozens of Kylas pages while
          an associate waits. Only the very first ever, or the Refresh button,
          crawls here. */
+      /* NEVER CRAWLED INSIDE A REQUEST. Past Kylas' 10,000-row window the
+         crawl is well over a hundred requests, which Cloudflare refuses in one
+         invocation on the Free plan ("Too many subrequests") and which takes
+         over a minute on any plan. The maintenance run builds it; until it
+         has, this says so rather than failing. The Refresh button asks for a
+         new crawl on the next run. */
       touchCompanies();
-      const crawl = await kylasCompanies({ fresh: !!fresh });
+      if (fresh && cache) inFlight(cache.put("companies-want-fresh", "1", { ttlSeconds: 3600 })).catch(() => {});
+      const crawl = await kylasCompanies.peek();
+      if (!crawl) {
+        log("companies: no Kylas crawl yet — the maintenance run is building it");
+        return { owner: all ? "all" : String(owner), companies: [], owners: ownerList(),
+                 picklists: (await meta()).picklists, source: "kylas", building: true,
+                 kpiSource: "none", kpiError: "", kpiMatched: 0 };
+      }
       for (const co of crawl.companies) {
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
@@ -1670,17 +1683,38 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   async function maintain({ rebuild = false, only = null } = {}) {
     const out = {};
     /* Saves first: a retry waiting here is a call an associate logged. */
-    if (saves) out.saves = await saves.drain(performSave).catch((e) => ({ error: e.message }));
-    if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { rebuild, only });
+    /* ONE BIG PIECE OF WORK PER RUN. Cloudflare caps the outside requests
+       one invocation may make (50 on the Free plan, 1,000 or more on Paid),
+       and a table rebuild or a Kylas crawl can each be a few hundred. So a run
+       does at most one of them; the next run, five minutes later, does the
+       next. Nothing waits on these — readers are served the copy in hand. */
+    if (saves) out.saves = await saves.drain(performSave, { max: 15 }).catch((e) => ({ error: e.message }));
+    if (rebuild) {
+      /* After the nightly sync or rollup: mark, do not rebuild here — the job
+         that just ran has already spent this invocation's allowance. */
+      if (mirror) await mirror.markStale(only).catch((e) => log(`! mirror: ${e.message}`));
+      await syncShared({ fresh: true }).catch(() => {});
+      return out;
+    }
     const age = await kylasCompanies.age();
     const readAt = Number((cache && (await cache.get("companies-read-at").catch(() => null))) || 0);
+    const wantFresh = !!(cache && (await cache.get("companies-want-fresh").catch(() => null)));
     /* Only while the list is being served FROM Kylas — once the base is
        synced the list comes from the D1 copy and this crawl would be waste. */
-    if (Date.now() - readAt < 2 * 3600 * 1000 && (age === null || age * 1000 > COMPANY_TTL)) {
+    const wantCrawl = Date.now() - readAt < 2 * 3600 * 1000 &&
+      (wantFresh || age === null || age * 1000 > COMPANY_TTL);
+    const crawl = async () => {
+      if (wantFresh) await cache.delete("companies-want-fresh").catch(() => {});
       const got = await kylasCompanies({ fresh: true }).catch((e) => ({ error: e.message }));
       out.kylasCompanies = got.error ? { error: got.error } : { companies: got.companies.length };
-    }
-    if (rebuild) await syncShared({ fresh: true }).catch(() => {});
+    };
+    /* A company list that does not exist yet, or that somebody asked to
+       refresh, comes first: without it the console has nothing to show,
+       whereas a table not yet copied is still read straight from Airtable. */
+    if (wantCrawl && (age === null || wantFresh)) { await crawl(); return out; }
+    if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { only, maxBuilds: 1 });
+    const built = (out.mirror || []).some((r) => r.rows !== undefined);
+    if (wantCrawl && !built) await crawl();
     return out;
   }
 

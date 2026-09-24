@@ -338,14 +338,23 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
   /* What the scheduled job calls. Builds what is missing, rebuilds what is a
      day old, and — only while somebody has used the console recently — picks
      up changes made outside it. Idle, it costs nothing: no Airtable request. */
+  /* `maxBuilds` caps whole-table rebuilds per call: each is hundreds of
+     requests on a large base, and Cloudflare caps requests per invocation.
+     The rest wait for the next run; unbuilt tables go first, then the oldest. */
   async function maintain(at, { deltaEveryMs = 10 * 60 * 1000, fullEveryMs = 26 * 3600 * 1000,
-                                activeWithinMs = 60 * 60 * 1000, rebuild = false, only = null } = {}) {
+                                activeWithinMs = 60 * 60 * 1000, rebuild = false, only = null,
+                                maxBuilds = Infinity } = {}) {
     await check(true);
     const out = [];
-    for (const t of only || Object.keys(tables)) {
+    let builds = 0;
+    const order = [...(only || Object.keys(tables))].sort((a, b) =>
+      Number(meta.get(a)?.full_at || 0) - Number(meta.get(b)?.full_at || 0));
+    for (const t of order) {
       const m = meta.get(t);
       try {
-        if (rebuild || !built(m) || now() - Number(m.full_at) > fullEveryMs) out.push(await build(at, t));
+        const due = rebuild || !built(m) || now() - Number(m.full_at) > fullEveryMs;
+        if (due && builds >= maxBuilds) continue;
+        if (due) { builds++; out.push(await build(at, t)); }
         else if (now() - Number(m.delta_at || 0) > deltaEveryMs &&
                  now() - Number(m.read_at || 0) < activeWithinMs) out.push(await delta(at, t));
       } catch (e) {
@@ -356,17 +365,25 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     return out;
   }
 
+  /* Due for a rebuild on the next runs, while still served as it is. */
+  async function markStale(only = null) {
+    await ready();
+    for (const t of only || Object.keys(tables))
+      await db.prepare("UPDATE mirror_meta SET full_at = 1 WHERE tbl = ? AND full_at IS NOT NULL").bind(t).run();
+    await check(true);
+  }
+
   async function status() {
     await check(true);
     return Object.keys(tables).map((t) => {
       const m = meta.get(t);
-      return { table: t, built: built(m), rows: m?.count ?? null, version: m ? `${m.gen}.${m.v}` : null,
+      return { table: t, built: built(m), stale: Number(m?.full_at) === 1, rows: m?.count ?? null, version: m ? `${m.gen}.${m.v}` : null,
                builtAt: m?.full_at ? new Date(m.full_at).toISOString() : null,
                deltaAt: m?.delta_at ? new Date(m.delta_at).toISOString() : null };
     });
   }
 
-  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, status,
+  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, markStale, status,
            pending: () => [...pending] };
 }
 

@@ -218,9 +218,29 @@ const unsynced = await (await coldWorker(3)).fetch(
   new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
   withStore(ENV), { waitUntil() {} });
 const unsyncedBody = await unsynced.json();
-check('lists companies from Kylas, not from its few Airtable rows',
-      unsynced.status === 200 && unsyncedBody.source !== 'airtable' && unsyncedBody.companies.length > 1,
-      `${unsynced.status} source=${unsyncedBody.source || 'kylas'} companies=${unsyncedBody.companies?.length}`);
+/* The crawl is never run inside a request — past Kylas' result window it is
+   over a hundred requests, which Cloudflare's Free plan refuses in one
+   invocation ("Too many subrequests"). The first answer says it is building. */
+check('does not crawl Kylas inside the request; says the list is being built',
+      unsynced.status === 200 && unsyncedBody.building === true && unsyncedBody.source !== 'airtable',
+      `${unsynced.status} building=${unsyncedBody.building} companies=${unsyncedBody.companies?.length}`);
+const CR = { CRON_SYNC: '30 20 * * *', CRON_SNAPSHOT: '45 18 * * *', CRON_ROLLUP: '0 21 * * 0', CRON_MAINTAIN: '*/5 * * * *' };
+const firstRun = [];
+await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, withStore({ ...ENV, ...CR }),
+  { waitUntil: (p) => firstRun.push(p) });
+await Promise.allSettled(firstRun);
+for (let i = 0; i < 100; i++) {           /* the crawl runs in waitUntil; wait for it to land */
+  const r = await (await coldWorker(4 + i / 1000)).fetch(
+    new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }), withStore(ENV), { waitUntil() {} });
+  const b = await r.json();
+  if (!b.building) {
+    check('the next maintenance run builds it, and the list comes from Kylas',
+          b.source !== 'airtable' && b.companies.length > 1, `source=${b.source || 'kylas'} companies=${b.companies.length}`);
+    break;
+  }
+  if (i === 99) check('the next maintenance run builds it', false, 'still building');
+  await sleep(200);
+}
 
 /* ── 7 · the nightly jobs ────────────────────────────────────────────── */
 /* The whole reason for moving off a laptop. Fired the way Cloudflare fires
@@ -296,6 +316,15 @@ const get = async (w, path) => {
 const MAINT = '*/5 * * * *';
 const maintOut = await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
 check('the maintenance cron runs', /-> maintain/.test(maintOut), maintOut.split('\n')[0]);
+/* One table rebuild per run, so no run exceeds Cloudflare's per-invocation
+   request cap. Fired until every table is in. */
+let runs = 1;
+for (; runs < 20; runs++) {
+  const c = await get(await coldWorker(19 + runs / 1000), '/cache-status');
+  if (c.body.mirror?.every((t) => t.built && !t.stale)) break;
+  await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+}
+check('tables are copied one per run, not all at once', runs >= 5 && runs < 20, `${runs} runs`);
 const cs = await get(await coldWorker(20), '/cache-status');
 check('every mirrored table is in D1', cs.status === 200 && cs.body.mirror.every((t) => t.built),
       JSON.stringify(cs.body.mirror?.filter((t) => !t.built).map((t) => t.table)));
@@ -374,6 +403,50 @@ const legacy = await post(await coldWorker(34), '/save', { contact: { ...qContac
   phones: [{ type: 'MOBILE', cc: '+91', value: '9800009993', primary: true }] }, call: { ...call1, at: new Date().toISOString() } });
 check('an older console (no queue flag) still gets the finished save', legacy.status === 200 && !legacy.body.queued && !!legacy.body.kid,
       JSON.stringify(legacy.body).slice(0, 80));
+
+/* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */
+/* Cloudflare counts every outside request AND every database query an
+   invocation makes, and refuses past a cap: 50 on the Free plan. The Kylas
+   company crawl inside /companies passed it on a real account ("Too many
+   subrequests by single Worker invocation"). Each console request, on a cold
+   instance, is counted here and held under the Free cap — so the console works
+   whatever the plan, and the heavy work is the scheduled job's alone. */
+console.log('\n10. requests per invocation (Cloudflare Free plan allows 50)');
+const realFetch = globalThis.fetch;
+let outside = 0;
+globalThis.fetch = (u, ...a) => { if (/127\.0\.0\.1:99/.test(String(u))) outside++; return realFetch(u, ...a); };
+const cost = async (n, method, path, body) => {
+  const w = await coldWorker(40 + n);
+  const heldC = [];
+  const q0 = db.queries(), o0 = outside;
+  const r = await w.fetch(new Request(`https://bd.enout.website${path}`, {
+    method, headers: { Origin: ORIGIN, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined }), withStore(ENV), { waitUntil: (p) => heldC.push(p) });
+  await r.text();
+  await Promise.allSettled(heldC);
+  return { status: r.status, n: (db.queries() - q0) + (outside - o0), d1: db.queries() - q0, out: outside - o0 };
+};
+const ROUTES = [
+  ['GET', '/health'], ['GET', '/meta'], ['GET', '/companies?owner=all'], ['GET', '/companies?owner=all&fresh=1'],
+  ['GET', '/report?period=month&owner=all'], ['GET', '/report?period=week&owner=74725'],
+  ['GET', '/queue?owner=74725'], ['GET', '/company?id=1776620'], ['GET', '/rca'], ['GET', '/team'],
+  ['GET', '/snapshots?days=60'], ['GET', '/cache-status'], ['GET', '/users'],
+  ['POST', '/save', { contact: { ...qContact, lid: 'wk-cost', pocName: 'Cost Person',
+    phones: [{ type: 'MOBILE', cc: '+91', value: '9800009995', primary: true }] },
+    call: { ...call1, at: new Date().toISOString() }, queue: true }],
+];
+let worst = { n: 0 };
+for (let i = 0; i < ROUTES.length; i++) {
+  const [m, p, b] = ROUTES[i];
+  const c = await cost(i, m, p, b);
+  if (c.n > worst.n) worst = { ...c, path: p };
+  check(`${m} ${p.split('?')[0]}${p.includes('fresh') ? ' (Refresh)' : ''} — ${c.n} (${c.out} outside, ${c.d1} database)`,
+        c.status === 200 && c.n <= 50, `status ${c.status}`);
+}
+const q0m = db.queries(), o0m = outside;
+await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+console.log(`   worst request: ${worst.path} at ${worst.n}; one maintenance run: ${(db.queries() - q0m) + (outside - o0m)}`);
+globalThis.fetch = realFetch;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 done();

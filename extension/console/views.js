@@ -394,6 +394,10 @@
      nothing whatever for Kylas' result window. Sending somebody to change a
      number that cannot help is worse than saying nothing. */
   const truncWarn = () => {
+    if (CACHE.building)
+      return `<p class="vwarn">The server is building the company list from Kylas — the first
+        time takes a few minutes, and it fills in here by itself.${CACHE.companies.length
+        ? " Until then these are the companies this browser last had." : ""}</p>`;
     if (!CACHE.truncated) return "";
     const got = esc(String(CACHE.crawled));
     /* READ FROM THE MIRROR, the shortfall is the SYNC's, and the fix is to run
@@ -526,6 +530,16 @@
     CACHE.loading = true;
     API.companies("all", force)
       .then(async (r) => {
+        /* The server has no company list from Kylas yet — its background job
+           is building one. Keep whatever this browser holds, say so, and ask
+           again in a minute rather than in five. */
+        if (r.building) {
+          CACHE.building = true; CACHE.error = "";
+          CACHE.at = Date.now() - FRESH_MS + 60 * 1000;
+          if (r.picklists) adoptPicklists(r.picklists);
+          return;
+        }
+        CACHE.building = false;
         CACHE.companies = r.companies || [];
         CACHE.owners = r.owners || [];
         CACHE.error = "";

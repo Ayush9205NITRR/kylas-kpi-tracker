@@ -82,6 +82,14 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**Heavy work inside a request.** `/companies` ran the whole Kylas crawl inline
+when there was no copy yet. Past Kylas' 10,000-row window that is 100+
+requests, and Cloudflare refused it: "Too many subrequests by single Worker
+invocation" (50 on Free). Requests now only read. The crawl, table copies and
+saves' retries run in the 5-minute job, one heavy piece per run.
+`test-worker.mjs` §10 counts every route's outside requests and database
+queries on a cold instance and fails any above 50.
+
 **Background work nobody waited for jams the instance.** On Workers, anything
 still running when a request ends is cancelled. A cancelled fetch is never
 settled, and the Airtable and Kylas clients each keep ONE queue per instance,
