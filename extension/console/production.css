@@ -966,8 +966,6 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .acctable .co .dp{font-style:normal;font-size:var(--t-meta);color:var(--amber);background:var(--amberSoft);border-radius:999px;padding:0 7px}
 @media (max-width:760px){.focusl .dtab .vr{grid-template-columns:1fr 1fr}}
 .rsec>.f,.rsec>.g2{margin-bottom:12px}.rsec>.f:last-child{margin-bottom:0}
-/* the focus-list card in the second pane */
-#s-focus .fctl{border-bottom:0;padding-bottom:0;margin-bottom:0}
 a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .rlist a{color:var(--blue)}
 /* research in its own (narrow) pane: one column, and the pane already says
@@ -975,9 +973,25 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 #formX .rlist{grid-template-columns:1fr}
 #formX #s-research>.cardH h2{display:none}
 #formX{padding-left:16px;padding-right:16px}
-/* ★ Focus on the company line of the header — one click, always visible */
-.who .atco .hstar{align-self:center;background:var(--panel);border:1px solid var(--line2);border-radius:999px;
-  padding:1px 9px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);cursor:pointer}
-.who .atco .hstar:hover{border-color:var(--blue);color:var(--blue)}
-.who .atco .hstar.on{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
-.who .atco .hstar.dp{background:var(--amberSoft);border-color:var(--amberLine);color:var(--amber)}
+
+/* ── the focus list, in the header ─────────────────────────────────── */
+.hfocus{position:relative;flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+  padding:0 16px;border-left:1px solid var(--line)}
+.hfocus .hfl{font-size:var(--t-meta);color:var(--text3);white-space:nowrap;max-width:380px;overflow:hidden;text-overflow:ellipsis}
+.hfocus .hfl i{font-style:normal;color:var(--text2)}
+.hfocus.depri .hfl i{color:var(--amber)}
+.hfocus .hfl b{color:var(--text2);font-weight:var(--w-strong)}
+.hseg{display:inline-flex;border:1.5px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--panel)}
+.hseg button{border:0;border-right:1px solid var(--line);background:transparent;padding:8px 14px;cursor:pointer;
+  font:inherit;font-size:var(--t-body);font-weight:var(--w-strong);color:var(--text2);white-space:nowrap}
+.hseg button:last-child{border-right:0}
+.hseg button:hover{color:var(--text);background:var(--panel2)}
+.hseg .focus[aria-pressed="true"]{background:var(--blue);color:var(--onBlue)}
+.hseg .normal[aria-pressed="true"]{background:var(--panel2);color:var(--text)}
+.hseg .depri[aria-pressed="true"]{background:var(--amberSoft);color:var(--amber)}
+.hfocus .fform{position:absolute;top:100%;right:0;z-index:40;margin-top:6px;width:560px;max-width:90vw;
+  background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);box-shadow:var(--sh);padding:12px}
+@media(max-width:1080px){.hfocus{border-left:0;padding-left:0}}
+/* Room for the focus bar and Save & next on one line at laptop widths: the
+   record id (developer information) gives way first. */
+@media(max-width:1440px){.hseg button{padding:8px 10px}.hfocus{padding:0 12px}.cbmeta .mi.kid{display:none}}

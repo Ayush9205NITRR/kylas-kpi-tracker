@@ -234,8 +234,10 @@ team's Kylas Field Map copies Kylas `cfOffsiteTimeline` (company) into it,
 2026-09-24): an account fact, not a contact field.
 
 **Focus lists and research on the call card** (1.19.3). The focus control
-(★ Focus / Not picked / Deprioritize with a reason, Airtable Focus table) is
-its own card in the SECOND pane, under "Where this stands". Research is the
+(★ Focus / Not picked / Deprioritize with a reason, Airtable Focus table) is,
+since 1.19.8, a large three-way switch in the HEADER beside Save & next,
+captioned with the company (a card low in the second pane, then a small pill,
+were both missed). Deprioritize opens a reason popover under it. Research is the
 team's own curated row — Company Database (`RESEARCH_BASE`) → "Company List",
 keyed by "Kylas Company Id" — shown read-only in the THIRD pane in four
 sections, the ten fields Ayush named, with "Open in Airtable". Since 1.19.4 it is

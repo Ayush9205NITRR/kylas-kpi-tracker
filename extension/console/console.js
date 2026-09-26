@@ -306,24 +306,6 @@ function renderCallbar(){
      <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
      ${a.designation?`<span>${esc(a.designation)}</span>`:""}</span>`);
   C.appendChild(who);
-  /* ★ FOCUS, ONE CLICK, WHERE IT IS ALWAYS VISIBLE. The focus-list card sits
-     low in the second pane and was not found; this is the same status, on the
-     company line. Deprioritize (it needs a reason) stays on the card. */
-  const coId=accountOf(a).id;
-  const atco=who.querySelector(".atco");
-  if(coId&&atco&&typeof Focus!=="undefined"){
-    Focus.load();
-    const on=Focus.of(coId)==="focus",dp=Focus.of(coId)==="depri";
-    const star=el("button","hstar"+(on?" on":"")+(dp?" dp":""),on?"★ Focus":dp?"Deprioritized":"☆ Focus");
-    star.type="button";
-    star.title=on?"On your focus list — click to take it off":dp?"Deprioritized — open the Focus list card to change it":"Add this account to your focus list";
-    star.onclick=()=>{
-      if(dp){document.getElementById("s-focus")?.scrollIntoView({block:"center",behavior:"smooth"});return;}
-      setFocusFor({...a,company:coName||a.company},coId,{status:on?"normal":"focus"});
-    };
-    atco.appendChild(star);
-  }
-
   const d=el("div","dial");
   /* A BUTTON, not a link. While this carried href="tel:..." a stray default —
      middle-click, cmd-click, or any path that skipped preventDefault — sent the
@@ -366,6 +348,10 @@ function renderCallbar(){
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
+  /* THE FOCUS LIST, IN THE HEADER — all three choices spelled out, big
+     enough to hit without looking (Ayush, 2026-09-26). It is about the
+     COMPANY, so it names it, and it is the same for every contact there. */
+  const fb=focusBar(a);if(fb)C.appendChild(fb);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
   btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
@@ -914,9 +900,6 @@ function renderBasic(){
      asking. */
   W.appendChild(whoCard);
   W.appendChild(group("Where this stands",[sRow,rRow]));
-  /* The account's focus-list status: a decision about the account, next to
-     the stage and the call-back. */
-  W.appendChild(focusCard(a));
 }
 
 /* ── THE ACCOUNT: FOCUS LIST (second pane) AND RESEARCH (third pane) ────
@@ -1051,24 +1034,30 @@ function paintResearch(){
    the contact's own. The header's ★ uses the same, so the two cannot disagree. */
 const accountOf=a=>({id:String((typeof scope!=="undefined"&&scope?.id)||a.companyId||""),
   name:(typeof scope!=="undefined"&&scope?.name)||a.company||""});
-function focusCard(a){
-  const id=accountOf(a).id;
+function focusBar(a){
+  const {id,name}=accountOf(a);
+  if(!id||typeof Focus==="undefined")return null;
   if(FOC_FOR!==id){FOC_FOR=id;FOC_FORM=null;}
-  const c=el("section","card");c.id="s-focus";
-  const st=id?Focus.of(id):"normal",E=id?Focus.entry(id):null;
-  c.appendChild(el("div","cardH",`<h2>${st==="focus"?'<span class="fstar">★</span> ':""}Focus list</h2><span class="sub">${esc(accountOf(a).name)}</span>`));
-  const b=el("div","cardB grp");c.appendChild(b);
-  if(!id){b.appendChild(el("p","rs-note","Link this contact to a company to put it on a focus list."));return c;}
   Focus.load();
-  const w=el("div","fctl");
-  const seg=el("div","fseg");seg.setAttribute("role","group");seg.setAttribute("aria-label","Focus list");
+  const st=Focus.of(id),E=Focus.entry(id);
+  const w=el("div","hfocus "+st);
+  /* What the status says, on the caption line — a line of its own made the
+     whole header jump in height every time the status changed. */
+  const said=st==="depri"&&E?`Dropped: ${E.reason||"no reason given"}${E.note?` — “${E.note}”`:""}`
+    :st==="focus"&&E?.setAt?`since ${dayAgo(E.setAt)}`:"";
+  const cap=el("span","hfl",`Focus list${name?` · <b>${esc(name)}</b>`:""}${said?` · <i>${esc(said)}</i>`:""}`);
+  if(said)cap.title=said;
+  w.appendChild(cap);
+  const seg=el("div","hseg");seg.setAttribute("role","group");seg.setAttribute("aria-label","Focus list for "+(name||"this company"));
   [["focus","★ Focus"],["normal","Not picked"],["depri","Deprioritize"]].forEach(([k,l])=>{
-    const bb=el("button",null,l);bb.type="button";
+    const bb=el("button",k,l);bb.type="button";
     bb.setAttribute("aria-pressed",String(FOC_FORM?k==="depri":st===k));
+    bb.title=k==="focus"?"Put this company on your focus list":k==="normal"?"Not on any list":"Drop this company — you will be asked why";
     bb.onclick=()=>{
-      if(k==="depri"){FOC_FORM=FOC_FORM?null:{reason:E?.reason||Focus.REASONS[0],note:E?.note||""};paintFocus();return;}
+      if(k==="depri"){FOC_FORM=FOC_FORM?null:{reason:E?.reason||Focus.REASONS[0],note:E?.note||""};renderCallbar();
+        document.querySelector(".hfocus .fform select")?.focus();return;}
       FOC_FORM=null;
-      if(st===k){paintFocus();return;}
+      if(st===k){renderCallbar();return;}
       setFocusFor(a,id,{status:k});
     };
     seg.appendChild(bb);
@@ -1081,19 +1070,13 @@ function focusCard(a){
     r.onchange=e=>FOC_FORM.reason=e.target.value;
     const n=el("input","in");n.type="text";n.placeholder="One line on why (optional)";n.value=FOC_FORM.note;
     n.setAttribute("aria-label","Note");n.oninput=e=>FOC_FORM.note=e.target.value;
+    n.onkeydown=e=>{if(e.key==="Enter")go.click();if(e.key==="Escape")no.click();};
     const go=el("button","pbtn","Deprioritize");go.type="button";
     go.onclick=()=>{const {reason,note}=FOC_FORM;FOC_FORM=null;setFocusFor(a,id,{status:"depri",reason,note});};
-    const no=el("button","gbtn","Cancel");no.type="button";no.onclick=()=>{FOC_FORM=null;paintFocus();};
+    const no=el("button","gbtn","Cancel");no.type="button";no.onclick=()=>{FOC_FORM=null;renderCallbar();};
     f.append(r,n,no,go);w.appendChild(f);
-  }else if(st==="focus"&&E){
-    w.appendChild(el("p","fnote",E.setAt?`On the focus list since ${esc(dayAgo(E.setAt))}.`:"On the focus list."));
-  }else if(st==="depri"&&E){
-    w.appendChild(el("p","fnote",`<b>Deprioritized ${esc(dayAgo(E.setAt))}</b> — ${esc(E.reason||"no reason given")}${E.note?`: “${esc(E.note)}”`:""}`));
-  }else if(Focus.error){
-    w.appendChild(el("p","fnote",esc(Focus.error)));
   }
-  b.appendChild(w);
-  return c;
+  return w;
 }
 async function setFocusFor(a,id,{status,reason="",note=""}){
   try{
@@ -1101,13 +1084,8 @@ async function setFocusFor(a,id,{status,reason="",note=""}){
     toast(status==="focus"?"On the focus list.":status==="depri"?"Deprioritized.":"Taken off the list.");
   }catch(e){toast("Not saved — "+(e.message||e));}
 }
-/* Only this card, so an answer arriving mid-call never moves the focus. */
-function paintFocus(){
-  const old=document.getElementById("s-focus");
-  if(!old||cur==null||!DATA[cur])return;
-  old.replaceWith(focusCard(rec()));
-}
-if(typeof Focus!=="undefined")Focus.onChange(()=>{paintFocus();if(DATA[cur])renderCallbar();});
+/* The header only, so an answer arriving mid-call never moves the caret. */
+if(typeof Focus!=="undefined")Focus.onChange(()=>{if(DATA[cur])renderCallbar();});
 function dayAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
   return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";
