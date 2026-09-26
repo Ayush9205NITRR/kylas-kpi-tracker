@@ -187,15 +187,29 @@
            handshake would stay silent on the very instance that motivated it.
            "unknown" is different: that is a build which reported, from outside
            a checkout, and there is nothing to compare. */
-        const stale = mine ? (!theirs || (theirs !== "unknown" && theirs !== mine)) : false;
+        /* ONLY WHEN THE SERVER IS BEHIND. The hosted server is updated the
+           moment it is deployed; the extension waits days for store review.
+           A server AHEAD of the console is the normal state of a release in
+           review and is fine — its routes are a superset. Behind is the case
+           that bites: the console asks for something the server lacks. */
+        const cmp = (a, b) => {
+          const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
+          for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+          return 0;
+        };
+        const local = isLocal();
+        const stale = mine ? (!theirs || (theirs !== "unknown" && cmp(theirs, mine) < 0)) : false;
         state = { online: true, reason: "", user: r.user || null, role: r.role || "admin",
                   version: theirs, staleProxy: stale,
                   staleNote: !stale ? ""
-                    : theirs
-                      ? `The proxy is running build ${theirs}, this console is ${mine}. ` +
-                        `Restart it: stop node scripts/proxy.mjs, then start it again.`
-                      : `The proxy predates this console (${mine}) — it is old enough not to ` +
-                        `report its build. Restart it: stop node scripts/proxy.mjs, then start it again.` };
+                    : local
+                      ? (theirs
+                        ? `The proxy is running build ${theirs}, this console is ${mine}. ` +
+                          `Restart it: stop node scripts/proxy.mjs, then start it again.`
+                        : `The proxy predates this console (${mine}) — it is old enough not to ` +
+                          `report its build. Restart it: stop node scripts/proxy.mjs, then start it again.`)
+                      : `The server is on build ${theirs || "unknown"}, this console is ${mine}. ` +
+                        `Deploy the server (npx wrangler deploy) — until then newer features may not answer.` };
         announce();
         return r;
       } catch { return null; }

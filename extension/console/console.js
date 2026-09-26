@@ -306,6 +306,23 @@ function renderCallbar(){
      <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
      ${a.designation?`<span>${esc(a.designation)}</span>`:""}</span>`);
   C.appendChild(who);
+  /* ★ FOCUS, ONE CLICK, WHERE IT IS ALWAYS VISIBLE. The focus-list card sits
+     low in the second pane and was not found; this is the same status, on the
+     company line. Deprioritize (it needs a reason) stays on the card. */
+  const coId=accountOf(a).id;
+  const atco=who.querySelector(".atco");
+  if(coId&&atco&&typeof Focus!=="undefined"){
+    Focus.load();
+    const on=Focus.of(coId)==="focus",dp=Focus.of(coId)==="depri";
+    const star=el("button","hstar"+(on?" on":"")+(dp?" dp":""),on?"★ Focus":dp?"Deprioritized":"☆ Focus");
+    star.type="button";
+    star.title=on?"On your focus list — click to take it off":dp?"Deprioritized — open the Focus list card to change it":"Add this account to your focus list";
+    star.onclick=()=>{
+      if(dp){document.getElementById("s-focus")?.scrollIntoView({block:"center",behavior:"smooth"});return;}
+      setFocusFor({...a,company:coName||a.company},coId,{status:on?"normal":"focus"});
+    };
+    atco.appendChild(star);
+  }
 
   const d=el("div","dial");
   /* A BUTTON, not a link. While this carried href="tel:..." a stray default —
@@ -973,7 +990,7 @@ const rHTML=(f,v)=>f.link&&/^https?:|^www\./i.test(v)
   :esc(v);
 const RES_ALL=RESEARCH_SECTIONS.flatMap(s=>s.f);
 function researchCard(a){
-  const id=String(a.companyId||"");
+  const id=accountOf(a).id;
   const c=el("section","card");c.id="s-research";
   /* Its own pane has the room: open. Folded when it shares the events pane. */
   if(RES_FOR!==id){RES_FOR=id;RES_OPEN=researchInPane();}
@@ -1030,12 +1047,16 @@ function paintResearch(){
 }
 
 /* ★ Focus / Not picked / Deprioritize, for the company this contact is at. */
+/* The account this card is about: the company the console is open on, else
+   the contact's own. The header's ★ uses the same, so the two cannot disagree. */
+const accountOf=a=>({id:String((typeof scope!=="undefined"&&scope?.id)||a.companyId||""),
+  name:(typeof scope!=="undefined"&&scope?.name)||a.company||""});
 function focusCard(a){
-  const id=String(a.companyId||"");
+  const id=accountOf(a).id;
   if(FOC_FOR!==id){FOC_FOR=id;FOC_FORM=null;}
   const c=el("section","card");c.id="s-focus";
   const st=id?Focus.of(id):"normal",E=id?Focus.entry(id):null;
-  c.appendChild(el("div","cardH",`<h2>${st==="focus"?'<span class="fstar">★</span> ':""}Focus list</h2><span class="sub">${esc(a.company||"")}</span>`));
+  c.appendChild(el("div","cardH",`<h2>${st==="focus"?'<span class="fstar">★</span> ':""}Focus list</h2><span class="sub">${esc(accountOf(a).name)}</span>`));
   const b=el("div","cardB grp");c.appendChild(b);
   if(!id){b.appendChild(el("p","rs-note","Link this contact to a company to put it on a focus list."));return c;}
   Focus.load();
@@ -1076,7 +1097,7 @@ function focusCard(a){
 }
 async function setFocusFor(a,id,{status,reason="",note=""}){
   try{
-    await Focus.set(id,{status,reason,note,companyName:a.company||"",ownerName:a.owner||"",setBy:ME||""});
+    await Focus.set(id,{status,reason,note,companyName:accountOf(a).name||a.company||"",ownerName:a.owner||"",setBy:ME||""});
     toast(status==="focus"?"On the focus list.":status==="depri"?"Deprioritized.":"Taken off the list.");
   }catch(e){toast("Not saved — "+(e.message||e));}
 }
@@ -1086,7 +1107,7 @@ function paintFocus(){
   if(!old||cur==null||!DATA[cur])return;
   old.replaceWith(focusCard(rec()));
 }
-if(typeof Focus!=="undefined")Focus.onChange(()=>paintFocus());
+if(typeof Focus!=="undefined")Focus.onChange(()=>{paintFocus();if(DATA[cur])renderCallbar();});
 function dayAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
   return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";

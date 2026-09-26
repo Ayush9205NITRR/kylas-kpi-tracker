@@ -321,7 +321,7 @@
     const k = kind === "on" && API.staleProxy ? "stale" : kind;
     linkEl.className = "link " + k;
     linkEl.textContent = k === "on" ? "Kylas"
-      : k === "stale" ? "old proxy"
+      : k === "stale" ? (/^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(API.base || "") ? "old proxy" : "server behind")
       : k === "signin" ? "sign in"
       : k === "busy" ? "…" : "offline";
     linkEl.title = k === "stale" ? API.staleNote : (title || "");
