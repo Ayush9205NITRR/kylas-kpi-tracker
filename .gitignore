@@ -16,3 +16,4 @@ apps/bd-ladder/dist
 .dev.vars
 .dev.vars.*
 .wrangler/
+screenshots/

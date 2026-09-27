@@ -1729,7 +1729,13 @@
   /* Filter state for the explorer. A SET per dimension, same as the board's
      filters — "Apollo and LinkedIn but not Referral" is an ordinary question. */
   const ACC = { stage: null, stageLabel: "", sources: new Set(), kpis: new Set(),
-                fresh: new Set(), owner: "", sort: "recent", limit: 100, offsite: "",
+                /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
+                   the one thing on this screen with a deadline, so an account
+                   due today should not have to be sorted for — it is the first
+                   thing the list shows, every morning, with no clicks. With no
+                   call-backs set anywhere this degrades to last-call-newest,
+                   which is what the list used to open on. */
+                fresh: new Set(), owner: "", sort: "next", limit: 100, offsite: "",
                 srcOpen: false, srcFind: "", srcScroll: 0,
                 /* the condition, as in Airtable's text filter */
                 srcOp: "any", srcText: "",
@@ -1961,13 +1967,18 @@
 
   function explorerHTML(all, owners) {
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
-    const SORTS = { recent: "Last call, newest", stale: "Last call, oldest", next: "Next call, soonest",
+    const SORTS = { next: "Call-backs first", recent: "Last call, newest", stale: "Last call, oldest",
                     kpi: "Furthest along", az: "A–Z" };
     const cmp = {
       recent: (a, b) => String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
       stale: (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || "")),
       kpi: (a, b) => kpiOf(b) - kpiOf(a) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
-      next: (a, b) => (a.nextCall ? 0 : 1) - (b.nextCall ? 0 : 1) || String(a.nextCall || "").localeCompare(String(b.nextCall || "")),
+      /* Anything with a call-back first, earliest date first — so overdue sits
+         above today, today above the rest. Everything without one keeps the
+         default order behind them: last call newest. */
+      next: (a, b) => (a.nextCall ? 0 : 1) - (b.nextCall ? 0 : 1)
+        || String(a.nextCall || "").localeCompare(String(b.nextCall || ""))
+        || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
