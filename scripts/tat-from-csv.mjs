@@ -28,6 +28,7 @@
  */
 import { readFileSync } from "node:fs";
 import { TAT_PAIRS, tatMatrix, tatCohort, tatWorkList } from "./tat.mjs";
+import { diagnose, bottlenecks } from "./diagnose.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback = null) => {
@@ -169,6 +170,85 @@ if (pair && pair !== true) {
     console.log(`  ${pad(c.key, 9)}${lpad(c.arrived, 9)}${lpad(c.hit, 9)}${lpad(`${c.pct}%`, 7)}` +
                 `${lpad(c.stillOpen, 12)}   ${c.settled ? "yes" : "no — still inside the gate"}`);
   console.log();
+}
+
+/* ── WHY, not just how long ───────────────────────────────────────────
+   The matrix says which step is slow and whose. On its own that is a finding
+   with no action attached: nine days could be nobody calling, or everybody
+   calling and nobody picking up, or the client having asked for a month. Hand
+   it the Call Log and it can tell those apart. */
+const callFile = flag("calls");
+if (callFile && callFile !== true) {
+  const ct = parseCSV(readFileSync(callFile, "utf8"));
+  const ch = ct[0].map((h) => h.trim().toLowerCase());
+  const ci = (names) => names.map((n) => ch.indexOf(n)).find((i) => i > -1) ?? -1;
+  const cCo = ci(["company", "account", "company name"]);
+  const cAt = ci(["called at", "at", "date", "call date"]);
+  const cOut = ci(["outcome", "result", "disposition"]);
+  const calls = ct.slice(1)
+    .map((r) => ({ company: (r[cCo] || "").trim(), at: at(r[cAt]),
+                   outcome: (r[cOut] || "").trim() }))
+    .filter((c) => c.company && c.at);
+
+  const rcaFile = flag("rca");
+  let rca = [];
+  if (rcaFile && rcaFile !== true) {
+    const rt = parseCSV(readFileSync(rcaFile, "utf8"));
+    const rh = rt[0].map((h) => h.trim().toLowerCase());
+    rca = rt.slice(1).map((r) => ({
+      company: (r[rh.indexOf("company")] || "").trim(),
+      from: (r[rh.indexOf("from")] || "").trim(),
+      to: (r[rh.indexOf("to")] || "").trim(),
+      reason: (r[rh.indexOf("reason")] || "").trim(),
+    })).filter((r) => r.company && r.reason);
+  }
+
+  const dx = diagnose({ arrivals, created, owners, calls, rca, now });
+
+  console.log(`${"═".repeat(72)}\nWHERE THE FUNNEL IS STUCK — ${calls.length} calls` +
+              (rca.length ? `, ${rca.length} RCA answers` : "") + "\n");
+
+  /* One ranked list, because "where is the funnel stuck" has a single answer,
+     not a grid. Ranked by accounts at risk rather than by median days: a bad
+     median over four accounts is a statistic, fifty rotting accounts is the
+     bottleneck. */
+  let rank = 0;
+  for (const b of bottlenecks(dx)) {
+    if (!b.atRisk && !b.overdue) continue;
+    console.log(`${++rank}. ${b.label.toUpperCase()}`);
+    console.log(`   ${b.inFlight} in flight · ${b.overdue} past the gate · ` +
+                `${b.atRisk} of them ours to fix`);
+    if (b.medianDays !== null && b.medianDeadDays !== null)
+      console.log(`   takes ${b.medianDays} days, of which ${b.medianDeadDays} are silent ` +
+                  `(${b.deadShare}% of the wait is nobody calling)`);
+    else if (b.medianDays !== null)
+      console.log(`   takes ${b.medianDays} days — all of it before the first call, by definition`);
+    if (b.cause) {
+      console.log(`   mostly: ${b.cause}`);
+      console.log(`   → ${b.action}`);
+      if (b.who.length)
+        console.log(`   start with: ${b.who.map((w) => `${w.name} (${w.n})`).join(", ")}`);
+    }
+    console.log();
+  }
+
+  for (const d of dx) {
+    if (!d.inFlight && !d.closed) continue;
+    console.log(`${d.label}`);
+    if (d.medianDays !== null)
+      console.log(`  closed ${d.closed} · median ${d.medianDays}d` +
+                  (d.medianDeadDays === null ? "" : `, ${d.medianDeadDays}d silent (${d.deadShare}%)`) +
+                  ` · typically ${d.medianTouches} touch(es)` +
+                  (d.coverage !== null && d.coverage < 100
+                    ? `  [only ${d.coverage}% of this step is inside the call history]` : ""));
+    for (const b of d.buckets)
+      console.log(`  ${lpad(b.n, 4)}  ${pad(b.label, 32)}${lpad(`${b.share}%`, 5)}  ` +
+                  `${b.owners.map((o) => `${o.name} ${o.n}`).join(", ")}`);
+    if (d.rcaReasons.length)
+      console.log(`        they told us why: ` +
+                  d.rcaReasons.map((r) => `${r.code} ×${r.n}`).join(", "));
+    console.log();
+  }
 }
 
 const work = tatWorkList({ arrivals, created, owners, now, limit: 15 });
