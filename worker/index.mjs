@@ -41,6 +41,12 @@ import { d1Store, kvStore } from "../scripts/store.mjs";
 import { createGoogleAuth } from "../scripts/google-auth.mjs";
 import { createMirror } from "../scripts/mirror.mjs";
 import PRIVACY from "./privacy.mjs";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/* WHO IS ASKING, for the length of one request. "Me" in the console is the
+   signed-in Google account, not whoever owns the server's Kylas key — and the
+   handlers learn it from here without every function passing it along. */
+const REQUEST = new AsyncLocalStorage();
 
 /* Built per isolate, keyed on nothing: one Worker serves one account. The
    promise itself is cached, not the result, so ten requests arriving at a cold
@@ -65,6 +71,7 @@ function handlers(env, log) {
   /* mirror: the D1 copy of the Airtable tables the console reads, so a read
      is a query next door instead of pages of Airtable (scripts/mirror.mjs). */
   return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log, db: env.DB || null,
+                                     callerOf: () => REQUEST.getStore()?.caller || null,
                                      mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
@@ -292,7 +299,7 @@ export default {
          and the report build inside it with it. Registered here, the work
          runs on (Cloudflare allows it a further thirty seconds) and a finished
          report is kept for the next request instead of thrown away. */
-      const pending = handler(url, parsed);
+      const pending = REQUEST.run({ caller }, () => handler(url, parsed));
       ctx?.waitUntil?.(pending.catch(() => {}));
       /* EVERYTHING LEFT RUNNING, UNTIL THERE IS NOTHING LEFT — including work
          that other background work starts later (a queued save starts its

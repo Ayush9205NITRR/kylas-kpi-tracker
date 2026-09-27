@@ -260,6 +260,22 @@ later. `/ladder` is memoised on the mirror stamp: 422 ms → 12 ms warm. The
 floor now is Airtable's rate limit. `MOCK_LATENCY_MS` / `MOCK_TRACE` on both
 mocks reproduce this.
 
+**"Me" is the signed-in person** (1.20). It used to be whoever owned the
+server's Kylas key, for every associate. The Worker now carries the Google
+caller through each request (AsyncLocalStorage) and `whoami()` matches that
+email to a Kylas user — resolved one by one from the crawl's owner ids, since
+Kylas has no list-users endpoint. No match → an empty identity that owns
+nothing, and the console says why. No sign-in (local proxy, crons) → the key's
+owner, as before.
+
+**The call-back is stored** (1.20): Contacts "Next Call Date"/"Next Call Time"
+and Call Log "Next Call Date" (the promise made on that call). Until then it
+lived only in the browser. Needs `repair-base` on the live base. From it,
+`scripts/progress.mjs` works out each account's furthest stage, SQL date, last
+and next call, and whether promised call-backs were kept — the focus pane in
+the Today tab, the Next call column/chips, and TAT (pick → SQL days, days
+open, call-backs on time %). A focus account stays on the pane until SQL.
+
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's
 code and answers everything cheerfully. **Restart the proxy after editing

@@ -516,7 +516,7 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .kpi.rn{color:var(--text3)}
 .acctable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   overflow:clip;margin-top:12px}
-.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .7fr .95fr .9fr;gap:14px;
+.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .7fr .95fr .9fr .85fr;gap:14px;
   padding:8px 14px;border-bottom:1px solid var(--line);align-items:center;font-size:var(--t-label);
   cursor:pointer}
 .acctable .vr:last-child{border-bottom:0}
@@ -974,24 +974,50 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 #formX #s-research>.cardH h2{display:none}
 #formX{padding-left:16px;padding-right:16px}
 
-/* ── the focus list, in the header ─────────────────────────────────── */
-.hfocus{position:relative;flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:4px;
-  padding:0 16px;border-left:1px solid var(--line)}
-.hfocus .hfl{font-size:var(--t-meta);color:var(--text3);white-space:nowrap;max-width:380px;overflow:hidden;text-overflow:ellipsis}
-.hfocus .hfl i{font-style:normal;color:var(--text2)}
-.hfocus.depri .hfl i{color:var(--amber)}
-.hfocus .hfl b{color:var(--text2);font-weight:var(--w-strong)}
+/* ── the focus list, top left, under the company name ─────────────── */
+.hfocus{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:4px 0 6px}
+.hfocus .hfl{font-size:var(--t-meta);color:var(--text3);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.hfocus.depri .hfl{color:var(--amber)}
 .hseg{display:inline-flex;border:1.5px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--panel)}
-.hseg button{border:0;border-right:1px solid var(--line);background:transparent;padding:8px 14px;cursor:pointer;
+.hseg button{border:0;border-right:1px solid var(--line);background:transparent;padding:7px 14px;cursor:pointer;
   font:inherit;font-size:var(--t-body);font-weight:var(--w-strong);color:var(--text2);white-space:nowrap}
 .hseg button:last-child{border-right:0}
 .hseg button:hover{color:var(--text);background:var(--panel2)}
 .hseg .focus[aria-pressed="true"]{background:var(--blue);color:var(--onBlue)}
 .hseg .normal[aria-pressed="true"]{background:var(--panel2);color:var(--text)}
 .hseg .depri[aria-pressed="true"]{background:var(--amberSoft);color:var(--amber)}
-.hfocus .fform{position:absolute;top:100%;right:0;z-index:40;margin-top:6px;width:560px;max-width:90vw;
+.hfocus .fform{position:absolute;top:100%;left:0;z-index:40;margin-top:6px;width:560px;max-width:90vw;
   background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);box-shadow:var(--sh);padding:12px}
-@media(max-width:1080px){.hfocus{border-left:0;padding-left:0}}
 /* Room for the focus bar and Save & next on one line at laptop widths: the
    record id (developer information) gives way first. */
-@media(max-width:1440px){.hseg button{padding:8px 10px}.hfocus{padding:0 12px}.cbmeta .mi.kid{display:none}}
+@media(max-width:1440px){.hseg button{padding:7px 11px}}
+
+/* ── the focus pane, top of the queue ──────────────────────────────── */
+.qfocus{border-bottom:1px solid var(--line);padding:10px 14px 12px;background:var(--panel2)}
+.qfocus .qfh{display:flex;align-items:baseline;gap:8px;font-size:var(--t-label);color:var(--text2)}
+.qfocus .qfh b{font-family:var(--display);font-size:var(--t-body);color:var(--blue)}
+.qfocus .qfh em{font-style:normal;font-weight:var(--w-strong);color:var(--amber)}
+.qfocus .qfgo{margin-top:8px;width:100%;text-align:left;background:var(--amberSoft);border:1px solid var(--amberLine);
+  border-radius:var(--r);padding:8px 10px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--amber);cursor:pointer}
+.qfocus .qfl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
+.qfocus .qfi{width:100%;display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line2);border-radius:var(--r);padding:8px 10px;font:inherit}
+.qfocus .qfi:hover{border-color:var(--blueLine)}
+.qfocus .qfi .n{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qfocus .qfi .st{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text3);white-space:nowrap}
+.qfocus .qfi .sub{grid-column:1 / -1;font-size:var(--t-meta);color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qfocus .qfi.overdue,.qfocus .qfi.no-date{border-left-color:var(--amber)}
+.qfocus .qfi.overdue .st,.qfocus .qfi.no-date .st{color:var(--amber)}
+.qfocus .qfi.today{border-left-color:var(--blue)}
+.qfocus .qfi.today .st{color:var(--blue)}
+.qfocus .qfi.done{opacity:.7}
+.qfocus .qft{margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:var(--t-meta);color:var(--text3)}
+.qfocus .qft div{display:flex;flex-wrap:wrap;gap:2px 10px}
+.qfocus .qft b{color:var(--text2);font-weight:var(--w-strong)}
+.qfocus .qft em{font-style:normal;font-weight:var(--w-strong);color:var(--text)}
+
+/* the Next call column */
+.acctable .nc{font-size:var(--t-label);color:var(--text2);white-space:nowrap}
+.acctable .nc-overdue{color:var(--amber);font-weight:var(--w-strong)}
+.acctable .nc-today{color:var(--blue);font-weight:var(--w-strong)}
+.acctable .nc-none{color:var(--text3)}

@@ -306,6 +306,11 @@ function renderCallbar(){
      <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
      ${a.designation?`<span>${esc(a.designation)}</span>`:""}</span>`);
   C.appendChild(who);
+  /* THE FOCUS LIST, TOP LEFT, UNDER THE COMPANY IT IS ABOUT — all three
+     choices spelled out and big enough to hit without looking (Ayush,
+     2026-09-27; it sat beside Save & next before, and as a pill before that). */
+  const fb=focusBar(a);
+  if(fb){const atco=who.querySelector(".atco");if(atco)atco.after(fb);else who.prepend(fb);}
   const d=el("div","dial");
   /* A BUTTON, not a link. While this carried href="tel:..." a stray default —
      middle-click, cmd-click, or any path that skipped preventDefault — sent the
@@ -348,10 +353,6 @@ function renderCallbar(){
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
-  /* THE FOCUS LIST, IN THE HEADER — all three choices spelled out, big
-     enough to hit without looking (Ayush, 2026-09-26). It is about the
-     COMPANY, so it names it, and it is the same for every contact there. */
-  const fb=focusBar(a);if(fb)C.appendChild(fb);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
   btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
@@ -464,7 +465,7 @@ function visible(){
   return mode==="session"?rows.sort(byRecentCall):rows;
 }
 function renderQueue(){
-  renderMode();renderScope();renderFilters();
+  renderMode();renderScope();renderFocusPane();renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
   if(!rows.length){L.appendChild(el("li","qempty","Nothing here right now."));return;}
@@ -592,6 +593,82 @@ function renderMode(){
     w.appendChild(b);
   });
 }
+/* ── THE FOCUS PANE: WHAT YOU OWE YOUR FOCUS ACCOUNTS ────────────────────
+   Once an account is picked (★ Focus) it stays in front of you until it is
+   exhausted — it reaches SQL — or you drop it with a reason (Deprioritize).
+   There is no third way off. Each one says what it is owed: overdue first,
+   then due today, then those with no call-back set at all (which is its own
+   kind of overdue — nothing is scheduled to happen). Under Today it is the
+   full list; under Company it is one line pointing there, so it is never
+   out of sight. */
+const FOCUS_ORDER={overdue:0,today:1,"no-date":2,closed:3,later:4,done:5};
+function myFocus(){
+  if(typeof Focus==="undefined")return [];
+  const u=API.state?.user||{},me=String(u.name||"").toLowerCase(),em=String(u.email||"").toLowerCase();
+  return Object.entries(Focus.map)
+    .filter(([,f])=>f.status==="focus")
+    .filter(([,f])=>API.isAdmin||String(f.ownerName||"").toLowerCase()===me||String(f.setByEmail||"").toLowerCase()===em
+      ||String(f.setByEmail||"").toLowerCase()===me)
+    .map(([id,f])=>({id,f,s:f.standing||{state:"no-date"}}))
+    .sort((x,y)=>(FOCUS_ORDER[x.s.state]??9)-(FOCUS_ORDER[y.s.state]??9)
+      ||(x.s.nextCall||"").localeCompare(y.s.nextCall||"")||(y.s.daysOpen||0)-(x.s.daysOpen||0));
+}
+function focusStateText(s){
+  return s.state==="overdue"?`Overdue ${-s.dueIn}d`
+    :s.state==="today"?"Due today"
+    :s.state==="no-date"?"No call-back set"
+    :s.state==="closed"?"All POCs closed"
+    :s.state==="done"?`SQL ✓${s.tatDays!=null?` in ${s.tatDays}d`:""}`
+    :`In ${s.dueIn}d`;
+}
+function renderFocusPane(){
+  const w=document.getElementById("qfocus");if(!w)return;
+  if(typeof Focus==="undefined"){w.hidden=true;return;}
+  Focus.load();
+  const all=myFocus(),open=all.filter(x=>x.s.state!=="done");
+  if(!all.length){w.hidden=true;w.innerHTML="";return;}
+  w.hidden=false;w.innerHTML="";
+  const n=k=>open.filter(x=>x.s.state===k).length;
+  const owed=n("overdue")+n("today")+n("no-date");
+  const head=el("div","qfh",`<b>★ Focus</b><span>${open.length} open${owed?` · <em>${owed} need a call</em>`:""}</span>`);
+  w.appendChild(head);
+  if(mode!=="session"){
+    /* Company tab: never out of sight, one line. */
+    if(owed){
+      const go=el("button","qfgo",`${n("overdue")?`${n("overdue")} overdue · `:""}${n("today")?`${n("today")} due today · `:""}${n("no-date")?`${n("no-date")} with no call-back`:""}`.replace(/ · $/,"")+" — see Today →");
+      go.type="button";go.onclick=()=>{mode="session";render();};
+      w.appendChild(go);
+    }
+    return;
+  }
+  const ul=el("ul","qfl");
+  const shown=[...open,...all.filter(x=>x.s.state==="done").slice(0,3)];
+  shown.forEach(({id,f,s})=>{
+    const li=el("li"),b=el("button","qfi "+s.state);b.type="button";
+    b.innerHTML=`<span class="n">${esc(f.companyName||"#"+id)}</span>
+      <span class="st">${esc(focusStateText(s))}</span>
+      <span class="sub">${esc([label(s.stage)||"not called yet",s.daysOpen!=null?`day ${s.daysOpen}`:"",
+        s.lastCallAt?`last call ${since(s.lastCallAt)}`:"",API.isAdmin&&f.ownerName?String(f.ownerName).split(" ")[0]:""].filter(Boolean).join(" · "))}</span>`;
+    b.title=s.state==="closed"?"Every POC here is at a dead end: add a new POC or deprioritize with a reason"
+      :s.state==="no-date"?"Nothing is scheduled: open it and set a day to call back":"Open this company";
+    b.onclick=()=>window.openCompanyFromView?.(id,f.companyName||"");
+    li.appendChild(b);ul.appendChild(li);
+  });
+  w.appendChild(ul);
+  /* TAT, for the person looking (or the team, for an admin). */
+  const T=Focus.tat||{},rows=Object.entries(T).filter(([o])=>API.isAdmin||o.toLowerCase()===String(API.state?.user?.name||"").toLowerCase());
+  if(rows.length){
+    const t=el("div","qft");
+    t.innerHTML=rows.map(([o,v])=>`<div><b>${esc(API.isAdmin?o.split(" ")[0]:"Your pace")}</b>
+      ${v.medianPickToSql!=null?`<span>pick → SQL <em>${v.medianPickToSql}d</em></span>`:""}
+      ${v.medianDaysOpen!=null?`<span>open for <em>${v.medianDaysOpen}d</em></span>`:""}
+      ${v.followups?.onTimePct!=null?`<span>call-backs on time <em>${v.followups.onTimePct}%</em></span>`:""}
+      ${v.followups?.medianDelayDays?`<span>late by <em>${v.followups.medianDelayDays}d</em></span>`:""}</div>`).join("");
+    t.title="Median days from ★ Focus to SQL; median days the open ones have been open; share of promised call-backs made on or before the day; median lateness of the rest.";
+    w.appendChild(t);
+  }
+}
+
 function renderScope(){
   const w=document.getElementById("qscope");
   if(!w)return;
@@ -1045,9 +1122,8 @@ function focusBar(a){
      whole header jump in height every time the status changed. */
   const said=st==="depri"&&E?`Dropped: ${E.reason||"no reason given"}${E.note?` — “${E.note}”`:""}`
     :st==="focus"&&E?.setAt?`since ${dayAgo(E.setAt)}`:"";
-  const cap=el("span","hfl",`Focus list${name?` · <b>${esc(name)}</b>`:""}${said?` · <i>${esc(said)}</i>`:""}`);
-  if(said)cap.title=said;
-  w.appendChild(cap);
+  const cap=said?el("span","hfl",esc(said)):null;
+  if(cap)cap.title=said;
   const seg=el("div","hseg");seg.setAttribute("role","group");seg.setAttribute("aria-label","Focus list for "+(name||"this company"));
   [["focus","★ Focus"],["normal","Not picked"],["depri","Deprioritize"]].forEach(([k,l])=>{
     const bb=el("button",k,l);bb.type="button";
@@ -1063,6 +1139,7 @@ function focusBar(a){
     seg.appendChild(bb);
   });
   w.appendChild(seg);
+  if(cap)w.appendChild(cap);
   if(FOC_FORM){
     const f=el("div","fform");
     const r=el("select","in");r.setAttribute("aria-label","Why deprioritize");
@@ -1085,7 +1162,7 @@ async function setFocusFor(a,id,{status,reason="",note=""}){
   }catch(e){toast("Not saved — "+(e.message||e));}
 }
 /* The header only, so an answer arriving mid-call never moves the caret. */
-if(typeof Focus!=="undefined")Focus.onChange(()=>{if(DATA[cur])renderCallbar();});
+if(typeof Focus!=="undefined")Focus.onChange(()=>{if(DATA[cur])renderCallbar();renderFocusPane();});
 function dayAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
   return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";

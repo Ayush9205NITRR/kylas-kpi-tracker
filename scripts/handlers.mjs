@@ -42,12 +42,14 @@ import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
 import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
+import { accountProgress, focusStanding, median } from "./progress.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null } = {}) {
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null,
+                                      callerOf = () => null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
   const STARTED = new Date().toISOString();
@@ -609,9 +611,37 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      not open with a round trip to Kylas to learn what the last one knew. */
   const ME_TTL = Number(env.ME_TTL_MS || 10 * 60 * 1000);
   let meShared = null;
-  async function whoami() {
+  /* "ME" IS THE PERSON SIGNED IN. The server holds one Kylas key, and Kylas'
+     /users/me names that key's owner — so every associate used to be "Me" =
+     the admin whose key it is. With Google sign-in the request carries who is
+     asking; that email is matched to the Kylas user with the same email.
+     No sign-in (the local proxy, the scheduled jobs): the key's owner, as
+     before. Signed in but no Kylas user with that email: not the key owner —
+     an empty identity that owns nothing, and /health says why. */
+  async function keyOwner() {
     meShared ||= shared("kylas-me", { ttl: ME_TTL, stale: 24 * 3600 * 1000 }, () => kylas.me());
     return meShared();
+  }
+  const kylasUsers = () => (usersShared ||= shared("kylas-users",
+    { ttl: 10 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 },
+    async () => {
+      /* Kylas has no list-users endpoint, so users are resolved one by one by
+         id: everyone who owns a company in the crawl, and the key's owner. */
+      const crawl = await kylasCompanies.peek().catch(() => null);
+      const ids = new Set([...owners.keys(), ...(crawl?.companies || []).map((c) => String(c.ownerId || ""))]);
+      ids.add(String((await keyOwner().catch(() => null))?.id || ""));
+      return kylas.users([...ids].filter(Boolean));
+    }))();
+  async function whoami() {
+    const email = String(callerOf()?.email || "").trim().toLowerCase();
+    if (!email) return keyOwner();
+    const { users } = await kylasUsers().catch(() => ({ users: [] }));
+    const u = users.find((x) => String(x.email || "").trim().toLowerCase() === email);
+    if (u) {
+      const [firstName, ...rest] = String(u.name || email).split(" ");
+      return { id: u.id, firstName, lastName: rest.join(" "), email, matched: true };
+    }
+    return { id: "", firstName: callerOf()?.name || email, lastName: "", email, matched: false };
   }
 
   /* ── ANSWER NOW, REFRESH BEHIND IT ───────────────────────────────────────
@@ -1136,6 +1166,29 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       });
   }
 
+  /* WHERE EACH ACCOUNT STANDS (scripts/progress.mjs): furthest stage, SQL
+     date, last call, next call-back — and whether promised call-backs were
+     kept. Held until one of its four tables changes. "Today" is India's. */
+  const TZ_MIN = Number(env.TZ_OFFSET_MIN ?? 330);
+  const todayLocal = () => new Date(Date.now() + TZ_MIN * 60000).toISOString().slice(0, 10);
+  const progressData = memo("account progress", {
+    ttl: REPORT_TTL,
+    key: mirror ? () => mirror.stamp(["Contacts", "Companies", "Stage Transitions", "Call Log"]) : null,
+  }, async () => {
+    const [companies, contacts, transitions, calls] = await Promise.all([
+      airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Stage Transitions", { fields: ["To Stage", "Changed At", "Contact"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Contact", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
+    ]);
+    return accountProgress({ companies, contacts, transitions, calls, today: todayLocal() });
+  });
+  const progress = async () => {
+    if (!airtable) return { byCompany: new Map(), followups: new Map() };
+    try { return await progressData(); }
+    catch (e) { log(`  account progress: not available (${e.message.slice(0, 80)})`); return { byCompany: new Map(), followups: new Map() }; }
+  };
+
   /* The ladder is every company joined to every arrival — hundreds of ms of
      work over tables that change a few times a minute at most. Held until
      one of them does. */
@@ -1212,7 +1265,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
     "/health": async () => {
       const me = await whoami();
-      return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "" },
+      return { ok: true, user: { id: me?.id, name: userName(me), email: me?.email || "",
+                                 /* false: signed in, but no Kylas user has this email */
+                                 kylasMatch: me?.matched !== false },
                role: roleOf(me), admins: ADMINS.length,
                version: VERSION, startedAt: STARTED };
     },
@@ -1311,8 +1366,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           /* Kylas' own field rides on the crawl, when there is one. */
           const crawlNow = await kylasCompanies.peek().catch(() => null);
           const [offsite, fromKylas, fromList] = await Promise.all([offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite()]);
-          for (const co of mirror) co.offsite = OFFSITE_QUARTERS.filter((q) =>
-            [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
+          const { byCompany: prog } = await progress();
+          for (const co of mirror) {
+            co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
+            co.nextCall = prog.get(String(co.id))?.nextCall || null;
+          }
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
             if (co.id && co.name) companyNames.set(String(co.id), co.name);
@@ -1392,9 +1450,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const [offsite, fromKylas, fromList] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite()]);
+      const [offsite, fromKylas, fromList, { byCompany: prog }] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), progress()]);
       const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
-        offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))) }));
+        offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
+        nextCall: prog.get(String(co.id))?.nextCall || null }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the
@@ -1642,7 +1701,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/focus": async (_url, body) => {
       if (!body || !Object.keys(body).length) {
         if (!airtable) return { configured: false, focus: {} };
-        return { configured: true, focus: await readFocus(airtable) };
+        /* Each focus account's standing — the reminder pane's "what is owed
+           today" — and, per BD, how fast their focus accounts move (TAT). */
+        const [focus, { byCompany, followups }] = await Promise.all([readFocus(airtable), progress()]);
+        const today = todayLocal();
+        const tat = {};
+        for (const [id, f] of Object.entries(focus)) {
+          f.standing = focusStanding(f, byCompany.get(id), today);
+          if (f.status !== "focus") continue;
+          const o = (tat[f.ownerName || "—"] ||= { open: 0, overdue: 0, today: 0, noDate: 0, done: 0, closed: 0,
+                                                     daysOpen: [], pickToSql: [] });
+          const st = f.standing.state;
+          if (st === "done") { o.done++; if (f.standing.tatDays != null) o.pickToSql.push(f.standing.tatDays); }
+          else if (st === "closed") o.closed++;
+          else {
+            o.open++; if (f.standing.daysOpen != null) o.daysOpen.push(f.standing.daysOpen);
+            if (st === "overdue") o.overdue++; else if (st === "today") o.today++; else if (st === "no-date") o.noDate++;
+          }
+        }
+        for (const [owner, o] of Object.entries(tat)) {
+          const fu = followups.get(owner);
+          Object.assign(o, {
+            medianDaysOpen: median(o.daysOpen), medianPickToSql: median(o.pickToSql),
+            followups: fu ? { due: fu.due, onTimePct: fu.due ? Math.round(fu.onTime / fu.due * 100) : null,
+                              lateOpen: fu.open, medianDelayDays: median(fu.delays) } : null,
+          });
+          delete o.daysOpen; delete o.pickToSql;
+        }
+        return { configured: true, today, focus, tat };
       }
       if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
       const status = String(body.status || "");

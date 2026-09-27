@@ -11,6 +11,7 @@ export const dateTime = {
 };
 export const sel = (...names) => ({ choices: names.map((name) => ({ name })) });
 export const num = { precision: 0 };
+export const date = { dateFormat: { name: "iso" } };
 export const check = { icon: "check", color: "greenBright" };
 
 /* Stage tables are generated from docs/stages.json — see gen-stages.mjs. */
@@ -123,6 +124,11 @@ export const TABLES = [
       { name: "Previous Stage", type: "singleSelect", options: sel(...STAGES) },
       { name: "Vendor Info", type: "singleSelect", options: sel("Internal", "Vendor Exists", "First Event", "No Info") },
       { name: "Mode of Meeting", type: "singleSelect", options: sel(...MEETING_MODES) },
+      /* The call-back the associate set on the card. It lived only in the
+         browser (and as text in Kylas remarks) until 1.20 — so nothing could
+         list "who do I owe a call today", and TAT could not be measured. */
+      { name: "Next Call Date", type: "date", options: date },
+      { name: "Next Call Time", type: "singleLineText" },
       { name: "Service Offering", type: "checkbox", options: check },
       { name: "Ever Picked", type: "checkbox", options: check,
         description: "Set true the first time a non-CNC stage is seen, never unset. This is what makes Phone Picked monotonic." },
@@ -180,6 +186,9 @@ export const TABLES = [
       { name: "Owner", type: "singleLineText" },
       { name: "Stage Set", type: "singleSelect", options: sel(...STAGES) },
       { name: "Created Here", type: "checkbox", options: check },
+      /* The call-back promised ON this call. The next call to the same contact,
+         set against it, is whether the follow-up happened on time (TAT). */
+      { name: "Next Call Date", type: "date", options: date },
     ],
   },
   {

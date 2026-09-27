@@ -378,7 +378,9 @@
     if (!local) return fetched;
     const out = { ...local };
     for (const [k, v] of Object.entries(fetched)) {
-      if (OVERLAY_OWNED.includes(k)) continue;
+      /* The call-back is the associate's, but it is saved to Airtable now:
+         one set on another machine fills an empty card here. */
+      if (OVERLAY_OWNED.includes(k) && !((k === "nextCallDate" || k === "nextCallTime") && !out[k] && v)) continue;
       /* A blank from Kylas should not wipe a value the associate just typed and
          has not synced yet. */
       if (v === "" && out[k]) continue;

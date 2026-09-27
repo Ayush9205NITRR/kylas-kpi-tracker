@@ -188,6 +188,16 @@ check('a malformed body is a 400, not a 502', bad.status === 400, `got ${bad.sta
    of the isolate. Reusing this module would reuse the good build from the
    tests above and prove nothing. A query string gives Node a separate registry
    entry, which is the closest thing to a cold isolate available here. */
+/* Straight to the Airtable mock, retried past its 5-a-second limit as the
+   real client does — a test that writes behind the server's back must not
+   fail on a 429 the server would have waited out. */
+const atPost = async (url, init) => {
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch(url, { method: 'POST', ...init });
+    if (r.status !== 429) return r;
+    await new Promise((res) => setTimeout(res, 400 * (i + 1)));
+  }
+};
 const coldWorker = async (n) => (await import(`../worker/index.mjs?cold=${n}`)).default;
 
 /* The privacy policy is the one page anyone can open — the Web Store needs its URL. */
@@ -449,7 +459,7 @@ await post(await coldWorker(40), '/focus', { companyId: String(contact.companyId
 const readF2 = await get(await coldWorker(41), '/focus');
 check('Restore takes it off the list', !readF2.body.focus?.[String(contact.companyId)], JSON.stringify(readF2.body.focus));
 /* Research is the team's curated Company List (another base), read-only. */
-await fetch('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', { method: 'POST',
+await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
   headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
   body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': String(contact.companyId),
     'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }] } }] }) });
@@ -462,13 +472,51 @@ check('the card reads the curated Company List row, flattened',
 
 /* The Company List's own "Offsite Timeline" (Kylas cfOffsiteTimeline, copied
    by the team's field map) reaches the accounts list too. */
-await fetch('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', { method: 'POST',
+await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
   headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
   body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': '903', 'Offsite Timeline': 'Apr - Jun' } }] }) });
 const offList = await get(await coldWorker(44), '/companies?owner=all', { RESEARCH_BASE: 'appRESEARCH' });
 const shore = (offList.body.companies || []).find((c) => String(c.id) === '903');
 check('the accounts list reads Offsite Timeline from the Company List', shore?.offsite?.includes('APR_JUN'),
       JSON.stringify(shore?.offsite));
+
+/* "Me" is the signed-in person, matched to the Kylas user with that email —
+   not the owner of the server's Kylas key. */
+{
+  const asUser = async (n, email) => {
+    const r = await (await coldWorker(n)).fetch(new Request('https://bd.enout.website/health', {
+      headers: { Origin: ORIGIN, 'Cf-Access-Jwt-Assertion': 'x', 'Cf-Access-Authenticated-User-Email': email } }),
+      withStore({ ...ENV, AUTH: 'access' }), { waitUntil: () => {} });
+    return (await r.json()).user || {};
+  };
+  const priya = await asUser(45, 'Priya@enout.in');
+  check('a signed-in associate is "Me", not the key owner', String(priya.id) === '74726' && priya.kylasMatch === true,
+        JSON.stringify(priya));
+  const stranger = await asUser(46, 'nobody@enout.in');
+  check('an email no Kylas user has owns nothing, and says so', !stranger.id && stranger.kylasMatch === false,
+        JSON.stringify(stranger));
+}
+
+/* The call-back is saved: on the contact (who is due when) and on the call
+   (what was promised on it — follow-up TAT is measured against this). */
+{
+  const held = [];
+  const r = await (await coldWorker(47)).fetch(new Request('https://bd.enout.website/save', {
+    method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ contact: { ...contact, nextCallDate: '2026-10-01', nextCallTime: '11:30' },
+                           call: { ...call1, at: new Date().toISOString() } }),
+  }), withStore(ENV), { waitUntil: (p) => held.push(p) });
+  await Promise.allSettled(held);
+  let w = [];
+  for (let i = 0; i < 6; i++) {
+    const res = await fetch('http://127.0.0.1:9901/__writes', { headers: { Authorization: 'Bearer x' } });
+    if (res.status !== 429) { w = (await res.json()).writes || []; break; }
+    await new Promise((ok) => setTimeout(ok, 400 * (i + 1)));
+  }
+  check('a save stores the call-back on the contact and on the call', r.status === 200 &&
+        w.some((x) => x.table === 'Contacts' && x.fields?.['Next Call Date'] === '2026-10-01' && x.fields?.['Next Call Time'] === '11:30') &&
+        w.some((x) => x.table === 'Call Log' && x.fields?.['Next Call Date'] === '2026-10-01'));
+}
 
 /* ── 10 · every request stays inside Cloudflare's per-invocation cap ───── */
 /* Cloudflare counts every outside request AND every database query an

@@ -10,7 +10,7 @@
   const REASONS = ["No event budget this year", "Too small / not a fit", "Events handled in-house",
                    "Locked in with another agency", "Can't reach the right POC",
                    "Timing — revisit next quarter", "Other"];
-  let map = {}, at = 0, ok = false, loading = null, error = "";
+  let map = {}, at = 0, ok = false, loading = null, error = "", tat = {}, today = "", fails = 0;
   const listeners = new Set();
   const tell = () => listeners.forEach((fn) => { try { fn(); } catch { /* a view gone */ } });
 
@@ -18,6 +18,10 @@
     REASONS,
     /* { companyId: { status: "focus"|"depri", reason, note, ownerName, setAt, ... } } */
     get map() { return map; },
+    /* Per BD: open / overdue / due today / no call-back / done, median days
+       open, median pick→SQL, follow-ups on time. From the server. */
+    get tat() { return tat; },
+    get today() { return today; },
     get error() { return error; },
     get loaded() { return ok || !!error; },
     of(id) { return map[String(id)]?.status || "normal"; },
@@ -29,9 +33,15 @@
       if (!global.API?.focusAll) return Promise.resolve(map);
       if (!fresh && at && Date.now() - at < 60000) return Promise.resolve(map);
       return (loading ||= API.focusAll().then((r) => {
-        map = r?.focus || {}; ok = true;
+        map = r?.focus || {}; tat = r?.tat || {}; today = r?.today || ""; ok = true;
         error = r?.configured === false ? "Airtable is not configured on the server, so focus lists cannot be kept." : "";
-      }).catch((e) => { error = e.message || String(e); })
+        fails = 0;
+      }).catch((e) => {
+        error = e.message || String(e);
+        /* The first ask can land before the console has connected: try again
+           shortly, a few times, rather than showing nothing for a minute. */
+        if (++fails <= 5) setTimeout(() => Focus.load(true), 5000);
+      })
         /* Stamped on failure too: a refused read is retried in a minute, not
            on the redraw its own failure triggers. */
         .finally(() => { at = Date.now(); loading = null; tell(); }).then(() => map));
@@ -54,6 +64,9 @@
         tell();
         throw e;
       }
+      /* The server knows where the account stands (stage, next call, TAT);
+         read it back so the reminder pane is right at once. */
+      Focus.load(true);
     },
   };
   global.Focus = Focus;

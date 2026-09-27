@@ -162,6 +162,7 @@
         if (!co[k] && seed[k]) co[k] = seed[k];
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
+      if (seed?.nextCall && (!co.nextCall || seed.nextCall < co.nextCall)) co.nextCall = seed.nextCall;
       return co;
     };
 
@@ -173,7 +174,7 @@
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
                            lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
-                           offsite: co.offsite });
+                           offsite: co.offsite, nextCall: co.nextCall });
     }
 
     for (const c of data) {
@@ -190,6 +191,8 @@
         /* Derived from the event rows on this browser's card, possibly not
            saved yet — the same rule the server applies (offsite.js). */
         for (const q of global.Offsite ? Offsite.offsiteOf(c) : []) if (!co.offsite.includes(q)) co.offsite.push(q);
+        /* A call-back set on this browser's card, possibly not saved yet. */
+        if (c.nextCallDate && (!co.nextCall || c.nextCallDate < co.nextCall)) co.nextCall = c.nextCallDate;
         if (!co.owner && c.owner) co.owner = c.owner;
 
         /* The company sits at the best rung any of its POCs has reached. */
@@ -1731,7 +1734,9 @@
                 /* the condition, as in Airtable's text filter */
                 srcOp: "any", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
-                focus: "" };
+                /* the focus list and the call-back, as chip rows on top of
+                   every other filter */
+                focusSet: new Set(), nextSet: new Set() };
   const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
@@ -1743,11 +1748,8 @@
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsite &&
         (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
-    if (skip !== "focus" && ACC.focus) {
-      const [want, who] = ACC.focus.split(/:(.*)/s);
-      if (focusOf(co) !== want) return false;
-      if (who !== undefined && (co.owner || "Unassigned") !== who) return false;
-    }
+    if (skip !== "focus" && ACC.focusSet.size && !ACC.focusSet.has(focusOf(co))) return false;
+    if (skip !== "next" && ACC.nextSet.size && !ACC.nextSet.has(nextOf(co))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
     if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
     return true;
@@ -1805,7 +1807,8 @@
     const pool = all.filter((c) => accMatch(c, key));
     const cnt = new Map();
     for (const c of pool) {
-      const v = key === "source" ? (c.source || "—") : key === "kpi" ? kpiOf(c) : freshOf(c);
+      const v = key === "source" ? (c.source || "—") : key === "kpi" ? kpiOf(c)
+        : key === "focus" ? focusOf(c) : key === "next" ? nextOf(c) : freshOf(c);
       cnt.set(v, (cnt.get(v) || 0) + 1);
     }
     const chip = (v) => {
@@ -1941,34 +1944,34 @@
      select beside the others: every focus account, one BD's, the dropped
      ones, or the rest. The table then shows them with every other filter
      still applying. (focus.js) */
-  function focusSelect(all) {
-    const pool = all.filter((c) => accMatch(c, "focus"));
-    const n = { focus: 0, normal: 0, depri: 0 }, byOwner = new Map();
-    for (const c of pool) {
-      const f = focusOf(c);
-      n[f]++;
-      if (f === "focus") { const o = c.owner || "Unassigned"; byOwner.set(o, (byOwner.get(o) || 0) + 1); }
-    }
-    const opt = (v, l) => `<option value="${esc(v)}"${ACC.focus === v ? " selected" : ""}>${esc(l)}</option>`;
-    const first = (o) => String(o).split(/\s+/)[0];
-    return `<select id="accFocus" aria-label="Focus list"${ACC.focus ? ' class="on"' : ""}>
-      ${opt("", "Any focus status")}${opt("focus", `★ On a focus list (${n.focus})`)}
-      ${[...byOwner].sort((a, b) => b[1] - a[1]).map(([o, k]) => opt(`focus:${o}`, `\u00a0\u00a0★ ${first(o)}’s focus (${k})`)).join("")}
-      ${opt("depri", `Deprioritized (${n.depri})`)}${opt("normal", `Not picked (${n.normal})`)}</select>`;
-  }
+  const FOCUS_CHIPS = { focus: "★ Focus", normal: "Not picked", depri: "Deprioritized" };
+  /* NEXT CALL — the earliest call-back set on a contact still in play at the
+     company (saved to Airtable since 1.20). "Today" is this machine's day. */
+  const localDay = () => new Date().toLocaleDateString("sv");
+  const nextIn = (co) => co.nextCall ? Math.round((Date.parse(co.nextCall) - Date.parse(localDay())) / 864e5) : null;
+  const nextOf = (co) => { const d = nextIn(co); return d === null ? "none" : d < 0 ? "overdue" : d === 0 ? "today" : d <= 7 ? "week" : "later"; };
+  const NEXT_CHIPS = { overdue: "Overdue", today: "Due today", week: "Next 7 days", later: "Later", none: "No call-back" };
+  const nextText = (co) => {
+    const d = nextIn(co);
+    if (d === null) return "—";
+    if (d < 0) return `Overdue ${-d}d`;
+    if (d === 0) return "Today";
+    return new Date(co.nextCall + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  };
 
   function explorerHTML(all, owners) {
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
-    const SORTS = { recent: "Last call, newest", stale: "Last call, oldest",
+    const SORTS = { recent: "Last call, newest", stale: "Last call, oldest", next: "Next call, soonest",
                     kpi: "Furthest along", az: "A–Z" };
     const cmp = {
       recent: (a, b) => String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
       stale: (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || "")),
       kpi: (a, b) => kpiOf(b) - kpiOf(a) || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
+      next: (a, b) => (a.nextCall ? 0 : 1) - (b.nextCall ? 0 : 1) || String(a.nextCall || "").localeCompare(String(b.nextCall || "")),
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focus;
+    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focusSet.size || ACC.nextSet.size;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2007,15 +2010,16 @@
           </select>
           ${sourcePicker(all, sources)}
           ${offsiteSelect(all)}
-          ${focusSelect(all)}
         </div>
         ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
           (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
         ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
           (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
+        ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
+        ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         <div class="acctable">
           <div class="vr vh"><span>Company</span><span>Pipeline stage</span><span>Owner</span>
-            <span>Source of Data</span><span>Offsite</span><span>KPI status</span><span>Last call</span></div>
+            <span>Source of Data</span><span>Offsite</span><span>KPI status</span><span>Last call</span><span>Next call</span></div>
           ${shown.length ? shown.map((c) => {
             const d = daysSince(c.lastCalledAt), k = kpiOf(c);
             return `<div class="vr" data-id="${esc(c.id)}">
@@ -2028,6 +2032,7 @@
               <span><i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i></span>
               <span class="lc"><i class="f-${freshOf(c)}"></i>${
                 d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}</span>
+              <span class="nc nc-${nextOf(c)}">${esc(nextText(c))}</span>
             </div>`;
           }).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
         </div>
@@ -2371,10 +2376,12 @@
           : VIEW_MODE === "accounts" ? `${all.length} allotted`
           : `${rows.length} of ${all.length}`}</span>
       </div>
+      ${API.state.user?.kylasMatch === false ? `<p class="vwarn">You are signed in as <b>${esc(API.state.user.email)}</b>, but no Kylas
+        user has that email — so “Me” owns no accounts. Ask an admin to set your Kylas user's email to this address.</p>` : ""}
       <div class="vfilters">
         <label>Allotted to<select id="fOwner"${API.isAdmin ? "" : " disabled"}>
           <option value=""${!FILTERS.owner ? " selected" : ""}>${
-            API.isAdmin ? "Me" : esc(API.state.user?.name || "Me")}</option>
+            esc(`Me — ${API.state.user?.name || API.state.user?.email || "signed in"}`)}</option>
           ${API.isAdmin ? `<option value="all"${FILTERS.owner === "all" ? " selected" : ""}>Everyone</option>
           ${CACHE.owners.map((o) => `<option value="${esc(o.id)}"${
             String(FILTERS.owner) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}` : ""}
@@ -2524,7 +2531,8 @@
     }));
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
-      const set = f === "source" ? ACC.sources : f === "kpi" ? ACC.kpis : ACC.fresh;
+      const set = f === "source" ? ACC.sources : f === "kpi" ? ACC.kpis
+        : f === "focus" ? ACC.focusSet : f === "next" ? ACC.nextSet : ACC.fresh;
       const val = f === "kpi" ? Number(v) : v;
       if (set.has(val)) set.delete(val); else set.add(val);
       ACC.limit = 100; redraw();
@@ -2597,17 +2605,16 @@
     }
     global.__srcRedraw = redraw;
     on("accOffsite", "change", (e) => { ACC.offsite = e.target.value; ACC.limit = 100; redraw(); });
-    on("accFocus", "change", (e) => { ACC.focus = e.target.value; ACC.limit = 100; redraw(); });
     /* Focus lists load on their own and change from the call card: repaint
        this view when they do, if it is the one on screen. Bound once. */
-    global.__focusRedraw = () => { if (host.isConnected && host.querySelector("#accFocus")) redraw(); };
+    global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".explorer")) redraw(); };
     if (global.Focus && !global.__focusBound) { global.__focusBound = true; Focus.onChange(() => global.__focusRedraw?.()); }
     global.Focus?.load();
     on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
     on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focus = "";
+      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focusSet.clear(); ACC.nextSet.clear();
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });

@@ -392,6 +392,10 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
      to say where they stopped. Assigned after the blank pass, so "" is written
      rather than skipped. */
   fields["Exit Reason"] = EXIT_STAGES.includes(c.stage) ? c.stage : "";
+  /* The call-back tracks the card both ways, like Exit Reason: a date the
+     associate cleared (or an account that is done) must stop saying "call". */
+  fields["Next Call Date"] = /^\d{4}-\d{2}-\d{2}$/.test(c.nextCallDate || "") ? c.nextCallDate : null;
+  fields["Next Call Time"] = fields["Next Call Date"] ? (c.nextCallTime || "") : "";
   fields["Kylas Contact ID"] = String(c.kid || "");
 
   /* 3 · the contact */
@@ -440,6 +444,7 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
       Owner: c.owner || "",
       "Stage Set": c.stage || "",
       "Created Here": !!call.createdHere,
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(c.nextCallDate || "") ? { "Next Call Date": c.nextCallDate } : {}),
       Contact: [contactRec.id],
     });
     wrote.push("call log");
@@ -630,7 +635,7 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
     stage: f["Current Stage"] || "",
     stageLabel: STAGE_LABEL[f["Current Stage"]] || "",
     source: f["Source of Data"] || "",
-    nextCallDate: "", nextCallTime: "",
+    nextCallDate: f["Next Call Date"] || "", nextCallTime: f["Next Call Time"] || "",
     remarks: f.Remarks || "",
     owner: f.Owner || "",
     ownerId: String(f["Kylas Owner ID"] || ""),
@@ -670,7 +675,7 @@ export async function listTolerant(at, table, opts) {
 export const CONTACT_READ_FIELDS = [
   "Kylas Contact ID", "Name", "Salutation", "Designation", "LinkedIn", "Owner",
   "Kylas Owner ID",
-  "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks",
+  "Phone", "Phones", "Email", "Emails", "Source of Data", "Remarks", "Next Call Date", "Next Call Time",
   "Current Stage", "KPI Rank", "Kylas Updated At",
   "Vendor Info", "Mode of Meeting", "Service Offering", "Flagged", "Exit Reason",
   "Company",
