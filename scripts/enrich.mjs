@@ -3,5 +3,5 @@
  * the same file for the Worker and the tests. */
 import "../extension/console/enrich.js";
 
-export const { USD_INR, num, money, toInr, inrText, usdText,
+export const { num, money, usdText,
                REVENUE_BANDS, ROUND_BANDS, UNKNOWN, bandOf, bandLabel, empBand, empFloor } = globalThis.Enrich;

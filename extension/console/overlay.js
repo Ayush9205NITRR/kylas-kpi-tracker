@@ -402,6 +402,32 @@
      `mode = "session"` above was therefore setting the dock state and leaving
      the queue exactly as it was: opening one contact still listed everybody
      at their company, with the contact merely selected. */
+  /* ── DRAGGING THE WHOLE CONSOLE ──────────────────────────────────────
+     The header is the handle, the way a window's title bar is. The console
+     cannot move itself — it is an iframe inside the host page's shadow root —
+     so it says a drag has begun and where the pointer took hold, and the host
+     page (content/inject.js) does the moving.
+
+     Everything clickable in the header is excluded, or the drag would fire on
+     the way to New contact and Dashboard and those buttons would stop working
+     on any press that wandered a pixel. Double-click puts it back to full
+     screen, which is the way out of a console dragged somewhere unhelpful. */
+  const bar = document.querySelector("header");
+  if (bar && framed) {
+    bar.style.cursor = "grab";
+    bar.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest("button, a, input, select, label, .link")) return;
+      /* The header's own coordinates ARE the wrap's: the iframe fills it. */
+      post("dragstart", { x: e.clientX, y: e.clientY });
+      e.preventDefault();
+    });
+    bar.addEventListener("dblclick", (e) => {
+      if (e.target.closest("button, a, input, select, label, .link")) return;
+      post("dragreset", {});
+    });
+  }
+
   let pane = "full";
   document.getElementById("dockBtn").onclick = (e) => {
     pane = pane === "full" ? "dock" : "full";

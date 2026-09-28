@@ -13,25 +13,20 @@
  * ₹2.25 Cr, and reading it as rupees would put every Indian account about
  * eighty-five times too low.
  *
- * The BD team sizes accounts in crores, so revenue is converted on the way
- * out and shown in rupees; funding is left in dollars, which is how funding
- * is talked about anyway. ONE rate, here, named — see USD_INR.
+ * SHOWN IN DOLLARS, AS IT IS STORED (Ayush, 2026-09-28). An earlier build
+ * converted revenue to rupees at a fixed rate so the bands could be written
+ * in crores. It is gone: a rate baked into the code is wrong the week after
+ * it is written, and two people reading the same account on different builds
+ * would have seen different numbers for it. Nothing is converted now, so
+ * nothing can drift — the screen shows what the record holds.
  *
- * BANDS ARE COMPUTED, NEVER STORED. Nobody types "₹50–100 Cr" into a field:
- * the raw number is the record, the band is a function of it, and a band that
- * was typed once is a band that is wrong the day the number changes.
+ * BANDS ARE COMPUTED, NEVER STORED. Nobody types "$10–50M" into a field: the
+ * raw number is the record, the band is a function of it, and a band that was
+ * typed once is a band that is wrong the day the number changes.
  */
 (function (global) {
-  /* The rupee value of a dollar. Apollo's figures are USD; the revenue column
-     and its bands are rupees, because that is the unit the team sizes
-     accounts in. Change it HERE and every column, band and count moves
-     together — it is deliberately not read from anywhere, because a live rate
-     would mean yesterday's screenshot and today's screen disagree for a
-     reason nobody can see. */
-  const USD_INR = 88;
-
-  const CR = 1e7, LAKH = 1e5;                       /* rupees */
   const M = 1e6, B = 1e9;                           /* dollars */
+  const CR = 1e7, LAKH = 1e5;                       /* rupees — parsing only, see num() */
 
   /* Suffixes, longest first so "crore" is not read as "c" then "rore". */
   const UNITS = [
@@ -73,13 +68,16 @@
   /* ── bands ──────────────────────────────────────────────────────────
      Each is { key, label, min } with min in the field's own unit, read as
      "at least this". Ordered small to large; `bandOf` walks from the top. */
-  const REVENUE_BANDS = [                            /* rupees */
-    { key: "r0", label: "<₹10 Cr",        min: 0 },
-    { key: "r1", label: "₹10–50 Cr",      min: 10 * CR },
-    { key: "r2", label: "₹50–100 Cr",     min: 50 * CR },
-    { key: "r3", label: "₹100–500 Cr",    min: 100 * CR },
-    { key: "r4", label: "₹500–1,000 Cr",  min: 500 * CR },
-    { key: "r5", label: "₹1,000 Cr+",     min: 1000 * CR },
+  /* Six bands, in dollars, on the round numbers people actually say. The
+     original spec wrote these in crores; at any plausible rate those edges
+     land on figures like "$5.7M", which is not a band anybody asks for. */
+  const REVENUE_BANDS = [                            /* dollars */
+    { key: "r0", label: "<$1M",        min: 0 },
+    { key: "r1", label: "$1–10M",      min: 1 * M },
+    { key: "r2", label: "$10–50M",     min: 10 * M },
+    { key: "r3", label: "$50–100M",    min: 50 * M },
+    { key: "r4", label: "$100M–1B",    min: 100 * M },
+    { key: "r5", label: "$1B+",        min: 1 * B },
   ];
   const ROUND_BANDS = [                              /* dollars */
     { key: "f0", label: "<$1M",      min: 0 },
@@ -115,13 +113,6 @@
      estimate behind it deserves: Apollo's revenue is a guess to one or two
      significant figures, so "₹323 Cr" and not "₹322.78 Cr". */
   const trim = (n, dp) => Number(n.toFixed(dp)).toLocaleString("en-IN");
-  function inrText(rupees) {
-    if (rupees === null || rupees === undefined || !Number.isFinite(rupees)) return "";
-    const a = Math.abs(rupees);
-    if (a >= CR) return `₹${trim(rupees / CR, a >= 100 * CR ? 0 : 1)} Cr`;
-    if (a >= LAKH) return `₹${trim(rupees / LAKH, 1)} L`;
-    return `₹${trim(rupees, 0)}`;
-  }
   function usdText(dollars) {
     if (dollars === null || dollars === undefined || !Number.isFinite(dollars)) return "";
     const a = Math.abs(dollars);
@@ -130,8 +121,6 @@
     if (a >= 1e3) return `$${trim(dollars / 1e3, 0)}K`;
     return `$${trim(dollars, 0)}`;
   }
-  const toInr = (usd) => (usd === null || usd === undefined ? null : usd * USD_INR);
-
-  global.Enrich = { USD_INR, num, money, toInr, inrText, usdText,
+  global.Enrich = { num, money, usdText,
                     REVENUE_BANDS, ROUND_BANDS, UNKNOWN, bandOf, bandLabel, empBand, empFloor };
 })(typeof window !== "undefined" ? window : globalThis);

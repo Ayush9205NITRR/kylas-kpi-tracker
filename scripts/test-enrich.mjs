@@ -4,8 +4,8 @@
  * The parser is the only thing standing between "a cell somebody typed by
  * hand" and a screen of 6,000 rows, so the cases that must NOT throw matter
  * as much as the ones that must parse. */
-import { num, money, toInr, inrText, usdText, bandOf, bandLabel, empBand, empFloor,
-         REVENUE_BANDS, ROUND_BANDS, UNKNOWN, USD_INR } from "./enrich.mjs";
+import { num, money, usdText, bandOf, bandLabel, empBand, empFloor,
+         REVENUE_BANDS, ROUND_BANDS, UNKNOWN } from "./enrich.mjs";
 
 let pass = 0, fail = 0;
 const is = (what, got, want) => {
@@ -41,19 +41,20 @@ is("money(0) is null", money(0), null);
 is("num(0) is still 0", num(0), 0);
 is("money of a real amount", money(8305000), 8305000);
 
-console.log("\n4. revenue bands, in rupees, from dollars");
-const revBand = (usd) => bandOf(REVENUE_BANDS, toInr(usd));
-is("$22.5M is ₹100–500 Cr", revBand(22500000), "r3");
-is("$1.089B is ₹1,000 Cr+", revBand(1089000000), "r5");
-/* $1M is ₹8.8 Cr, which is under the first edge — the conversion is the
-   whole point of this case, so it is spelled out rather than rounded up. */
-is("$1M is under ₹10 Cr", revBand(1e6), "r0");
-is("$3M is ₹10–50 Cr", revBand(3e6), "r1");          /* ₹26.4 Cr */
-is("$8M is ₹50–100 Cr", revBand(8e6), "r2");          /* ₹70.4 Cr */
-is("$100k is <₹10 Cr", revBand(1e5), "r0");
+console.log("\n4. revenue bands, in dollars, exactly as stored");
+const revBand = (usd) => bandOf(REVENUE_BANDS, usd);
+/* Nothing is converted. An earlier build turned these into rupees at a fixed
+   rate; the rate is gone, so a figure here must land on the band its own
+   number says and on no other. */
+is("$22.5M is $10–50M", revBand(22500000), "r2");
+is("$1.089B is $1B+", revBand(1089000000), "r5");
+is("$1M is exactly the bottom of $1–10M", revBand(1e6), "r1");
+is("$999,999 is under $1M", revBand(999999), "r0");
+is("$76M is $50–100M", revBand(76033000), "r3");
+is("$184M is $100M–1B", revBand(184000000), "r4");
+is("$100k is <$1M", revBand(1e5), "r0");
 is("nothing is Unknown", revBand(null), UNKNOWN);
-is("the rate is the one thing to change", USD_INR, 88);
-is("a band's name", bandLabel(REVENUE_BANDS, "r3"), "₹100–500 Cr");
+is("a band's name", bandLabel(REVENUE_BANDS, "r2"), "$10–50M");
 is("Unknown has a name too", bandLabel(REVENUE_BANDS, UNKNOWN), "Unknown");
 
 console.log("\n5. latest round bands, in dollars");
@@ -73,15 +74,14 @@ is("ordered by where the band starts", order.join(" "), "1-10 51-200 1001-5000 1
 is("Unknown sorts last", empFloor(UNKNOWN), Infinity);
 
 console.log("\n7. how a number is written");
-is("hundreds of crores lose the decimal", inrText(3.23e9), "₹323 Cr");
-is("tens of crores keep one", inrText(4.25e8), "₹42.5 Cr");
-is("lakhs", inrText(4.25e6), "₹42.5 L");
-is("under a lakh", inrText(4250), "₹4,250");
 is("billions", usdText(1.3e9), "$1.3B");
 is("hundreds of millions lose the decimal", usdText(100e6), "$100M");
 is("tens of millions keep one", usdText(8.3e6), "$8.3M");
 is("thousands", usdText(500000), "$500K");
-is("nothing is written as nothing", inrText(null) + usdText(null), "");
+is("nothing is written as nothing", usdText(null), "");
+/* The parser still understands rupees, because a hand-typed cell in Company
+   List may well say "₹4.2 Cr" — it is only the OUTPUT that is dollars now. */
+is("a rupee figure still parses", num("₹4.2 Cr"), 4.2e7);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

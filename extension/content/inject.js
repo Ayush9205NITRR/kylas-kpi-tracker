@@ -46,6 +46,16 @@
       }
       .wrap.full{inset:18px}
       .wrap.dock{top:0;right:0;bottom:0;width:min(520px,46vw);border-radius:0}
+      /* MOVED BY HAND. Once the console has been dragged it stops being
+         "the whole screen inset by 18px" and becomes a rectangle at a
+         remembered place, so the geometry has to be explicit. */
+      .wrap.free{inset:auto;transition:none}
+      /* While a drag is running this sits over everything, including the
+         iframe. Without it the pointer crosses into the iframe on the first
+         movement and the host page stops hearing mousemove at all — the
+         console would follow the cursor for three pixels and then stop. */
+      .dragcatch{position:fixed;inset:0;z-index:2147483647;cursor:grabbing;display:none}
+      :host(.dragging) .dragcatch{display:block}
       :host(.open) .wrap{opacity:1;pointer-events:auto;transform:none}
       :host(.open) .scrim{opacity:1;pointer-events:auto}
       :host(.open) .fab{display:none}
@@ -78,7 +88,8 @@
       <span class="lbl">Call console</span> <kbd>⌥⇧E</kbd>
     </button>
     <div class="scrim"></div>
-    <div class="wrap full"><iframe title="Enout call console" allow="clipboard-write"></iframe></div>`;
+    <div class="wrap full"><iframe title="Enout call console" allow="clipboard-write"></iframe></div>
+    <div class="dragcatch"></div>`;
 
   const fab = root.querySelector(".fab");
   const fabLabel = root.querySelector(".fab .lbl");
@@ -87,6 +98,93 @@
   const frame = root.querySelector("iframe");
 
   let open = false, loaded = false, ready = false, deadline = null;
+
+  /* ── MOVING THE CONSOLE ──────────────────────────────────────────────
+     It used to be nailed to the screen: full, or docked right, and nothing
+     else. On a real desk that is wrong often enough to matter — the Kylas
+     record underneath is sometimes the thing you need to read while you
+     type, and "close it, look, open it again" costs the call.
+
+     Dragging starts on the console's own header, which is INSIDE the iframe,
+     so the console tells the host page a drag has begun (overlay.js posts
+     "dragstart") and the host does the rest. The host has to own the move:
+     the wrap is its element, and once the pointer is over the iframe the
+     host stops seeing mousemove — hence .dragcatch above. */
+  const POS_KEY = "enout.console.pos";
+  let drag = null;
+  const catcher = root.querySelector(".dragcatch");
+
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  function place(left, top, width, height) {
+    /* Always leave a strip of the header reachable. A window dragged off the
+       top edge is a window that cannot be dragged back. */
+    const w = clamp(width, 360, innerWidth);
+    const h = clamp(height, 260, innerHeight);
+    wrap.style.width = `${w}px`;
+    wrap.style.height = `${h}px`;
+    wrap.style.left = `${clamp(left, 40 - w, innerWidth - 40)}px`;
+    wrap.style.top = `${clamp(top, 0, innerHeight - 40)}px`;
+  }
+  function savePos() {
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify({
+        left: parseFloat(wrap.style.left), top: parseFloat(wrap.style.top),
+        width: parseFloat(wrap.style.width), height: parseFloat(wrap.style.height),
+      }));
+    } catch { /* a browser with no storage still moves it, it just forgets */ }
+  }
+  function restorePos() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(POS_KEY) || "null"); } catch { /* ignore */ }
+    if (!p || ![p.left, p.top, p.width, p.height].every(Number.isFinite)) return false;
+    wrap.classList.remove("full", "dock");
+    wrap.classList.add("free");
+    place(p.left, p.top, p.width, p.height);
+    return true;
+  }
+  function startDrag(grabX, grabY) {
+    const r = wrap.getBoundingClientRect();
+    if (!wrap.classList.contains("free")) {
+      wrap.classList.remove("full", "dock");
+      host.classList.remove("dock");
+      wrap.classList.add("free");
+      place(r.left, r.top, r.width, r.height);
+    }
+    drag = { grabX, grabY };
+    host.classList.add("dragging");
+  }
+  const onMove = (e) => {
+    if (!drag) return;
+    place(e.clientX - drag.grabX, e.clientY - drag.grabY,
+          parseFloat(wrap.style.width), parseFloat(wrap.style.height));
+  };
+  const endDrag = () => {
+    if (!drag) return;
+    drag = null;
+    host.classList.remove("dragging");
+    savePos();
+  };
+  catcher.addEventListener("mousemove", onMove);
+  catcher.addEventListener("mouseup", endDrag);
+  /* The pointer can leave the window mid-drag (over the browser chrome, or
+     off the screen entirely). Ending it there beats leaving the console
+     stuck to a cursor that is no longer reporting. */
+  addEventListener("mouseup", endDrag, true);
+  addEventListener("blur", endDrag);
+  addEventListener("resize", () => {
+    if (!wrap.classList.contains("free")) return;
+    place(parseFloat(wrap.style.left), parseFloat(wrap.style.top),
+          parseFloat(wrap.style.width), parseFloat(wrap.style.height));
+  });
+  function resetPos() {
+    drag = null;
+    host.classList.remove("dragging");
+    wrap.classList.remove("free", "dock");
+    host.classList.remove("dock");
+    wrap.removeAttribute("style");
+    wrap.classList.add("full");
+    try { localStorage.removeItem(POS_KEY); } catch { /* ignore */ }
+  }
 
   /* Real Kylas record urls look like
        app.kylas.io/sales/companies/details/1776620
@@ -132,9 +230,18 @@
     open = next;
     host.classList.toggle("open", open);
     if (mode) {
+      /* Full and Dock are a deliberate choice, so they win over a remembered
+         position — otherwise clicking Dock on a console you had moved would
+         appear to do nothing. */
+      wrap.removeAttribute("style");
+      wrap.classList.remove("free");
       wrap.classList.toggle("full", mode === "full");
       wrap.classList.toggle("dock", mode === "dock");
       host.classList.toggle("dock", mode === "dock");
+      if (mode === "full") try { localStorage.removeItem(POS_KEY); } catch { /* ignore */ }
+    } else if (open && !wrap.classList.contains("dock")) {
+      /* Opened with no mode asked for: put it back where it was left. */
+      restorePos();
     }
     if (!open) return;
 
@@ -214,6 +321,11 @@
     if (m.type === "close") setOpen(false);
     if (m.type === "mode") setOpen(true, m.mode);
     if (m.type === "dial") dial(String(m.number || ""));
+    /* The grab point arrives in the IFRAME's coordinates. The iframe fills
+       the wrap, so they are the wrap's too — no conversion needed, and none
+       that could be got wrong. */
+    if (m.type === "dragstart") startDrag(Number(m.x) || 0, Number(m.y) || 0);
+    if (m.type === "dragreset") resetPos();
   });
 
   /* ── hand a number to Kylas' own dialler ───────────────────────────────

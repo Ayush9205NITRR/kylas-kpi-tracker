@@ -1739,7 +1739,7 @@
      a company with no stage belongs to no family and so had no tile. A set of
      chips answers the same question in one line, takes two stages at once, and
      has a chip for the blank. */
-  const ACC = { stages: new Set(), stageMore: false, sources: new Set(), kpis: new Set(),
+  const ACC = { stages: new Set(), stageOpen: false, stageFind: "", sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
                    due today should not have to be sorted for — it is the first
@@ -1892,7 +1892,7 @@
     /* THE BANDS. Computed from the raw number on every read — nobody types
        "₹50–100 Cr" into a field, and a band that was written down once is
        wrong the day the number behind it changes. */
-    rev: (c) => global.Enrich.bandOf(global.Enrich.REVENUE_BANDS, global.Enrich.toInr(c.enrich?.rev ?? null)),
+    rev: (c) => global.Enrich.bandOf(global.Enrich.REVENUE_BANDS, c.enrich?.rev ?? null),
     round: (c) => global.Enrich.bandOf(global.Enrich.ROUND_BANDS, c.enrich?.amt ?? null),
     emp: (c) => c.enrich?.emp || global.Enrich.UNKNOWN,
     fstage: (c) => c.enrich?.type || global.Enrich.UNKNOWN,
@@ -2045,6 +2045,50 @@
      matches a quarter if any of its contacts' rows named it. */
   const OFFSITE_LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
   const offLabel = (v) => OFFSITE_LABEL[v] || String(v || "").replace(/_/g, " ");
+  /* ── the stage picker ───────────────────────────────────────────────
+     A dropdown rather than a row of chips (Ayush, 2026-09-28). The chips
+     were right about the filter — multi-select, "is any of", with the blank
+     as a value you can reach — and wrong about the space: twenty-three
+     stages is two wrapped lines above a table, every time, whether or not
+     anybody is filtering by stage today. The same control as Source of Data,
+     so the toolbar reads as one thing: a button saying what is picked, and a
+     searchable checklist behind it.
+
+     Counts still leave stage out of their own reckoning, so an unticked
+     stage says what it would give rather than zero. */
+  function stagePicker(all) {
+    const cnt = new Map();
+    for (const c of all.filter((x) => accMatch(x, "stage"))) {
+      const k = stageOf(c) || "";
+      cnt.set(k, (cnt.get(k) || 0) + 1);
+    }
+    const sel = ACC.stages;
+    /* Picked first so they are never scrolled away from, then busiest. */
+    const ranked = [...new Set([...cnt.keys(), ...sel])]
+      .sort((a, b) => (sel.has(b) - sel.has(a)) || (cnt.get(b) || 0) - (cnt.get(a) || 0)
+        || stageName(a).localeCompare(stageName(b)));
+    const summary = !sel.size ? "All"
+      : sel.size === 1 ? stageName([...sel][0]) : `any of ${sel.size}`;
+    return `<div class="msel" id="stagePick">
+      <button type="button" class="msel-btn${sel.size ? " on" : ""}" id="stageBtn"
+        aria-haspopup="true" aria-expanded="${ACC.stageOpen}">
+        <span class="msel-k">Stage</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.stageOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by pipeline stage">
+        <input id="stageFind" class="msel-find" type="search" placeholder="Find a stage…"
+          aria-label="Find a stage" autocomplete="off" value="${esc(ACC.stageFind)}">
+        <div class="msel-list" id="stageList">
+          ${ranked.map((v) => `<label class="msel-opt${sel.has(v) ? " on" : ""}" data-name="${esc(stageName(v).toLowerCase())}">
+            <input type="checkbox" data-stagev="${esc(v)}"${sel.has(v) ? " checked" : ""}>
+            <span class="msel-name">${esc(stageName(v))}</span><span class="msel-n">${cnt.get(v) || 0}</span></label>`).join("")}
+          <p class="msel-empty" id="stageNoMatch" hidden>No stage matches.</p>
+        </div>
+        <div class="msel-foot"><span>${sel.size ? `${sel.size} of ${ranked.length} selected` : `${ranked.length} stages`}</span>
+          <button type="button" class="gbtn sm" id="stageClear"${sel.size ? "" : " disabled"}>Clear</button></div>
+      </div>` : ""}
+    </div>`;
+  }
+
   /* ── the columns picker ─────────────────────────────────────────────
      Airtable's own gesture: a button that says how many are on, and a
      checklist behind it. The choice is this person's and is remembered —
@@ -2164,15 +2208,11 @@
       cell: (c) => `<span class="nc nc-${nextOf(c)}">${esc(nextText(c))}</span>` },
     { k: "priority", label: "Priority", w: ".55fr", on: true, num: true,
       cell: (c) => dash(en(c).pri ?? "") },
+    /* Dollars, as Apollo stores them. Nothing is converted — see enrich.js. */
     { k: "revenue", label: "Revenue", w: ".8fr", num: true,
-      /* Shown in rupees because that is how the team sizes an account; the
-         dollars Apollo actually gave us are on the hover, so the conversion
-         is never something you have to take on trust. */
-      cell: (c) => { const usd = en(c).rev;
-        return usd == null ? "—" : `<span title="Apollo: ${esc(E.usdText(usd))}">${esc(E.inrText(E.toInr(usd)))}</span>`; } },
+      cell: (c) => dash(esc(E.usdText(en(c).rev))) },
     { k: "rpe", label: "Rev / employee", w: ".85fr", num: true,
-      cell: (c) => { const usd = en(c).rpe;
-        return usd == null ? "—" : `<span title="Apollo: ${esc(E.usdText(usd))}">${esc(E.inrText(E.toInr(usd)))}</span>`; } },
+      cell: (c) => dash(esc(E.usdText(en(c).rpe))) },
     { k: "employees", label: "Employees", w: ".7fr", num: true,
       cell: (c) => dash(en(c).emp && en(c).emp !== E.UNKNOWN ? esc(en(c).emp) : "") },
     { k: "funding", label: "Total funding", w: ".8fr", num: true,
@@ -2260,11 +2300,10 @@
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
+          ${stagePicker(all)}
           ${sourcePicker(all, sources)}
           ${columnPicker()}
         </div>
-        ${chipRow(all, "Stage", "stage", null, stageName, ACC.stages, null,
-          { limit: 10, expanded: ACC.stageMore, moreNoun: "stages", moreOne: "stage" })}
         ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
           (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
         ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
@@ -2777,7 +2816,6 @@
     /* A row that hides its long tail says so, and says it as a chip, so
        reaching the rest is the same gesture as picking one. */
     host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
-      if (b.dataset.more === "stage") ACC.stageMore = !ACC.stageMore;
       if (b.dataset.more === "fstage") ACC.fstageMore = !ACC.fstageMore;
       redraw();
     }));
@@ -2802,7 +2840,7 @@
       try { await navigator.clipboard.writeText(url); toast("Link copied — it opens this list with these filters"); }
       catch { toast("Could not copy — the link is in the address bar"); }
     });
-    on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = false; redraw(); });
+    on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = ACC.stageOpen = false; redraw(); });
     on("colReset", "click", () => { ACC.cols = new Set(COL_DEFAULTS); saveAccPrefs(); redraw(); });
     host.querySelectorAll("[data-col]").forEach((b) => b.addEventListener("change", () => {
       if (b.checked) ACC.cols.add(b.dataset.col); else ACC.cols.delete(b.dataset.col);
@@ -2818,6 +2856,42 @@
       priTimer = setTimeout(() => { const at = document.activeElement?.id; redraw();
         if (at === "accPri") document.getElementById("accPri")?.focus(); }, 350);
     });
+    /* ── the Stage picker ── */
+    const stageList = document.getElementById("stageList");
+    const findStage = () => {
+      if (!stageList) return;
+      const q = ACC.stageFind.trim().toLowerCase();
+      let shown = 0;
+      stageList.querySelectorAll(".msel-opt").forEach((o) => {
+        o.hidden = !!q && !o.dataset.name.includes(q);
+        if (!o.hidden) shown++;
+      });
+      const none = document.getElementById("stageNoMatch");
+      if (none) none.hidden = shown > 0;
+    };
+    if (ACC.stageOpen) {
+      findStage();
+      if (stageList) stageList.scrollTop = ACC.stageScroll || 0;
+      const box = document.getElementById("stageFind");
+      if (box) {
+        box.focus({ preventScroll: true });
+        try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* not a text box */ }
+      }
+    }
+    on("stageBtn", "click", () => {
+      ACC.stageOpen = !ACC.stageOpen; ACC.stageScroll = 0;
+      if (!ACC.stageOpen) ACC.stageFind = ""; else ACC.srcOpen = ACC.colsOpen = false;
+      redraw();
+    });
+    on("stageFind", "input", (e) => { ACC.stageFind = e.target.value; findStage(); });
+    on("stageFind", "keydown", (e) => { if (e.key === "Escape") { ACC.stageOpen = false; ACC.stageFind = ""; redraw(); } });
+    stageList?.querySelectorAll("input[data-stagev]").forEach((cb) => cb.addEventListener("change", () => {
+      const v = cb.dataset.stagev;
+      if (cb.checked) ACC.stages.add(v); else ACC.stages.delete(v);
+      ACC.stageScroll = stageList.scrollTop; ACC.limit = 100; redraw();
+    }));
+    on("stageClear", "click", () => { ACC.stages.clear(); ACC.limit = 100; redraw(); });
+
     /* ── the Source of Data picker ── */
     const srcList = document.getElementById("srcList");
     const findSrc = () => {
@@ -2876,12 +2950,17 @@
     if (!global.__srcOutside) {
       global.__srcOutside = true;
       document.addEventListener("mousedown", (e) => {
-        if (!ACC.srcOpen || e.target.closest?.("#srcPick")) return;
         /* Closing keeps the filter, as Airtable does. This used to reset the
            condition and its text, so "contains GPTW" vanished the moment you
            clicked the table to look at what it found. */
-        ACC.srcOpen = false; ACC.srcFind = "";
-        global.__srcRedraw?.();
+        let shut = false;
+        for (const [open, id, clear] of [["srcOpen", "#srcPick", () => { ACC.srcFind = ""; }],
+                                         ["stageOpen", "#stagePick", () => { ACC.stageFind = ""; }],
+                                         ["colsOpen", "#colPick", () => {}]]) {
+          if (!ACC[open] || e.target.closest?.(id)) continue;
+          ACC[open] = false; clear(); shut = true;
+        }
+        if (shut) global.__srcRedraw?.();
       });
     }
     global.__srcRedraw = redraw;
