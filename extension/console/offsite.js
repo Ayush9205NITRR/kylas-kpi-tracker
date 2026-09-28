@@ -77,6 +77,19 @@
     return OFFSITE_QUARTERS.filter((k) => q.has(k));
   }
 
-  const LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
-  global.Offsite = { OFFSITE_QUARTERS, LABEL, quartersOf, isOffsiteRow, offsiteOf };
+  /* NAMED THE WAY ENOUT COUNTS ITS YEAR. The financial year starts in April
+     (Ayush, 2026-09-28), so Apr–Jun is Q1 and Jan–Mar is Q4 — the opposite
+     end of the year from where a calendar reader would put it, which is
+     exactly why the months stay in the label. The quarter alone would be
+     read as a calendar quarter by half the people looking at it.
+
+     No year in these. What the console derives comes out of what a prospect
+     said on a call — "around Diwali", "next quarter" — and that names a
+     quarter, never a year. The year appears only on values that carry one,
+     which is what the Kylas field will hold once it is a multi-select. */
+  const LABEL = { APR_JUN: "Q1 (Apr–Jun)", JUL_SEP: "Q2 (Jul–Sep)",
+                  OCT_DEC: "Q3 (Oct–Dec)", JAN_MAR: "Q4 (Jan–Mar)" };
+  /* Shown in financial-year order, not calendar order. */
+  const FY_ORDER = ["APR_JUN", "JUL_SEP", "OCT_DEC", "JAN_MAR"];
+  global.Offsite = { OFFSITE_QUARTERS, FY_ORDER, LABEL, quartersOf, isOffsiteRow, offsiteOf };
 })(typeof window !== "undefined" ? window : globalThis);

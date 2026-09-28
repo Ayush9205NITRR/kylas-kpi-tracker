@@ -1815,6 +1815,7 @@
     if (ACC.priMin !== "") q.set("pri", ACC.priMin);
     if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
     if (ACC.sort !== "next") q.set("sort", ACC.sort);
+    if (FB.tree.items.length) q.set("fb", JSON.stringify(FB.tree));
     q.set("cols", [...ACC.cols].join("~"));
     return q.toString();
   }
@@ -1831,6 +1832,12 @@
     ACC.srcOp = q.get("srcop") || "any";
     ACC.srcText = q.get("srctext") || "";
     if (SORT_KEYS.includes(q.get("sort"))) ACC.sort = q.get("sort");
+    /* A tree out of a link is text somebody could have edited. Anything that
+       is not the shape this build understands is dropped, not repaired. */
+    try {
+      const t = JSON.parse(q.get("fb") || "null");
+      FB.tree = t && Array.isArray(t.items) ? { join: t.join === "or" ? "or" : "and", items: t.items } : { join: "and", items: [] };
+    } catch { FB.tree = { join: "and", items: [] }; }
     const cols = (q.get("cols") || "").split("~").filter((k) => ACOLS.some((c) => c.k === k));
     if (q.has("cols")) ACC.cols = new Set(cols);
     return true;
@@ -1862,6 +1869,8 @@
     /* "at least N". A company with no score is not "0" — it is unscored, so it
        drops out of a floor rather than sitting at the bottom of it. */
     if (ACC.priMin !== "" && !(Number(co.enrich?.pri) >= Number(ACC.priMin))) return false;
+    /* The condition builder, ANDed after everything the chips said. */
+    if (skip !== "fb" && !fbMatchNode(co, FB.tree)) return false;
     if (skip !== "focus" && ACC.focusSet.size && !ACC.focusSet.has(focusOf(co))) return false;
     if (skip !== "next" && ACC.nextSet.size && !ACC.nextSet.has(nextOf(co))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
@@ -2043,8 +2052,196 @@
   /* OFFSITE TIMELINE — the quarters a company's offsite rows name in their
      Timeline, Past and Now, derived (offsite.js) rather than typed. A company
      matches a quarter if any of its contacts' rows named it. */
-  const OFFSITE_LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
-  const offLabel = (v) => OFFSITE_LABEL[v] || String(v || "").replace(/_/g, " ");
+  /* One copy of these names, in offsite.js, beside the rules that produce
+     them — this file used to hold a second one and they drifted. */
+  const offLabel = (v) => global.Offsite.LABEL[v] || String(v || "").replace(/_/g, " ");
+  /* ── THE CONDITION BUILDER ──────────────────────────────────────────
+     Airtable's filter panel, over these companies: `Where <field> <is>
+     <value>`, conditions joined by and/or, and one level of groups so
+     "A and (B or C)" is sayable.
+
+     IT SITS ON TOP OF THE CHIPS, not instead of them. The chips are the
+     everyday path and they have something this cannot have: every chip says
+     what it would give BEFORE you click it. A builder can only tell you
+     after. So the chips stay for "due today", and this is here for the slice
+     that chips cannot express — revenue over $10M, overdue or never called,
+     not Seed — which is a real question somebody asks about once a month.
+     Both apply, and the header says so when both are on.
+
+     One level of nesting, deliberately. Two levels of groups is a query
+     language, and a query language on a screen BDs use between calls is a
+     thing people get wrong silently. */
+  const FB_TYPES = {
+    /* what each operator needs in the value box: nothing, one, or a list */
+    contains: 1, ncontains: 1, is: 1, isnot: 1, atleast: 1, atmost: 1,
+    anyof: "list", noneof: "list", between: 2, empty: 0, notempty: 0,
+  };
+  const FB_OPS = {
+    text: { contains: "contains", ncontains: "does not contain", is: "is", isnot: "is not",
+            empty: "is empty", notempty: "is not empty" },
+    enum: { anyof: "is any of", noneof: "is none of", empty: "is empty", notempty: "is not empty" },
+    multi: { anyof: "has any of", noneof: "has none of", empty: "is empty", notempty: "is not empty" },
+    num: { atleast: "is at least", atmost: "is at most", is: "is", between: "is between",
+           empty: "is empty", notempty: "is not empty" },
+  };
+  /* Every field the builder can ask about, with how to read it off a company
+     and what a value looks like. `values` is a function so a list built from
+     the data is current, not whatever existed when this file loaded. */
+  function FB_FIELDS(all) {
+    const vals = (get) => [...new Set(all.map(get).flat().filter((v) => v !== "" && v != null))]
+      .sort((a, b) => String(a).localeCompare(String(b)));
+    const E = global.Enrich;
+    return [
+      { k: "name", label: "Company", type: "text", get: (c) => c.name || "" },
+      { k: "stage", label: "Pipeline stage", type: "enum", get: (c) => stageOf(c) || "",
+        values: () => vals((c) => stageOf(c) || ""), labelOf: stageName, blankOk: true },
+      { k: "owner", label: "Owner", type: "enum", get: (c) => c.owner || "", values: () => vals((c) => c.owner || "") },
+      { k: "source", label: "Source of Data", type: "enum", get: (c) => c.source || "",
+        values: () => vals((c) => c.source || "") },
+      { k: "kpi", label: "KPI status", type: "enum", get: (c) => String(kpiOf(c)),
+        values: () => ["-1", "0", "1", "2", "3", "4", "5"], labelOf: (v) => KPI_LABELS[Number(v) + 1] },
+      { k: "fresh", label: "Last call", type: "enum", get: (c) => freshOf(c),
+        values: () => FRESH.map((z) => z.k), labelOf: (v) => FRESH.find((z) => z.k === v)?.label || v },
+      { k: "days", label: "Days since last call", type: "num", get: (c) => daysSince(c.lastCalledAt) },
+      { k: "next", label: "Next call", type: "enum", get: (c) => nextOf(c),
+        values: () => Object.keys(NEXT_CHIPS), labelOf: (v) => NEXT_CHIPS[v] },
+      { k: "focus", label: "Focus list", type: "enum", get: (c) => focusOf(c),
+        values: () => Object.keys(FOCUS_CHIPS), labelOf: (v) => FOCUS_CHIPS[v] },
+      { k: "offsite", label: "Offsite timeline", type: "multi", get: (c) => c.offsite || [],
+        values: () => global.Offsite.FY_ORDER, labelOf: offLabel },
+      { k: "revenue", label: "Revenue", type: "num", get: (c) => c.enrich?.rev ?? null, fmt: E.usdText },
+      { k: "rpe", label: "Rev / employee", type: "num", get: (c) => c.enrich?.rpe ?? null, fmt: E.usdText },
+      { k: "employees", label: "Employees", type: "enum", get: (c) => c.enrich?.emp || "",
+        values: () => vals((c) => (c.enrich?.emp && c.enrich.emp !== E.UNKNOWN ? c.enrich.emp : ""))
+          .sort((a, b) => E.empFloor(a) - E.empFloor(b)) },
+      { k: "funding", label: "Total funding", type: "num", get: (c) => c.enrich?.fund ?? null, fmt: E.usdText },
+      { k: "round", label: "Latest round", type: "num", get: (c) => c.enrich?.amt ?? null, fmt: E.usdText },
+      { k: "fstage", label: "Funding stage", type: "enum", get: (c) => c.enrich?.type || "",
+        values: () => vals((c) => c.enrich?.type || "") },
+      { k: "priority", label: "Priority", type: "num", get: (c) => c.enrich?.pri ?? null },
+    ];
+  }
+  let FB_CACHE = [];
+  const fbField = (k) => FB_CACHE.find((f) => f.k === k) || FB_CACHE[0];
+
+  /* A condition is { f, op, v: [] }. A group is { join, items: [condition] }.
+     An empty value means the condition is still being written, so it does not
+     filter anything yet — a half-typed row must not empty the table. */
+  const fbNeeds = (op) => FB_TYPES[op] ?? 1;
+  function fbReady(c) {
+    const n = fbNeeds(c.op);
+    if (n === 0) return true;
+    if (n === "list") return c.v.length > 0;
+    return c.v.slice(0, n).filter((x) => String(x ?? "").trim() !== "").length === n;
+  }
+  /* The numbers people type are the ones they say: 10M, 2.5b, 40 — all read
+     by the same parser the columns use. */
+  const fbNum = (s) => global.Enrich.num(s);
+
+  function fbTest(co, c) {
+    const f = fbField(c.f);
+    if (!f || !fbReady(c)) return true;
+    const raw = f.get(co);
+    const list = Array.isArray(raw) ? raw : [raw];
+    const filled = list.some((x) => x !== "" && x !== null && x !== undefined
+      && x !== global.Enrich.UNKNOWN);
+    switch (c.op) {
+      case "empty": return !filled;
+      case "notempty": return filled;
+      case "anyof": return list.some((x) => c.v.includes(String(x)));
+      case "noneof": return !list.some((x) => c.v.includes(String(x)));
+      case "contains": return String(raw ?? "").toLowerCase().includes(String(c.v[0]).toLowerCase());
+      case "ncontains": return !String(raw ?? "").toLowerCase().includes(String(c.v[0]).toLowerCase());
+      case "is": return f.type === "num"
+        ? Number(raw) === fbNum(c.v[0])
+        : String(raw ?? "").toLowerCase() === String(c.v[0]).toLowerCase();
+      case "isnot": return String(raw ?? "").toLowerCase() !== String(c.v[0]).toLowerCase();
+      /* A company with no figure is not "below ten million", it is unknown —
+         so it drops out of every comparison rather than counting as zero. */
+      case "atleast": return raw != null && Number(raw) >= fbNum(c.v[0]);
+      case "atmost": return raw != null && Number(raw) <= fbNum(c.v[0]);
+      case "between": return raw != null && Number(raw) >= fbNum(c.v[0]) && Number(raw) <= fbNum(c.v[1]);
+      default: return true;
+    }
+  }
+  function fbMatchNode(co, node) {
+    const live = node.items.filter((it) => (it.items ? it.items.some(fbReady) : fbReady(it)));
+    if (!live.length) return true;
+    const one = (it) => (it.items ? fbMatchNode(co, it) : fbTest(co, it));
+    return node.join === "or" ? live.some(one) : live.every(one);
+  }
+  const fbCount = (node = FB.tree) => node.items
+    .reduce((n, it) => n + (it.items ? fbCount(it) : (fbReady(it) ? 1 : 0)), 0);
+  const fbActive = () => fbCount() > 0;
+  const FB = { open: false, tree: { join: "and", items: [] } };
+  const fbNew = () => ({ f: "revenue", op: "atleast", v: [""] });
+
+  function fbRowHTML(c, path) {
+    const f = fbField(c.f);
+    const ops = FB_OPS[f.type];
+    const need = fbNeeds(c.op);
+    const labelOf = f.labelOf || ((v) => v);
+    let value = "";
+    if (need === "list") {
+      const opts = f.values().filter((v) => !c.v.includes(String(v)));
+      value = `<div class="fb-pills">
+        ${c.v.map((v) => `<span class="fb-pill">${esc(labelOf(v))}<button type="button" data-fbdrop="${path}" data-v="${esc(v)}" aria-label="Remove">×</button></span>`).join("")}
+        <select class="fb-add" data-fbadd="${path}" aria-label="Add a value">
+          <option value="">${c.v.length ? "+ add" : "Choose…"}</option>
+          ${opts.map((v) => `<option value="${esc(v)}">${esc(labelOf(v))}</option>`).join("")}
+          ${f.blankOk && !c.v.includes("") ? `<option value="">— No stage —</option>` : ""}
+        </select></div>`;
+    } else if (need >= 1) {
+      const box = (i, ph) => `<input class="fb-val" type="text" data-fbv="${path}" data-i="${i}"
+        value="${esc(c.v[i] ?? "")}" placeholder="${esc(ph)}" autocomplete="off">`;
+      const ph = f.type === "num" ? "e.g. 10M" : "value";
+      value = need === 2 ? `${box(0, "from")}<span class="fb-and">and</span>${box(1, "to")}` : box(0, ph);
+    }
+    return `<div class="fb-row" data-path="${path}">
+      <select class="fb-f" data-fbf="${path}" aria-label="Field">
+        ${FB_CACHE.map((x) => `<option value="${esc(x.k)}"${x.k === c.f ? " selected" : ""}>${esc(x.label)}</option>`).join("")}
+      </select>
+      <select class="fb-op" data-fbop="${path}" aria-label="Condition">
+        ${Object.entries(ops).map(([k, v]) => `<option value="${k}"${k === c.op ? " selected" : ""}>${esc(v)}</option>`).join("")}
+      </select>
+      <div class="fb-v">${value}</div>
+      <button type="button" class="fb-x" data-fbdel="${path}" aria-label="Remove this condition">✕</button>
+    </div>`;
+  }
+  const fbJoinCell = (node, i, path) => (i === 0 ? `<span class="fb-w">Where</span>`
+    : i === 1 ? `<select class="fb-join" data-fbjoin="${path}" aria-label="and or or">
+        ${["and", "or"].map((j) => `<option value="${j}"${node.join === j ? " selected" : ""}>${j}</option>`).join("")}
+      </select>`
+    : `<span class="fb-w dim">${esc(node.join)}</span>`);
+
+  function filterPanel() {
+    const body = FB.tree.items.map((it, i) => {
+      const lead = fbJoinCell(FB.tree, i, "");
+      if (!it.items) return `<div class="fb-line">${lead}${fbRowHTML(it, String(i))}</div>`;
+      return `<div class="fb-line"><div class="fb-lead">${lead}</div>
+        <div class="fb-group">${it.items.map((c, j) =>
+          `<div class="fb-line">${fbJoinCell(it, j, String(i))}${fbRowHTML(c, `${i}.${j}`)}</div>`).join("")}
+          <button type="button" class="fb-add-btn" data-fbaddcond="${i}">+ Add condition</button>
+        </div></div>`;
+    }).join("");
+    return `<div class="msel" id="fbPick">
+      <button type="button" class="msel-btn${fbActive() ? " on" : ""}" id="fbBtn"
+        aria-haspopup="true" aria-expanded="${FB.open}">
+        <span class="msel-k">Filter</span><span class="msel-v">${fbActive() ? `${fbCount()} condition${fbCount() === 1 ? "" : "s"}` : "None"}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${FB.open ? `<div class="msel-pop fb-pop" role="dialog" aria-label="Build a filter">
+        <p class="fb-hint">Applied on top of the chips above.</p>
+        ${body || `<p class="msel-empty">No conditions yet.</p>`}
+        <div class="fb-foot">
+          <button type="button" class="fb-add-btn" id="fbAdd">+ Add condition</button>
+          <button type="button" class="fb-add-btn" id="fbAddGroup">+ Add condition group</button>
+          <span class="fb-sp"></span>
+          <button type="button" class="gbtn sm" id="fbClear"${fbActive() || FB.tree.items.length ? "" : " disabled"}>Clear</button>
+        </div>
+      </div>` : ""}
+    </div>`;
+  }
+
   /* ── the stage picker ───────────────────────────────────────────────
      A dropdown rather than a row of chips (Ayush, 2026-09-28). The chips
      were right about the filter — multi-select, "is any of", with the blank
@@ -2230,6 +2427,8 @@
 
   function explorerHTML(all, owners) {
     const cols = colsOn();
+    /* Rebuilt each paint so a value list offers what the data holds now. */
+    FB_CACHE = FB_FIELDS(all);
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
     const SORTS = { next: "Call-backs first", recent: "Last call, newest", stale: "Last call, oldest",
                     kpi: "Furthest along", priority: "Priority, highest", revenue: "Revenue, largest",
@@ -2261,7 +2460,7 @@
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
     const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size
-      || ACC.focusSet.size || ACC.nextSet.size || moreActive();
+      || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive();
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2301,6 +2500,7 @@
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
           ${stagePicker(all)}
+          ${filterPanel()}
           ${sourcePicker(all, sources)}
           ${columnPicker()}
         </div>
@@ -2856,6 +3056,93 @@
       priTimer = setTimeout(() => { const at = document.activeElement?.id; redraw();
         if (at === "accPri") document.getElementById("accPri")?.focus(); }, 350);
     });
+    /* ── the condition builder ── */
+    /* A path is "2" for a top-level row or "1.0" for one inside a group, so
+       every control carries where it belongs and nothing has to be counted
+       back from the DOM. */
+    const fbAt = (path) => {
+      const [i, j] = String(path).split(".").map(Number);
+      const top = FB.tree.items[i];
+      return j === undefined ? top : top?.items?.[j];
+    };
+    const fbNodeOf = (path) => (String(path).includes(".") ? FB.tree.items[Number(String(path).split(".")[0])] : FB.tree);
+    on("fbBtn", "click", () => {
+      FB.open = !FB.open;
+      if (FB.open) { ACC.srcOpen = ACC.stageOpen = ACC.colsOpen = false; if (!FB.tree.items.length) FB.tree.items.push(fbNew()); }
+      redraw();
+    });
+    on("fbAdd", "click", () => { FB.tree.items.push(fbNew()); redraw(); });
+    on("fbAddGroup", "click", () => { FB.tree.items.push({ join: "or", items: [fbNew()] }); redraw(); });
+    on("fbClear", "click", () => { FB.tree = { join: "and", items: [] }; ACC.limit = 100; redraw(); });
+    host.querySelectorAll("[data-fbaddcond]").forEach((b) => b.addEventListener("click", () => {
+      FB.tree.items[Number(b.dataset.fbaddcond)]?.items.push(fbNew()); redraw();
+    }));
+    host.querySelectorAll("[data-fbdel]").forEach((b) => b.addEventListener("click", () => {
+      const [i, j] = String(b.dataset.fbdel).split(".").map(Number);
+      if (j === undefined) FB.tree.items.splice(i, 1);
+      else {
+        FB.tree.items[i].items.splice(j, 1);
+        /* A group with nothing left in it is not a group. */
+        if (!FB.tree.items[i].items.length) FB.tree.items.splice(i, 1);
+      }
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fbf]").forEach((sel) => sel.addEventListener("change", () => {
+      const c = fbAt(sel.dataset.fbf);
+      if (!c) return;
+      c.f = sel.value;
+      /* The operators change with the field, so an operator the new field has
+         no idea about is replaced by its first — "contains" on a number is
+         not a question. */
+      const ops = Object.keys(FB_OPS[fbField(c.f).type]);
+      if (!ops.includes(c.op)) c.op = ops[0];
+      c.v = [];
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fbop]").forEach((sel) => sel.addEventListener("change", () => {
+      const c = fbAt(sel.dataset.fbop);
+      if (!c) return;
+      const was = fbNeeds(c.op), now = fbNeeds(sel.value);
+      c.op = sel.value;
+      /* Switching between "one value" and "a list" means what was typed no
+         longer fits the box it was typed into. */
+      if (was !== now) c.v = [];
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fbjoin]").forEach((sel) => sel.addEventListener("change", () => {
+      fbNodeOf(sel.dataset.fbjoin + (sel.dataset.fbjoin ? ".0" : "")).join = sel.value;
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fbadd]").forEach((sel) => sel.addEventListener("change", () => {
+      const c = fbAt(sel.dataset.fbadd);
+      if (!c || !sel.selectedIndex) return;
+      c.v = [...new Set([...c.v, sel.value])];
+      ACC.limit = 100; redraw();
+    }));
+    host.querySelectorAll("[data-fbdrop]").forEach((b) => b.addEventListener("click", () => {
+      const c = fbAt(b.dataset.fbdrop);
+      if (!c) return;
+      c.v = c.v.filter((v) => v !== b.dataset.v);
+      ACC.limit = 100; redraw();
+    }));
+    /* Typed values apply a moment after the last key, and the caret goes back
+       where it was — the table redraws underneath the box being typed into. */
+    let fbTimer = null;
+    host.querySelectorAll("[data-fbv]").forEach((box) => box.addEventListener("input", () => {
+      const c = fbAt(box.dataset.fbv);
+      if (!c) return;
+      c.v[Number(box.dataset.i)] = box.value;
+      ACC.limit = 100;
+      clearTimeout(fbTimer);
+      fbTimer = setTimeout(() => {
+        const path = box.dataset.fbv, i = box.dataset.i;
+        redraw();
+        const again = document.querySelector(`[data-fbv="${path}"][data-i="${i}"]`);
+        if (again) { again.focus({ preventScroll: true });
+          try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* ignore */ } }
+      }, 400);
+    }));
+
     /* ── the Stage picker ── */
     const stageList = document.getElementById("stageList");
     const findStage = () => {
@@ -2960,10 +3247,25 @@
           if (!ACC[open] || e.target.closest?.(id)) continue;
           ACC[open] = false; clear(); shut = true;
         }
+        if (FB.open && !e.target.closest?.("#fbPick")) { FB.open = false; shut = true; }
         if (shut) global.__srcRedraw?.();
       });
     }
     global.__srcRedraw = redraw;
+    /* A LINK PASTED INTO A CONSOLE THAT IS ALREADY OPEN changes only the
+       fragment, and a browser does not reload the page for that — it fires
+       one event and expects to be listened to. Without this, following a
+       colleague's filter link while the console was up did nothing at all,
+       which looks exactly like a broken link. Bound once. */
+    global.__hashRedraw = () => { if (host.isConnected && host.querySelector(".explorer")) redraw(); };
+    if (!global.__hashBound) {
+      global.__hashBound = true;
+      addEventListener("hashchange", () => {
+        if (!readHash()) return;
+        ACC.limit = 100;
+        global.__hashRedraw?.();
+      });
+    }
     /* Focus lists load on their own and change from the call card: repaint
        this view when they do, if it is the one on screen. Bound once. */
     global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".explorer")) redraw(); };
@@ -2976,7 +3278,7 @@
       ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear(); ACC.nextSet.clear();
       for (const s of moreSets()) s.clear();
-      ACC.priMin = "";
+      ACC.priMin = ""; FB.tree = { join: "and", items: [] };
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });
