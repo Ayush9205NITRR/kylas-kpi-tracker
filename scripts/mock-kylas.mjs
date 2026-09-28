@@ -90,6 +90,15 @@ const COMPANIES = {
 /* MOCK_MANY=1 gives 260; MOCK_MANY=<n> gives n. Ayush's real account pages
    past 5,000, which is the case that exposed the page cap — so the number has
    to be settable, not a constant that happens to be smaller than the bug. */
+/* Eight of the twenty-three, in the proportions the account actually has:
+   mostly "could not connect", a long tail of everything else. */
+/* `id` by that name is the loop's own company id below, which shadows the
+   stage-id helper — hence the alias. */
+const stageId = id;
+const MANY_STAGES = ["CNC_COULD_NOT_CONNECT", "CNC_COULD_NOT_CONNECT", "MQL_MARKETING_QUALIFIED_LEAD",
+  "CNC_COULD_NOT_CONNECT_2", "FOLLOW_UP_1", "NOT_INTERESTED", "DISCOVERY_CALL_BOOKED",
+  "CONNECT_LATER", "GHOSTED", "SQL_SALES_QUALIFIED_LEAD", "FOLLOW_UP_2", "INVALID_CONTACT",
+  "OFFSITE_DELAYED", "ACTIVATION", "DISQUALIFIED_WRONG_POC"];
 if (process.env.MOCK_MANY) {
   const HOW_MANY = process.env.MOCK_MANY === "1" ? 260 : Number(process.env.MOCK_MANY) || 260;
   for (let i = 0; i < HOW_MANY; i++) {
@@ -114,7 +123,14 @@ if (process.env.MOCK_MANY) {
       customFieldValues: { cfSourceOfData: process.env.MOCK_MANY_SOURCES
                              ? (i % 5 === 0 ? "Round-Robin" : `Source ${i % Number(process.env.MOCK_MANY_SOURCES)}`)
                              : i % 3 ? "Round-Robin" : "Apollo",
-                           cfBatch: `Batch${(i % 2) + 1}` } };
+                           cfBatch: `Batch${(i % 2) + 1}`,
+                           /* A SPREAD OF STAGES, AND A THIRD WITH NONE. Every bulk
+                              company used to arrive with no stage at all, which made
+                              the fixture agree with any stage filter for the wrong
+                              reason. The blank third is the real account's shape —
+                              most of what Kylas holds has never been given a stage —
+                              and it is the case the "No stage" chip exists for. */
+                           ...(i % 3 === 0 ? {} : { cfPipelineStageBd: stageId(MANY_STAGES[i % MANY_STAGES.length]) }) } };
   }
 }
 

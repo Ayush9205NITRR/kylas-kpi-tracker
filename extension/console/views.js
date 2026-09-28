@@ -1728,7 +1728,13 @@
 
   /* Filter state for the explorer. A SET per dimension, same as the board's
      filters — "Apollo and LinkedIn but not Referral" is an ordinary question. */
-  const ACC = { stage: null, stageLabel: "", sources: new Set(), kpis: new Set(),
+  /* STAGE IS A CHIP ROW, NOT A PANE. It used to be six blocks of tiles above
+     the table — most of the first screen, one stage selectable at a time, and
+     no way at all to reach the 5,949 companies Kylas has no stage for, because
+     a company with no stage belongs to no family and so had no tile. A set of
+     chips answers the same question in one line, takes two stages at once, and
+     has a chip for the blank. */
+  const ACC = { stages: new Set(), stageMore: false, sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
                    due today should not have to be sorted for — it is the first
@@ -1749,7 +1755,7 @@
      options WOULD give rather than counting only what is already selected —
      otherwise every unticked chip reads 0 and the filter cannot be widened. */
   function accMatch(co, skip) {
-    if (skip !== "stage" && ACC.stage && stageOf(co) !== ACC.stage) return false;
+    if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(stageOf(co) || "")) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsite &&
@@ -1761,68 +1767,60 @@
     return true;
   }
 
-  /* ── the families strip ───────────────────────────────────────────── */
-  /* One block per family, one tile per stage inside it, and under each tile a
-     bar showing WHEN those accounts were last called. The bar is the whole
-     point: a stage with 40 companies in it means nothing until you know
-     whether they were called last week or last year. */
-  function famsHTML(all) {
-    /* Counted with every filter EXCEPT stage, so clicking a tile narrows the
-       table without the tiles around it collapsing to zero. */
-    const pool = all.filter((c) => accMatch(c, "stage"));
-    const byStage = new Map();
-    for (const c of pool) {
-      const k = stageOf(c) || "";
-      if (!byStage.has(k)) byStage.set(k, []);
-      byStage.get(k).push(c);
-    }
-    let h = "";
-    for (const f of STAGE_FAMILIES) {
-      const stages = f.stages.filter((code) => (byStage.get(code) || []).length)
-        .sort((a, b) => (byStage.get(b) || []).length - (byStage.get(a) || []).length);
-      if (!stages.length) continue;
-      const tot = stages.reduce((t, code) => t + byStage.get(code).length, 0);
-      h += `<div class="fam"><h3>
-          <button type="button" data-fam="${esc(f.key)}" title="Every stage in ${esc(f.label)}">${esc(f.label)}</button>
-          <span class="c tnum">${tot}</span><span class="h">${esc(f.hint)}</span></h3><div class="tiles">`;
-      for (const code of stages) {
-        const rs = byStage.get(code);
-        const fc = Object.fromEntries(FRESH.map((z) => [z.k, 0]));
-        for (const c of rs) fc[freshOf(c)]++;
-        h += `<button class="tile" type="button" data-stage="${esc(code)}"
-            aria-pressed="${ACC.stage === code}">
-            <span class="nm">${esc(label(code) || code)}</span>
-            <span class="ct tnum">${rs.length}</span>
-            <span class="fresh" title="When these were last called">${
-              FRESH.map((z) => fc[z.k] ? `<i class="f-${z.k}" style="width:${fc[z.k] / rs.length * 100}%"></i>` : "").join("")
-            }</span></button>`;
-      }
-      h += `</div></div>`;
-    }
-    /* A company with no stage at all belongs to no family, and dropping it
-       silently would make the tiles disagree with the table below them. */
-    const none = (byStage.get("") || []).length;
-    return `<div class="fams">${h || `<p class="vnote">No stages on these companies yet.</p>`}</div>
-      <p class="legend">Bar under each stage is when its accounts were last called: ${
-        FRESH.map((z) => `<span><i class="f-${z.k}"></i>${esc(z.label)}</span>`).join("")}${
-        none ? ` · ${none} with no stage are not in any family.` : ""}</p>`;
-  }
+  /* THE FAMILIES STRIP IS GONE — it was six blocks of stage tiles above the
+     table, and `famsHTML` rendered it. Removed for the Stage chip row below:
+     the tiles ate the first screen to say what one line of chips says, only
+     one stage could be lit at a time, and a company Kylas has no stage for
+     belonged to no family, so thousands of accounts had no tile to reach them
+     by. The freshness bar under each tile went with it; "Last call" is its own
+     chip row and answers the same question for whatever is on screen. */
 
   /* ── the explorer ─────────────────────────────────────────────────── */
-  const chipRow = (all, lbl, key, values, labelOf, set, swatch) => {
+  /* What each chip row reads off a company. One place, so a row's counts and
+     its filter can never disagree about what the chip means. Each is wrapped
+     rather than named directly: half of these are declared further down the
+     file, and naming them here would read them before they exist. */
+  const VALUE_OF = {
+    source: (c) => c.source || "—",
+    kpi: (c) => kpiOf(c),
+    focus: (c) => focusOf(c),
+    next: (c) => nextOf(c),
+    fresh: (c) => freshOf(c),
+    stage: (c) => stageOf(c) || "",
+  };
+
+  /* `values` fixes the chips and their order; pass null to take them from the
+     data instead, busiest first. `limit` then caps how many are shown until
+     the row is expanded — with the picked ones always among them, because a
+     chip you cannot see is a filter you cannot turn off. */
+  const chipRow = (all, lbl, key, values, labelOf, set, swatch, opts = {}) => {
     const pool = all.filter((c) => accMatch(c, key));
     const cnt = new Map();
     for (const c of pool) {
-      const v = key === "source" ? (c.source || "—") : key === "kpi" ? kpiOf(c)
-        : key === "focus" ? focusOf(c) : key === "next" ? nextOf(c) : freshOf(c);
+      const v = VALUE_OF[key](c);
       cnt.set(v, (cnt.get(v) || 0) + 1);
+    }
+    let vals = values || [...new Set([...cnt.keys(), ...set])]
+      .sort((a, b) => (cnt.get(b) || 0) - (cnt.get(a) || 0)
+        || String(labelOf(a)).localeCompare(String(labelOf(b))));
+    const cap = opts.limit || 0;
+    let extra = 0;
+    if (cap && !opts.expanded && vals.length > cap) {
+      const picked = vals.filter((v) => set.has(v));
+      const rest = vals.filter((v) => !set.has(v));
+      const shown = [...picked, ...rest].slice(0, Math.max(cap, picked.length));
+      extra = vals.length - shown.length;
+      vals = shown;
     }
     const chip = (v) => {
       const n = cnt.get(v) || 0;
       return `<button class="chip${n ? "" : " zero"}" type="button" data-f="${key}" data-v="${esc(String(v))}"
         aria-pressed="${set.has(v)}">${swatch ? swatch(v) : ""}${esc(labelOf(v))}<span class="k tnum">${n}</span></button>`;
     };
-    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${values.map(chip).join("")}</div>`;
+    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${vals.map(chip).join("")}${
+      extra ? `<button class="chip more" type="button" data-more="${esc(key)}">+${extra} more ${
+        esc(extra === 1 ? (opts.moreOne || "value") : (opts.moreNoun || "values"))}</button>`
+      : opts.expanded && cap ? `<button class="chip more" type="button" data-more="${esc(key)}">Show fewer</button>` : ""}</div>`;
   };
 
   /* SOURCE OF DATA, the way Airtable's own filter works. It is free text in
@@ -1982,7 +1980,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stage || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focusSet.size || ACC.nextSet.size;
+    const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focusSet.size || ACC.nextSet.size;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2006,7 +2004,7 @@
     return `
       <div class="card explorer">
         <div class="exhead">
-          <h2>${esc(ACC.stage ? (label(ACC.stage) || ACC.stage) : "All accounts")}</h2>
+          <h2>${esc(ACC.stages.size === 1 ? stageName([...ACC.stages][0]) : "All accounts")}</h2>
           <span class="exn tnum">${rows.length} ${rows.length === 1 ? "company" : "companies"}</span>
           ${any ? `<button class="gbtn sm" id="accClear" type="button">Clear filters</button>` : ""}
           <p>${parts.length ? esc(parts.join(" · ")) + "." : (rows.length ? "" : "Nothing matches these filters.")}</p>
@@ -2022,6 +2020,8 @@
           ${sourcePicker(all, sources)}
           ${offsiteSelect(all)}
         </div>
+        ${chipRow(all, "Stage", "stage", null, stageName, ACC.stages, null,
+          { limit: 10, expanded: ACC.stageMore, moreNoun: "stages", moreOne: "stage" })}
         ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
           (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
         ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
@@ -2082,6 +2082,10 @@
      mirrored stage otherwise. Same fallback the card's stage line uses, so a
      company cannot be filed under one stage and labelled with another. */
   const stageOf = (co) => co.stage || co.kylasStage || "";
+  /* A stage's name for a chip. The blank one is a real answer — thousands of
+     allotted companies have never been given a stage in Kylas — so it is
+     named rather than left as an empty chip. */
+  const stageName = (code) => (code ? (label(code) || code) : "No stage");
 
   /* LANES, for whichever axis is selected.
      state  — fixed six, because the funnel has a shape and an empty rung is
@@ -2441,7 +2445,7 @@
       </div>
       ${chipStrip(rows, all)}
       ${rcaStrip()}
-      ${VIEW_MODE === "accounts" ? famsHTML(all) + explorerHTML(all, ownerNames)
+      ${VIEW_MODE === "accounts" ? explorerHTML(all, ownerNames)
         : VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
@@ -2529,21 +2533,17 @@
     host.querySelectorAll(".acctable .vr[data-id]").forEach((r) =>
       r.addEventListener("click", () =>
         global.openCompanyFromView?.(r.dataset.id, r.querySelector(".co")?.textContent || "")));
-    host.querySelectorAll(".tile[data-stage]").forEach((b) => b.addEventListener("click", () => {
-      /* Clicking the lit tile clears it — same rule as the event chips on the
-         call card, so one gesture means one thing everywhere. */
-      ACC.stage = ACC.stage === b.dataset.stage ? null : b.dataset.stage;
-      ACC.limit = 100; redraw();
-    }));
-    host.querySelectorAll("[data-fam]").forEach((b) => b.addEventListener("click", () => {
-      /* A family heading is not a filter of its own: it clears the stage so the
-         table widens back to everything the other filters allow. */
-      ACC.stage = null; ACC.limit = 100; redraw();
+    /* A row that hides its long tail says so, and says it as a chip, so
+       reaching the rest is the same gesture as picking one. */
+    host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
+      if (b.dataset.more === "stage") ACC.stageMore = !ACC.stageMore;
+      redraw();
     }));
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
       const set = f === "source" ? ACC.sources : f === "kpi" ? ACC.kpis
-        : f === "focus" ? ACC.focusSet : f === "next" ? ACC.nextSet : ACC.fresh;
+        : f === "focus" ? ACC.focusSet : f === "next" ? ACC.nextSet
+        : f === "stage" ? ACC.stages : ACC.fresh;
       const val = f === "kpi" ? Number(v) : v;
       if (set.has(val)) set.delete(val); else set.add(val);
       ACC.limit = 100; redraw();
@@ -2625,7 +2625,7 @@
     on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stage = null; ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focusSet.clear(); ACC.nextSet.clear();
+      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focusSet.clear(); ACC.nextSet.clear();
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });

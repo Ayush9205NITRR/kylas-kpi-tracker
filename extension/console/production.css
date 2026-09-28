@@ -464,6 +464,10 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .chip:hover{border-color:var(--blueLine)}
 .chip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
 .chip.zero{opacity:.45}
+/* The tail of a long row. Not a value, so it never lights up as one: dashed,
+   in the accent, so it reads as "there is more" rather than "this is picked". */
+.chip.more{border-style:dashed;color:var(--blue);background:none}
+.chip.more:hover{border-color:var(--blue)}
 /* ── a multi-select dropdown, Airtable-style (Source of Data) ── */
 .msel{position:relative}
 .msel-btn{display:inline-flex;align-items:center;gap:8px;height:100%;min-height:34px;padding:6px 10px;
