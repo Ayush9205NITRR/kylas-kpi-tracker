@@ -163,6 +163,11 @@
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
       if (seed?.nextCall && (!co.nextCall || seed.nextCall < co.nextCall)) co.nextCall = seed.nextCall;
+      /* The enrichment block from the server, whole — it is one object per
+         company and there is nothing here to merge. Left off entirely for a
+         company the Company Database has no row for, which is what the
+         Unknown chips count. */
+      if (seed?.enrich && !co.enrich) co.enrich = seed.enrich;
       return co;
     };
 
@@ -174,7 +179,7 @@
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
                            lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
-                           offsite: co.offsite, nextCall: co.nextCall });
+                           offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich });
     }
 
     for (const c of data) {
@@ -1748,8 +1753,98 @@
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
                 /* the focus list and the call-back, as chip rows on top of
                    every other filter */
-                focusSet: new Set(), nextSet: new Set() };
+                focusSet: new Set(), nextSet: new Set(),
+                /* which columns are shown, and whether the picker is open.
+                   Filled from the stored choice on first paint. */
+                cols: new Set(), colsOpen: false,
+                /* REQ-03's bands. Each is a Set of band keys ("r3", "f1", a
+                   source employee bucket, a funding-stage name), plus a floor
+                   for the priority score. The bands themselves are computed
+                   from the raw number every time — see enrich.js. */
+                rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(),
+                offsiteSet: new Set(), priMin: "", moreOpen: false };
   const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
+  let priTimer = null;
+
+  /* WHAT IS REMEMBERED, AND WHAT IS NOT. The columns and the bands are a way
+     of working — a BD who lives in funding stage should find it there
+     tomorrow. The owner, the stage and the call-back chips are a question
+     being asked right now, and restoring those would mean opening the list
+     one morning already filtered to something you set last Thursday and have
+     forgotten. So: the shape of the table persists, the question does not. */
+  const ACC_PREF = "accountsView";
+  let prefsReady = false;
+  async function loadAccPrefs() {
+    if (prefsReady) return;
+    prefsReady = true;
+    let saved = null;
+    try { saved = await Store.getSetting(ACC_PREF); } catch { /* first run */ }
+    ACC.cols = new Set(Array.isArray(saved?.cols) ? saved.cols.filter((k) => ACOLS.some((c) => c.k === k))
+                                                  : COL_DEFAULTS);
+    if (saved?.sort && SORT_KEYS.includes(saved.sort)) ACC.sort = saved.sort;
+    /* A link wins over the stored preference: somebody followed it to see
+       one particular thing, and showing them their own columns instead is
+       not what they clicked. */
+    readHash();
+  }
+  const saveAccPrefs = () => {
+    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort }); }
+    catch { /* a browser with no storage still works, it just forgets */ }
+  };
+  const SORT_KEYS = ["next", "recent", "stale", "kpi", "priority", "revenue", "az"];
+
+  /* ── a filter set as a link ──────────────────────────────────────────
+     "Everyone in ₹100–500 Cr with a call-back overdue" is a question worth
+     sending to somebody, and reading out eight chips over a call is not
+     sending it. The whole filter state encodes into the console's own URL,
+     which every associate can open because they all have the extension: the
+     link is chrome-extension://<the same id>/console/console.html#accounts=…
+
+     Written to the address bar as it changes, so Back works and a reload
+     keeps the question, and read on open. Not a router — one parameter, and
+     anything in it the console does not recognise is ignored rather than
+     being an error, because a link outlives the filter it was made with. */
+  const LINK_SETS = { stage: "stages", src: "sources", kpi: "kpis", fresh: "fresh", next: "nextSet",
+                      focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage",
+                      off: "offsiteSet" };
+  function filtersToQuery() {
+    const q = new URLSearchParams();
+    for (const [short, prop] of Object.entries(LINK_SETS))
+      if (ACC[prop].size) q.set(short, [...ACC[prop]].join("~"));
+    if (ACC.owner) q.set("owner", ACC.owner);
+    if (ACC.priMin !== "") q.set("pri", ACC.priMin);
+    if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
+    if (ACC.sort !== "next") q.set("sort", ACC.sort);
+    q.set("cols", [...ACC.cols].join("~"));
+    return q.toString();
+  }
+  function applyQuery(str) {
+    const q = new URLSearchParams(str || "");
+    if (![...q.keys()].length) return false;
+    for (const [short, prop] of Object.entries(LINK_SETS)) {
+      ACC[prop].clear();
+      for (const v of (q.get(short) || "").split("~").filter(Boolean))
+        ACC[prop].add(prop === "kpis" ? Number(v) : v);
+    }
+    ACC.owner = q.get("owner") || "";
+    ACC.priMin = q.get("pri") || "";
+    ACC.srcOp = q.get("srcop") || "any";
+    ACC.srcText = q.get("srctext") || "";
+    if (SORT_KEYS.includes(q.get("sort"))) ACC.sort = q.get("sort");
+    const cols = (q.get("cols") || "").split("~").filter((k) => ACOLS.some((c) => c.k === k));
+    if (q.has("cols")) ACC.cols = new Set(cols);
+    return true;
+  }
+  const HASH = "#accounts=";
+  function writeHash() {
+    if (!global.location || VIEW_MODE !== "accounts") return;
+    const next = HASH + filtersToQuery();
+    if (location.hash !== next) history.replaceState(null, "", next);
+  }
+  function readHash() {
+    const h = String(global.location?.hash || "");
+    return h.startsWith(HASH) ? applyQuery(h.slice(HASH.length)) : false;
+  }
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
      options WOULD give rather than counting only what is already selected —
@@ -1758,8 +1853,15 @@
     if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(stageOf(co) || "")) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
-    if (skip !== "offsite" && ACC.offsite &&
-        (ACC.offsite === "none" ? (co.offsite || []).length : !(co.offsite || []).includes(ACC.offsite))) return false;
+    if (skip !== "offsite" && ACC.offsiteSet.size &&
+        !VALUE_OF.offsite(co).some((q) => ACC.offsiteSet.has(q))) return false;
+    if (skip !== "rev" && ACC.rev.size && !ACC.rev.has(VALUE_OF.rev(co))) return false;
+    if (skip !== "emp" && ACC.emp.size && !ACC.emp.has(VALUE_OF.emp(co))) return false;
+    if (skip !== "round" && ACC.round.size && !ACC.round.has(VALUE_OF.round(co))) return false;
+    if (skip !== "fstage" && ACC.fstage.size && !ACC.fstage.has(VALUE_OF.fstage(co))) return false;
+    /* "at least N". A company with no score is not "0" — it is unscored, so it
+       drops out of a floor rather than sitting at the bottom of it. */
+    if (ACC.priMin !== "" && !(Number(co.enrich?.pri) >= Number(ACC.priMin))) return false;
     if (skip !== "focus" && ACC.focusSet.size && !ACC.focusSet.has(focusOf(co))) return false;
     if (skip !== "next" && ACC.nextSet.size && !ACC.nextSet.has(nextOf(co))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
@@ -1787,7 +1889,20 @@
     next: (c) => nextOf(c),
     fresh: (c) => freshOf(c),
     stage: (c) => stageOf(c) || "",
+    /* THE BANDS. Computed from the raw number on every read — nobody types
+       "₹50–100 Cr" into a field, and a band that was written down once is
+       wrong the day the number behind it changes. */
+    rev: (c) => global.Enrich.bandOf(global.Enrich.REVENUE_BANDS, global.Enrich.toInr(c.enrich?.rev ?? null)),
+    round: (c) => global.Enrich.bandOf(global.Enrich.ROUND_BANDS, c.enrich?.amt ?? null),
+    emp: (c) => c.enrich?.emp || global.Enrich.UNKNOWN,
+    fstage: (c) => c.enrich?.type || global.Enrich.UNKNOWN,
+    /* A company can name more than one quarter, so this one answers with a
+       list and the chips mean "contains any" — see MULTI below. */
+    offsite: (c) => ((c.offsite || []).length ? c.offsite : [global.Enrich.UNKNOWN]),
   };
+  /* Rows whose value is a LIST. Their chips count a company once per value it
+     holds, and select as "has any of these" rather than "is one of these". */
+  const MULTI = new Set(["offsite"]);
 
   /* `values` fixes the chips and their order; pass null to take them from the
      data instead, busiest first. `limit` then caps how many are shown until
@@ -1797,12 +1912,17 @@
     const pool = all.filter((c) => accMatch(c, key));
     const cnt = new Map();
     for (const c of pool) {
-      const v = VALUE_OF[key](c);
-      cnt.set(v, (cnt.get(v) || 0) + 1);
+      for (const v of MULTI.has(key) ? VALUE_OF[key](c) : [VALUE_OF[key](c)])
+        cnt.set(v, (cnt.get(v) || 0) + 1);
     }
     let vals = values || [...new Set([...cnt.keys(), ...set])]
-      .sort((a, b) => (cnt.get(b) || 0) - (cnt.get(a) || 0)
-        || String(labelOf(a)).localeCompare(String(labelOf(b))));
+      /* `byFloor` keeps a banded row in its own order rather than by count:
+         employee buckets are a scale, and "10000+" before "51-200" (which is
+         what sorting them as text gives) reads as a mistake. */
+      .sort(opts.byFloor
+        ? (a, b) => global.Enrich.empFloor(a) - global.Enrich.empFloor(b)
+        : (a, b) => (cnt.get(b) || 0) - (cnt.get(a) || 0)
+          || String(labelOf(a)).localeCompare(String(labelOf(b))));
     const cap = opts.limit || 0;
     let extra = 0;
     if (cap && !opts.expanded && vals.length > cap) {
@@ -1925,22 +2045,65 @@
      matches a quarter if any of its contacts' rows named it. */
   const OFFSITE_LABEL = { JAN_MAR: "Jan–Mar", APR_JUN: "Apr–Jun", JUL_SEP: "Jul–Sep", OCT_DEC: "Oct–Dec" };
   const offLabel = (v) => OFFSITE_LABEL[v] || String(v || "").replace(/_/g, " ");
-  function offsiteSelect(all) {
-    const pool = all.filter((c) => accMatch(c, "offsite"));
-    const cnt = new Map();
-    let none = 0;
-    for (const c of pool) {
-      if (!(c.offsite || []).length) none++;
-      for (const v of c.offsite || []) cnt.set(v, (cnt.get(v) || 0) + 1);
-    }
-    const order = Object.keys(OFFSITE_LABEL);
-    const vals = [...cnt.keys()].sort((a, b) => ((order.indexOf(a) + 1) || 99) - ((order.indexOf(b) + 1) || 99));
-    return `<select id="accOffsite" aria-label="Offsite timeline">
-      <option value="">Any offsite timeline</option>
-      ${vals.map((v) => `<option value="${esc(v)}"${ACC.offsite === v ? " selected" : ""}>${esc(offLabel(v))} (${cnt.get(v)})</option>`).join("")}
-      <option value="none"${ACC.offsite === "none" ? " selected" : ""}>Not known yet (${none})</option>
-    </select>`;
+  /* ── the columns picker ─────────────────────────────────────────────
+     Airtable's own gesture: a button that says how many are on, and a
+     checklist behind it. The choice is this person's and is remembered —
+     a BD who works on funding stage should not re-tick it every morning. */
+  function columnPicker() {
+    const opt = ACOLS.filter((c) => !c.fixed);
+    const n = opt.filter((c) => ACC.cols.has(c.k)).length;
+    return `<div class="msel" id="colPick">
+      <button type="button" class="msel-btn" id="colBtn"
+        aria-haspopup="true" aria-expanded="${ACC.colsOpen}">
+        <span class="msel-k">Columns</span><span class="msel-v">${n}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.colsOpen ? `<div class="msel-pop" role="dialog" aria-label="Which columns to show">
+        <div class="msel-list">${opt.map((c) => `<label class="msel-opt">
+          <input type="checkbox" data-col="${esc(c.k)}"${ACC.cols.has(c.k) ? " checked" : ""}>
+          <span>${esc(c.label)}</span></label>`).join("")}</div>
+        <div class="msel-foot"><span></span><button type="button" class="gbtn sm" id="colReset">Reset</button></div>
+      </div>` : ""}
+    </div>`;
   }
+
+  /* ── more filters ───────────────────────────────────────────────────
+     The enrichment bands. Folded away by default because most days nobody
+     touches them, and open on its own whenever one of them is doing
+     something — a filter that is narrowing the list while hidden behind a
+     closed section is how you end up certain you have forty accounts.
+
+     Every row carries an Unknown chip, and it is not noise: it says how much
+     of the account still has no enrichment behind it, which is a number the
+     demand team wants to see go down. */
+  function moreFilters(all) {
+    const E = global.Enrich;
+    const open = ACC.moreOpen || moreActive();
+    const bandRow = (lbl, key, bands, set) => chipRow(all, lbl, key,
+      [...bands.map((b) => b.key), E.UNKNOWN], (v) => E.bandLabel(bands, v), set);
+    return `<div class="morefil${open ? " open" : ""}">
+      <button type="button" class="morebtn" id="moreBtn" aria-expanded="${open}">
+        ${open ? "▾" : "▸"} More filters${moreActive() ? `<span class="k tnum">${moreCount()}</span>` : ""}
+      </button>
+      ${open ? `<div class="morebody">
+        ${bandRow("Revenue", "rev", E.REVENUE_BANDS, ACC.rev)}
+        ${chipRow(all, "Employees", "emp", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.emp,
+          null, { byFloor: true })}
+        ${bandRow("Latest round", "round", E.ROUND_BANDS, ACC.round)}
+        ${chipRow(all, "Funding stage", "fstage", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.fstage,
+          null, { limit: 8, expanded: ACC.fstageMore, moreNoun: "stages", moreOne: "stage" })}
+        ${chipRow(all, "Offsite timeline", "offsite", null,
+          (v) => (v === E.UNKNOWN ? "Not known yet" : offLabel(v)), ACC.offsiteSet)}
+        <div class="frow"><span class="lbl">Priority</span>
+          <label class="pri">at least
+            <input type="number" id="accPri" min="0" step="1" value="${esc(ACC.priMin)}"
+              placeholder="any" aria-label="Minimum priority score"></label>
+        </div>
+      </div>` : ""}
+    </div>`;
+  }
+  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet];
+  const moreCount = () => moreSets().reduce((n, s) => n + s.size, 0) + (ACC.priMin === "" ? 0 : 1);
+  const moreActive = () => moreCount() > 0;
 
   /* FOCUS LISTS, AS A FILTER. Which accounts each BD has picked to work (★)
      and which they dropped — set on the call card. A panel listing them all
@@ -1963,10 +2126,85 @@
     return new Date(co.nextCall + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
   };
 
+  /* ── the columns ────────────────────────────────────────────────────
+     Company is always there and always first; everything else is the
+     associate's choice, kept per person. The defaults are the seven Ayush
+     named (stage, owner, source, offsite, KPI status, last call, priority)
+     plus the call-back, which is the one column with a deadline in it.
+
+     `w` is the column's share of the row. `num` right-aligns and sets
+     tabular figures, so a column of money reads down the decimal point.
+     A cell with nothing behind it is an em dash, NEVER a zero: Apollo
+     writes 0 where it has no figure, and "₹0" reads as a fact. */
+  const en = (c) => c.enrich || {};
+  const E = global.Enrich;
+  const dash = (s) => (s === "" || s === null || s === undefined ? "—" : s);
+  /* A link as a small chip. New tab, and noopener — these are third-party
+     URLs out of a shared table. */
+  const linkChip = (url, text) => (url
+    ? `<a class="lnk" href="${esc(url)}" target="_blank" rel="noopener noreferrer"
+         title="${esc(url)}" data-stop="1">${esc(text)}</a>` : "—");
+
+  const ACOLS = [
+    { k: "company", label: "Company", w: "1.6fr", fixed: true, cls: "co",
+      cell: (c) => `${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
+        focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}` },
+    { k: "stage", label: "Pipeline stage", w: "1.3fr", on: true,
+      cell: (c) => esc(label(stageOf(c)) || "—") },
+    { k: "owner", label: "Owner", w: "1fr", on: true, cell: (c) => esc(c.owner || "—") },
+    { k: "source", label: "Source of Data", w: ".9fr", on: true, cell: (c) => esc(c.source || "—") },
+    { k: "offsite", label: "Offsite", w: ".7fr", on: true,
+      cell: (c) => ((c.offsite || []).length ? esc(c.offsite.map(offLabel).join(", ")) : "—") },
+    { k: "kpi", label: "KPI status", w: ".95fr", on: true,
+      cell: (c) => { const k = kpiOf(c); return `<i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i>`; } },
+    { k: "last", label: "Last call", w: ".9fr", on: true, cls: "lc",
+      cell: (c) => { const d = daysSince(c.lastCalledAt);
+        return `<i class="f-${freshOf(c)}"></i>${d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}`; } },
+    { k: "next", label: "Next call", w: ".85fr", on: true,
+      cell: (c) => `<span class="nc nc-${nextOf(c)}">${esc(nextText(c))}</span>` },
+    { k: "priority", label: "Priority", w: ".55fr", on: true, num: true,
+      cell: (c) => dash(en(c).pri ?? "") },
+    { k: "revenue", label: "Revenue", w: ".8fr", num: true,
+      /* Shown in rupees because that is how the team sizes an account; the
+         dollars Apollo actually gave us are on the hover, so the conversion
+         is never something you have to take on trust. */
+      cell: (c) => { const usd = en(c).rev;
+        return usd == null ? "—" : `<span title="Apollo: ${esc(E.usdText(usd))}">${esc(E.inrText(E.toInr(usd)))}</span>`; } },
+    { k: "rpe", label: "Rev / employee", w: ".85fr", num: true,
+      cell: (c) => { const usd = en(c).rpe;
+        return usd == null ? "—" : `<span title="Apollo: ${esc(E.usdText(usd))}">${esc(E.inrText(E.toInr(usd)))}</span>`; } },
+    { k: "employees", label: "Employees", w: ".7fr", num: true,
+      cell: (c) => dash(en(c).emp && en(c).emp !== E.UNKNOWN ? esc(en(c).emp) : "") },
+    { k: "funding", label: "Total funding", w: ".8fr", num: true,
+      cell: (c) => dash(esc(E.usdText(en(c).fund))) },
+    { k: "round", label: "Latest round", w: ".8fr", num: true,
+      cell: (c) => dash(esc(E.usdText(en(c).amt))) },
+    { k: "fstage", label: "Funding stage", w: "1fr",
+      cell: (c) => dash(esc(en(c).type || "")) },
+    { k: "linkedin", label: "LinkedIn", w: ".6fr", cell: (c) => linkChip(en(c).li, "in") },
+    { k: "boolean", label: "Boolean post", w: ".7fr", cell: (c) => linkChip(en(c).bp, "post") },
+  ];
+  const COL_DEFAULTS = ACOLS.filter((c) => c.on).map((c) => c.k);
+  const colsOn = () => ACOLS.filter((c) => c.fixed || ACC.cols.has(c.k));
+  const gridOf = (cols) => cols.map((c) => c.w).join(" ");
+
   function explorerHTML(all, owners) {
+    const cols = colsOn();
     const sources = [...new Set(all.map((c) => c.source || "—"))].sort();
     const SORTS = { next: "Call-backs first", recent: "Last call, newest", stale: "Last call, oldest",
-                    kpi: "Furthest along", az: "A–Z" };
+                    kpi: "Furthest along", priority: "Priority, highest", revenue: "Revenue, largest",
+                    az: "A–Z" };
+    /* BLANKS LAST, ALWAYS. Sorting descending puts them last by accident and
+       ascending puts them first, which reads as "these are the smallest" when
+       what it means is "we do not know". So absence is its own bucket, at the
+       bottom, whichever way the numbers are going. */
+    const byNum = (get) => (a, b) => {
+      const x = get(a), y = get(b);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return y - x;
+    };
     const cmp = {
       recent: (a, b) => String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
       stale: (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || "")),
@@ -1977,10 +2215,13 @@
       next: (a, b) => (a.nextCall ? 0 : 1) - (b.nextCall ? 0 : 1)
         || String(a.nextCall || "").localeCompare(String(b.nextCall || ""))
         || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
+      priority: byNum((c) => (c.enrich?.pri ?? null)),
+      revenue: byNum((c) => (c.enrich?.rev ?? null)),
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size || ACC.offsite || ACC.focusSet.size || ACC.nextSet.size;
+    const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size
+      || ACC.focusSet.size || ACC.nextSet.size || moreActive();
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2007,6 +2248,8 @@
           <h2>${esc(ACC.stages.size === 1 ? stageName([...ACC.stages][0]) : "All accounts")}</h2>
           <span class="exn tnum">${rows.length} ${rows.length === 1 ? "company" : "companies"}</span>
           ${any ? `<button class="gbtn sm" id="accClear" type="button">Clear filters</button>` : ""}
+          <button class="gbtn sm" id="accLink" type="button"
+            title="Copy a link that opens this list with these filters">Copy link</button>
           <p>${parts.length ? esc(parts.join(" · ")) + "." : (rows.length ? "" : "Nothing matches these filters.")}</p>
         </div>
         <div class="extools">
@@ -2018,7 +2261,7 @@
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
           ${sourcePicker(all, sources)}
-          ${offsiteSelect(all)}
+          ${columnPicker()}
         </div>
         ${chipRow(all, "Stage", "stage", null, stageName, ACC.stages, null,
           { limit: 10, expanded: ACC.stageMore, moreNoun: "stages", moreOne: "stage" })}
@@ -2028,25 +2271,15 @@
           (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
-        <div class="acctable">
-          <div class="vr vh"><span>Company</span><span>Pipeline stage</span><span>Owner</span>
-            <span>Source of Data</span><span>Offsite</span><span>KPI status</span><span>Last call</span><span>Next call</span></div>
-          ${shown.length ? shown.map((c) => {
-            const d = daysSince(c.lastCalledAt), k = kpiOf(c);
-            return `<div class="vr" data-id="${esc(c.id)}">
-              <span class="co">${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
-                focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}</span>
-              <span>${esc(label(stageOf(c)) || "—")}</span>
-              <span>${esc(c.owner || "—")}</span>
-              <span>${esc(c.source || "—")}</span>
-              <span>${(c.offsite || []).length ? esc(c.offsite.map(offLabel).join(", ")) : "—"}</span>
-              <span><i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i></span>
-              <span class="lc"><i class="f-${freshOf(c)}"></i>${
-                d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}</span>
-              <span class="nc nc-${nextOf(c)}">${esc(nextText(c))}</span>
-            </div>`;
-          }).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
-        </div>
+        ${moreFilters(all)}
+        <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)}">
+          <div class="vr vh">${cols.map((col) =>
+            `<span class="${col.num ? "num" : ""}">${esc(col.label)}</span>`).join("")}</div>
+          ${shown.length ? shown.map((c) =>
+            `<div class="vr" data-id="${esc(c.id)}">${cols.map((col) =>
+              `<span class="${col.cls || ""}${col.num ? " num" : ""}">${col.cell(c)}</span>`).join("")}</div>`
+          ).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
+        </div></div>
         ${rows.length > ACC.limit
           ? `<button class="gbtn" id="accMore" type="button">Show ${
               Math.min(100, rows.length - ACC.limit)} more of ${rows.length - ACC.limit}</button>` : ""}
@@ -2237,6 +2470,7 @@
     await restore();
     await restoreDensity();
     await restoreViewMode();
+    await loadAccPrefs();
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
     const loading = ensureCompanies(who, () => companies(host));
     /* An owner is selected unless the filter is cleared, and "all" is still a
@@ -2524,30 +2758,66 @@
        Every one of these is a pure re-render over the list already in memory.
        Nothing here goes to the network, which is the whole reason the tiles and
        the chips can carry live counts at all. */
-    const redraw = () => companies(host);
+    /* Every filter change goes through here, so the address bar and the
+       screen cannot drift apart. */
+    const redraw = () => { writeHash(); return companies(host); };
 
     /* A COMPANY ROW HAS TO OPEN THE COMPANY. bindRows lives inside paint(), and
        paint() returns immediately in this mode — so the explorer's rows were
        the only table in the app with no click handler, and clicking an account
        did nothing at all. Bound here, where the rest of this view is wired. */
     host.querySelectorAll(".acctable .vr[data-id]").forEach((r) =>
-      r.addEventListener("click", () =>
-        global.openCompanyFromView?.(r.dataset.id, r.querySelector(".co")?.textContent || "")));
+      r.addEventListener("click", (e) => {
+        /* The LinkedIn and boolean-post chips are links inside a row that is
+           itself a button. Without this, opening one also opened the company
+           behind it. */
+        if (e.target.closest("[data-stop]")) return;
+        global.openCompanyFromView?.(r.dataset.id, r.querySelector(".co")?.textContent || "");
+      }));
     /* A row that hides its long tail says so, and says it as a chip, so
        reaching the rest is the same gesture as picking one. */
     host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
       if (b.dataset.more === "stage") ACC.stageMore = !ACC.stageMore;
+      if (b.dataset.more === "fstage") ACC.fstageMore = !ACC.fstageMore;
       redraw();
     }));
+    /* Which set a chip row belongs to. One table, so a row added to the
+       markup and forgotten here fails loudly rather than silently toggling
+       "Last call". */
+    const SETS = { source: () => ACC.sources, kpi: () => ACC.kpis, focus: () => ACC.focusSet,
+                   next: () => ACC.nextSet, stage: () => ACC.stages, fresh: () => ACC.fresh,
+                   rev: () => ACC.rev, emp: () => ACC.emp, round: () => ACC.round,
+                   fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet };
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
-      const set = f === "source" ? ACC.sources : f === "kpi" ? ACC.kpis
-        : f === "focus" ? ACC.focusSet : f === "next" ? ACC.nextSet
-        : f === "stage" ? ACC.stages : ACC.fresh;
+      const set = SETS[f]?.();
+      if (!set) return;
       const val = f === "kpi" ? Number(v) : v;
       if (set.has(val)) set.delete(val); else set.add(val);
-      ACC.limit = 100; redraw();
+      ACC.limit = 100; saveAccPrefs(); redraw();
     }));
+    /* ── columns, and the bands behind More filters ── */
+    on("accLink", "click", async () => {
+      const url = String(location.href).split("#")[0] + HASH + filtersToQuery();
+      try { await navigator.clipboard.writeText(url); toast("Link copied — it opens this list with these filters"); }
+      catch { toast("Could not copy — the link is in the address bar"); }
+    });
+    on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = false; redraw(); });
+    on("colReset", "click", () => { ACC.cols = new Set(COL_DEFAULTS); saveAccPrefs(); redraw(); });
+    host.querySelectorAll("[data-col]").forEach((b) => b.addEventListener("change", () => {
+      if (b.checked) ACC.cols.add(b.dataset.col); else ACC.cols.delete(b.dataset.col);
+      saveAccPrefs(); redraw();
+    }));
+    on("moreBtn", "click", () => { ACC.moreOpen = !moreActive() && !ACC.moreOpen; redraw(); });
+    on("accPri", "input", (e) => {
+      ACC.priMin = e.target.value.trim();
+      ACC.limit = 100;
+      /* Redrawn on a delay so typing "12" does not filter on "1" first and
+         throw the cursor out of the box it is in. */
+      clearTimeout(priTimer);
+      priTimer = setTimeout(() => { const at = document.activeElement?.id; redraw();
+        if (at === "accPri") document.getElementById("accPri")?.focus(); }, 350);
+    });
     /* ── the Source of Data picker ── */
     const srcList = document.getElementById("srcList");
     const findSrc = () => {
@@ -2615,17 +2885,19 @@
       });
     }
     global.__srcRedraw = redraw;
-    on("accOffsite", "change", (e) => { ACC.offsite = e.target.value; ACC.limit = 100; redraw(); });
     /* Focus lists load on their own and change from the call card: repaint
        this view when they do, if it is the one on screen. Bound once. */
     global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".explorer")) redraw(); };
     if (global.Focus && !global.__focusBound) { global.__focusBound = true; Focus.onChange(() => global.__focusRedraw?.()); }
     global.Focus?.load();
     on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
-    on("accSort", "change", (e) => { ACC.sort = e.target.value; redraw(); });
+    on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear(); ACC.offsite = ""; ACC.focusSet.clear(); ACC.nextSet.clear();
+      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.focusSet.clear(); ACC.nextSet.clear();
+      for (const s of moreSets()) s.clear();
+      ACC.priMin = "";
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });

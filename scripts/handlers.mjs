@@ -438,10 +438,27 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     return { offsite: fields.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`))
       .map((f) => ({ name: f.name, label: f.displayName || "", options: findOptions(f) || [] })) };
   });
+  /* ONE COMPANY CAN NAME MORE THAN ONE QUARTER. Kylas' own field is a single
+     select today, so it cannot hold two — but the value still arrives as a
+     list in every other shape it travels in: an Airtable lookup comes back as
+     an array, a hand-edited cell reads "Jul - Sep; Oct - Dec", and the field
+     becomes a real multi-select the day the Kylas admin makes it one. So the
+     read splits and de-duplicates rather than assuming one value, and the
+     write stays single until that change is made. Nothing here has to change
+     when it is.
+
+     Split on ; and | and a comma. A comma is a risk — "Jul, Sep" would be one
+     value — but quartersOf reads each piece on its own terms and a piece it
+     cannot place contributes nothing, so the worst case is the same answer. */
   const quartersLoose = (t) => {
-    const s = String(t ?? "").trim();
-    if (OFFSITE_QUARTERS.includes(s.toUpperCase())) return [s.toUpperCase()];
-    return quartersOf(s.replace(/_/g, " "));
+    const out = new Set();
+    for (const piece of (Array.isArray(t) ? t : String(t ?? "").split(/[;|,]/))) {
+      const s = String(piece ?? "").trim();
+      if (!s) continue;
+      if (OFFSITE_QUARTERS.includes(s.toUpperCase())) { out.add(s.toUpperCase()); continue; }
+      for (const q of quartersOf(s.replace(/_/g, " "))) out.add(q);
+    }
+    return OFFSITE_QUARTERS.filter((q) => out.has(q));
   };
   /* THE SAME FIELD, AS THE TEAM'S COMPANY LIST HOLDS IT. The Kylas → Airtable
      field map copies Kylas' cfOffsiteTimeline into Company List → "Offsite
@@ -455,7 +472,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const out = {};
     for (const r of rows) {
       const kid = String(r.fields?.["Kylas Company Id"] || "").trim();
-      const q = quartersLoose(flat(r.fields?.["Offsite Timeline"]));
+      /* Not flattened first: a lookup arrives as an array and joining it into
+         one string before splitting it again only loses the boundaries. */
+      const q = quartersLoose(r.fields?.["Offsite Timeline"]);
       if (kid && q.length) out[kid] = [...new Set([...(out[kid] || []), ...q])];
     }
     return out;

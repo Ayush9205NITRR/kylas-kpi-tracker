@@ -520,7 +520,22 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .kpi.rn{color:var(--text3)}
 .acctable{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
   overflow:clip;margin-top:12px}
-.acctable .vr{display:grid;grid-template-columns:1.6fr 1.3fr 1fr .9fr .7fr .95fr .9fr .85fr;gap:14px;
+/* THE TABLE SCROLLS SIDEWAYS, THE COMPANY STAYS. With every enrichment
+   column on there are seventeen of them, and a row you have scrolled to the
+   right of is a row you can no longer name. */
+.accscroll{overflow-x:auto}
+.acctable{min-width:100%;width:max-content}
+.acctable .vr>span:first-child{position:sticky;left:0;z-index:1;background:inherit;
+  padding-right:6px;margin-right:-6px}
+.acctable .vr:not(.vh){background:var(--panel)}
+.acctable .vr:not(.vh):hover>span:first-child{background:var(--panel2)}
+.acctable .vr.vh>span:first-child{background:var(--panel2);z-index:3}
+/* Numbers read down the decimal point, or they are not a column of numbers. */
+.acctable .num{text-align:right;font-variant-numeric:tabular-nums}
+.acctable .lnk{display:inline-block;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--blue);
+  border:1px solid var(--line2);border-radius:999px;padding:1px 8px;text-decoration:none}
+.acctable .lnk:hover{border-color:var(--blue)}
+.acctable .vr{display:grid;grid-template-columns:var(--acols,1.6fr 1.3fr 1fr .9fr .7fr .95fr .9fr .85fr);gap:14px;
   padding:8px 14px;border-bottom:1px solid var(--line);align-items:center;font-size:var(--t-label);
   cursor:pointer}
 .acctable .vr:last-child{border-bottom:0}
@@ -532,10 +547,20 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .acctable .lc{display:inline-flex;align-items:center;gap:6px}
 .acctable .lc i{width:8px;height:8px;border-radius:2px;flex:none}
 #accMore{margin-top:12px;width:100%}
-@media(max-width:860px){
-  .acctable .vr{grid-template-columns:1.6fr 1fr .9fr}
-  .acctable .vr>span:nth-child(n+4){display:none}
-}
+/* On a phone the table scrolls sideways like any other wide table; hiding
+   every column past the third would hide whichever ones the person turned on,
+   which is the opposite of what a column picker is for. */
+
+/* ── more filters ── */
+.morefil{margin:2px 0 10px}
+.morebtn{border:0;background:none;padding:4px 0;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--text3);cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.morebtn:hover{color:var(--text2)}
+.morebtn .k{background:var(--blue);color:var(--onBlue);border-radius:999px;padding:0 7px;font-size:var(--t-meta)}
+.morebody{padding:10px 0 2px;border-top:1px solid var(--line);margin-top:4px}
+.frow .pri{display:inline-flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text3)}
+.frow .pri input{width:72px;font:inherit;font-size:var(--t-label);font-variant-numeric:tabular-nums;
+  border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);color:var(--text);padding:4px 8px}
 
 /* three-way view switch */
 .vseg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;
