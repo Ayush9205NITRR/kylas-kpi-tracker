@@ -75,15 +75,63 @@ The constraints do instead: a stage the base has never heard of, a date in
 refused on write rather than discovered weeks later as a filter quietly
 matching nothing.
 
+## Gate 1 — the backfill and the reconciler
+
+```sh
+node --env-file=.env.local scripts/backfill.mjs  --db db/kpi.sqlite
+node --env-file=.env.local scripts/reconcile.mjs --db db/kpi.sqlite
+node scripts/test-migration.mjs          # 18 checks, against the mock
+```
+
+`backfill.mjs` is **read-only against Airtable** — it never writes, updates or
+deletes there. The only thing it changes is the local SQLite file.
+
+It is re-runnable by construction: every row is upserted on its Airtable
+record id, so a second pass updates the rows the first one wrote rather than
+inserting a second copy. A backfill that dies halfway is something you re-run,
+not something you clean up after. Tables go parent-first, because a contact's
+company has to exist before the contact can point at it.
+
+`reconcile.mjs` answers three questions per table, kept apart because they
+have different causes:
+
+- **missing** — Airtable has it, the copy does not. The copy is behind.
+- **extra** — the copy has it, Airtable does not. Something was deleted, or
+  written twice.
+- **differing** — both have it and they disagree. A field mapped wrongly.
+
+It exits non-zero unless every table agrees, so it can be a cron that pages
+you rather than a report somebody remembers to read.
+
+**It refuses to compare a prefix to a prefix.** Airtable pages, and a reader
+that stops early and then reports agreement is the exact shape of the bug that
+once made a month of numbers the first 4,000 calls. Every table is read whole,
+and a read that hits the page ceiling is a failure rather than a result.
+
+**Comparison is by meaning, not by string.** `5` and `5.0`, a date-time
+written `Z` versus `+00:00`, a select that arrived as an object rather than a
+name — none of these are drift, and a reconciler that cried wolf on them daily
+would be ignored within a week. `sql-store.mjs` holds those rules once, and
+the backfill, the reconciler and the shadow writer all read them from there.
+
+### What the base actually holds (2026-09-28)
+
+| Table | Rows |
+|---|---|
+| Companies | 40 |
+| Contacts | 80 |
+| Call Log | 120 |
+
+Small enough that "how far back should the backfill go" does not arise — it
+takes everything, in seconds. Note that the ~17,900 companies live in **Kylas**,
+not here; this base holds what the console has written since it started.
+
 ## Still to build
 
-1. **The reconciler** — walks both sides, reports per-table differences as a
-   number and a list of keys. The instrument the rest of this is read through,
-   so it gets more care than the thing it measures.
-2. **The backfill** — one pass, resumable, identical when re-run.
-3. **The shadow writer** — after the reply, wrapped so it cannot throw into
-   the save path.
-4. **The derived views** — `sql-derived.mjs`, the 38 fields above.
-5. **The comparison harness** — for shadow reads, at Gate 3.
+1. **The derived views** — `sql-derived.mjs`, the 38 child-dependent fields.
+2. **The shadow writer** — after the reply, wrapped so it cannot throw into
+   the save path. Gate 2, and the first deploy that changes production.
+3. **The comparison harness** — for shadow reads, at Gate 3.
+4. **The Kylas write-back** — Gate 4. Waiting on the field list.
 
 Everything up to the shadow writer is invisible to production.

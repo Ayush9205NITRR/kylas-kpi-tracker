@@ -17,3 +17,6 @@ apps/bd-ladder/dist
 .dev.vars.*
 .wrangler/
 screenshots/
+
+db/*.sqlite
+db/*.sqlite-journal
