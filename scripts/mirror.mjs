@@ -40,6 +40,7 @@
  */
 import {
   COMPANY_READ_FIELDS, CONTACT_READ_FIELDS, KPI_FIELDS, RCA_READ_FIELDS, RESEARCH_COLUMNS,
+  ENRICH_FIELDS, ENRICH_TABLE,
 } from "./airtable.mjs";
 
 const uniq = (a) => [...new Set(a)];
@@ -60,6 +61,8 @@ export const MIRROR_TABLES = {
   Team: ["Name", "Role", "In Funnel", "Note"],
   Focus: ["Kylas Company ID", "Company Name", "Status", "Reason", "Note", "Owner", "Set By", "Set At"],
   Research: ["Kylas Company ID", ...Object.values(RESEARCH_COLUMNS), "Updated By", "Updated At"],
+  /* The one table in another base — see clientFor below. */
+  [ENRICH_TABLE]: ENRICH_FIELDS,
 };
 
 /* Airtable's LAST_MODIFIED_TIME is not instantaneous and two clocks are
@@ -96,9 +99,27 @@ export function simpleFilter(formula) {
   };
 }
 
-export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, checkMs = 1500, now = () => Date.now() }) {
+/* A TABLE THAT LIVES IN ANOTHER BASE. Company List is the team's own company
+   database — Apollo's revenue, employees and funding, curated by them, keyed
+   by Kylas company id. It is not in the KPI base and it is not ours to move
+   there: it is 9,600 rows the demand team maintains, and copying them into a
+   second place would mean two answers to "what is this company's revenue".
+   So the copy reads it where it lives, through a client of its own.
+   `clientFor(table)` says which client; everything else about a mirrored
+   table — generations, deltas, the daily rebuild — is the same. */
+export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, checkMs = 1500,
+                               clientFor: clientForOpt = null, now = () => Date.now() }) {
   if (!db) throw new Error("the mirror needs a D1 binding");
+  let clientFor = clientForOpt || (() => null);
   const spec = (t) => tables[t] || null;
+  /* Every read of a table goes through here, so a table with its own client
+     can never be read with the wrong one by a path that forgot to ask. */
+  const client = (at, t) => clientFor(t) || at;
+  /* Settable after construction, because the mirror is built where the D1
+     binding is (the runtime shell) and the research client is built where the
+     configuration is read (the handlers). The shell has no business knowing
+     about a second Airtable base. */
+  const setClientFor = (fn) => { clientFor = fn || (() => null); };
 
   let schema = null;
   const ready = () => (schema ||= db.batch([
@@ -239,8 +260,9 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
      write-through copy of them is already stale, and a delta cannot see it. */
   async function refetch(at, t, ids) {
     const recs = [];
+    const c = client(at, t);
     for (const id of ids.filter(Boolean)) {
-      try { recs.push(await at.call("GET", `/${encodeURIComponent(t)}/${encodeURIComponent(id)}`)); }
+      try { recs.push(await c.call("GET", `/${encodeURIComponent(t)}/${encodeURIComponent(id)}`)); }
       catch (e) { log(`! mirror: could not re-read ${t} ${id} — ${e.message.slice(0, 100)}`); }
     }
     await apply(t, recs);
@@ -249,6 +271,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
   /* Every row, dropping a field the base does not have rather than failing —
      one missing column must not keep a whole table out of the copy. */
   async function readAll(at, t) {
+    at = client(at, t);
     let fields = [...spec(t)];
     for (let i = 0; i <= spec(t).length; i++) {
       try {
@@ -321,7 +344,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     try {
       const fields = JSON.parse(m.fields || "[]");
       if (!fields.length) return { table: t, changed: 0 };
-      const recs = await at.listAll(t, {
+      const recs = await client(at, t).listAll(t, {
         formula: `IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('${m.delta_from}'))`,
         fields, pageSize: 100, maxPages: 2000,
       });
@@ -383,7 +406,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     });
   }
 
-  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, markStale, status,
+  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, markStale, status, setClientFor,
            pending: () => [...pending] };
 }
 

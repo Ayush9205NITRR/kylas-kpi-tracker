@@ -35,7 +35,9 @@ import { createAirtable, syncContact, readCompanyKpis,
          readCompanies, readSyncState, listTolerant,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter,
-         readFocus, readResearch, writeFocus, writeResearch } from "./airtable.mjs";
+         readFocus, readResearch, writeFocus, writeResearch,
+         ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
+import { num, money, empBand } from "./enrich.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
@@ -123,6 +125,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     log,
     ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
   }) : null;
+  /* Company List is mirrored like the KPI base's tables, but read through the
+     research client — the copy is told which one here, where the second base
+     is configured, rather than in the runtime shell that owns the D1 binding.
+     Without a research client the table simply never builds, and every
+     enrichment column reads Unknown. */
+  if (mirror && researchAt) mirror.setClientFor?.((t) => (t === ENRICH_TABLE ? researchAt : null));
   /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
      Hosted runtime only — on a laptop there is nothing to gain. */
   const saves = db ? createSaveQueue({ db, log }) : null;
@@ -452,6 +460,73 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     }
     return out;
   });
+  /* ENRICHMENT, FROM THE COPY OF COMPANY LIST.
+     One pass over 9,600 rows into a Map keyed by Kylas company id, memoised
+     on the copy's version so it is rebuilt when the copy changes and not once
+     per request. Parsed here, not in the console: the numbers arrive as
+     lookups, formulas and hand-typed text, and six thousand rows should not
+     each be re-parsed in a browser on every keystroke of a filter.
+
+     The keys are short on purpose — this rides on every row of a list that
+     can be six thousand long, and the long names would be most of the reply.
+       rev  annual revenue, US dollars, as Apollo gives it
+       rpe  revenue per employee, US dollars
+       emp  employee band, Apollo's own bucket ("51-200"), not a count
+       fund total funding, US dollars
+       amt  latest round, US dollars (0 means Apollo has none, so: null)
+       type latest round's type, which is what "funding stage" means here
+       pri  the team's own priority score (at_priority)
+       li   company LinkedIn
+       bp   boolean post link, whichever of the three columns is filled */
+  function rowsToEnrichment(fieldsList) {
+    const out = new Map();
+    for (const f of fieldsList) {
+      const kid = String(f[ENRICH_KEY] ?? "").trim();
+      if (!kid) continue;
+      const e = {
+        rev: money(f["Annual Revenue"]), rpe: money(f.at_rev_per_employee),
+        emp: empBand(f["No. of Employees (kylas)"]),
+        fund: money(f["Total Funding"]), amt: money(f["Latest Funding Amount"]),
+        type: flat(f["Latest Funding Type"]) || "", pri: num(f.at_priority),
+        li: flat(f["linkedin - Appollo"]) || "",
+        bp: ENRICH_BOOLEAN_COLUMNS.map((c) => flat(f[c])).find(Boolean) || "",
+      };
+      /* A row with nothing in it is not enrichment, it is a blank line — and
+         it would make an account read "known, and empty" rather than Unknown. */
+      if (Object.values(e).some((v) => v !== null && v !== "" && v !== "unknown")) out.set(kid, e);
+    }
+    return out;
+  }
+
+  const enrichShared = memo("enrichment", {
+    ttl: 10 * 60 * 1000, key: mirror ? () => mirror.stamp([ENRICH_TABLE]) : null,
+  }, async () => {
+    const rows = mirror ? await mirror.rows(ENRICH_TABLE) : null;
+    return rows ? rowsToEnrichment([...rows.values()]) : new Map();
+  });
+
+  /* WITHOUT A COPY, READ IT DIRECTLY — but only where that is safe. On a
+     laptop the proxy has no D1 and no subrequest cap, so a hundred pages is
+     just a slow first call and then half an hour of cache. On the hosted
+     runtime there IS a copy, and a request must never page a 9,600-row table
+     itself: until the copy is built the columns read Unknown, which is what
+     "still copying" looks like everywhere else here. */
+  const enrichDirect = shared("company-list-enrichment", { ttl: 30 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 },
+    /* Tolerantly: Company List is the demand team's table, columns come and go
+       in it, and one renamed column must not take every enrichment value with
+       it. The copy's own reader drops a missing field the same way. */
+    async () => Object.fromEntries(rowsToEnrichment(
+      (await listTolerant(researchAt, ENRICH_TABLE,
+        { fields: ENRICH_FIELDS, pageSize: 100, maxPages: 200 })).map((r) => r.fields || {}))));
+
+  const enrichByCompany = async () => {
+    if (!researchAt) return new Map();
+    try {
+      if (mirror) return await enrichShared();
+      return new Map(Object.entries(await enrichDirect()));
+    } catch (e) { log(`  enrichment: not available yet (${e.message.slice(0, 80)})`); return new Map(); }
+  };
+
   const listOffsite = async () => {
     if (!researchAt) return new Map();
     try { return new Map(Object.entries(await listOffsiteShared()).map(([k, v]) => [k, new Set(v)])); }
@@ -1365,9 +1440,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (mirror) {
           /* Kylas' own field rides on the crawl, when there is one. */
           const crawlNow = await kylasCompanies.peek().catch(() => null);
-          const [offsite, fromKylas, fromList] = await Promise.all([offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite()]);
+          const [offsite, fromKylas, fromList, enrich] = await Promise.all([
+            offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite(), enrichByCompany()]);
           const { byCompany: prog } = await progress();
           for (const co of mirror) {
+            /* Only where there is something: a key on every one of six
+               thousand rows, holding nine nulls, is the reply's biggest
+               single cost and says nothing the absence does not. */
+            const e = enrich.get(String(co.id));
+            if (e) co.enrich = e;
             co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
             co.nextCall = prog.get(String(co.id))?.nextCall || null;
           }
@@ -1450,9 +1531,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const [offsite, fromKylas, fromList, { byCompany: prog }] = await Promise.all([offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), progress()]);
+      const [offsite, fromKylas, fromList, enrich, { byCompany: prog }] = await Promise.all([
+        offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), enrichByCompany(), progress()]);
       const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
         offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
+        /* Only where there is something — see the Airtable path. */
+        ...(enrich.get(String(co.id)) ? { enrich: enrich.get(String(co.id)) } : {}),
         nextCall: prog.get(String(co.id))?.nextCall || null }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser

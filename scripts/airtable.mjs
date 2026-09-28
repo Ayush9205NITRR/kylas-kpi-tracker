@@ -1041,6 +1041,26 @@ export async function readFocus(at) {
    app speaks the reference's keys, so the mapping lives here and only here —
    two spellings of "decides events" in two files is how a form silently stops
    saving one of its boxes. */
+/* ── the team's Company Database ─────────────────────────────────────
+   Company List, in the research base: Apollo's numbers for every company,
+   keyed by Kylas company id. Read whole into the copy so the accounts table
+   can show revenue, size, funding and priority on 6,000 rows without asking
+   Airtable anything, and so the band filters can count without a round trip.
+
+   BOOLEAN POST HAS THREE HOMES in that table and different rows use different
+   ones; the reader takes the first one filled. Named here rather than picked
+   in the console, because "which column is the boolean post" is a fact about
+   the base, not about the screen. */
+export const ENRICH_TABLE = "Company List";
+export const ENRICH_KEY = "Kylas Company Id";
+export const ENRICH_BOOLEAN_COLUMNS =
+  ["Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)"];
+export const ENRICH_FIELDS = [
+  ENRICH_KEY, "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee",
+  "Total Funding", "Latest Funding Amount", "Latest Funding Type", "at_priority",
+  "linkedin - Appollo", "Offsite Timeline", ...ENRICH_BOOLEAN_COLUMNS,
+];
+
 export const RESEARCH_COLUMNS = {
   industry: "Industry", size: "Employees", hq: "HQ City", offices: "Other Offices",
   funding: "Funding", revenue: "Revenue Band", events: "Known Events",
