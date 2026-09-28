@@ -162,3 +162,17 @@ crons = [
 
 [observability]
 enabled = true
+
+# ── the migration's copy (docs/MIGRATION.md) ──────────────────────────
+# A SECOND D1 database, separate from the read mirror above, holding the
+# typed tables that will replace Airtable. Commented out on purpose: with no
+# KPI_DB binding the shadow is inert and a deploy changes nothing.
+#
+# To turn it on:
+#   npx wrangler d1 create enout-kpi
+#   ...then paste the database_id it prints below and uncomment.
+#
+# [[d1_databases]]
+# binding = "KPI_DB"
+# database_name = "enout-kpi"
+# database_id = "<paste from wrangler d1 create>"

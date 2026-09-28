@@ -146,7 +146,17 @@ try {
   r = await run("scripts/reconcile.mjs", ["--db", DB, "--only", "Companies"]);
   ok("a row only the copy still has", r.code === 1 && /only in SQL\s*: 901/.test(r.out), r.out.slice(-300));
 
-  console.log("\n6. it fails loudly rather than reporting a prefix");
+  console.log("\n6. the views came with the copy, and read live");
+  const v = new DatabaseSync(DB, { readOnly: true });
+  ok("v_contacts exists", !!v.prepare(`SELECT COUNT(*) n FROM v_contacts`).get());
+  ok("v_companies exists", !!v.prepare(`SELECT COUNT(*) n FROM v_companies`).get());
+  const acme = v.prepare(`SELECT * FROM v_companies WHERE kylas_company_id='900'`).get();
+  ok("the backfilled company rolled up its contact", acme.right_poc === 1,
+    `right_poc=${acme.right_poc}`);
+  ok("...and counted the call", acme.call_count === 1, `call_count=${acme.call_count}`);
+  v.close();
+
+  console.log("\n7. it fails loudly rather than reporting a prefix");
   r = await run("scripts/reconcile.mjs", ["--db", "/tmp/claude-0/does-not-exist.sqlite", "--only", "Team"]);
   ok("a missing database is an error, not 'clean'", r.code === 1, r.out.slice(-200));
 } finally {

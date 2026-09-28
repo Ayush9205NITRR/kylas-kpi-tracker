@@ -20,7 +20,8 @@ import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { sqlSchema, tableName } from "./sql-schema.mjs";
-import { BACKFILL_ORDER, recordToRow, upsertSql } from "./sql-store.mjs";
+import { sqlDerived } from "./sql-derived.mjs";
+import { BACKFILL_ORDER, recordToRow, upsertSql, LINKS_BY_TABLE } from "./sql-store.mjs";
 
 const arg = (name, dflt = null) => {
   const i = process.argv.indexOf(name);
@@ -45,6 +46,10 @@ mkdirSync(dirname(DB), { recursive: true });
 const db = new DatabaseSync(DB);
 db.exec("PRAGMA foreign_keys = ON");
 db.exec(sqlSchema());
+/* The views are rebuilt on every run. They hold no data — dropping and
+   recreating them costs nothing and means a copy can never be left with the
+   view definitions of an older build. */
+db.exec(sqlDerived());
 
 /* Airtable record id → the local row id, per table, so a child can find its
    parent. Read from the database rather than kept from this run: a re-run
@@ -78,9 +83,11 @@ for (const table of tables) {
   for (const rec of recs) {
     const row = recordToRow(table, rec, parentIdOf);
     /* A child whose parent is not here yet is reported, not dropped in
-       silence — it is the signal that the order or the source is wrong. */
-    for (const c of cols) if (c.endsWith("_id") && c !== "airtable_id" && row[c] === null
-      && (rec.fields?.[c.replace(/_id$/, "").replace(/_/g, " ")] || []).length) missingParent++;
+       silence — it is the signal that the order or the source is wrong. Read
+       from the schema's link list, not from column names ending in _id: three
+       real fields end that way and none of them is a link. */
+    for (const l of LINKS_BY_TABLE[table] || [])
+      if (row[l.col] === null && (rec.fields?.[l.name] || []).length) missingParent++;
     stmt.run(...cols.map((c) => row[c] ?? null));
     idCache.set(`${table}:${rec.id}`, db.prepare(
       `SELECT id FROM "${tableName(table)}" WHERE airtable_id = ?`).get(rec.id)?.id ?? null);

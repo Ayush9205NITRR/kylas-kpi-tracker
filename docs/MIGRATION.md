@@ -126,12 +126,80 @@ Small enough that "how far back should the backfill go" does not arise — it
 takes everything, in seconds. Note that the ~17,900 companies live in **Kylas**,
 not here; this base holds what the console has written since it started.
 
+## Gate 1 (continued) — the derived numbers
+
+```sh
+node scripts/sql-derived.mjs --out db/derived.sql
+node scripts/test-sql-derived.mjs                       # 98 checks, hand-computed
+node --env-file=.env.local scripts/verify-kpis.mjs --db db/kpi.sqlite   # T3
+```
+
+38 of the 41 derived fields read a CHILD table, so they are **views**. The
+other three read only their own row and are generated columns.
+
+That split is the whole reason this file is careful. Airtable recomputes a
+company's rollup when an *event row* changes, two levels below it. A stored
+value recomputes only when its own row is written, so a company whose
+grandchild changed would keep the old number and look perfectly fine. A view
+has nothing stored to go stale. `test-sql-derived.mjs` §8 is that exact case:
+insert an event row under a contact, touch neither the contact nor the
+company, and the company's Right POC has to move.
+
+Every expectation in that test was worked out from `kpi-spec.md` by hand. A
+test that asks the view what it says and then asserts it said that proves
+nothing.
+
+`verify-kpis.mjs` is the other half: it compares the views against the values
+**Airtable itself computed**, on every row, read-only both sides. Three kinds
+of difference are not differences and are handled rather than tolerated —
+list order (`ARRAYJOIN` follows link order, `group_concat` follows ours),
+precision (120 versus 120.0), and blank (Airtable omits an empty formula
+result). A verifier that cries wolf gets ignored inside a week.
+
+## Gate 2 — the shadow copy
+
+**It does not write from the save path.** The obvious design is a second write
+inside `performSave`; this deliberately avoids it. A save already writes five
+Airtable tables with an associate waiting, and hanging anything off it — even
+wrapped so it cannot throw — grows a branch on the busiest path in the system
+for the benefit of a database nobody reads yet, which would then have to be
+unpicked again at Gate 4.
+
+So the copy **pulls**, on the cron that already runs every minute. Airtable
+knows when each row last changed; `shadow.mjs` asks for the ones that changed
+since it last looked and upserts them. The save path does not know it exists.
+The copy trails the base by up to a minute, which for something no screen
+reads is not a cost.
+
+One table per run, parent-first, with a two-minute overlap on the watermark —
+the same mechanism the read mirror has used in production since 1.14. A full
+lap is thirteen minutes at worst and normally finds nothing to do.
+
+### Turning it on
+
+Nothing happens until a **second D1 database** is bound as `KPI_DB`. It is
+separate from the one holding the read mirror on purpose: it can be dropped
+whole without touching anything that is running.
+
+```sh
+npx wrangler d1 create enout-kpi
+# paste the database_id into the commented block at the end of wrangler.toml,
+# uncomment it, then deploy
+npx wrangler deploy
+curl -s https://bd.enout.website/shadow-status   # where it has got to
+```
+
+With no binding, `createShadow` returns null, every call site skips, and
+`/shadow-status` answers `{ configured: false }`. **Deploying the code without
+creating the database changes nothing.**
+
+If it throws, it is caught, recorded against that table in `shadow_state`, and
+the next pass carries on with another one. It runs last in the maintenance job
+and after the read mirror, so a failure there costs nothing that matters.
+
 ## Still to build
 
-1. **The derived views** — `sql-derived.mjs`, the 38 child-dependent fields.
-2. **The shadow writer** — after the reply, wrapped so it cannot throw into
-   the save path. Gate 2, and the first deploy that changes production.
-3. **The comparison harness** — for shadow reads, at Gate 3.
-4. **The Kylas write-back** — Gate 4. Waiting on the field list.
+1. **The comparison harness** — for shadow reads, at Gate 3.
+2. **The Kylas write-back** — Gate 4. Waiting on the field list.
 
-Everything up to the shadow writer is invisible to production.
+Nothing so far changes what an associate sees.

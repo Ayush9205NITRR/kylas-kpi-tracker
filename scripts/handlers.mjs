@@ -43,6 +43,7 @@ import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from ".
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
+import { createShadow } from "./shadow.mjs";
 import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 import { accountProgress, focusStanding, median } from "./progress.mjs";
 
@@ -50,7 +51,7 @@ import { accountProgress, focusStanding, median } from "./progress.mjs";
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null,
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null, shadowDb = null,
                                       callerOf = () => null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
@@ -131,6 +132,19 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      Without a research client the table simply never builds, and every
      enrichment column reads Unknown. */
   if (mirror && researchAt) mirror.setClientFor?.((t) => (t === ENRICH_TABLE ? researchAt : null));
+  /* THE MIGRATION'S COPY (docs/MIGRATION.md, Gate 2). A SECOND D1 database,
+     not the one holding the read mirror, so it can be dropped whole without
+     touching anything that is running. Kept current by pulling on the cron
+     rather than by writing from the save path — a save must not grow a branch
+     for the benefit of a database nothing reads yet.
+
+     No binding, no shadow. Until KPI_DB exists this is null and every call
+     site below skips, so deploying it changes nothing. */
+  const shadow = shadowDb && rawAirtable
+    ? createShadow({ db: shadowDb, at: rawAirtable, log })
+    : null;
+  if (shadow) log(`shadow copy: on (KPI_DB) — pulling on the cron, nothing reads it`);
+
   /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
      Hosted runtime only — on a laptop there is nothing to gain. */
   const saves = db ? createSaveQueue({ db, log }) : null;
@@ -2091,6 +2105,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   };
   /* Where the copies stand — how old, how many rows — for a person checking
      that the scheduled job is doing its work. */
+  /* Where the migration's copy has got to. Read-only, and it answers even
+     when there is no copy — "not configured" is the useful reply on a runtime
+     that has not been given the binding yet. */
+  routes["/shadow-status"] = async () => {
+    if (!shadow) return { configured: false, why: "no KPI_DB binding on this runtime" };
+    try { return { configured: true, ...(await shadow.status()) }; }
+    catch (e) { return { configured: true, error: e.message.slice(0, 200) }; }
+  };
+
   routes["/cache-status"] = async () => ({
     mirror: mirror ? await mirror.status() : null,
     kylasCompaniesAgeSeconds: await kylasCompanies.age(),
@@ -2170,6 +2193,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { only, maxBuilds: 1 });
     const built = (out.mirror || []).some((r) => r.rows !== undefined);
     if (wantCrawl && !built) await crawl();
+    /* LAST, AND NEVER FATAL. The migration's copy is the least important thing
+       this job does: if it throws, the run has already done everything that
+       matters and the failure is a log line, not a failed maintenance pass. */
+    if (shadow && !built) {
+      try { out.shadow = await shadow.tick(); }
+      catch (e) { out.shadow = { error: e.message.slice(0, 160) }; log(`! shadow: ${e.message.slice(0, 120)}`); }
+    }
     return out;
   }
 

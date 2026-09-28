@@ -72,6 +72,10 @@ function handlers(env, log) {
      is a query next door instead of pages of Airtable (scripts/mirror.mjs). */
   return (built ||= createHandlers({ env, store: storeFor(env), cache: storeFor(env), log, db: env.DB || null,
                                      callerOf: () => REQUEST.getStore()?.caller || null,
+                                     /* The migration's copy, on a SEPARATE database so it can be
+                                        dropped whole without touching the mirror. Absent until a
+                                        KPI_DB binding exists, and absent means inert. */
+                                     shadowDb: env.KPI_DB || null,
                                      mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
