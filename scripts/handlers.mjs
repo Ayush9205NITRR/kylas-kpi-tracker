@@ -44,6 +44,8 @@ import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
 import { createShadow } from "./shadow.mjs";
+import { createShadowReads } from "./shadow-read.mjs";
+import { readCompaniesSql } from "./sql-read.mjs";
 import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 import { accountProgress, focusStanding, median } from "./progress.mjs";
 
@@ -144,6 +146,30 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     ? createShadow({ db: shadowDb, at: rawAirtable, log })
     : null;
   if (shadow) log(`shadow copy: on (KPI_DB) — pulling on the cron, nothing reads it`);
+
+  /* GATE 3. Every read answered twice, Airtable's answer served, the pair
+     compared behind the reply. Off unless SHADOW_READS is set, because it
+     doubles the work a read does and there is no reason to pay that before
+     the copy has been agreeing for a week.
+
+     Nothing a viewer sees depends on this being right. */
+  const shadowReads = shadow && env.SHADOW_READS === "1"
+    ? createShadowReads({ db: shadowDb, log }) : null;
+  if (shadowReads) log(`shadow reads: on — comparing, serving Airtable`);
+
+  /* Compare one route's two answers, behind the reply. The SQL side is
+     computed HERE rather than passed in, so a route that has not been taught
+     to do this costs nothing. Never awaited by the caller, and never able to
+     throw into it. */
+  function compareRead(route, airtableAnswer, airtableMs, makeSql, keyOf) {
+    if (!shadowReads) return;
+    inFlight((async () => {
+      const t0 = Date.now();
+      const sql = await makeSql();
+      const sqlMs = Date.now() - t0;
+      await shadowReads.record(route, { airtable: airtableAnswer, sql, airtableMs, sqlMs, keyOf });
+    })()).catch(() => {});
+  }
 
   /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
      Hosted runtime only — on a laptop there is nothing to gain. */
@@ -1466,10 +1492,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             "Run the sync once (docs/DEPLOY.md, part 9).");
       }
       if (!url.searchParams.get("keys") && (sync || STRICT_AIRTABLE)) {
+        const readStarted = Date.now();
         const mirror = await fromAirtable("companies", async () => {
           const list = await readCompanies(airtable);
           return list.length ? list : null;
         });
+        /* GATE 3. The same question asked of the copy, behind the reply, and
+           the two answers compared. `mirror` here is the Airtable answer —
+           the local name shadows the outer one, which is why it is read into
+           a const before the background work closes over it. */
+        const airtableAnswer = mirror;
+        compareRead("/companies", airtableAnswer, Date.now() - readStarted,
+          () => readCompaniesSql(shadowDb), (c) => c.id);
         if (mirror) {
           /* Kylas' own field rides on the crawl, when there is one. */
           const crawlNow = await kylasCompanies.peek().catch(() => null);
@@ -2111,6 +2145,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   routes["/shadow-status"] = async () => {
     if (!shadow) return { configured: false, why: "no KPI_DB binding on this runtime" };
     try { return { configured: true, ...(await shadow.status()) }; }
+    catch (e) { return { configured: true, error: e.message.slice(0, 200) }; }
+  };
+
+  /* What the two lanes have said, per route: how often they agreed, which
+     fields disagreed when they did not, and both timings. Read-only. */
+  routes["/shadow-reads"] = async () => {
+    if (!shadowReads) return { configured: false,
+      why: shadow ? "SHADOW_READS is not set on this runtime" : "no KPI_DB binding on this runtime" };
+    try { return { configured: true, routes: await shadowReads.status() }; }
     catch (e) { return { configured: true, error: e.message.slice(0, 200) }; }
   };
 

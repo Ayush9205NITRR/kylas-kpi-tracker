@@ -197,9 +197,78 @@ If it throws, it is caught, recorded against that table in `shadow_state`, and
 the next pass carries on with another one. It runs last in the maintenance job
 and after the read mirror, so a failure there costs nothing that matters.
 
+## Gate 3 — shadow reads
+
+```sh
+node scripts/test-shadow-read.mjs     # 52 checks
+node scripts/bench-lanes.mjs          # latency, size and scale
+curl -s https://bd.enout.website/shadow-reads
+```
+
+Every read of `/companies` is answered twice: Airtable's answer is served,
+the SQL answer is computed behind the reply, and the two are compared. This
+is the test row-level checks cannot do — a reply is rows *plus* a filter, a
+sort and a timezone, and any of those four can read differently while every
+row is identical.
+
+Off unless `SHADOW_READS=1`. It doubles the work a read does, and there is no
+reason to pay that before the copy has been agreeing for a week.
+
+### What is not a difference
+
+Most of `compare.mjs` is about what must *not* be reported. A comparison that
+fired on list order, on 120 versus 120.0, or on `""` versus `null` would
+report drift on every row of a perfectly correct copy — and then be switched
+off, which is worse than never having built it.
+
+- **Row order.** Airtable returns record order, SQL returns insert order, the
+  console sorts it anyway. Matched by key.
+- **Order inside a list.** `ARRAYJOIN` follows link order, `group_concat`
+  follows ours. Names compare as sets.
+- **Precision, blank and instants.** 120 / 120.0; `""` / `null` / `0`;
+  the same moment written `Z` or `+00:00`.
+
+What is never forgiven: a value on one side only, a number off by more than
+rounding, a name in one list and not the other.
+
+### Latency, size and scale
+
+`bench-lanes.mjs` on synthetic data. The SQL side is real — real SQLite, the
+real views, the real reader. Airtable is modelled at 250ms a page with its
+five-a-second ceiling, because timing the live API over a home connection
+measures the connection.
+
+| Companies | Contacts | SQL read | Airtable | Faster | Reply | DB file |
+|---|---|---|---|---|---|---|
+| 40 | 120 | 1.1ms | 500ms | 446x | 23KB | 296KB |
+| 1,000 | 3,000 | 20ms | 5.0s | 248x | 575KB | 1.5MB |
+| 10,000 | 30,000 | 309ms | 50s | 162x | 5.7MB | 13MB |
+
+The progress read — next call and TAT, four tables joined — is 0.2ms at
+today's size and 48ms at 10,000 companies.
+
+At 10,000 companies the whole database is 13MB against D1's 10GB ceiling:
+about 785x headroom. Airtable's per-base record cap would have been passed
+long before.
+
+### The finding the benchmark turned up
+
+**The database stops being the bottleneck and the payload becomes one.** At
+10,000 companies `/companies` answers in 309ms and then has to send 5.7MB to
+a browser. On a laptop on office wifi that is the slower half; on a phone it
+is most of the wait.
+
+This is not caused by the migration — the same reply is 10.7MB out of
+Airtable today, so the move roughly halves it. But it is the next thing worth
+fixing once the move is done, and it is worth knowing before anyone reads
+"162x faster" and expects the screen to be 162x faster. It will not be.
+
+Three ways out when the time comes, cheapest first: send only the columns the
+table has switched on; page the list and fetch the rest as it scrolls; or
+filter server-side, which is only possible once the data is in SQL.
+
 ## Still to build
 
-1. **The comparison harness** — for shadow reads, at Gate 3.
-2. **The Kylas write-back** — Gate 4. Waiting on the field list.
+1. **The Kylas write-back** — Gate 4. Waiting on the field list.
 
 Nothing so far changes what an associate sees.
