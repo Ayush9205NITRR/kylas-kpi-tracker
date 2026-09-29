@@ -1063,7 +1063,14 @@ export const ENRICH_BOOLEAN_COLUMNS =
 export const ENRICH_FIELDS = [
   ENRICH_KEY, "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee",
   "Total Funding", "Latest Funding Amount", "Latest Funding Type", "at_priority",
-  "linkedin - Appollo", "Offsite Timeline", ...ENRICH_BOOLEAN_COLUMNS,
+  "linkedin - Appollo", "Offsite Timeline",
+  /* The demand team's own view of where an account stands — "LinkedIn Outreach
+     Initiated", "Not Interested", "Invalid Contact". It is NOT the Kylas
+     pipeline stage and does not always agree with it, which is the reason for
+     showing both: where they disagree, somebody has worked the account
+     somewhere the other side cannot see. */
+  "Account Pipeline Stage",
+  ...ENRICH_BOOLEAN_COLUMNS,
 ];
 
 export const RESEARCH_COLUMNS = {

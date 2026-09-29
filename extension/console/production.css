@@ -456,6 +456,15 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .extools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .extools select{border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
   padding:7px 10px;font-size:var(--t-label);font-weight:var(--w-med)}
+/* THE SEARCH BOX, first in the row and wider than anything beside it. Typing
+   a name is the fastest way to one account and it was the one thing the
+   toolbar could not do. It grows into whatever the toolbar has spare so that
+   a long company name is readable while it is being typed. */
+.srch{flex:1 1 200px;min-width:160px;max-width:340px;display:flex}
+.srch input{flex:1;min-width:0;border:1px solid var(--line2);background:var(--panel);
+  border-radius:var(--r);padding:7px 10px;font:inherit;font-size:var(--t-label);color:var(--text)}
+.srch input::placeholder{color:var(--text3)}
+.srch input:focus-visible{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
 .frow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:7px}
 .frow .lbl{font-size:var(--t-meta);color:var(--text3);min-width:74px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--panel);
@@ -532,6 +541,20 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .acctable .vr.vh>span:first-child{background:var(--panel2);z-index:3}
 /* Numbers read down the decimal point, or they are not a column of numbers. */
 .acctable .num{text-align:right;font-variant-numeric:tabular-nums}
+/* RESIZING A COLUMN. The grip lives on the right edge of the header cell,
+   invisible until the pointer is near it — seventeen visible handles across
+   the top would read as furniture. It sits inside the cell because the header
+   clips its overflow like every other cell does. */
+.acctable .vr.vh>span{position:relative}
+.acctable .cgrip{position:absolute;top:0;bottom:0;right:0;width:7px;cursor:col-resize;
+  border-right:2px solid transparent;transition:border-color .12s ease}
+.acctable .vr.vh:hover .cgrip{border-right-color:var(--line2)}
+.acctable .cgrip:hover{border-right-color:var(--blue)}
+/* While a column is being dragged the pointer leaves the 7px strip long
+   before the layout catches up; without this the cursor flickers back to a
+   text caret over the rows underneath, which reads as the drag having ended. */
+body.colresize{cursor:col-resize;user-select:none}
+body.colresize .cgrip{border-right-color:var(--blue)}
 .acctable .lnk{display:inline-block;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--blue);
   border:1px solid var(--line2);border-radius:999px;padding:1px 8px;text-decoration:none}
 .acctable .lnk:hover{border-color:var(--blue)}

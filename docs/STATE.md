@@ -68,6 +68,14 @@ node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: 
                                          #      survives it, and the backfill repairs it
 node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of event-row text
 node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
+node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
+node scripts/test-etag.mjs               # 33 · conditional requests, and what may not be cached
+node scripts/test-sql-schema.mjs         # 102 · the generated SQL is the Airtable base, exactly
+node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable's rollups did
+node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
+node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
+node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
+node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 ```
 
 `test-idempotency.mjs` is the one to imitate for anything new: it spawns its own
@@ -275,6 +283,19 @@ lived only in the browser. Needs `repair-base` on the live base. From it,
 and next call, and whether promised call-backs were kept — the focus pane in
 the Today tab, the Next call column/chips, and TAT (pick → SQL days, days
 open, call-backs on time %). A focus account stays on the pane until SQL.
+
+**Enrichment reads as "—" for four different reasons, and they look identical.**
+The Revenue / LinkedIn / Boolean post / Account stage columns come out of the
+demand team's `Company List`, joined to the account on `Kylas Company Id`. Four
+things break that chain and every one of them renders an em dash on every row:
+`RESEARCH_BASE` or `AIRTABLE_PAT` unset; the D1 copy of that table not built
+yet (it is ~150 pages, and `maintain()` builds ONE table per minute, so on a
+fresh deploy this is simply "come back in a few minutes"); a column missing
+from `ENRICH_FIELDS`; or a join key that does not match, because Company List
+holds the id as text and one typed with a stray space joins nothing. **`GET
+/enrich-status` answers which one** — counts on both sides, how many ids
+actually meet, per-column fill counts, and five sample keys from each. Reach
+for it before reading any of the code.
 
 **The version handshake exists for a reason.** `/health` returns the build; the
 console warns when it differs. A proxy left running for hours serves yesterday's

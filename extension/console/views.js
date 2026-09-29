@@ -1762,9 +1762,22 @@
                    for the priority score. The bands themselves are computed
                    from the raw number every time — see enrich.js. */
                 rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(),
-                offsiteSet: new Set(), priMin: "", moreOpen: false };
+                offsiteSet: new Set(), priMin: "", moreOpen: false,
+                /* the demand team's own pipeline stage, out of Company List */
+                apsSet: new Set(),
+                /* THE SEARCH BOX. One string, every word of which has to land
+                   somewhere on the row — see textOf below. Not remembered and
+                   not in the stored preference: it is the most temporary
+                   question on the screen. */
+                q: "",
+                /* Hand-set column widths, in pixels, keyed by column. Absent
+                   means "whatever the layout gives it". */
+                widths: {} };
   const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
-  let priTimer = null;
+  let priTimer = null, qTimer = null;
+  /* The column being dragged, or null. Module-level because the listeners
+     that read it are bound once and outlive any one paint. */
+  let GRIP = null;
 
   /* WHAT IS REMEMBERED, AND WHAT IS NOT. The columns and the bands are a way
      of working — a BD who lives in funding stage should find it there
@@ -1782,13 +1795,16 @@
     ACC.cols = new Set(Array.isArray(saved?.cols) ? saved.cols.filter((k) => ACOLS.some((c) => c.k === k))
                                                   : COL_DEFAULTS);
     if (saved?.sort && SORT_KEYS.includes(saved.sort)) ACC.sort = saved.sort;
+    if (saved?.widths && typeof saved.widths === "object")
+      for (const [k, w] of Object.entries(saved.widths))
+        if (ACOLS.some((c) => c.k === k) && Number.isFinite(Number(w))) ACC.widths[k] = Number(w);
     /* A link wins over the stored preference: somebody followed it to see
        one particular thing, and showing them their own columns instead is
        not what they clicked. */
     readHash();
   }
   const saveAccPrefs = () => {
-    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort }); }
+    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths }); }
     catch { /* a browser with no storage still works, it just forgets */ }
   };
   const SORT_KEYS = ["next", "recent", "stale", "kpi", "priority", "revenue", "az"];
@@ -1806,12 +1822,13 @@
      being an error, because a link outlives the filter it was made with. */
   const LINK_SETS = { stage: "stages", src: "sources", kpi: "kpis", fresh: "fresh", next: "nextSet",
                       focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage",
-                      off: "offsiteSet" };
+                      off: "offsiteSet", aps: "apsSet" };
   function filtersToQuery() {
     const q = new URLSearchParams();
     for (const [short, prop] of Object.entries(LINK_SETS))
       if (ACC[prop].size) q.set(short, [...ACC[prop]].join("~"));
     if (ACC.owner) q.set("owner", ACC.owner);
+    if (ACC.q) q.set("q", ACC.q);
     if (ACC.priMin !== "") q.set("pri", ACC.priMin);
     if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
     if (ACC.sort !== "next") q.set("sort", ACC.sort);
@@ -1828,6 +1845,7 @@
         ACC[prop].add(prop === "kpis" ? Number(v) : v);
     }
     ACC.owner = q.get("owner") || "";
+    ACC.q = q.get("q") || "";
     ACC.priMin = q.get("pri") || "";
     ACC.srcOp = q.get("srcop") || "any";
     ACC.srcText = q.get("srctext") || "";
@@ -1853,10 +1871,38 @@
     return h.startsWith(HASH) ? applyQuery(h.slice(HASH.length)) : false;
   }
 
+  /* WHAT THE SEARCH BOX LOOKS AT. Everything on the row that is a name
+     rather than a number: the company, who owns it, where it came from, both
+     pipeline stages. Not the money — "100" would match half the list through
+     a revenue figure nobody was searching for. */
+  const textOf = (co) => [co.name, co.owner, co.source, label(stageOf(co)), co.enrich?.aps]
+    .filter(Boolean).join(" ").toLowerCase();
+  /* Every word has to land, in any order and anywhere on the row: "acme ravi"
+     finds Ravi's Acme without caring which column holds which.
+
+     The terms are split once per query, not once per company. accMatch runs
+     for every chip on every row — eight chip rows over 17,900 accounts is
+     most of a million calls per keystroke, and splitting a string inside that
+     is a quarter of a second the box spends not showing what was typed. */
+  let Q_TERMS = [], Q_FOR = null;
+  const qTerms = () => {
+    if (ACC.q !== Q_FOR) { Q_FOR = ACC.q; Q_TERMS = ACC.q.toLowerCase().split(/\s+/).filter(Boolean); }
+    return Q_TERMS;
+  };
+  const qMatch = (co) => {
+    const terms = qTerms();
+    if (!terms.length) return true;
+    const hay = textOf(co);
+    return terms.every((t) => hay.includes(t));
+  };
+
   /* `skip` leaves one dimension out, so a chip row can show what its own
      options WOULD give rather than counting only what is already selected —
-     otherwise every unticked chip reads 0 and the filter cannot be widened. */
+     otherwise every unticked chip reads 0 and the filter cannot be widened.
+     The search box is NOT skippable: it is the question being asked, and a
+     chip counting rows the search has already ruled out would be lying. */
   function accMatch(co, skip) {
+    if (!qMatch(co)) return false;
     if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(stageOf(co) || "")) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
@@ -1866,6 +1912,7 @@
     if (skip !== "emp" && ACC.emp.size && !ACC.emp.has(VALUE_OF.emp(co))) return false;
     if (skip !== "round" && ACC.round.size && !ACC.round.has(VALUE_OF.round(co))) return false;
     if (skip !== "fstage" && ACC.fstage.size && !ACC.fstage.has(VALUE_OF.fstage(co))) return false;
+    if (skip !== "aps" && ACC.apsSet.size && !ACC.apsSet.has(VALUE_OF.aps(co))) return false;
     /* "at least N". A company with no score is not "0" — it is unscored, so it
        drops out of a floor rather than sitting at the bottom of it. */
     if (ACC.priMin !== "" && !(Number(co.enrich?.pri) >= Number(ACC.priMin))) return false;
@@ -1905,6 +1952,7 @@
     round: (c) => global.Enrich.bandOf(global.Enrich.ROUND_BANDS, c.enrich?.amt ?? null),
     emp: (c) => c.enrich?.emp || global.Enrich.UNKNOWN,
     fstage: (c) => c.enrich?.type || global.Enrich.UNKNOWN,
+    aps: (c) => c.enrich?.aps || global.Enrich.UNKNOWN,
     /* A company can name more than one quarter, so this one answers with a
        list and the chips mean "contains any" — see MULTI below. */
     offsite: (c) => ((c.offsite || []).length ? c.offsite : [global.Enrich.UNKNOWN]),
@@ -2302,7 +2350,9 @@
         <div class="msel-list">${opt.map((c) => `<label class="msel-opt">
           <input type="checkbox" data-col="${esc(c.k)}"${ACC.cols.has(c.k) ? " checked" : ""}>
           <span>${esc(c.label)}</span></label>`).join("")}</div>
-        <div class="msel-foot"><span></span><button type="button" class="gbtn sm" id="colReset">Reset</button></div>
+        <div class="msel-foot"><span></span>
+          <button type="button" class="gbtn sm" id="colWidthReset">Reset widths</button>
+          <button type="button" class="gbtn sm" id="colReset">Reset</button></div>
       </div>` : ""}
     </div>`;
   }
@@ -2326,6 +2376,8 @@
         ${open ? "▾" : "▸"} More filters${moreActive() ? `<span class="k tnum">${moreCount()}</span>` : ""}
       </button>
       ${open ? `<div class="morebody">
+        ${chipRow(all, "Account stage", "aps", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.apsSet,
+          null, { limit: 10, expanded: ACC.apsMore, moreNoun: "stages", moreOne: "stage" })}
         ${bandRow("Revenue", "rev", E.REVENUE_BANDS, ACC.rev)}
         ${chipRow(all, "Employees", "emp", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.emp,
           null, { byFloor: true })}
@@ -2342,7 +2394,7 @@
       </div>` : ""}
     </div>`;
   }
-  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet];
+  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet, ACC.apsSet];
   const moreCount = () => moreSets().reduce((n, s) => n + s.size, 0) + (ACC.priMin === "" ? 0 : 1);
   const moreActive = () => moreCount() > 0;
 
@@ -2418,12 +2470,22 @@
       cell: (c) => dash(esc(E.usdText(en(c).amt))) },
     { k: "fstage", label: "Funding stage", w: "1fr",
       cell: (c) => dash(esc(en(c).type || "")) },
+    /* NOT the Kylas pipeline stage in the column beside it. This is the demand
+       team's own read of the account out of Company List — "LinkedIn Outreach
+       Initiated", "Invalid Contact" — and the two disagree often. Where they
+       do, somebody has worked the account somewhere the other side cannot see,
+       which is exactly why both are on the row. */
+    { k: "aps", label: "Account stage", w: "1.1fr", on: true,
+      cell: (c) => dash(esc(en(c).aps || "")) },
     { k: "linkedin", label: "LinkedIn", w: ".6fr", cell: (c) => linkChip(en(c).li, "in") },
     { k: "boolean", label: "Boolean post", w: ".7fr", cell: (c) => linkChip(en(c).bp, "post") },
   ];
   const COL_DEFAULTS = ACOLS.filter((c) => c.on).map((c) => c.k);
   const colsOn = () => ACOLS.filter((c) => c.fixed || ACC.cols.has(c.k));
-  const gridOf = (cols) => cols.map((c) => c.w).join(" ");
+  /* A hand-set width wins over the column's share of the row. Mixing px and
+     fr in one grid is fine: the pinned columns take their pixels and the rest
+     divide what is left. */
+  const gridOf = (cols) => cols.map((c) => (ACC.widths[c.k] ? `${ACC.widths[c.k]}px` : c.w)).join(" ");
 
   function explorerHTML(all, owners) {
     const cols = colsOn();
@@ -2460,7 +2522,7 @@
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
     const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size
-      || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive();
+      || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -2492,6 +2554,10 @@
           <p>${parts.length ? esc(parts.join(" · ")) + "." : (rows.length ? "" : "Nothing matches these filters.")}</p>
         </div>
         <div class="extools">
+          <div class="srch">
+            <input id="accQ" type="search" value="${esc(ACC.q)}" placeholder="Search accounts…"
+              aria-label="Search accounts by name, owner, source or stage" autocomplete="off" spellcheck="false">
+          </div>
           <select id="accOwner" aria-label="Owner">
             <option value="">All owners</option>
             ${owners.map((o) => `<option value="${esc(o)}"${ACC.owner === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
@@ -2513,7 +2579,8 @@
         ${moreFilters(all)}
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)}">
           <div class="vr vh">${cols.map((col) =>
-            `<span class="${col.num ? "num" : ""}">${esc(col.label)}</span>`).join("")}</div>
+            `<span class="${col.num ? "num" : ""}">${esc(col.label)}<i class="cgrip" data-grip="${esc(col.k)}"
+              title="Drag to resize · double-click to reset" role="separator" aria-hidden="true"></i></span>`).join("")}</div>
           ${shown.length ? shown.map((c) =>
             `<div class="vr" data-id="${esc(c.id)}">${cols.map((col) =>
               `<span class="${col.cls || ""}${col.num ? " num" : ""}">${col.cell(c)}</span>`).join("")}</div>`
@@ -3015,8 +3082,12 @@
       }));
     /* A row that hides its long tail says so, and says it as a chip, so
        reaching the rest is the same gesture as picking one. */
+    /* One flag per row that can be capped — named after the row, so adding a
+       capped row is one entry here and not a second branch. */
+    const MORE_FLAG = { fstage: "fstageMore", aps: "apsMore" };
     host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
-      if (b.dataset.more === "fstage") ACC.fstageMore = !ACC.fstageMore;
+      const flag = MORE_FLAG[b.dataset.more];
+      if (flag) ACC[flag] = !ACC[flag];
       redraw();
     }));
     /* Which set a chip row belongs to. One table, so a row added to the
@@ -3025,7 +3096,7 @@
     const SETS = { source: () => ACC.sources, kpi: () => ACC.kpis, focus: () => ACC.focusSet,
                    next: () => ACC.nextSet, stage: () => ACC.stages, fresh: () => ACC.fresh,
                    rev: () => ACC.rev, emp: () => ACC.emp, round: () => ACC.round,
-                   fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet };
+                   fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet, aps: () => ACC.apsSet };
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
       const set = SETS[f]?.();
@@ -3042,6 +3113,79 @@
     });
     on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = ACC.stageOpen = false; redraw(); });
     on("colReset", "click", () => { ACC.cols = new Set(COL_DEFAULTS); saveAccPrefs(); redraw(); });
+    on("colWidthReset", "click", () => { ACC.widths = {}; saveAccPrefs(); redraw(); });
+
+    /* ── the search box ──
+       Redrawn a beat after the last key, and then given the focus and the
+       caret back — the whole card is re-rendered, so the box the person is
+       typing into is a different element by the time they press the next key.
+       Same shape as the priority box above it, for the same reason. */
+    on("accQ", "input", (e) => {
+      ACC.q = e.target.value;
+      ACC.limit = 100;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        const at = document.activeElement?.id;
+        redraw();
+        if (at !== "accQ") return;
+        const box = document.getElementById("accQ");
+        if (!box) return;
+        box.focus({ preventScroll: true });
+        try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* not a text box */ }
+      }, 200);
+    });
+    on("accQ", "keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      clearTimeout(qTimer);
+      ACC.q = ""; ACC.limit = 100; redraw();
+    });
+
+    /* ── resizing a column ──
+       Seventeen columns do not fit on any screen the BD team has, so the
+       table scrolls sideways — and then "Company" at 1.6fr is luxurious while
+       "Account stage" truncates every value it holds. The width is dragged
+       here and kept per person, like the choice of columns itself.
+
+       The drag does NOT redraw: it writes the grid template straight onto the
+       table, sixty times a second, and only saves on release. Re-rendering
+       every frame would rebuild several hundred rows per pixel and the edge
+       would lag a long way behind the cursor.
+
+       The two document listeners are bound ONCE, not per paint: this runs
+       again on every redraw, and a pair added each time would end the morning
+       with a hundred of them. */
+    if (!global.__gripBound) {
+      global.__gripBound = true;
+      document.addEventListener("mousemove", (e) => {
+        if (!GRIP) return;
+        /* A floor, not zero: a column dragged to nothing cannot be found again
+           to drag back. The ceiling keeps one column from pushing every other
+           one off the far end of the scroll. */
+        ACC.widths[GRIP.k] = Math.round(Math.min(Math.max(GRIP.w + (e.clientX - GRIP.x), 64), 640));
+        document.querySelector(".acctable")?.style.setProperty("--acols", gridOf(colsOn()));
+      });
+      document.addEventListener("mouseup", () => {
+        if (!GRIP) return;
+        GRIP = null;
+        document.body.classList.remove("colresize");
+        saveAccPrefs();
+      });
+    }
+    host.querySelectorAll(".cgrip[data-grip]").forEach((g) => {
+      g.addEventListener("mousedown", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        GRIP = { k: g.dataset.grip, x: e.clientX, w: g.parentElement.getBoundingClientRect().width };
+        document.body.classList.add("colresize");
+      });
+      /* Double-click gives the column back to the layout, rather than to some
+         other number somebody has to guess at. */
+      g.addEventListener("dblclick", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        delete ACC.widths[g.dataset.grip];
+        saveAccPrefs(); redraw();
+      });
+    });
     host.querySelectorAll("[data-col]").forEach((b) => b.addEventListener("change", () => {
       if (b.checked) ACC.cols.add(b.dataset.col); else ACC.cols.delete(b.dataset.col);
       saveAccPrefs(); redraw();
@@ -3278,7 +3422,7 @@
       ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear(); ACC.nextSet.clear();
       for (const s of moreSets()) s.clear();
-      ACC.priMin = ""; FB.tree = { join: "and", items: [] };
+      ACC.priMin = ""; FB.tree = { join: "and", items: [] }; ACC.q = "";
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });

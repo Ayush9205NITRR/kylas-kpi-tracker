@@ -44,10 +44,10 @@
         opacity:0;pointer-events:none;transform:translateY(6px);
         transition:opacity .16s ease,transform .16s ease;
       }
-      .wrap.full{inset:18px}
+      .wrap.full{inset:10px}
       .wrap.dock{top:0;right:0;bottom:0;width:min(520px,46vw);border-radius:0}
       /* MOVED BY HAND. Once the console has been dragged it stops being
-         "the whole screen inset by 18px" and becomes a rectangle at a
+         "the whole screen inset by a hair" and becomes a rectangle at a
          remembered place, so the geometry has to be explicit. */
       .wrap.free{inset:auto;transition:none}
       /* While a drag is running this sits over everything, including the
@@ -56,6 +56,27 @@
          console would follow the cursor for three pixels and then stop. */
       .dragcatch{position:fixed;inset:0;z-index:2147483647;cursor:grabbing;display:none}
       :host(.dragging) .dragcatch{display:block}
+      /* RESIZING. Eight grips on the console's own edge, on the host's side of
+         the iframe — the iframe swallows the pointer, so a grip drawn inside
+         the console could be grabbed but never dragged. 6px is the smallest
+         strip a mouse finds reliably; the corners are 12px because a corner
+         is aimed at rather than swept into. They sit over the iframe's edge
+         rather than outside it, so the console does not grow a border. */
+      .rsz{position:absolute;z-index:4}
+      .rsz.n{top:0;left:12px;right:12px;height:6px;cursor:ns-resize}
+      .rsz.s{bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize}
+      .rsz.w{left:0;top:12px;bottom:12px;width:6px;cursor:ew-resize}
+      .rsz.e{right:0;top:12px;bottom:12px;width:6px;cursor:ew-resize}
+      .rsz.nw{top:0;left:0;width:12px;height:12px;cursor:nwse-resize}
+      .rsz.se{bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize}
+      .rsz.ne{top:0;right:0;width:12px;height:12px;cursor:nesw-resize}
+      .rsz.sw{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize}
+      /* The catcher's grabbing cursor is right for a move and wrong for a
+         resize — it would say "you are moving this" for the whole drag. */
+      :host(.rs-ns) .dragcatch{cursor:ns-resize}
+      :host(.rs-ew) .dragcatch{cursor:ew-resize}
+      :host(.rs-nwse) .dragcatch{cursor:nwse-resize}
+      :host(.rs-nesw) .dragcatch{cursor:nesw-resize}
       :host(.open) .wrap{opacity:1;pointer-events:auto;transform:none}
       :host(.open) .scrim{opacity:1;pointer-events:auto}
       :host(.open) .fab{display:none}
@@ -88,7 +109,9 @@
       <span class="lbl">Call console</span> <kbd>⌥⇧E</kbd>
     </button>
     <div class="scrim"></div>
-    <div class="wrap full"><iframe title="Enout call console" allow="clipboard-write"></iframe></div>
+    <div class="wrap full"><iframe title="Enout call console" allow="clipboard-write"></iframe>
+      <i class="rsz n"></i><i class="rsz s"></i><i class="rsz w"></i><i class="rsz e"></i>
+      <i class="rsz nw"></i><i class="rsz ne"></i><i class="rsz sw"></i><i class="rsz se"></i></div>
     <div class="dragcatch"></div>`;
 
   const fab = root.querySelector(".fab");
@@ -111,7 +134,7 @@
      the wrap is its element, and once the pointer is over the iframe the
      host stops seeing mousemove — hence .dragcatch above. */
   const POS_KEY = "enout.console.pos";
-  let drag = null;
+  let drag = null, resize = null;
   const catcher = root.querySelector(".dragcatch");
 
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -142,28 +165,59 @@
     place(p.left, p.top, p.width, p.height);
     return true;
   }
-  function startDrag(grabX, grabY) {
+  /* Whatever mode it was in, from here on it is a rectangle we own. */
+  function goFree() {
+    if (wrap.classList.contains("free")) return;
     const r = wrap.getBoundingClientRect();
-    if (!wrap.classList.contains("free")) {
-      wrap.classList.remove("full", "dock");
-      host.classList.remove("dock");
-      wrap.classList.add("free");
-      place(r.left, r.top, r.width, r.height);
-    }
+    wrap.classList.remove("full", "dock");
+    host.classList.remove("dock");
+    wrap.classList.add("free");
+    place(r.left, r.top, r.width, r.height);
+  }
+  function startDrag(grabX, grabY) {
+    goFree();
     drag = { grabX, grabY };
     host.classList.add("dragging");
   }
+  /* A resize is the opposite of a move: the edges you did NOT grab stay put.
+     So the fixed edges are recorded once, and each move recomputes the box
+     from them — dragging the left edge past the right one then pins at the
+     minimum width instead of turning the console inside out. */
+  const CURSOR = { n: "ns", s: "ns", w: "ew", e: "ew", nw: "nwse", se: "nwse", ne: "nesw", sw: "nesw" };
+  function startResize(dir, e) {
+    goFree();
+    const r = wrap.getBoundingClientRect();
+    resize = { dir, x: e.clientX, y: e.clientY, left: r.left, top: r.top, width: r.width, height: r.height };
+    host.classList.add("dragging", `rs-${CURSOR[dir]}`);
+  }
   const onMove = (e) => {
+    if (resize) {
+      const { dir, x, y, left, top, width, height } = resize;
+      const dx = e.clientX - x, dy = e.clientY - y;
+      /* place() clamps width and height; the left/top for a west or north
+         grab is derived from the RIGHT/BOTTOM edge afterwards so the clamp
+         cannot drag the fixed edge along with it. */
+      const w = dir.includes("w") ? width - dx : dir.includes("e") ? width + dx : width;
+      const h = dir.includes("n") ? height - dy : dir.includes("s") ? height + dy : height;
+      place(dir.includes("w") ? left + width - clamp(w, 360, innerWidth) : left,
+            dir.includes("n") ? top + height - clamp(h, 260, innerHeight) : top, w, h);
+      return;
+    }
     if (!drag) return;
     place(e.clientX - drag.grabX, e.clientY - drag.grabY,
           parseFloat(wrap.style.width), parseFloat(wrap.style.height));
   };
   const endDrag = () => {
-    if (!drag) return;
-    drag = null;
-    host.classList.remove("dragging");
+    if (!drag && !resize) return;
+    drag = resize = null;
+    host.classList.remove("dragging", "rs-ns", "rs-ew", "rs-nwse", "rs-nesw");
     savePos();
   };
+  for (const grip of root.querySelectorAll(".rsz"))
+    grip.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      startResize([...grip.classList].find((c) => c !== "rsz"), e);
+    });
   catcher.addEventListener("mousemove", onMove);
   catcher.addEventListener("mouseup", endDrag);
   /* The pointer can leave the window mid-drag (over the browser chrome, or
@@ -177,8 +231,8 @@
           parseFloat(wrap.style.width), parseFloat(wrap.style.height));
   });
   function resetPos() {
-    drag = null;
-    host.classList.remove("dragging");
+    drag = resize = null;
+    host.classList.remove("dragging", "rs-ns", "rs-ew", "rs-nwse", "rs-nesw");
     wrap.classList.remove("free", "dock");
     host.classList.remove("dock");
     wrap.removeAttribute("style");

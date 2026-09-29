@@ -480,6 +480,54 @@ const shore = (offList.body.companies || []).find((c) => String(c.id) === '903')
 check('the accounts list reads Offsite Timeline from the Company List', shore?.offsite?.includes('APR_JUN'),
       JSON.stringify(shore?.offsite));
 
+/* ENRICHMENT ON THE ROW, AND A WAY TO SEE WHY IT IS NOT.
+   Every enrichment column read "—" on production for a week and there was no
+   way to tell which of four things was wrong: no PAT, no copy yet, a column
+   missing from the projection, or a join key that does not match. So the two
+   halves are asserted together — the value arriving on the row, and the
+   diagnostic that names the fault when it does not. */
+await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
+  headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
+  body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': '1776620',
+    'Account Pipeline Stage': 'LinkedIn Outreach Initiated',
+    'linkedin - Appollo': 'https://linkedin.com/company/seats',
+    'Boolean Post link - kylas': 'https://example.com/boolean/seats',
+    'Annual Revenue': [12000000], at_priority: 7 } }] }) });
+/* THE COPY HAS TO BE REBUILT FOR THIS TO ARRIVE, and that is the design, not
+   a gap: section 8 built Company List when the fixture held none, and a delta
+   only runs ten minutes after the last one on a table something is reading.
+   The nightly sync marks every copy stale; maintain() then rebuilds ONE table
+   per run. So this is what a production morning does, at speed — and it is
+   the shape of the answer when the columns read "—" on a fresh deploy: not
+   broken, not yet built. */
+const RESEARCH = { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT, RESEARCH_BASE: 'appRESEARCH' };
+await fire(CRONS.CRON_SYNC, RESEARCH);
+let listRows = 0;
+for (let i = 0; i < 12 && !listRows; i++) {
+  await fire(MAINT, RESEARCH);
+  const c = await get(await coldWorker(45 + i / 1000), '/cache-status', { RESEARCH_BASE: 'appRESEARCH' });
+  listRows = (c.body.mirror || []).find((t) => t.table === 'Company List')?.rows || 0;
+}
+check('a Company List row reaches the copy, one table per cron run', listRows > 0, `${listRows} rows`);
+const enList = await get(await coldWorker(45), '/companies?owner=all&fresh=1', { RESEARCH_BASE: 'appRESEARCH' });
+const enriched = (enList.body.companies || []).find((c) => String(c.id) === '1776620');
+check('Account Pipeline Stage reaches the accounts list',
+      enriched?.enrich?.aps === 'LinkedIn Outreach Initiated', JSON.stringify(enriched?.enrich));
+check('...and so do the two links the columns render',
+      /linkedin\.com/.test(enriched?.enrich?.li || '') && /boolean/.test(enriched?.enrich?.bp || ''),
+      JSON.stringify(enriched?.enrich));
+
+const diag = await get(await coldWorker(46), '/enrich-status', { RESEARCH_BASE: 'appRESEARCH' });
+check('/enrich-status says where the enrichment came from and how much joined',
+      diag.body.ok && diag.body.enriched > 0 && diag.body.filled?.aps > 0 && diag.body.filled?.li > 0,
+      JSON.stringify(diag.body).slice(0, 200));
+/* The answer that matters when every cell is a dash: nothing is configured,
+   said in one line rather than as an empty table. */
+const diagOff = await get(await coldWorker(48), '/enrich-status');
+check('...and says so plainly when the research base is not configured',
+      diagOff.body.ok === false && /RESEARCH_BASE/.test(diagOff.body.reason || ''),
+      JSON.stringify(diagOff.body));
+
 /* "Me" is the signed-in person, matched to the Kylas user with that email —
    not the owner of the server's Kylas key. */
 {

@@ -547,6 +547,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         emp: empBand(f["No. of Employees (kylas)"]),
         fund: money(f["Total Funding"]), amt: money(f["Latest Funding Amount"]),
         type: flat(f["Latest Funding Type"]) || "", pri: num(f.at_priority),
+        aps: flat(f["Account Pipeline Stage"]) || "",
         li: flat(f["linkedin - Appollo"]) || "",
         bp: ENRICH_BOOLEAN_COLUMNS.map((c) => flat(f[c])).find(Boolean) || "",
       };
@@ -2120,6 +2121,50 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const team = await readTeam(airtable);
       log(`team: ${team.filter((p) => p.inFunnel).length} of ${team.length} in the funnel`);
       return { ok: true, team };
+    },
+
+    /* WHY IS EVERY LinkedIn CELL A DASH?
+       The enrichment columns come from Company List by way of the D1 copy, and
+       there are four places that can break the chain, each of which looks
+       identical on screen: no PAT for that base, the copy not built yet (it is
+       ~150 pages and maintain() does one table per minute), the projection
+       missing a column, or the join key not matching — Company List holds the
+       Kylas id as text and a row typed with a stray space joins nothing.
+       Guessing between those cost an evening once. This answers it directly:
+       counts on both sides, how many ids actually meet, and a handful of keys
+       from each so a mismatch is visible rather than inferred. */
+    "/enrich-status": async () => {
+      if (!researchAt) return { ok: false,
+        reason: `the research base is not configured — ${!AT_PAT ? "AIRTABLE_PAT" : "RESEARCH_BASE"} is unset`,
+        pat: !!AT_PAT, base: RESEARCH_BASE || null };
+      const copy = mirror ? (await mirror.status()).find((s) => s.table === ENRICH_TABLE) || null : null;
+      let map = new Map(), error = null;
+      try { map = await enrichByCompany(); } catch (e) { error = e.message.slice(0, 200); }
+
+      /* Filled, not present: a row exists for nearly every company, and the
+         question is always whether the COLUMN has anything in it. */
+      const filled = { rev: 0, emp: 0, fund: 0, amt: 0, type: 0, pri: 0, aps: 0, li: 0, bp: 0 };
+      for (const e of map.values())
+        for (const k of Object.keys(filled))
+          if (e[k] !== null && e[k] !== "" && e[k] !== "unknown") filled[k]++;
+
+      const kylasIds = (companyCache.get("all")?.body?.companies || []).map((c) => String(c.id));
+      const matched = kylasIds.filter((id) => map.has(id));
+      return {
+        ok: true,
+        source: mirror ? "d1 copy of Company List" : "Airtable, read directly",
+        copy: copy && { built: copy.built, rows: copy.rows, stale: copy.stale, version: copy.version, builtAt: copy.builtAt },
+        /* built:false with mirror on is the common answer, and it is not a
+           fault — it is "come back in a few minutes". */
+        building: !!mirror && !copy?.built,
+        enriched: map.size, error,
+        filled,
+        kylasCompanies: kylasIds.length,
+        matched: matched.length,
+        sampleEnrichKeys: [...map.keys()].slice(0, 5),
+        sampleKylasIds: kylasIds.slice(0, 5),
+        sampleRow: map.size ? map.get(matched[0] ?? [...map.keys()][0]) : null,
+      };
     },
 
     /* Whether each half of the write is configured, so the console can say so
