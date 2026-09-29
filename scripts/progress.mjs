@@ -16,7 +16,7 @@
  * the same contact. On time = that call happened on or before the promised
  * day. A promise whose day has passed with no call yet is late and open.
  */
-import { STAGE_RUNG, EXIT_STAGES } from "./stages.mjs";
+import { STAGE_RUNG, STAGE_AT_RUNG, EXIT_STAGES } from "./stages.mjs";
 
 export const QUALIFIED = ["SQL_SALES_QUALIFIED_LEAD", "ACTIVATION"];
 /* DAYS ARE THE ASSOCIATE'S, NOT UTC'S. `day` used to be slice(0, 10), which
@@ -55,7 +55,20 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
     const rung = Math.max(Number(f["KPI Rank"] || 0), STAGE_RUNG[stage] || 0);
     p.contacts++;
     if (EXIT_STAGES.includes(stage)) p.exited++;
-    if (rung > p.rung) { p.rung = rung; p.stage = stage; }
+    /* THE LABEL FOLLOWS THE RUNG (Ayush, 2026-09-29: "make the label follow
+       the rung").
+       The rung is the FURTHEST this contact ever reached — KPI Rank only ever
+       rises, which is the point of it: a POC who got to Discovery and was
+       later re-dialled to a no-answer has still been to Discovery, and the
+       account should not fall back down the funnel because of one bad call.
+       The name beside it used to be `Current Stage`, which is where the
+       contact is NOW. So an account could sort at rung 26 and read "CNC
+       (Could Not Connect)" — the order right, the words wrong, and the words
+       are what anybody actually reads.
+       Now the name is the name of the rung itself, and the two cannot
+       disagree. Where the rank came from the current stage they are the same
+       string anyway, so this only changes the rows that were misreading. */
+    if (rung > p.rung) { p.rung = rung; p.stage = STAGE_AT_RUNG[rung] || stage; }
     if (QUALIFIED.includes(stage)) p.done = true;
     /* A call-back only counts while the contact is still in play. */
     const next = at(f["Next Call Date"]);

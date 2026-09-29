@@ -47,5 +47,32 @@ const r = followups.get("Rubal");
 eq("three promises: on time, late by 3, still open and late by 3", [r.due, r.onTime, r.late, r.open, r.delays], [3, 1, 2, 1, [3, 3]]);
 eq("median delay", median(r.delays), 3);
 
+/* ── the label follows the rung ─────────────────────────────────────────
+   KPI Rank only ever rises, so it records the furthest a contact ever got.
+   Current Stage records where it is now. When a POC reaches Discovery and is
+   later re-dialled to a no-answer, those two disagree — and the account is
+   sorted by the first while being LABELLED by the second, which read as "rung
+   26 · CNC (Could Not Connect)". The order was right and the words were
+   wrong, and the words are what anybody reads. */
+console.log("\n5. a contact that fell back down the funnel");
+{
+  const rows = [
+    rec("x1", { Company: ["coX"], "Current Stage": "CNC_COULD_NOT_CONNECT", "KPI Rank": 26 }),
+  ];
+  const { byCompany } = accountProgress({ companies: [rec("coX", { "Kylas Company ID": "9001" })], contacts: rows,
+                                          transitions: [], calls: [], today: "2026-09-29" });
+  const p = byCompany.get("9001");
+  eq("the rung is the furthest it ever reached", p.rung, 26);
+  eq("...and the name is that rung's, not where it sits today",
+    p.stage, "SQL_SALES_QUALIFIED_LEAD");
+}
+console.log("\n   ...while a contact that never fell back is unchanged");
+{
+  const rows = [rec("y1", { Company: ["coY"], "Current Stage": "ACTIVATION" })];
+  const { byCompany } = accountProgress({ companies: [rec("coY", { "Kylas Company ID": "9002" })], contacts: rows,
+                                          transitions: [], calls: [], today: "2026-09-29" });
+  eq("the stage it is on", byCompany.get("9002").stage, "ACTIVATION");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

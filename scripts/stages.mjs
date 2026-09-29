@@ -120,6 +120,14 @@ export const STAGE_LABEL = {
 };
 
 /* [rung, label] lowest first, for the Airtable ladder formula. */
+/* RUNG → STAGE, the ladder read the other way. STAGE_RUNG answers "how far is
+   this stage"; this answers "what stage is this far", which is what anything
+   holding a rank rather than a code needs — KPI Rank is a number and the name
+   beside it has to be the name of THAT rung. Built from STAGE_RUNG so the two
+   can never disagree. */
+export const STAGE_AT_RUNG = Object.fromEntries(
+  Object.entries(STAGE_RUNG).map(([code, rung]) => [rung, code]));
+
 export const LADDER = [
   [1, "01 · LinkedIn Outreach Initiated"],
   [2, "02 · POC - Organization - Changed"],

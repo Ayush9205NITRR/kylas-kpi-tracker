@@ -570,6 +570,13 @@ is also what every test does — nothing here can email anybody by accident.
 
 ## 4 · Invariants that look arbitrary and are not
 
+- **The account's stage label is the RUNG's name, not the contact's current
+  one.** `KPI Rank` only rises, so it holds the furthest a contact ever got;
+  `Current Stage` holds where it sits today. A POC who reached Discovery and
+  was later re-dialled to a no-answer makes those disagree, and the account
+  used to sort at rung 26 while reading "CNC (Could Not Connect)" — the order
+  right, the words wrong, and the words are what gets read. `STAGE_AT_RUNG`
+  (built from `STAGE_RUNG`, so the two cannot drift) names the rung instead.
 - **`KPI Rank` only rises.** Written as `MAX(existing, computed)`. `KPI Rank At`
   is when it last rose, which is how "stuck since" is known without a new column.
 - **`Ever Picked` is monotonic** and excludes `NOT_CONNECTED` — CNC is rung 6,
