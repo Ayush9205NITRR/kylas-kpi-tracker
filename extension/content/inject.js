@@ -28,6 +28,11 @@
         box-shadow:0 4px 14px rgba(43,108,246,.32);
       }
       .fab:hover{filter:brightness(1.08)}
+      /* MOVED BY HAND. Anchored bottom-right until it is dragged, then it is a
+         point and both anchors have to go — leaving the right offset set would
+         fight the left offset being written, and the button would not move. */
+      .fab.free{right:auto;bottom:auto}
+      .fab.dragging{cursor:grabbing;transition:none}
       .fab kbd{
         font:500 10px/1 ui-monospace,Menlo,monospace;
         background:rgba(255,255,255,.18);border-radius:3px;padding:2px 4px;
@@ -369,7 +374,79 @@
     if (open) handoff();
   }, 700);
 
-  fab.addEventListener("click", () => setOpen(true));
+  /* ── MOVING THE BUTTON ───────────────────────────────────────────────
+     It sat in the bottom-right corner with no way off it, and that corner is
+     where Kylas puts its own controls — so on some records the one control
+     that opens this thing was underneath something else.
+
+     Unlike the console, the button is the host page's own element, so there
+     is no iframe in the way and the host hears the whole drag itself.
+
+     A DRAG MUST NOT OPEN THE CONSOLE. The button is the thing you click to
+     open it, so the two gestures start identically; they are told apart by
+     distance, and a press that never travels four pixels is still a click. */
+  const FAB_KEY = "enout.fab.pos";
+  const FAB_SLOP = 4;
+  let fabDrag = null, fabMoved = false;
+  fab.title = "Drag to move · drop it back in the corner to reset";
+
+  function fabPlace(left, top) {
+    const r = fab.getBoundingClientRect();
+    fab.classList.add("free");
+    fab.style.left = `${clamp(left, 4, innerWidth - r.width - 4)}px`;
+    fab.style.top = `${clamp(top, 4, innerHeight - r.height - 4)}px`;
+  }
+  function fabReset() {
+    fab.classList.remove("free");
+    fab.style.left = fab.style.top = "";
+    try { localStorage.removeItem(FAB_KEY); } catch { /* ignore */ }
+  }
+  function fabRestore() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(FAB_KEY) || "null"); } catch { /* ignore */ }
+    if (p && Number.isFinite(p.left) && Number.isFinite(p.top)) fabPlace(p.left, p.top);
+  }
+  fab.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    const r = fab.getBoundingClientRect();
+    fabDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top, x: e.clientX, y: e.clientY };
+    fabMoved = false;
+    e.preventDefault();
+  });
+  addEventListener("mousemove", (e) => {
+    if (!fabDrag) return;
+    if (!fabMoved && Math.abs(e.clientX - fabDrag.x) + Math.abs(e.clientY - fabDrag.y) < FAB_SLOP) return;
+    fabMoved = true;
+    fab.classList.add("dragging");
+    fabPlace(e.clientX - fabDrag.dx, e.clientY - fabDrag.dy);
+  });
+  addEventListener("mouseup", () => {
+    if (!fabDrag) return;
+    fabDrag = null;
+    fab.classList.remove("dragging");
+    if (!fabMoved) return;
+    /* DROPPED BACK WHERE IT CAME FROM means forget the custom position, so
+       there is a way home that does not need a menu nobody would find. The
+       corner is 18px in, so anything landing within a button's width of it
+       was aiming for it. */
+    const r = fab.getBoundingClientRect();
+    if (innerWidth - r.right < 64 && innerHeight - r.bottom < 64) { fabReset(); return; }
+    try {
+      localStorage.setItem(FAB_KEY, JSON.stringify({ left: r.left, top: r.top }));
+    } catch { /* a browser with no storage still moves it, it just forgets */ }
+  });
+  /* A window that got smaller must not leave it off the edge. */
+  addEventListener("resize", () => {
+    if (fab.classList.contains("free")) fabPlace(parseFloat(fab.style.left), parseFloat(fab.style.top));
+  });
+  fabRestore();
+
+  fab.addEventListener("click", () => {
+    /* The mouseup that ended a drag is followed by a click. Without this,
+       letting go of the button opens the console every time you move it. */
+    if (fabMoved) { fabMoved = false; return; }
+    setOpen(true);
+  });
   scrim.addEventListener("click", () => setOpen(false));
 
   /* messages back from the console */

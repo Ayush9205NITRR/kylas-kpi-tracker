@@ -85,6 +85,9 @@ node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the exi
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
+xvfb-run -a node scripts/test-fab-live.mjs    # 10 · the launcher moves, and moving it
+                                              #      does not open the console — a click
+                                              #      and a drag start identically
 xvfb-run -a node scripts/test-move-live.mjs   # 15 · a REAL Chrome with the extension
                                               #      loaded: the console moves, resizes,
                                               #      remembers and resets. Needs the :8778
