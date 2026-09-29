@@ -1465,6 +1465,9 @@
 
   async function dashboard(host) {
     await restore();
+    /* The dashboard is prose and stat tiles — it keeps the reading measure the
+       accounts view above drops. */
+    host.closest(".vwrap")?.classList.remove("wide", "board");
     const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
     const dbase = companiesNow(DASH_OWNER);
     /* Airtable's own rows are the population when it has any. Falling back to
@@ -2625,7 +2628,14 @@
             /* Furthest first: this is a ladder, and sorting its rungs
                alphabetically is how "Activation" ends up above "SQL". */
             order: (a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0) },
-      cell: (c) => { const v = acctStageOf(c); return v ? esc(label(v) || v) : "—"; } },
+      /* A stage that came off the company record rather than from its contacts
+         is dimmed and says so on hover — it is the same column, but it is not
+         the same claim. */
+      cell: (c) => { const v = acctStageOf(c);
+        if (!v) return "—";
+        return acctStageFrom(c) === "company"
+          ? `<span class="acctown" title="From the company's own Pipeline Stage - BD in Kylas — no contact of this account has been saved here yet, so there is nothing to calculate from.">${esc(label(v) || v)}</span>`
+          : esc(label(v) || v); } },
     /* The demand team's own read, kept and clearly named rather than confused
        with the calculated one above. Off by default — it is a second opinion,
        not the answer. */
@@ -2897,10 +2907,18 @@
      open. Whichever is further along is the account's stage. */
   const acctStageOf = (co) => {
     const a = co.acctStage || "", b = co.stage || "";
-    if (!a) return b;
-    if (!b) return a;
-    return (STAGE_RUNG[b] || 0) > (STAGE_RUNG[a] || 0) ? b : a;
+    const best = !a ? b : !b ? a : (STAGE_RUNG[b] || 0) > (STAGE_RUNG[a] || 0) ? b : a;
+    /* LAST RESORT: the company's OWN Pipeline Stage - BD in Kylas. It is not a
+       calculation — somebody typed it on the company record and it goes stale
+       the moment a POC moves — so it never beats a contact-derived stage. But
+       17,827 of the 17,925 allotted companies have no contact saved here yet,
+       and for every one of them the column read "Unknown", which is the whole
+       list. A stale answer that says which account this is beats no answer on
+       every row. acctStageFrom() says which of the two a row got. */
+    return best || co.kylasStage || "";
   };
+  const acctStageFrom = (co) =>
+    (co.acctStage || co.stage) ? "contacts" : co.kylasStage ? "company" : "";
   /* A stage's name for a chip. The blank one is a real answer — thousands of
      allotted companies have never been given a stage in Kylas — so it is
      named rather than left as an empty chip. */
@@ -3299,8 +3317,14 @@
         with no POCs yet is one allotted to you that nobody has opened.
         <b>Batch</b> is Kylas' own <code>Batch</code> field on the company, shown as it is stored.</p>`}`;
 
-    /* The board needs the page, not the reading measure. */
-    host.closest(".vwrap")?.classList.toggle("board", VIEW_MODE === "board");
+    /* THE ACCOUNTS VIEW GETS THE WHOLE WINDOW. 1180px is a measure for
+       reading, and this is not prose — it is a nine-column grid with a filter
+       rail above it and a six-column board below, and on a 1900px screen the
+       measure left a third of the window empty while the board's first column
+       sat off the left edge. The dashboard keeps the measure; this does not. */
+    const wrap = host.closest(".vwrap");
+    wrap?.classList.add("wide");
+    wrap?.classList.toggle("board", VIEW_MODE === "board");
     /* The companies view has its own owner selector, and it is not the
        dashboard's. */
     ensureRca(FILTERS.owner, () => companies(host));

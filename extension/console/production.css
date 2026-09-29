@@ -184,6 +184,14 @@ body.framed .ovOnly{display:inline-block}
    side by side is not text, and inside that measure the sixth sat off the right
    edge, which defeats the one thing a board is for. */
 .vwrap.board{max-width:1560px}
+/* ...and the accounts view is not text at all: a nine-column grid, a filter
+   rail, a six-column board. It takes the window, whatever the window is.
+   Declared after .board so it wins when both are on. */
+.vwrap.wide{max-width:none;padding-left:24px;padding-right:24px}
+/* A stage read off the company record rather than calculated from its
+   contacts. Same column, weaker claim, so it is dimmed rather than badged —
+   a badge on 17,827 rows is not a badge. */
+.acctown{color:var(--text3)}
 .vhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 18px;flex-wrap:wrap}
 .vhead.sm{margin-top:34px}
 /* The display face on headings and on the numbers meant to be read first —
