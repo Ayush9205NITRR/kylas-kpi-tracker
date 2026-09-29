@@ -1784,7 +1784,11 @@
                 q: "",
                 /* Hand-set column widths, in pixels, keyed by column. Absent
                    means "whatever the layout gives it". */
-                widths: {} };
+                widths: {},
+                /* "table" or "board". The board is the same rows, the same
+                   filters and the same sort, stacked into the six call
+                   buckets instead of listed. */
+                view: "table" };
   const focusOf = (co) => (global.Focus ? Focus.of(co.id) : "normal");
   let priTimer = null, qTimer = null;
   /* The column being dragged, or null. Module-level because the listeners
@@ -1807,6 +1811,7 @@
     ACC.cols = new Set(Array.isArray(saved?.cols) ? saved.cols.filter((k) => ACOLS.some((c) => c.k === k))
                                                   : COL_DEFAULTS);
     if (saved?.sort && SORT_KEYS.includes(saved.sort)) ACC.sort = saved.sort;
+    if (saved?.view === "board" || saved?.view === "table") ACC.view = saved.view;
     if (saved?.widths && typeof saved.widths === "object")
       for (const [k, w] of Object.entries(saved.widths))
         if (ACOLS.some((c) => c.k === k) && Number.isFinite(Number(w))) ACC.widths[k] = Number(w);
@@ -1816,7 +1821,7 @@
     readHash();
   }
   const saveAccPrefs = () => {
-    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths }); }
+    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths, view: ACC.view }); }
     catch { /* a browser with no storage still works, it just forgets */ }
   };
   const SORT_KEYS = ["next", "recent", "stale", "kpi", "priority", "revenue", "az"];
@@ -2640,6 +2645,79 @@
      divide what is left. */
   const gridOf = (cols) => cols.map((c) => (ACC.widths[c.k] ? `${ACC.widths[c.k]}px` : c.w)).join(" ");
 
+  /* ── THE BOARD ──────────────────────────────────────────────────────
+     The same accounts as the table, stacked into Ayush's six call buckets
+     (docs/stages.json `families`) instead of listed. A bucket is a pile to
+     work: pick one, and everything in it wants the same kind of call.
+
+     IT GROUPS ON THE CALCULATED ACCOUNT STAGE, not on the company's own Kylas
+     field — the furthest rung any of its contacts has reached. That is the
+     whole reason the buckets mean anything: an account whose three POCs sit
+     at CNC, MQL and Follow-up 2 is a Follow-up 2 account, and it belongs in
+     the pile you would actually call it from.
+
+     THE BUCKETS ARE NOT THE LADDER'S ORDER. The 26 rungs are a funnel; these
+     are an action order, which is a different axis. Discovery Call No-Show is
+     rung 20 and needs a call today; Not Interested is rung 10 and never needs
+     one again. Sorting the board by rung would interleave the two.
+
+     Every filter above still applies, because the board is handed the same
+     rows the table would have shown. Filter to one owner and the board is
+     that person's day. */
+  function boardHTML(rows) {
+    const cards = new Map(STAGE_FAMILIES.map((f) => [f.key, []]));
+    /* An account with no contact saved yet has no calculated stage. It is not
+       "Not started" — that is a real stage somebody set — so it gets its own
+       pile rather than being quietly filed under one of the six. */
+    const unplaced = [];
+    for (const c of rows) {
+      const st = acctStageOf(c);
+      const k = st ? FAMILY_OF[st] : null;
+      if (k && cards.has(k)) cards.get(k).push(c); else unplaced.push(c);
+    }
+    const col = (key, label, hint, list) => {
+      /* Call-backs first inside every column, whatever the table is sorted
+         by: a pile is worked from the top, and the top of a calling pile is
+         whatever was promised soonest. */
+      const sorted = [...list].sort((a, b) =>
+        (a.nextCall ? 0 : 1) - (b.nextCall ? 0 : 1)
+        || String(a.nextCall || "").localeCompare(String(b.nextCall || ""))
+        || String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")));
+      const cap = BOARD_LIMIT[key] || 50;
+      const shown = sorted.slice(0, cap);
+      return `<section class="bcol" data-bkey="${esc(key)}">
+        <header><h3>${esc(label)}</h3><span class="bn tnum">${list.length}</span>
+          <em>${esc(hint)}</em></header>
+        <div class="bcards">
+          ${shown.map((c) => {
+            const nk = nextOf(c), d = daysSince(c.lastCalledAt);
+            return `<button type="button" class="bcard" data-id="${esc(c.id)}">
+              <b class="co">${focusOf(c) === "focus" ? `<i class="fstar">★</i> ` : ""}${esc(c.name)}</b>
+              <span class="bstage">${esc(label2(acctStageOf(c)))}</span>
+              <span class="bmeta">
+                ${c.nextCall ? `<i class="nc nc-${nk}">${esc(nextText(c))}</i>` : ""}
+                <i class="f-${freshOf(c)}"></i>${d === null ? "Never called" : d === 0 ? "Called today" : `${d}d ago`}
+                ${ACC.owner ? "" : ` · ${esc(String(c.owner || "—").split(/\s+/)[0])}`}
+              </span>
+            </button>`;
+          }).join("")}
+          ${list.length > shown.length
+            ? `<p class="bmore">${list.length - shown.length} more — narrow the filters to see them</p>` : ""}
+          ${list.length ? "" : `<p class="bempty">Nothing here.</p>`}
+        </div>
+      </section>`;
+    };
+    return `<div class="board">
+      ${STAGE_FAMILIES.map((f) => col(f.key, f.label, f.hint, cards.get(f.key))).join("")}
+      ${unplaced.length ? col("none", "No contacts yet", "nobody has been saved against these", unplaced) : ""}
+    </div>`;
+  }
+  /* One cap for every column. A pile of nine thousand untouched accounts is
+     not a pile anybody works from, and rendering it costs the scroll. */
+  const BOARD_LIMIT = { new: 50, cnc: 50, active: 100, meeting: 100, newpoc: 50, closed: 25, none: 25 };
+  /* A stage's own name, for the line under the company. */
+  const label2 = (code) => (code ? (label(code) || code) : "—");
+
   function explorerHTML(all, owners) {
     const cols = colsOn();
     /* Rebuilt each paint so a value list offers what the data holds now. */
@@ -2746,6 +2824,10 @@
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
+          <div class="vtoggle" role="group" aria-label="How to show the accounts">
+            <button type="button" id="accTable"${ACC.view === "table" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Table</button>
+            <button type="button" id="accBoard"${ACC.view === "board" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Board</button>
+          </div>
           ${stagePicker(all)}
           ${filterPanel()}
           ${sourcePicker(all, sources)}
@@ -2758,6 +2840,7 @@
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         ${moreFilters(all)}
+        ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)}">
           <div class="vr vh">${cols.map((col) =>
             `<span class="${col.num ? "num" : ""}">${esc(col.label)}<i class="cgrip" data-grip="${esc(col.k)}"
@@ -2769,7 +2852,7 @@
         </div></div>
         ${rows.length > ACC.limit
           ? `<button class="gbtn" id="accMore" type="button">Show ${
-              Math.min(100, rows.length - ACC.limit)} more of ${rows.length - ACC.limit}</button>` : ""}
+              Math.min(100, rows.length - ACC.limit)} more of ${rows.length - ACC.limit}</button>` : ""}`}
       </div>`;
   }
 
@@ -3264,6 +3347,13 @@
        paint() returns immediately in this mode — so the explorer's rows were
        the only table in the app with no click handler, and clicking an account
        did nothing at all. Bound here, where the rest of this view is wired. */
+    const setView = (v) => { ACC.view = v; saveAccPrefs(); redraw(); };
+    on("accTable", "click", () => setView("table"));
+    on("accBoard", "click", () => setView("board"));
+    /* A card opens the account, exactly as a row does. */
+    host.querySelectorAll(".bcard[data-id]").forEach((b) =>
+      b.addEventListener("click", () =>
+        global.openCompanyFromView?.(b.dataset.id, b.querySelector(".co")?.textContent?.trim() || "")));
     host.querySelectorAll(".acctable .vr[data-id]").forEach((r) =>
       r.addEventListener("click", (e) => {
         /* The LinkedIn and boolean-post chips are links inside a row that is

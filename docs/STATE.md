@@ -72,6 +72,8 @@ node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of ev
 node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
 node scripts/test-days.mjs               # 43 · where one day ends. Every case is an hour
                                          #      the old code got wrong
+node scripts/test-buckets.mjs            # 38 · the six call buckets, and the stages that
+                                         #      are easy to file by rung and should not be
 node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
 node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
                                          #       page documenting them, all agreeing
@@ -294,6 +296,19 @@ lived only in the browser. Needs `repair-base` on the live base. From it,
 and next call, and whether promised call-backs were kept — the focus pane in
 the Today tab, the Next call column/chips, and TAT (pick → SQL days, days
 open, call-backs on time %). A focus account stays on the pane until SQL.
+
+**The board's buckets are an ACTION order, not the ladder's.** The 26 rungs are
+a funnel; the six call buckets (`docs/stages.json` `families`, 2026-09-29) are
+what you would do next, and the two disagree on purpose. `GHOSTED` is rung 20
+and is labelled **Discovery Call No-Show** — a meeting to re-book, so it is in
+*Meeting in play*, not *Closed*. `NOT_INTERESTED` is rung 10 and never needs a
+call again. Offsite Delayed and Offsite Done (Late Reachout) rank *below*
+Activation and still sit in *Activation and above*, because a conversation
+happened. Anything that sorts the board by rung, or replaces the table with two
+comparisons, has misunderstood it — `test-buckets.mjs` asserts exactly that.
+The board groups on the **calculated** account stage, so an account whose POCs
+sit at CNC, MQL and Follow-up 2 is in the pile you would call a Follow-up 2
+account from.
 
 **Every date was UTC, and half of them were a rolling 24 hours.** Fixed
 2026-09-29; `scripts/day.mjs` and `extension/console/day.js` are now the only

@@ -223,70 +223,70 @@
   "families": [
     {
       "key": "new",
-      "label": "Not touched yet",
+      "label": "Not started",
       "hint": "never called",
       "stages": [
         "YET_TO_BE_MINED"
       ]
     },
     {
-      "key": "trying",
-      "label": "Trying to connect",
-      "hint": "calls going out, no real conversation",
+      "key": "cnc",
+      "label": "CNC",
+      "hint": "dialled, nobody picked up — or asked to be called later",
       "stages": [
         "CNC_COULD_NOT_CONNECT",
         "CNC_COULD_NOT_CONNECT_2",
         "CNC_COULD_NOT_CONNECT_3",
-        "FOLLOWUP_CNC"
+        "FOLLOWUP_CNC",
+        "CONNECT_LATER"
       ]
     },
     {
-      "key": "talking",
-      "label": "In conversation",
-      "hint": "right person found, qualifying",
+      "key": "active",
+      "label": "Activation and above",
+      "hint": "a real conversation is running",
       "stages": [
+        "ACTIVATION",
         "MQL_MARKETING_QUALIFIED_LEAD",
         "FOLLOW_UP_1",
         "FOLLOW_UP_2",
         "FOLLOW_UP_3",
+        "OFFSITE_DELAYED",
+        "OFFSITE_DONE_LATE_REACHOUT",
+        "SQL_SALES_QUALIFIED_LEAD"
+      ]
+    },
+    {
+      "key": "meeting",
+      "label": "Meeting in play",
+      "hint": "a meeting is booked, held or to be re-booked",
+      "stages": [
         "DISCOVERY_CALL_BOOKED",
+        "GHOSTED",
         "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
         "ACTIVE_REQUIREMENT_CALL_BOOKED",
+        "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
         "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"
       ]
     },
     {
-      "key": "qualified",
-      "label": "Qualified",
-      "hint": "SQL and beyond",
+      "key": "newpoc",
+      "label": "Needs a new POC",
+      "hint": "the account is open, the person is wrong",
       "stages": [
-        "SQL_SALES_QUALIFIED_LEAD",
-        "ACTIVATION"
-      ]
-    },
-    {
-      "key": "parked",
-      "label": "Parked",
-      "hint": "alive, but not now",
-      "stages": [
-        "CONNECT_LATER",
-        "OFFSITE_DELAYED",
-        "OFFSITE_DONE_LATE_REACHOUT",
-        "GHOSTED",
-        "ACTIVE_REQUIREMENT_CALL_NO_SHOW"
+        "DISQUALIFIED_WRONG_POC",
+        "NOT_A_DECISION_MAKER_NDM",
+        "POC_ORGANIZATION_CHANGED"
       ]
     },
     {
       "key": "closed",
-      "label": "Closed out",
-      "hint": "not a fit, or lost",
+      "label": "Closed",
+      "hint": "no call to make",
       "stages": [
-        "CLOSING_LOOPS_LOW_VALUE",
         "NOT_INTERESTED",
         "INVALID_CONTACT",
-        "DISQUALIFIED_WRONG_POC",
-        "NOT_A_DECISION_MAKER_NDM",
-        "POC_ORGANIZATION_CHANGED"
+        "CLOSING_LOOPS_LOW_VALUE"
       ]
     }
   ],
@@ -307,5 +307,6 @@
       "addedOn": "2026-09-19",
       "why": "Kylas gained a second meeting track. Discovery Call is rungs 19-22; Active Requirement Call is the SQL meeting."
     }
-  ]
+  ],
+  "familiesNote": "Ayush's six call buckets (2026-09-29). The ladder's 26 rungs are a FUNNEL order; these are an ACTION order, which is a different axis — Discovery Call No-Show is rung 20 and still needs a call, Not Interested is rung 10 and never does. The board groups accounts by these, on the account's calculated stage (the furthest any of its contacts has reached). Every stage belongs to exactly one bucket and gen-stages.mjs refuses to build if one is left out."
 }

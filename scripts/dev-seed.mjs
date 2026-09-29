@@ -6,7 +6,8 @@
  *   node scripts/dev-seed.mjs rca          3 stalled contacts + 4 that must NOT be asked
  *   node scripts/dev-seed.mjs history      14 months of calls and transitions
  *   node scripts/dev-seed.mjs callbacks    contacts with a promised call-back
- *   node scripts/dev-seed.mjs all          all four, in order
+ *   node scripts/dev-seed.mjs buckets      accounts across all six call buckets
+ *   node scripts/dev-seed.mjs all          all five, in order
  *
  * Writes to the MOCK base at 127.0.0.1:9901. It refuses to run against anything
  * else — see the guard below. Start the stack first:
@@ -256,8 +257,50 @@ async function callbacks() {
     + `${PLAN.filter(([, d]) => d > 7).length} beyond it`);
 }
 
+/* ONE ACCOUNT IN EVERY BUCKET, so the board can be judged on a spread.
+   Without this the fixture had contacts on four accounts and the board showed
+   two buckets with one card each and 262 in "No contacts yet" — which is
+   honest about the mock, and useless for looking at the thing.
+
+   Three stages per bucket, chosen to include the ones that are easy to file
+   wrongly: Discovery Call No-Show sits in Meeting in play (it is a meeting to
+   re-book, not a loss) though its rung is 20; Connect Later sits in CNC though
+   nobody failed to connect; Offsite Delayed sits in Activation and above
+   though its rung is below Activation's. */
+const BUCKET_STAGES = [
+  ["YET_TO_BE_MINED"],
+  ["CNC_COULD_NOT_CONNECT", "CNC_COULD_NOT_CONNECT_3", "CONNECT_LATER"],
+  ["ACTIVATION", "MQL_MARKETING_QUALIFIED_LEAD", "FOLLOW_UP_2", "OFFSITE_DELAYED"],
+  ["DISCOVERY_CALL_BOOKED", "GHOSTED", "ACTIVE_REQUIREMENT_CALL_BOOKED"],
+  ["DISQUALIFIED_WRONG_POC", "NOT_A_DECISION_MAKER_NDM", "POC_ORGANIZATION_CHANGED"],
+  ["NOT_INTERESTED", "INVALID_CONTACT", "CLOSING_LOOPS_LOW_VALUE"],
+];
+async function buckets() {
+  const flat = BUCKET_STAGES.flat();
+  /* Kylas ids the mock actually serves under MOCK_MANY — the board shows the
+     Kylas roster, so an account Kylas has never heard of never appears on it
+     however many contacts it has. */
+  const made = await postBack("Companies", flat.map((stage, i) => ({
+    "Kylas Company ID": String(200000 + i), Name: `bucket-${String(i).padStart(2, "0")}`,
+    Owner: i % 2 ? "Priya Deshmukh" : "Enout Super Admin", "Kylas Owner ID": i % 2 ? "74726" : "74725",
+    "Source of Data": SRC[i % SRC.length], "KPI Rank": 6,
+  })));
+  const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const people = flat.map((stage, i) => ({
+    Name: `Bucket Contact ${i + 1}`, "Kylas Contact ID": String(73000 + i),
+    Owner: i % 2 ? "Priya Deshmukh" : "Enout Super Admin",
+    "Current Stage": stage,
+    Company: made[i] ? [made[i].id] : undefined,
+    /* A call-back on every third, so the cards have something to sort by. */
+    ...(i % 3 === 0 ? { "Next Call Date": day((i % 7) - 2) } : {}),
+  }));
+  await post("Contacts", people);
+  console.log(`buckets    ${flat.length} accounts across ${BUCKET_STAGES.length} buckets, `
+    + `${people.filter((p) => p["Next Call Date"]).length} of them with a call-back`);
+}
+
 const what = process.argv[2] || "all";
-const JOBS = { companies, rca, history, callbacks };
+const JOBS = { companies, rca, history, callbacks, buckets };
 if (what === "all") { for (const fn of Object.values(JOBS)) await fn(); }
 else if (JOBS[what]) await JOBS[what]();
 else { console.error(`usage: node scripts/dev-seed.mjs companies|rca|history|all`); process.exit(2); }
