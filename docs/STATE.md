@@ -46,6 +46,8 @@ AIRTABLE_BASE_URL=http://127.0.0.1:9901 AIRTABLE_PAT=pat_mock \
 AIRTABLE_BASE=appMOCK PORT=8787 node scripts/proxy.mjs &
 
 node scripts/dev-seed.mjs all        # fixtures with a spread, not a happy path
+                                     # (includes four promised call-backs on real
+                                     #  Kylas ids — overdue, today, +3, +45)
 ```
 
 For the browser: the extension needs a host page. There is a stub served from a
@@ -69,6 +71,8 @@ node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: 
 node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of event-row text
 node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
 node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
+node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
+                                         #       page documenting them, all agreeing
 node scripts/test-etag.mjs               # 33 · conditional requests, and what may not be cached
 node scripts/test-sql-schema.mjs         # 102 · the generated SQL is the Airtable base, exactly
 node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable's rollups did

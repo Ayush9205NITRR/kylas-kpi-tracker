@@ -2123,7 +2123,16 @@
     /* what each operator needs in the value box: nothing, one, or a list */
     contains: 1, ncontains: 1, is: 1, isnot: 1, atleast: 1, atmost: 1,
     anyof: "list", noneof: "list", between: 2, empty: 0, notempty: 0,
+    on: 1, before: 1, after: 1, within: 1, ago: 1,
   };
+  /* WHAT KIND OF BOX the value is typed into, where a plain text box is
+     wrong. A date picker beats asking somebody to type 2026-04-01 in the
+     right order, and "within the next ___ days" is a number with a word
+     after it, not a date. */
+  const FB_INPUT = { on: "date", before: "date", after: "date", within: "days", ago: "days" };
+  /* THE OPERATORS EACH TYPE OFFERS. This is the whole of "filter in
+     accordance with the column's type": pick a column, and the second
+     dropdown holds exactly the questions that column can answer. */
   const FB_OPS = {
     text: { contains: "contains", ncontains: "does not contain", is: "is", isnot: "is not",
             empty: "is empty", notempty: "is not empty" },
@@ -2131,43 +2140,52 @@
     multi: { anyof: "has any of", noneof: "has none of", empty: "is empty", notempty: "is not empty" },
     num: { atleast: "is at least", atmost: "is at most", is: "is", between: "is between",
            empty: "is empty", notempty: "is not empty" },
+    /* "within" and "ago" are the two a BD actually asks — "due in the next
+       three days", "not called in the last thirty" — and both are relative to
+       today, so they keep working tomorrow. A fixed date answers the other
+       kind of question and is kept for it. */
+    date: { on: "is", before: "is before", after: "is after",
+            within: "is within the next", ago: "was in the last",
+            empty: "is empty", notempty: "is not empty" },
+    link: { notempty: "has a link", empty: "has none",
+            contains: "URL contains", ncontains: "URL does not contain" },
   };
-  /* Every field the builder can ask about, with how to read it off a company
-     and what a value looks like. `values` is a function so a list built from
-     the data is current, not whatever existed when this file loaded. */
+  /* Shown as the group headings in the field dropdown, so the type a column
+     is filtered as is on screen rather than inferred from which operators
+     turned up. */
+  const FB_TYPE_LABEL = { text: "Text", enum: "Single select", multi: "Multiple select",
+                          num: "Number", date: "Date", link: "Link" };
+  /* THE THREE FIELDS THAT ARE NOT COLUMNS. Everything else the builder can
+     ask about is a column, read straight off ACOLS. These three are things
+     the table shows in another column's cell — the star on the company name,
+     the dot beside the last call — and they earn a row of their own because
+     a band and a date answer different questions. */
+  const FB_EXTRA = () => [
+    { k: "focus", label: "Focus list", type: "enum", get: (c) => focusOf(c),
+      valueList: () => Object.keys(FOCUS_CHIPS), labelOf: (v) => FOCUS_CHIPS[v] },
+    { k: "fresh", label: "Last call, banded", type: "enum", get: (c) => freshOf(c),
+      valueList: () => FRESH.map((z) => z.k), labelOf: (v) => FRESH.find((z) => z.k === v)?.label || v },
+    { k: "days", label: "Days since last call", type: "num", get: (c) => daysSince(c.lastCalledAt) },
+  ];
+
+  /* Every field the builder can ask about: one per filterable column, in the
+     table's own order, then the three above. `values` is a function so a list
+     built from the data is current, not whatever existed when this file
+     loaded. */
   function FB_FIELDS(all) {
-    const vals = (get) => [...new Set(all.map(get).flat().filter((v) => v !== "" && v != null))]
-      .sort((a, b) => String(a).localeCompare(String(b)));
-    const E = global.Enrich;
-    return [
-      { k: "name", label: "Company", type: "text", get: (c) => c.name || "" },
-      { k: "stage", label: "Pipeline stage", type: "enum", get: (c) => stageOf(c) || "",
-        values: () => vals((c) => stageOf(c) || ""), labelOf: stageName, blankOk: true },
-      { k: "owner", label: "Owner", type: "enum", get: (c) => c.owner || "", values: () => vals((c) => c.owner || "") },
-      { k: "source", label: "Source of Data", type: "enum", get: (c) => c.source || "",
-        values: () => vals((c) => c.source || "") },
-      { k: "kpi", label: "KPI status", type: "enum", get: (c) => String(kpiOf(c)),
-        values: () => ["-1", "0", "1", "2", "3", "4", "5"], labelOf: (v) => KPI_LABELS[Number(v) + 1] },
-      { k: "fresh", label: "Last call", type: "enum", get: (c) => freshOf(c),
-        values: () => FRESH.map((z) => z.k), labelOf: (v) => FRESH.find((z) => z.k === v)?.label || v },
-      { k: "days", label: "Days since last call", type: "num", get: (c) => daysSince(c.lastCalledAt) },
-      { k: "next", label: "Next call", type: "enum", get: (c) => nextOf(c),
-        values: () => Object.keys(NEXT_CHIPS), labelOf: (v) => NEXT_CHIPS[v] },
-      { k: "focus", label: "Focus list", type: "enum", get: (c) => focusOf(c),
-        values: () => Object.keys(FOCUS_CHIPS), labelOf: (v) => FOCUS_CHIPS[v] },
-      { k: "offsite", label: "Offsite timeline", type: "multi", get: (c) => c.offsite || [],
-        values: () => global.Offsite.FY_ORDER, labelOf: offLabel },
-      { k: "revenue", label: "Revenue", type: "num", get: (c) => c.enrich?.rev ?? null, fmt: E.usdText },
-      { k: "rpe", label: "Rev / employee", type: "num", get: (c) => c.enrich?.rpe ?? null, fmt: E.usdText },
-      { k: "employees", label: "Employees", type: "enum", get: (c) => c.enrich?.emp || "",
-        values: () => vals((c) => (c.enrich?.emp && c.enrich.emp !== E.UNKNOWN ? c.enrich.emp : ""))
-          .sort((a, b) => E.empFloor(a) - E.empFloor(b)) },
-      { k: "funding", label: "Total funding", type: "num", get: (c) => c.enrich?.fund ?? null, fmt: E.usdText },
-      { k: "round", label: "Latest round", type: "num", get: (c) => c.enrich?.amt ?? null, fmt: E.usdText },
-      { k: "fstage", label: "Funding stage", type: "enum", get: (c) => c.enrich?.type || "",
-        values: () => vals((c) => c.enrich?.type || "") },
-      { k: "priority", label: "Priority", type: "num", get: (c) => c.enrich?.pri ?? null },
-    ];
+    const vals = (get) => [...new Set(all.map(get).flat().filter((v) => v !== "" && v != null))];
+    const build = (k, label, ff) => ({
+      k, label: ff.label || label, type: ff.type, get: ff.get,
+      labelOf: ff.labelOf, blankOk: ff.blankOk,
+      /* Alphabetical unless the field says otherwise, and never the order the
+         rows happened to arrive in — a checklist that reshuffles when the
+         data does is one nobody can find anything in twice. */
+      values: () => (ff.valueList ? ff.valueList() : vals(ff.get))
+        .sort(ff.order || ((a, b) => String(ff.labelOf ? ff.labelOf(a) : a)
+          .localeCompare(String(ff.labelOf ? ff.labelOf(b) : b)))),
+    });
+    return [...ACOLS.filter((c) => c.ff).map((c) => build(c.k, c.label, c.ff)),
+            ...FB_EXTRA().map((f) => build(f.k, f.label, f))];
   }
   let FB_CACHE = [];
   const fbField = (k) => FB_CACHE.find((f) => f.k === k) || FB_CACHE[0];
@@ -2177,6 +2195,11 @@
      filter anything yet — a half-typed row must not empty the table. */
   const fbNeeds = (op) => FB_TYPES[op] ?? 1;
   function fbReady(c) {
+    /* A LINK OUTLIVES THE FILTER IT WAS MADE WITH, and a field can change
+       type between builds — "Next call" was a bucket and is now a date. An
+       operator its type no longer offers is not a filter, it is a leftover,
+       and it must narrow nothing rather than silently empty the table. */
+    if (!FB_OPS[fbField(c.f)?.type]?.[c.op]) return false;
     const n = fbNeeds(c.op);
     if (n === 0) return true;
     if (n === "list") return c.v.length > 0;
@@ -2185,6 +2208,15 @@
   /* The numbers people type are the ones they say: 10M, 2.5b, 40 — all read
      by the same parser the columns use. */
   const fbNum = (s) => global.Enrich.num(s);
+  /* A date, as the day it falls on. Kylas hands back "2026-04-17" for some
+     fields and a full timestamp for others, and comparing those two as
+     strings quietly puts every timestamp after every date. Ten characters is
+     the day in both. */
+  const fbDay = (v) => String(v ?? "").slice(0, 10);
+  /* Today on THIS machine, not in UTC — an associate in Delhi filtering for
+     "due today" at nine in the morning means their today. */
+  const fbToday = () => new Date().toLocaleDateString("sv");
+  const fbShift = (days) => new Date(Date.parse(fbToday()) + days * 864e5).toLocaleDateString("sv");
 
   function fbTest(co, c) {
     const f = fbField(c.f);
@@ -2209,6 +2241,19 @@
       case "atleast": return raw != null && Number(raw) >= fbNum(c.v[0]);
       case "atmost": return raw != null && Number(raw) <= fbNum(c.v[0]);
       case "between": return raw != null && Number(raw) >= fbNum(c.v[0]) && Number(raw) <= fbNum(c.v[1]);
+      /* Dates. An account with no date is not "before 1 April", it has never
+         been called — so, as with the numbers above, it drops out of every
+         comparison rather than sorting to one end of it. */
+      case "on": return filled && fbDay(raw) === fbDay(c.v[0]);
+      case "before": return filled && fbDay(raw) < fbDay(c.v[0]);
+      case "after": return filled && fbDay(raw) > fbDay(c.v[0]);
+      /* Both windows INCLUDE today, and both are half-open at the other end.
+         "within the next 0 days" is today alone, which is what somebody
+         typing 0 into a call-back filter means. */
+      case "within": { const d = fbDay(raw);
+        return filled && d >= fbToday() && d <= fbShift(Math.max(0, fbNum(c.v[0]) || 0)); }
+      case "ago": { const d = fbDay(raw);
+        return filled && d <= fbToday() && d >= fbShift(-Math.max(0, fbNum(c.v[0]) || 0)); }
       default: return true;
     }
   }
@@ -2240,14 +2285,27 @@
           ${f.blankOk && !c.v.includes("") ? `<option value="">— No stage —</option>` : ""}
         </select></div>`;
     } else if (need >= 1) {
-      const box = (i, ph) => `<input class="fb-val" type="text" data-fbv="${path}" data-i="${i}"
-        value="${esc(c.v[i] ?? "")}" placeholder="${esc(ph)}" autocomplete="off">`;
+      const kind = FB_INPUT[c.op];
+      const box = (i, ph, type = "text") => `<input class="fb-val${kind ? ` fb-${kind}` : ""}" type="${type}"
+        data-fbv="${path}" data-i="${i}" value="${esc(c.v[i] ?? "")}"
+        ${type === "text" ? `placeholder="${esc(ph)}"` : ""} autocomplete="off">`;
+      /* A date operator gets a date picker, a "within N days" one gets a
+         number with the word after it, and everything else a text box that
+         says what it wants. "10M" and "1.2b" are read by the same parser the
+         columns use, so the placeholder can promise them. */
       const ph = f.type === "num" ? "e.g. 10M" : "value";
-      value = need === 2 ? `${box(0, "from")}<span class="fb-and">and</span>${box(1, "to")}` : box(0, ph);
+      value = kind === "date" ? box(0, "", "date")
+        : kind === "days" ? `${box(0, "", "number")}<span class="fb-and">days</span>`
+        : need === 2 ? `${box(0, "from")}<span class="fb-and">and</span>${box(1, "to")}`
+        : box(0, ph);
     }
     return `<div class="fb-row" data-path="${path}">
       <select class="fb-f" data-fbf="${path}" aria-label="Field">
-        ${FB_CACHE.map((x) => `<option value="${esc(x.k)}"${x.k === c.f ? " selected" : ""}>${esc(x.label)}</option>`).join("")}
+        ${Object.entries(FB_TYPE_LABEL).map(([t, tl]) => {
+          const mine = FB_CACHE.filter((x) => x.type === t);
+          return mine.length ? `<optgroup label="${esc(tl)}">${mine.map((x) =>
+            `<option value="${esc(x.k)}"${x.k === c.f ? " selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>` : "";
+        }).join("")}
       </select>
       <select class="fb-op" data-fbop="${path}" aria-label="Condition">
         ${Object.entries(ops).map(([k, v]) => `<option value="${k}"${k === c.op ? " selected" : ""}>${esc(v)}</option>`).join("")}
@@ -2438,37 +2496,92 @@
     ? `<a class="lnk" href="${esc(url)}" target="_blank" rel="noopener noreferrer"
          title="${esc(url)}" data-stop="1">${esc(text)}</a>` : "—");
 
+  /* EVERY COLUMN DECLARES ITS TYPE, AND THE FILTER MENU IS BUILT FROM THAT.
+     This is the Airtable gesture, and the reason it is one table rather than
+     two: the columns and the filter fields used to be separate lists, and a
+     column added to one and forgotten in the other is invisible — the column
+     appears, and the only thing that goes wrong is that you cannot filter on
+     it, which nobody reports as a bug. Now a column IS a filter field, and
+     what you can ask about it follows from `ff.type`:
+
+       text    contains · does not contain · is · is not · empty · not empty
+       enum    is any of · is none of · empty · not empty          (checklist)
+       multi   has any of · has none of · empty · not empty        (checklist)
+       num     at least · at most · is · between · empty · not empty
+       date    is · before · after · within the next N days ·
+               in the last N days · empty · not empty
+       link    has a link · has none · URL contains · URL does not contain
+
+     `get` reads the raw value — the number, the ISO date, the url — never the
+     rendered cell, because "₹—" is not a value you can compare. A column with
+     no `ff` cannot be filtered on, and that has to be a decision, not a
+     slip. */
   const ACOLS = [
     { k: "company", label: "Company", w: "1.6fr", fixed: true, cls: "co",
+      ff: { type: "text", get: (c) => c.name || "" },
       cell: (c) => `${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
         focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}` },
     { k: "stage", label: "Pipeline stage", w: "1.3fr", on: true,
+      /* blankOk: "no stage" is a real answer on thousands of accounts, so the
+         checklist offers it rather than making it unreachable. */
+      /* Wrapped, not named: stageName and offLabel below are declared further
+         down this file, and naming one here would read it before it exists —
+         the same trap VALUE_OF carries a note about. */
+      ff: { type: "enum", get: (c) => stageOf(c) || "", labelOf: (v) => stageName(v), blankOk: true },
       cell: (c) => esc(label(stageOf(c)) || "—") },
-    { k: "owner", label: "Owner", w: "1fr", on: true, cell: (c) => esc(c.owner || "—") },
-    { k: "source", label: "Source of Data", w: ".9fr", on: true, cell: (c) => esc(c.source || "—") },
+    { k: "owner", label: "Owner", w: "1fr", on: true,
+      ff: { type: "enum", get: (c) => c.owner || "" },
+      cell: (c) => esc(c.owner || "—") },
+    { k: "source", label: "Source of Data", w: ".9fr", on: true,
+      ff: { type: "enum", get: (c) => c.source || "" },
+      cell: (c) => esc(c.source || "—") },
     { k: "offsite", label: "Offsite", w: ".7fr", on: true,
+      /* The one genuinely multi-valued column: a company can name two
+         quarters, so the checklist means "has any of" and not "is". */
+      ff: { type: "multi", get: (c) => c.offsite || [],
+            valueList: () => global.Offsite.FY_ORDER, labelOf: (v) => offLabel(v) },
       cell: (c) => ((c.offsite || []).length ? esc(c.offsite.map(offLabel).join(", ")) : "—") },
     { k: "kpi", label: "KPI status", w: ".95fr", on: true,
+      ff: { type: "enum", get: (c) => String(kpiOf(c)),
+            valueList: () => ["-1", "0", "1", "2", "3", "4", "5"],
+            labelOf: (v) => KPI_LABELS[Number(v) + 1] },
       cell: (c) => { const k = kpiOf(c); return `<i class="kpi r${k < 0 ? "n" : k}">${esc(KPI_LABELS[k + 1])}</i>`; } },
     { k: "last", label: "Last call", w: ".9fr", on: true, cls: "lc",
+      /* The DATE, not the "31–90 days" band the cell shows. The band is a
+         separate field below — asking "before 1 April" is a different
+         question from "cold", and a band cannot answer it. */
+      ff: { type: "date", label: "Last call date", get: (c) => c.lastCalledAt || "" },
       cell: (c) => { const d = daysSince(c.lastCalledAt);
         return `<i class="f-${freshOf(c)}"></i>${d === null ? "Never" : d === 0 ? "Today" : `${d}d ago`}`; } },
     { k: "next", label: "Next call", w: ".85fr", on: true,
+      ff: { type: "date", label: "Next call date", get: (c) => c.nextCall || "" },
       cell: (c) => `<span class="nc nc-${nextOf(c)}">${esc(nextText(c))}</span>` },
     { k: "priority", label: "Priority", w: ".55fr", on: true, num: true,
+      ff: { type: "num", get: (c) => en(c).pri ?? null },
       cell: (c) => dash(en(c).pri ?? "") },
     /* Dollars, as Apollo stores them. Nothing is converted — see enrich.js. */
     { k: "revenue", label: "Revenue", w: ".8fr", num: true,
+      ff: { type: "num", get: (c) => en(c).rev ?? null },
       cell: (c) => dash(esc(E.usdText(en(c).rev))) },
     { k: "rpe", label: "Rev / employee", w: ".85fr", num: true,
+      ff: { type: "num", get: (c) => en(c).rpe ?? null },
       cell: (c) => dash(esc(E.usdText(en(c).rpe))) },
     { k: "employees", label: "Employees", w: ".7fr", num: true,
+      /* Apollo hands over a BAND ("51-200"), never a count, so this is a
+         select and not a number however much it looks like one. Ordered by
+         where each band starts — "10000+" above "51-200" is what sorting
+         these as text gives, and it reads as a mistake. */
+      ff: { type: "enum", get: (c) => (en(c).emp && en(c).emp !== E.UNKNOWN ? en(c).emp : ""),
+            order: (a, b) => E.empFloor(a) - E.empFloor(b) },
       cell: (c) => dash(en(c).emp && en(c).emp !== E.UNKNOWN ? esc(en(c).emp) : "") },
     { k: "funding", label: "Total funding", w: ".8fr", num: true,
+      ff: { type: "num", get: (c) => en(c).fund ?? null },
       cell: (c) => dash(esc(E.usdText(en(c).fund))) },
     { k: "round", label: "Latest round", w: ".8fr", num: true,
+      ff: { type: "num", get: (c) => en(c).amt ?? null },
       cell: (c) => dash(esc(E.usdText(en(c).amt))) },
     { k: "fstage", label: "Funding stage", w: "1fr",
+      ff: { type: "enum", get: (c) => en(c).type || "" },
       cell: (c) => dash(esc(en(c).type || "")) },
     /* NOT the Kylas pipeline stage in the column beside it. This is the demand
        team's own read of the account out of Company List — "LinkedIn Outreach
@@ -2476,9 +2589,18 @@
        do, somebody has worked the account somewhere the other side cannot see,
        which is exactly why both are on the row. */
     { k: "aps", label: "Account stage", w: "1.1fr", on: true,
+      ff: { type: "enum", get: (c) => en(c).aps || "" },
       cell: (c) => dash(esc(en(c).aps || "")) },
-    { k: "linkedin", label: "LinkedIn", w: ".6fr", cell: (c) => linkChip(en(c).li, "in") },
-    { k: "boolean", label: "Boolean post", w: ".7fr", cell: (c) => linkChip(en(c).bp, "post") },
+    /* A url is not text. "Which accounts still have no LinkedIn" is the
+       question actually asked of these two, every week, and on a text field
+       that is "is empty" hidden among five operators that make no sense for
+       a link. So they get their own four. */
+    { k: "linkedin", label: "LinkedIn", w: ".6fr",
+      ff: { type: "link", get: (c) => en(c).li || "" },
+      cell: (c) => linkChip(en(c).li, "in") },
+    { k: "boolean", label: "Boolean post", w: ".7fr",
+      ff: { type: "link", get: (c) => en(c).bp || "" },
+      cell: (c) => linkChip(en(c).bp, "post") },
   ];
   const COL_DEFAULTS = ACOLS.filter((c) => c.on).map((c) => c.k);
   const colsOn = () => ACOLS.filter((c) => c.fixed || ACC.cols.has(c.k));

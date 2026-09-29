@@ -5,7 +5,8 @@
  *   node scripts/dev-seed.mjs companies    43 companies across all six lanes
  *   node scripts/dev-seed.mjs rca          3 stalled contacts + 4 that must NOT be asked
  *   node scripts/dev-seed.mjs history      14 months of calls and transitions
- *   node scripts/dev-seed.mjs all          all three, in order
+ *   node scripts/dev-seed.mjs callbacks    contacts with a promised call-back
+ *   node scripts/dev-seed.mjs all          all four, in order
  *
  * Writes to the MOCK base at 127.0.0.1:9901. It refuses to run against anything
  * else — see the guard below. Start the stack first:
@@ -43,6 +44,24 @@ const day = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10
 
 /* The mock rate-limits above 5 req/s, and a 429 has no `records` — a loop that
    does not retry reads that as success and seeds half a fixture. */
+/* Same, but hands back the records the mock created — the link fields need
+   the parent's record id, which only the reply knows. */
+async function postBack(table, records) {
+  const out = [];
+  for (let i = 0; i < records.length; i += 10) {
+    const batch = records.slice(i, i + 10).map((fields) => ({ fields }));
+    for (let t = 0; t < 6; t++) {
+      const r = await fetch(`${A}/${encodeURIComponent(table)}`, {
+        method: "POST", headers: H, body: JSON.stringify({ records: batch, typecast: true }) });
+      if (r.ok) { out.push(...(await r.json()).records); break; }
+      if (r.status !== 429) { console.error(`! ${table}: ${r.status} ${(await r.text()).slice(0, 160)}`); process.exit(1); }
+      await sleep(700);
+    }
+    await sleep(260);
+  }
+  return out;
+}
+
 async function post(table, records) {
   for (let i = 0; i < records.length; i += 10) {
     const batch = records.slice(i, i + 10).map((fields) => ({ fields }));
@@ -180,8 +199,50 @@ async function history() {
   console.log(`history    ${calls.length} calls, ${trans.length} transitions over 14 months`);
 }
 
+/* CALL-BACKS, WHICH NOTHING ELSE SEEDED. The Next call column, its chip row,
+   the focus pane's "promised and kept" and — since the filter builder learned
+   what a date is — "next call within the next N days" all read one field, and
+   no fixture ever wrote it. So every one of them was being judged on a column
+   of em dashes, which agrees with any change you make to it.
+
+   A spread on purpose: overdue, today, this week, and one far enough out to
+   fall outside every window. The contact has to be LINKED to the company —
+   progress.mjs walks Contacts → Company → Kylas id, so a contact with a date
+   and no link is a call-back nobody can see. */
+async function callbacks() {
+  const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  /* THE IDS THE MOCK KYLAS ACTUALLY HAS. companies() above invents 500000+,
+     which is deliberate — it is what a base synced from another tenant looks
+     like, and the console's "Kylas has never heard of these ids" banner is
+     seeded by it. But a call-back has to land on an account the list SHOWS,
+     and the list comes from Kylas. These four are in mock-kylas.mjs whatever
+     MOCK_MANY is set to, so this fixture does not depend on it.
+     Days from today: overdue, today, inside the week, and one well past it. */
+  const PLAN = [["903", -11], ["1776620", 0], ["1778327", 3], ["1810449", 45]];
+  const made = await postBack("Companies", PLAN.map(([kid], i) => ({
+    "Kylas Company ID": kid, Name: `callback-co-${i + 1}`,
+    Owner: "Enout Super Admin", "Kylas Owner ID": "74725",
+    "Source of Data": SRC[i % SRC.length], "KPI Rank": 6,
+  })));
+  const people = PLAN.map(([, d], i) => ({
+    Name: `Callback Contact ${i + 1}`, "Kylas Contact ID": String(72000 + i),
+    Owner: i % 2 ? "Priya Deshmukh" : "Enout Super Admin",
+    /* NOT an exit stage: progress.mjs drops a call-back promised to somebody
+       who has since said no, which is right, and which also means seeding one
+       there would silently seed nothing. */
+    "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD",
+    Company: made[i] ? [made[i].id] : undefined,
+    "Next Call Date": day(d),
+  }));
+  await post("Contacts", people);
+  console.log(`callbacks  ${people.length} promised on real Kylas ids — `
+    + `${PLAN.filter(([, d]) => d < 0).length} overdue, 1 today, `
+    + `${PLAN.filter(([, d]) => d > 0 && d <= 7).length} inside the week, `
+    + `${PLAN.filter(([, d]) => d > 7).length} beyond it`);
+}
+
 const what = process.argv[2] || "all";
-const JOBS = { companies, rca, history };
+const JOBS = { companies, rca, history, callbacks };
 if (what === "all") { for (const fn of Object.values(JOBS)) await fn(); }
 else if (JOBS[what]) await JOBS[what]();
 else { console.error(`usage: node scripts/dev-seed.mjs companies|rca|history|all`); process.exit(2); }

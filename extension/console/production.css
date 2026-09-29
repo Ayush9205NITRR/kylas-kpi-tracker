@@ -575,7 +575,15 @@ body.colresize .cgrip{border-right-color:var(--blue)}
    which is the opposite of what a column picker is for. */
 
 /* ── the condition builder ── */
-.fb-pop{width:min(720px,88vw);padding:12px}
+/* IT HANGS OFF THE TOOLBAR, NOT OFF ITS OWN BUTTON. Four dropdowns wide, and
+   the Filter button sits in the middle of the row — anchored to the button
+   the panel ran past the right edge of the card and the last value box was
+   simply not on screen. The toolbar starts at the card's left edge and is as
+   wide as the card, so hanging it there gives the panel the whole width to
+   sit in, whatever the console has been resized to. */
+.extools{position:relative}
+#fbPick{position:static}
+.fb-pop{left:0;right:auto;width:min(720px,100%);padding:12px}
 .fb-hint{margin:0 0 10px;font-size:var(--t-meta);color:var(--text3)}
 .fb-line{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px}
 /* "Where" and the and/or keep one width, so the fields below them line up
@@ -588,12 +596,22 @@ body.colresize .cgrip{border-right-color:var(--blue)}
 .fb-row{display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0}
 .fb-f,.fb-op{flex:none;border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);
   color:var(--text);font:inherit;font-size:var(--t-label);padding:6px 8px}
-.fb-f{width:150px}
-.fb-op{width:132px}
+.fb-f{width:160px}
+.fb-op{width:152px}
 .fb-v{flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fb-val{flex:1;min-width:80px;border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);
   color:var(--text);font:inherit;font-size:var(--t-label);padding:6px 8px}
 .fb-and{font-size:var(--t-meta);color:var(--text3)}
+/* A date box and a day count are both fixed-width: they hold a known number
+   of characters, and letting them stretch like a text box puts a lot of
+   empty field beside "3". */
+.fb-val.fb-date{flex:none;width:148px}
+.fb-val.fb-days{flex:none;width:76px}
+/* Chrome draws a spinner on number inputs that is three pixels wide and
+   changes the value when the wheel moves over it. */
+.fb-val.fb-days{-moz-appearance:textfield}
+.fb-val.fb-days::-webkit-outer-spin-button,
+.fb-val.fb-days::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .fb-pills{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
 .fb-pill{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line2);
   border-radius:999px;padding:2px 4px 2px 9px;font-size:var(--t-meta);color:var(--text2)}

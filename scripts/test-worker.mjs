@@ -338,15 +338,37 @@ const get = async (w, path, extra = {}) => {
   return { status: r.status, body };
 };
 const MAINT = '*/5 * * * *';
-const maintOut = await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+/* THE ENRICHMENT ROW GOES IN BEFORE THE COPY IS BUILT, deliberately. Company
+   List is copied from ANOTHER base, and the copy is built once and then kept
+   up to date by a delta that only runs ten minutes after the last one on a
+   table something is reading. Seeding after the build and firing crons until
+   it caught up was a test that passed or failed on how the rate limiter felt
+   that minute. The row it asserts is read in section 10. */
+await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
+  headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
+  /* NOT the contact's own company: section 9 posts its own Company List row
+     for that one and reads back the FIRST match, so a second row against the
+     same id would shadow it. 1778327 is in the mock and nothing else claims
+     it. */
+  body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': '1778327',
+    'Account Pipeline Stage': 'LinkedIn Outreach Initiated',
+    'linkedin - Appollo': 'https://linkedin.com/company/bbb',
+    'Boolean Post link - kylas': 'https://example.com/boolean/bbb',
+    'Annual Revenue': [12000000], at_priority: 7 } }] }) });
+/* RESEARCH_BASE on the maintenance env, as production has it: without it the
+   copy of Company List is built from the KPI base, which does not have that
+   table, and every enrichment column reads "—" for the fourth of the four
+   reasons /enrich-status exists to tell apart. */
+const MAINT_ENV = { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT, RESEARCH_BASE: 'appRESEARCH' };
+const maintOut = await fire(MAINT, MAINT_ENV);
 check('the maintenance cron runs', /-> maintain/.test(maintOut), maintOut.split('\n')[0]);
 /* One table rebuild per run, so no run exceeds Cloudflare's per-invocation
    request cap. Fired until every table is in. */
 let runs = 1;
 for (; runs < 20; runs++) {
-  const c = await get(await coldWorker(19 + runs / 1000), '/cache-status');
+  const c = await get(await coldWorker(19 + runs / 1000), '/cache-status', { RESEARCH_BASE: 'appRESEARCH' });
   if (c.body.mirror?.every((t) => t.built && !t.stale)) break;
-  await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
+  await fire(MAINT, MAINT_ENV);
 }
 check('tables are copied one per run, not all at once', runs >= 5 && runs < 20, `${runs} runs`);
 const cs = await get(await coldWorker(20), '/cache-status');
@@ -482,35 +504,17 @@ check('the accounts list reads Offsite Timeline from the Company List', shore?.o
 
 /* ENRICHMENT ON THE ROW, AND A WAY TO SEE WHY IT IS NOT.
    Every enrichment column read "—" on production for a week and there was no
-   way to tell which of four things was wrong: no PAT, no copy yet, a column
-   missing from the projection, or a join key that does not match. So the two
-   halves are asserted together — the value arriving on the row, and the
-   diagnostic that names the fault when it does not. */
-await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
-  headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
-  body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': '1776620',
-    'Account Pipeline Stage': 'LinkedIn Outreach Initiated',
-    'linkedin - Appollo': 'https://linkedin.com/company/seats',
-    'Boolean Post link - kylas': 'https://example.com/boolean/seats',
-    'Annual Revenue': [12000000], at_priority: 7 } }] }) });
-/* THE COPY HAS TO BE REBUILT FOR THIS TO ARRIVE, and that is the design, not
-   a gap: section 8 built Company List when the fixture held none, and a delta
-   only runs ten minutes after the last one on a table something is reading.
-   The nightly sync marks every copy stale; maintain() then rebuilds ONE table
-   per run. So this is what a production morning does, at speed — and it is
-   the shape of the answer when the columns read "—" on a fresh deploy: not
-   broken, not yet built. */
-const RESEARCH = { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT, RESEARCH_BASE: 'appRESEARCH' };
-await fire(CRONS.CRON_SYNC, RESEARCH);
-let listRows = 0;
-for (let i = 0; i < 12 && !listRows; i++) {
-  await fire(MAINT, RESEARCH);
-  const c = await get(await coldWorker(45 + i / 1000), '/cache-status', { RESEARCH_BASE: 'appRESEARCH' });
-  listRows = (c.body.mirror || []).find((t) => t.table === 'Company List')?.rows || 0;
-}
-check('a Company List row reaches the copy, one table per cron run', listRows > 0, `${listRows} rows`);
+   way to tell which of four things was wrong: no PAT or no RESEARCH_BASE, the
+   copy of Company List not built yet, a column missing from the projection,
+   or a join key that does not match. So the two halves are asserted together —
+   the value arriving on the row, and the diagnostic that names the fault when
+   it does not. The row itself went in before section 8 built the copy. */
+const listRows = ((await get(await coldWorker(44.5), '/cache-status', { RESEARCH_BASE: 'appRESEARCH' }))
+  .body.mirror || []).find((t) => t.table === 'Company List')?.rows || 0;
+check('Company List is copied from the RESEARCH base, not the KPI one', listRows > 0,
+      `${listRows} rows — the copy was built from a base with no such table`);
 const enList = await get(await coldWorker(45), '/companies?owner=all&fresh=1', { RESEARCH_BASE: 'appRESEARCH' });
-const enriched = (enList.body.companies || []).find((c) => String(c.id) === '1776620');
+const enriched = (enList.body.companies || []).find((c) => String(c.id) === '1778327');
 check('Account Pipeline Stage reaches the accounts list',
       enriched?.enrich?.aps === 'LinkedIn Outreach Initiated', JSON.stringify(enriched?.enrich));
 check('...and so do the two links the columns render',

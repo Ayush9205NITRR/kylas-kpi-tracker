@@ -10,7 +10,8 @@ short version — the **rules**.
 > and it is maintained; these other docs are design history.
 
 `docs/UI-SPEC.md` has the full design system, `docs/HANDOFF-v2.md` the product rules,
-`docs/architecture.md` the shape, `docs/kpi-spec.md` the KPI definitions.
+`docs/architecture.md` the shape, `docs/kpi-spec.md` the KPI definitions,
+`docs/FILTERS.md` what each column's data type lets you ask of it.
 
 ## What this is
 
