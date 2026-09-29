@@ -1271,6 +1271,83 @@ function eventsGroup(){
   return g;
 }
 
+/* ── WHEN IS IT · quarter, then month, then week ───────────────────────
+   Ayush, 2026-09-29: "Timeline (Quarter) — Jan-Mar, Apr-June … once selected
+   quarter can lower down on month and week", on Past rows as well as Now.
+
+   The quarters are the CALENDAR ones, because those are the four buckets
+   Kylas' Offsite Timeline field holds and the four the accounts filter counts
+   — not the financial year. (The old chips said "Q3 FY27", which is a
+   different thing said in the same number of characters, and the quarter that
+   reaches Kylas has to be the one Kylas means.)
+
+   THE FIELD IS STILL FREE TEXT. That is non-negotiable #2 and it is right: a
+   prospect says "August, maybe the second week, not signed off" and all of
+   that has to survive. So a chip does not own the field — it writes a phrase
+   into it and remembers the phrase, so the next chip REPLACES that phrase and
+   leaves everything else the associate typed exactly where it was.
+
+   What lands in Kylas follows from the text, not from the chips: offsite.js
+   reads the quarter back out of whatever is written, so "Aug" and "second
+   week of August" and "Q3" all derive JUL_SEP without the picker being in the
+   loop at all. */
+const QTRS=[{k:"JAN_MAR",t:"Jan–Mar",m:[0,1,2]},{k:"APR_JUN",t:"Apr–Jun",m:[3,4,5]},
+            {k:"JUL_SEP",t:"Jul–Sep",m:[6,7,8]},{k:"OCT_DEC",t:"Oct–Dec",m:[9,10,11]}];
+const MON3=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+/* Write the phrase into the free text, replacing the one the picker put there
+   last. Never touches anything else in the field. */
+function putPhrase(i,r,next,size){
+  const old=r.tlPhrase||"";
+  let v=String(r.timeline||"");
+  if(old&&v.includes(old))v=v.replace(old,next);
+  else v=v.trim()?next+", "+v.trim():next;
+  r.timeline=v.replace(/^[,\s]+|[,\s]+$/g,"").replace(/,\s*,/g,",");
+  r.tlPhrase=next;i.value=r.timeline;size();
+}
+
+function timelineStrip(strip,i,r,size){
+  strip.innerHTML="";
+  const tl=r.tl||(r.tl={q:"",m:null,w:0});
+  const row=(label)=>{const d=el("div","qrow");d.appendChild(el("span","lbl",label));strip.appendChild(d);return d;};
+  const chip=(parent,text,on,fn)=>{
+    const b=el("button","qc"+(on?" on":""),esc(text));b.type="button";b.tabIndex=-1;
+    b.setAttribute("aria-pressed",on?"true":"false");
+    b.onmousedown=e=>e.preventDefault();
+    b.onclick=()=>{fn();touch("record");refreshQual();validate();timelineStrip(strip,i,r,size);i.focus();};
+    parent.appendChild(b);return b;
+  };
+  const write=()=>{
+    const next=tl.m==null?(QTRS.find(q=>q.k===tl.q)||{}).t||"":MON3[tl.m]+(tl.w?", week "+tl.w:"");
+    if(next)putPhrase(i,r,next,size);
+  };
+
+  const r1=row("Quarter:");
+  QTRS.forEach(q=>chip(r1,q.t,tl.q===q.k,()=>{
+    if(tl.q===q.k){tl.q="";tl.m=null;tl.w=0;}      /* tapping it again clears it */
+    else{tl.q=q.k;tl.m=null;tl.w=0;}
+    write();
+  }));
+  chip(r1,"Not decided",false,()=>{tl.q="";tl.m=null;tl.w=0;putPhrase(i,r,"Not decided",size);});
+
+  if(tl.q){
+    const q=QTRS.find(x=>x.k===tl.q);
+    const r2=row("Month:");
+    q.m.forEach(m=>chip(r2,MON3[m],tl.m===m,()=>{tl.m=tl.m===m?null:m;tl.w=0;write();}));
+    chip(r2,"Whole quarter",tl.m==null,()=>{tl.m=null;tl.w=0;write();});
+  }
+  if(tl.q&&tl.m!=null){
+    const r3=row("Week:");
+    [1,2,3,4].forEach(w=>chip(r3,"Week "+w,tl.w===w,()=>{tl.w=tl.w===w?0:w;write();}));
+    chip(r3,"Any week",!tl.w,()=>{tl.w=0;write();});
+  }
+  /* The rest of what an associate says about timing, still one tap away. */
+  const r4=row("Add:");
+  ["Tentative","Not signed off","Same as last year"].forEach(t=>chip(r4,t,false,()=>{
+    const v=(i.value||"").trim();
+    i.value=v?v+(/[,;]$/.test(v)?" ":", ")+t:t;r.timeline=i.value;size();
+  }));
+}
+
 function eventCard(a,key,r){
   const card=el("div","ev "+(key==="past"?"is-past":"is-now"));
   const h=el("div","evh");
@@ -1305,6 +1382,7 @@ function eventCard(a,key,r){
     size();
     i.oninput=()=>{r[k]=i.value;size();touch("record");refreshQual();validate();};
     i.onfocus=()=>{
+      if(chips===QUICK.timeline){timelineStrip(strip,i,r,size);return;}
       strip.innerHTML="";strip.appendChild(el("span","lbl","Tap to add:"));
       chips.forEach(c=>{
         const bb=el("button","qc",esc(c));bb.type="button";bb.tabIndex=-1;
@@ -1816,5 +1894,64 @@ async function boot(){
   /* Saves queued on the server before the console was last closed. */
   JOBS=(await Store.getSetting("saveJobs"))||{};
   watchJobs();
+  wirePanes(await Store.getSetting("panes"));
 }
 boot();
+
+/* ── the panes are the associate's to size ──────────────────────────────
+   The split was fixed at 1fr / 1fr / .72fr, and which pane needs the room
+   depends on the call: a discovery call with four event rows wants the middle
+   one wide, a first dial wants the contact fields. So the two borders drag.
+
+   Widths are stored as FRACTIONS, not pixels — a px layout looks right on the
+   screen it was dragged on and wrong on the next one, and the console is also
+   resizable now. Double-click a border to put it back. Below 1280px the third
+   pane is not there and below 960 they are tabs, so this only binds where
+   there is something to drag. */
+const PANE_MIN=260;
+function wirePanes(saved){
+  const split=document.getElementById("split");
+  if(!split)return;
+  const panes=[...split.querySelectorAll(".pane")];
+  /* THREE PANES ONLY. Below 1280px the research pane is hidden and below 960
+     they are tabs, and both of those are done with grid-template-columns in a
+     media query — which an inline style silently beats, leaving an empty
+     third column where the hidden pane used to be. So the stored widths are
+     applied only at the size they were measured at, and dropped otherwise. */
+  const wide=window.matchMedia("(min-width:1281px)");
+  let want=Array.isArray(saved)&&saved.length===panes.length
+    &&saved.every(n=>Number.isFinite(n)&&n>0)?saved.slice():null;
+  const apply=(fr)=>{split.style.gridTemplateColumns=fr.map(n=>n.toFixed(4)+"fr").join(" ");};
+  const sync=()=>{ if(wide.matches&&want)apply(want); else split.style.gridTemplateColumns=""; };
+  wide.addEventListener?.("change",sync);
+  sync();
+
+  panes.slice(0,-1).forEach((p,i)=>{
+    const g=el("div","pgrip");
+    g.title="Drag to resize · double-click to reset";
+    g.onpointerdown=(e)=>{
+      /* The pane that shrinks and the pane that grows are the two either side
+         of THIS border; the rest keep their width, so a drag is local and the
+         far pane does not jump. */
+      const w=panes.map(n=>n.getBoundingClientRect().width);
+      const x0=e.clientX,a=i,b=i+1,total=w[a]+w[b];
+      g.setPointerCapture(e.pointerId);
+      document.body.classList.add("colresize");
+      const move=(ev)=>{
+        let d=ev.clientX-x0;
+        d=Math.max(PANE_MIN-w[a],Math.min(w[b]-PANE_MIN,d));
+        const next=w.slice();next[a]=w[a]+d;next[b]=total-next[a];
+        apply(next);
+      };
+      const up=()=>{
+        g.removeEventListener("pointermove",move);g.removeEventListener("pointerup",up);
+        document.body.classList.remove("colresize");
+        want=panes.map(n=>n.getBoundingClientRect().width);
+        Store.setSetting("panes",want).catch(()=>{});
+      };
+      g.addEventListener("pointermove",move);g.addEventListener("pointerup",up);
+    };
+    g.ondblclick=()=>{want=null;sync();Store.setSetting("panes",null).catch(()=>{});};
+    p.appendChild(g);
+  });
+}

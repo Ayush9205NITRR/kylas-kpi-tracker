@@ -49,6 +49,8 @@ import { readCompaniesSql } from "./sql-read.mjs";
 import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 import { accountProgress, focusStanding, median } from "./progress.mjs";
 import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
+import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
+import { summarise, sendDigest, windowFor, yesterdayIn } from "./digest.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -1092,6 +1094,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   });
   const meta = () => metaShared();
 
+  /* WHICH FIELD IS THE CALL-BACK, AND WHICH IS THE OFFSITE TIMELINE.
+     Resolved from the same cached field list the picklists come from, so it
+     costs no extra request, and re-resolved whenever that cache refreshes —
+     an admin who adds the field today does not need a deploy. */
+  let writeMapCache = null, writeMapFrom = null;
+  const writeMap = async () => {
+    const m = await meta();
+    if (writeMapFrom !== m) {
+      writeMapCache = resolveWriteFields(m.fields, m.picklists);
+      writeMapFrom = m;
+      describeWriteMap(writeMapCache).forEach((l) => log(`write-back ${l}`));
+    }
+    return writeMapCache;
+  };
+
   /* Option arrays are nested differently per field type, so look for the shape
      rather than guessing at key names. */
   function findOptions(field, depth = 0) {
@@ -1229,7 +1246,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           catch { /* a failed read should not block the write */ }
         }
         const remarks = mergeRemarks(existing, renderRemarks(c, { stageLabel }));
-        const payload = toKylasContact(c, { remarks });
+        /* THE CALL-BACK AND THE OFFSITE QUARTER, WRITTEN BACK (Ayush,
+           2026-09-29). Both were on the card and in Airtable and reached Kylas
+           only as a line of remarks text nothing can filter on. The field
+           names differ per account, so they are resolved from the live field
+           list — which is already fetched and cached for the picklists — and
+           left off entirely when the account has neither. A field map that
+           cannot be read must never fail a save: the associate's call is not
+           lost over a lookup. */
+        let extra = {};
+        try {
+          const map = await writeMap();
+          extra = extraCustomFields(map, c, { tzMin: TZ_MIN, quarters: offsiteOf(c) });
+        } catch (e) { log(`  write map unavailable (${e.message.slice(0, 60)}) — stage and remarks only`); }
+        const payload = toKylasContact(c, { remarks, extra });
 
         if (!c.kid) {
           /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
@@ -2320,7 +2350,38 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       try { out.shadow = await shadow.tick(); }
       catch (e) { out.shadow = { error: e.message.slice(0, 160) }; log(`! shadow: ${e.message.slice(0, 120)}`); }
     }
+    /* THE DAY'S WRITE-BACK EMAIL, once, after the day it reports on has
+       ended. Guarded by a key in the shared store rather than by the cron's
+       schedule: the maintenance job runs every minute on several instances,
+       and "send it at 06:00" would send it once per instance per minute. The
+       key is the day itself, so the second attempt finds it already there.
+       Never fatal — a mail provider being down is not a failed maintenance
+       pass. */
+    try { out.digest = await dailyDigest(); }
+    catch (e) { out.digest = { error: e.message.slice(0, 160) }; log(`! digest: ${e.message.slice(0, 120)}`); }
     return out;
+  }
+
+  const DIGEST_AFTER_MIN = Number(env.DIGEST_AFTER_MIN ?? 6 * 60);   /* 06:00 local */
+  async function dailyDigest() {
+    if (!saves || !cache || !env.MAIL_TO) return { skipped: "not configured" };
+    const nowLocalMin = (() => {
+      const d = new Date(Date.now() + TZ_MIN * 60000);
+      return d.getUTCHours() * 60 + d.getUTCMinutes();
+    })();
+    if (nowLocalMin < DIGEST_AFTER_MIN) return { skipped: "too early" };
+    const day = yesterdayIn(TZ_MIN);
+    const mark = `digest-sent-${day}`;
+    if (await cache.get(mark).catch(() => null)) return { skipped: "already sent" };
+    /* Claimed BEFORE sending. Two instances a millisecond apart would
+       otherwise both read "not sent" and both send. */
+    await cache.put(mark, new Date().toISOString(), { ttlSeconds: 14 * 86400 }).catch(() => {});
+    const { from, to } = windowFor(day, TZ_MIN);
+    const rows = await saves.finishedSince(from, to);
+    const seen = new Set(rows.map((r) => r.result?.airtable?.companyRecordId).filter(Boolean));
+    const s = summarise(rows, { day, seenCompanies: seen });
+    const sent = await sendDigest(env, s, { log });
+    return { day, jobs: rows.length, sent: sent.sent, why: sent.why };
   }
 
   return { routes, version: VERSION, startedAt: STARTED, maintain,

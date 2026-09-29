@@ -246,7 +246,17 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 /* Three panes need the room; below it the research goes back to the top of
    the events pane (console.js researchInPane), and below 960 it is a tab. */
 @media(max-width:1280px) and (min-width:961px){.split{grid-template-columns:1fr 1fr}#paneX{display:none}#paneR{border-right:0}}
-.pane{display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0;border-right:1px solid var(--line)}
+.pane{display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0;border-right:1px solid var(--line);
+  position:relative}
+/* The border between two panes, made draggable. Four pixels wide and sitting
+   ON the line rather than beside it, so it is grabbable without being a
+   visible second rule; it lights up on hover the way a column edge does. */
+.pgrip{position:absolute;top:0;right:-3px;width:7px;height:100%;z-index:5;cursor:col-resize;
+  touch-action:none;background:transparent}
+.pgrip:hover{background:linear-gradient(to right,transparent 2px,var(--blue) 2px,var(--blue) 4px,transparent 4px)}
+body.colresize{cursor:col-resize;user-select:none}
+@media(max-width:960px){.pgrip{display:none}}
+@media(max-width:1280px) and (min-width:961px){#paneR .pgrip{display:none}}
 .pane:last-child{border-right:0}
 .ph{background:var(--panel);border-bottom:1px solid var(--line);padding:9px 16px;
   display:flex;align-items:baseline;gap:10px;font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
@@ -330,6 +340,17 @@ select.mini:hover{border-color:var(--blue);color:var(--blue)}
 .qc{border:1.5px solid var(--line2);background:var(--panel2);border-radius:16px;padding:7px 15px;
   font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2)}
 .qc:hover{border-color:var(--blue);color:var(--blue);background:var(--blueSoft)}
+/* A chip that is the current answer, not just an offer. The timeline picker
+   is the only place a chip holds a state — quarter, then month, then week —
+   and without this the row it drilled down from stops saying which one. */
+.qc.on{border-color:var(--blue);background:var(--blue);color:#fff}
+.qc.on:hover{background:var(--blue);color:#fff}
+/* One line per level of the picker, each with its own label, so the cascade
+   reads downwards instead of wrapping into one long run of chips. */
+.qrow{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;width:100%}
+.qrow .lbl{min-width:64px;font-size:var(--t-meta);color:var(--text3);padding:7px 0;
+  font-weight:var(--w-med)}
+.strip:has(.qrow){flex-direction:column;gap:7px}
 
 /* ── events ────────────────────────────────── */
 .ask{margin:0 0 10px;font-size:var(--t-meta);color:var(--text3);line-height:1.5}

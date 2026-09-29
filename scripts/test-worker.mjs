@@ -154,7 +154,8 @@ const contact = {
   companyId: '1776620', company: 'seats', owner: 'Enout Super Admin', ownerId: 74725,
   phones: [{ type: 'MOBILE', cc: '+91', value: '9800004321', primary: true }], emails: [],
   stage: 'MQL_MARKETING_QUALIFIED_LEAD', past: [],
-  current: [{ rowKey: 'wk-row-1', eventType: 'Offsite', budget: '8L', timeline: 'Q3', pax: '40', remarks: '' }],
+  nextCallDate: '2026-10-02', nextCallTime: '16:00',
+  current: [{ rowKey: 'wk-row-1', eventType: 'Offsite', budget: '8L', timeline: 'Aug, week 2', pax: '40', remarks: '' }],
 };
 const call1 = { at: '2026-09-23T10:00:00.000Z', outcome: 'Connected', duration: 40, durationSource: 'dialed', createdHere: true };
 const s1 = await call('/save', { method: 'POST', body: { contact, call: call1 } });
@@ -174,6 +175,22 @@ check('a retry did NOT create a second contact', s2j.created === false && s2j.ki
 check('the journal wrote itself into the store, not onto a disk',
       (await store.keys()).some((k) => k.startsWith('j:')),
       (await store.keys()).join(', ') || '(empty)');
+
+/* THE TWO FIELDS THAT ONLY EVER REACHED KYLAS AS REMARKS TEXT (Ayush,
+   2026-09-29). Both are custom fields whose names differ per account, so what
+   is asserted is that the resolver found THIS account's names in the live
+   field list and sent the right values under them: the call-back as the date
+   the associate picked, and "Aug, week 2" as the quarter Jul-Sep, by its
+   picklist id. */
+const kw = (await (await fetch('http://127.0.0.1:9900/__writes', { headers: { 'api-key': 'x' } })).json()).writes;
+const madeContact = kw.find((w) => w.kind === 'create' && /contacts/.test(w.path || 'contacts'));
+const cfSent = madeContact?.body?.customFieldValues || {};
+console.log(`   custom fields sent: ${JSON.stringify(cfSent)}`);
+check('the call-back date was written back to Kylas', cfSent.cfNextCallDate === '2026-10-02',
+      JSON.stringify(cfSent));
+check('and the offsite quarter, as the picklist id for Jul-Sep',
+      JSON.stringify(cfSent.cfOffsiteTimelineBdNew) === '[9103]', JSON.stringify(cfSent));
+check('the stage still goes with them', !!cfSent.cfPipelineStageBd, JSON.stringify(cfSent));
 
 /* ── 5 · the errors a shell is responsible for ───────────────────────── */
 console.log('\n5. errors');

@@ -706,7 +706,7 @@ export function renderRemarks(c, { stageLabel } = {}) {
 
 /* The console's shape back into Kylas'. Only fields Kylas owns — the overlay's
    own data lives in Airtable and in the remarks block. */
-export function toKylasContact(c, { remarks } = {}) {
+export function toKylasContact(c, { remarks, extra } = {}) {
   const { firstName, lastName } = splitName(c.pocName);
   const body = {
     firstName: firstName || undefined,
@@ -736,6 +736,11 @@ export function toKylasContact(c, { remarks } = {}) {
   const stageId = STAGE_ID[c.stage];
   if (stageId) body.customFieldValues.cfPipelineStageBd = stageId;
   if (c.source) body.customFieldValues.cfSourceOfData = c.source;
+  /* The call-back date and the offsite quarter, under whatever names this
+     account's admin gave those fields — resolved from the live field list, not
+     guessed here. See kylas-write-map.mjs. Empty when the account has neither,
+     which is exactly how it behaved before they were written at all. */
+  Object.assign(body.customFieldValues, extra || {});
   if (!Object.keys(body.customFieldValues).length) delete body.customFieldValues;
 
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];

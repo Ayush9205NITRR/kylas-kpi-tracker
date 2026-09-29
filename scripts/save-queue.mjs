@@ -161,5 +161,23 @@ export function createSaveQueue({ db, log = () => {}, now = () => Date.now() }) 
     return Object.fromEntries((r.results || []).map((x) => [x.state, x.n]));
   }
 
-  return { enqueue, run, drain, status, backlog };
+  /* Every job that finished in a window, for the daily write-back digest.
+     The job rows ARE the record of what reached Kylas — each result carries
+     the `wrote` list the save built ("created contact", "updated contact",
+     "logged call") — so the digest counts what happened rather than what was
+     meant to. Kept for KEEP_MS, which is why a day's window always fits. */
+  async function finishedSince(from, to = now()) {
+    await ready();
+    const r = await db.prepare(
+      "SELECT id, state, tries, result, error, updated_at FROM save_jobs " +
+      "WHERE state IN ('done','failed') AND updated_at >= ? AND updated_at < ? ORDER BY updated_at")
+      .bind(from, to).all();
+    return (r.results || []).map((j) => ({
+      id: j.id, state: j.state, tries: j.tries, at: j.updated_at,
+      result: j.result ? JSON.parse(j.result) : null,
+      error: j.error ? JSON.parse(j.error) : null,
+    }));
+  }
+
+  return { enqueue, run, drain, status, backlog, finishedSince };
 }

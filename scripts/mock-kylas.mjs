@@ -390,6 +390,20 @@ createServer(async (req, res) => {
       { name: "cfPipelineStageBd", displayName: "Pipeline Stage - BD", type: "PICK_LIST",
         picklist: { picklistValues: stages.map((s) => ({ id: s.id, name: s.code, displayName: s.label })) } },
       { name: "designation", displayName: "Designation", type: "TEXT_FIELD" },
+      /* The two write-back targets, and the field that must NOT be mistaken
+         for the first of them. Named the way the live account names them, so
+         kylas-write-map resolves against the real shapes rather than tidy
+         ones invented here. */
+      { name: "cfLastCalledAtDate", displayName: "Last Called At", type: "DATE_PICKER" },
+      { name: "cfNextCallDate", displayName: "Next Call Date", type: "DATE_PICKER" },
+      { name: "cfOffsiteTimelineBdNew", displayName: "Offsite Timeline (BD - New)",
+        type: "MULTI_PICKLIST",
+        picklist: { picklistValues: [
+          { id: 9101, name: "JAN_MAR", displayName: "Jan - Mar" },
+          { id: 9102, name: "APR_JUN", displayName: "Apr - Jun" },
+          { id: 9103, name: "JUL_SEP", displayName: "Jul - Sep" },
+          { id: 9104, name: "OCT_DEC", displayName: "Oct - Dec" },
+        ] } },
     ] });
   }
 

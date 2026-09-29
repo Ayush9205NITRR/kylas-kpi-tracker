@@ -76,6 +76,11 @@ node scripts/test-buckets.mjs            # 38 · the six call buckets, and the s
                                          #      are easy to file by rung and should not be
 node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup, drift, and a
                                          #      formula reading the wrong field
+node scripts/test-write-map.mjs          # 29 · which Kylas field is the call-back and which is
+                                         #      the offsite timeline, per account, and the
+                                         #      values sent under them
+node scripts/test-digest.mjs             # 28 · the daily write-back email, counted from the
+                                         #      job rows — including what a friendly number hides
 node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
 node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
                                          #       page documenting them, all agreeing
@@ -410,6 +415,66 @@ code and answers everything cheerfully. **Restart the proxy after editing
 `scripts/`** — an afternoon went into a bug that was only a stale process.
 
 ---
+
+## 3a · What the console writes back to Kylas
+
+One `PUT /v1/contacts/{id}` (or a `POST` for a new one) and one
+`POST /v1/call-logs/`. No company record is ever written — `updateCompany`
+exists in the client and nothing calls it, so **accounts created in Kylas is
+zero by design**, and the digest says so rather than printing a number.
+
+| | fields |
+|---|---|
+| Contact, every save | `firstName` `lastName` `designation` `linkedin` `emails[]` `phoneNumbers[]` `company` `ownerId` `remarks` (between the markers only) `cfPipelineStageBd` `cfSourceOfData` |
+| Contact, since 1.29 | the **call-back date** and the **offsite quarter**, under whatever this account calls those fields |
+| Call log | `outcome` `callType` `startTime` `duration` `phoneNumber` `notes[]` `relatedTo` |
+
+**The two new ones are resolved, not hardcoded** (`scripts/kylas-write-map.mjs`).
+A custom field's name is whatever the admin typed — `cfNextCallDate`,
+`cfCallBackOn`, `cfOffsiteTimelineBdNew` — so the field is picked out of the
+live field list (already fetched and cached for the picklists) by what it *is*:
+a date field whose label talks about the next call, a picklist whose label talks
+about the offsite timeline. `Last Called At` is explicitly scored to zero, since
+it is also a date field whose label says "call" and writing a future date into
+it would rewrite the account's own call history. An account with neither field
+gets the payload without them; the save is never failed over a lookup.
+
+The quarter is matched by **reading** each option with the same parser the
+console reads free text with — `"Jul - Sep"`, `"Q3 (Jul-Sep)"` and `"JUL_SEP"`
+all derive `JUL_SEP` — so the picklist's spelling never has to be known here.
+
+**Still not written:** budget, pax, event type, mode, vendor and service
+offering (remarks text only), and salutation.
+
+**Nothing has been written to a live Kylas account yet.** All of the above is
+verified against `mock-kylas.mjs` and `test-worker.mjs` §4, which asserts the
+exact `customFieldValues` that leave the Worker. `scripts/probe-write.mjs`
+is the live check, one contact at a time, restoring what it changed:
+
+```sh
+KYLAS_KEY=... node scripts/probe-write.mjs --contact <id>            # read-only
+KYLAS_KEY=... node scripts/probe-write.mjs --contact <id> --write    # and back again
+```
+
+It writes **one field per request**, because Kylas rejects a whole payload over
+one bad value with a 400 that names neither the field nor the rule. Its verdict
+separates `KEPT` from `DROPPED (200, nothing stored)` — the second is a
+permissions or shape problem, and it is the one that would otherwise look like
+success.
+
+## 3b · The daily write-back email
+
+`scripts/digest.mjs`, sent by the maintenance run once the reported day has
+ended (`DIGEST_AFTER_MIN`, default 06:00 IST), claimed in the shared store by
+the day's own key so several instances cannot each send it. It counts the
+**finished job rows** — what actually reached Kylas — not what was attempted:
+contacts updated, contacts created, calls logged, accounts worked, accounts
+saved here for the first time, plus every failure by name and every save whose
+Kylas half landed while its Airtable half did not.
+
+Set `MAIL_URL`, `MAIL_KEY`, `MAIL_FROM`, `MAIL_TO` (Resend's shape, which most
+providers accept). With them unset it logs the digest and sends nothing, which
+is also what every test does — nothing here can email anybody by accident.
 
 ## 4 · Invariants that look arbitrary and are not
 
