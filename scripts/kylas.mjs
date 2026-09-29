@@ -776,7 +776,7 @@ export function toKylasContact(c, { remarks, extra, base } = {}) {
      them. Values arrive as ids or as { id, name }; the id is what a write
      takes. */
   for (const [k, v] of Object.entries(had.customFieldValues || {})) {
-    const id = idOf(v);
+    const id = cfValue(v);
     if (id !== undefined && id !== null && id !== "") body.customFieldValues[k] = id;
   }
 
@@ -793,6 +793,17 @@ export function toKylasContact(c, { remarks, extra, base } = {}) {
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
   return body;
 }
+
+/* A CUSTOM FIELD'S VALUE, AS A WRITE TAKES IT.
+   idOf() below reads one value out of { id, name }, and a MULTI-picklist
+   arrives as an ARRAY of those — for which idOf returns undefined, because an
+   array has no .id. Carried through the loop above that meant "no value", the
+   field was left out of the payload, and the payload REPLACES the record: a
+   save on a contact whose Offsite Timeline had been set would silently clear
+   it. The same shape that cost a phone number, one level deeper. */
+const cfValue = (v) => (Array.isArray(v)
+  ? v.map((x) => idOf(x)).filter((x) => x !== undefined && x !== null && x !== "")
+  : idOf(v));
 
 /* Kylas' own call-log vocabulary, which is not the console's. */
 const OUTCOME = { "No answer": "no_answer", "Wrong POC": "connected",

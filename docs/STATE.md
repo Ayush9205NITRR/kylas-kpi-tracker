@@ -504,6 +504,17 @@ The quarter is matched by **reading** each option with the same parser the
 console reads free text with — `"Jul - Sep"`, `"Q3 (Jul-Sep)"` and `"JUL_SEP"`
 all derive `JUL_SEP` — so the picklist's spelling never has to be known here.
 
+**A MULTI-picklist is an array, and an array has no `.id`.** Kylas hands a
+multi-select back as an array of values, and the carry-over read it with the
+helper that reads `{ id, name }` — which returns `undefined` for an array.
+`undefined` meant "no value", the field was left out, and **the payload
+replaces the record**: a save on a contact whose Offsite Timeline had been set
+silently cleared it. It also made the nightly push rewrite the same value
+every night, because `undefined` never equals `[2880426]`. Found on 2026-09-29
+by running the push against the mocks for the first time; `cfValue` in
+kylas.mjs and `idOf` in push-kylas.mjs map arrays element by element, and
+test-replace §9 pins both.
+
 **Still not written:** budget, pax, event type, mode, vendor and service
 offering (remarks text only), and salutation.
 
@@ -552,6 +563,12 @@ moved because somebody edited an event row rather than logging a call. Without
 it the two fields are right on the contacts worked since the upgrade and blank
 on the thousands worked before, which is worse than either — a filter in Kylas
 would look like it works and quietly miss most of the pipeline.
+
+**A contact Kylas no longer has is not a failure.** The KPI base keeps a row
+for every contact ever saved; Kylas' copy can be deleted or merged away, and
+then the id 404s for ever. Those are counted as *gone* and named, not as
+failures — a nightly job that exits non-zero every night is one nobody reads.
+A rising `gone` count is the real signal: the two stores are drifting apart.
 
 It writes **only those two fields**. Not the stage, the name or the phone:
 Kylas is the system of record for those, and a nightly job that overwrites them

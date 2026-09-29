@@ -141,5 +141,32 @@ const bare = bodyFor({ firstName: "A", lastName: "B" }, { cfOffsiteTimeline: [28
 ok("no empty phoneNumbers key", !("phoneNumbers" in bare));
 ok("no empty emails key", !("emails" in bare));
 
+/* ── a MULTI-picklist is an array, and an array has no .id ──────────────
+   Found by running the push against the mock for the first time. Kylas hands
+   a multi-select back as an array of values; the carry-over read it with the
+   same helper that reads { id, name }, which returns undefined for an array.
+   Undefined meant "no value", the field was left out, and the payload
+   REPLACES the record — so a save on a contact whose Offsite Timeline had
+   been set silently cleared it. The same shape that cost a phone number, one
+   level deeper. It also made the nightly push rewrite the same value every
+   night, for ever, because undefined never equals [2880426]. */
+console.log("\n9. a multi-picklist survives, and does not look changed every night");
+const MULTI = { ...BASE, customFieldValues: {
+  cfPipelineStageBd: 2862827, cfOffsiteTimeline: [2880426, 2880427],
+  cfBatch: { id: 77, name: "B-11" } } };
+const saved = toKylasContact(CARD, { remarks: "x", base: MULTI });
+is("the array is carried over whole", saved.customFieldValues.cfOffsiteTimeline, [2880426, 2880427]);
+is("...beside the single-value fields", saved.customFieldValues.cfBatch, 77);
+const pushedMulti = bodyFor(MULTI, { cfOffsiteTimeline: [2880426] });
+is("the push carries it too", pushedMulti.customFieldValues.cfOffsiteTimeline, [2880426]);
+/* An array of { id, name }, which is the other shape Kylas uses for these. */
+const objArr = bodyFor({ ...BASE, customFieldValues: {
+  cfOffsiteTimeline: [{ id: 2880426, name: "Jul - Sep" }, { id: 2880427, name: "Oct - Dec" }] } }, {});
+is("...in either spelling", objArr.customFieldValues.cfOffsiteTimeline, [2880426, 2880427]);
+/* And the comparison that decides whether to write at all. */
+const idOf = (v) => (Array.isArray(v) ? v.map(idOf) : v && typeof v === "object" ? (v.id ?? v.value) : v);
+is("a value already correct reads as unchanged",
+  JSON.stringify(idOf([{ id: 2880426 }])), JSON.stringify([2880426]));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

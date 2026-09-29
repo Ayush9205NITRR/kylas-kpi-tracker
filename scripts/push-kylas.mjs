@@ -81,7 +81,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   };
 
   /* ── the pass ──────────────────────────────────────────────────────── */
-  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0;
+  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0, gone = 0;
   const examples = [];
   for (const rec of contacts) {
     const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
@@ -94,7 +94,21 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
 
     let base;
     try { base = await kylas.contact(kid); }
-    catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: could not read — ${e.message.slice(0, 90)}`); continue; }
+    catch (e) {
+      /* A CONTACT KYLAS NO LONGER HAS IS NOT A FAILURE OF THIS JOB. The KPI
+         base keeps a row for every contact ever saved; Kylas' own copy can be
+         deleted or merged away, and then the id 404s for ever. Counting that
+         as a failure means this job exits non-zero every night, and a nightly
+         job that is always red is a nightly job nobody reads. Counted as GONE
+         instead: named once, and a growing number is the real signal — the
+         two stores are drifting apart. */
+      if (/\b404\b/.test(e.message)) {
+        gone++;
+        if (gone <= 5) log(`  · ${rec.fields?.Name || kid}: not in Kylas any more (${kid})`);
+        continue;
+      }
+      failed++; log(`  ! ${rec.fields?.Name || kid}: could not read — ${e.message.slice(0, 90)}`); continue;
+    }
 
     const have = base?.customFieldValues || {};
     const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
@@ -109,11 +123,13 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: write refused — ${e.message.slice(0, 120)}`); }
   }
 
-  log(`\n  ${checked} checked · ${changed} differ · ${skipped} had nothing to push`);
+  log(`\n  ${checked} checked · ${changed} differ · ${skipped} had nothing to push` +
+      (gone ? ` · ${gone} no longer in Kylas` : ""));
+  if (gone > 5) log(`    …and ${gone - 5} more that Kylas no longer has`);
   examples.forEach((e) => log(`    ${e}`));
   if (examples.length && changed > examples.length) log(`    …and ${changed - examples.length} more`);
   log(apply ? `\n  ${wrote} written, ${failed} failed.` : `\n  Dry run — nothing written. Add --apply.`);
-  return { checked, changed, wrote, failed, skipped };
+  return { checked, changed, wrote, failed, skipped, gone };
 }
 
 /* ── the pieces run() uses, out here so they are testable ──────────────── */
@@ -131,7 +147,13 @@ export function findOptions(f, d = 0) {
   return null;
 }
 
-const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
+/* An array is a MULTI-picklist, not an object with an id: mapped element by
+   element, or it reads as "no value" and the field is dropped from a payload
+   that replaces the record. See cfValue in kylas.mjs — the same bug, and it
+   also made this job rewrite the same value every night, for ever, because
+   undefined never equals [9103]. */
+const idOf = (v) => (Array.isArray(v) ? v.map(idOf)
+  : v && typeof v === "object" ? (v.id ?? v.value) : v);
 const same = (a, b) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) ===
                        JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
 
