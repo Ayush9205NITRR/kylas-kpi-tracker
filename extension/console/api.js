@@ -67,19 +67,45 @@
 
   /* No `interactive` option, and its absence is the point: nothing that loads
      data can open a sign-in window. */
+  /* THE LAST ANSWER, AND ITS TAG, PER PATH. The company list is the biggest
+     thing this console fetches and it asks for it every time it opens; most
+     of those asks get back exactly what is already here. So the tag goes back
+     as If-None-Match and an unchanged answer arrives as a 304 with no body —
+     no download, and no parsing a few megabytes of JSON the browser already
+     holds.
+
+     In memory only, deliberately. A tag that outlived the page would have to
+     be invalidated when the server changed shape, and a console showing a
+     list from a previous build is a worse problem than one extra fetch on
+     open. Bounded, because a session can visit a lot of paths. */
+  const held = new Map();
+  const remember = (path, etag, value) => {
+    if (!etag) return value;
+    if (held.size > 40) held.clear();
+    held.set(path, { etag, value });
+    return value;
+  };
+
   async function req(path, { timeout = 12000, method = "GET", body } = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     try {
       const jwt = await token();
+      const seen = method === "GET" || !method ? held.get(path) : null;
       const res = await fetch(base + path, {
         signal: ctl.signal, method,
         headers: {
           ...(body ? { "content-type": "application/json" } : {}),
           ...(jwt ? { authorization: `Bearer ${jwt}` } : {}),
+          ...(seen ? { "if-none-match": seen.etag } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
       });
+      /* Unchanged: the server sent no body, so use the one already here. */
+      if (res.status === 304 && seen) {
+        if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
+        return seen.value;
+      }
       /* A 401 means the token was refused, not that the request was wrong.
          The commonest cause is the mundane one — it expired while the console
          sat open — so throw the held one away and try ONE silent refresh.
@@ -106,7 +132,7 @@
           throw err;
         }
         if (!state.online) { state = { ...state, online: true, reason: "" }; announce(); }
-        return p;
+        return (method === "GET" || !method) ? remember(path, again.headers.get("etag"), p) : p;
       }
       /* Deliberately not named `body` — that is the request payload above, and
          shadowing it here throws before the fetch ever runs. */
@@ -123,7 +149,9 @@
       if (!state.online || state.needsSignIn) {
         state = { ...state, online: true, reason: "", needsSignIn: false, signInCode: "" }; announce();
       }
-      return payload;
+      /* Held with its tag, so the next ask for this path can be conditional. */
+      return (method === "GET" || !method)
+        ? remember(path, res.headers.get("etag"), payload) : payload;
     } catch (e0) {
       /* "signal is aborted without reason" is the browser's text for our own
          timeout, and it reached the Dashboard verbatim. A slow answer is not a

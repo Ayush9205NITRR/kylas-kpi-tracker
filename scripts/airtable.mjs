@@ -557,8 +557,9 @@ export async function readCompanyKpis(at, { log = () => {} } = {}) {
        by hand in Airtable, which is worth knowing about. */
     if (!id) { skipped++; continue; }
     byKylasId.set(id, {
-      name: f.Name || "",
-      owner: f.Owner || "",
+      /* `name` and `owner` were repeated here from the company row above. The
+         console already falls back to the row (`k.name || c.name`), so the two
+         copies were always the same string sent twice. */
       rank: Number(f["KPI Rank"] || 0),
       stage: f["KPI Stage"] || "",
       stageAt: f["KPI Stage At"] || "",
@@ -880,7 +881,11 @@ export async function readCompanies(at) {
       ownerId: String(f["Kylas Owner ID"] || ""),
       /* Attached, not joined. */
       kpi: kpis.get(id) || null,
-      _airtable: { updatedAt: f["Kylas Updated At"] || "" },
+      /* `_airtable: { updatedAt }` used to ride here. Nothing has ever read
+         it — not the console, not a report, not a test — and on a list of ten
+         thousand companies an unread field is a quarter of a megabyte of
+         nothing. Kylas Updated At is still on the row in Airtable and in the
+         copy; it is just not sent to a browser that does not want it. */
     };
   });
 }

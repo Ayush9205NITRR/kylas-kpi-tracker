@@ -56,8 +56,6 @@ export async function readCompaniesSql(db) {
          holds, and readCompanyKpis skips it — so no KPI block here either,
          or the two sides would differ on a row neither can use. */
       kpi: id ? {
-        name: r.name || "",
-        owner: r.owner || "",
         rank: Number(r.kpi_rank || 0),
         stage: r.kpi_stage || "",
         /* Airtable returns "" for an empty formula, not null. */
@@ -76,7 +74,6 @@ export async function readCompaniesSql(db) {
         calls: Number(r.call_count || 0),
         talkSeconds: Number(r.talk_seconds || 0),
       } : null,
-      _airtable: { updatedAt: r.kylas_updated_at || "" },
     };
   });
 }

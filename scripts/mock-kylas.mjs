@@ -482,6 +482,20 @@ createServer(async (req, res) => {
   if (p === "/__refuse") { refuseName = url.searchParams.get("name") || ""; return json(res, 200, { refuseName }); }
   if (p === "/__hang") { hangCreate = url.searchParams.get("on") === "1"; return json(res, 200, { hangCreate }); }
   if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }
+  /* POST /__company?id=&name=&owner= adds a company to the account, the way a
+     BD adding one in Kylas would. There was no way to do that here, so
+     anything that had to prove it NOTICES a new company — the conditional
+     reply's invalidation, most of all — could only be tested by writing to
+     Airtable, which this list does not read from. */
+  if (p === "/__company") {
+    const id = Number(url.searchParams.get("id") || 0);
+    if (!id) return json(res, 400, { message: "id is required" });
+    COMPANIES[id] = { id, name: url.searchParams.get("name") || `company ${id}`,
+      ownerId: Number(url.searchParams.get("owner") || 74725),
+      updatedAt: new Date().toISOString(),
+      customFieldValues: { cfSourceOfData: url.searchParams.get("source") || "Round-Robin" } };
+    return json(res, 200, { ok: true, companies: Object.keys(COMPANIES).length });
+  }
 
   json(res, 404, { message: "not mocked", path: p, method: req.method });
 }).listen(PORT, "127.0.0.1", () => {

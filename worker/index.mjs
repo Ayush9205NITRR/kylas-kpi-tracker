@@ -40,6 +40,7 @@ import { createHandlers } from "../scripts/handlers.mjs";
 import { d1Store, kvStore } from "../scripts/store.mjs";
 import { createGoogleAuth } from "../scripts/google-auth.mjs";
 import { createMirror } from "../scripts/mirror.mjs";
+import { taggedBody, matches, cacheable } from "../scripts/etag.mjs";
 import PRIVACY from "./privacy.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -151,17 +152,32 @@ async function authenticate(request, env, log) {
    response — the request never leaves the browser at all, and `fetch` rejects
    with the maximally unhelpful "Failed to fetch". Which is exactly how this
    shipped. */
-const json = (body, status, origin) => new Response(JSON.stringify(body), {
-  status,
-  headers: {
-    "content-type": "application/json",
-    ...(origin ? { "Access-Control-Allow-Origin": origin,
-                   "Access-Control-Allow-Headers": "content-type, authorization",
-                   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                   "Access-Control-Allow-Credentials": "true",
-                   Vary: "Origin" } : {}),
-  },
-});
+const cors = (origin) => (origin ? {
+  "Access-Control-Allow-Origin": origin,
+  /* If-None-Match has to be allowed through or the browser strips it and every
+     reply is a fresh 200 — the cache would look implemented and do nothing. */
+  "Access-Control-Allow-Headers": "content-type, authorization, if-none-match",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Credentials": "true",
+  /* ...and ETag has to be EXPOSED, or script on another origin cannot read it
+     back off the response to send next time. */
+  "Access-Control-Expose-Headers": "etag",
+  Vary: "Origin",
+} : {});
+
+const json = (body, status, origin, request) => {
+  const { text, etag } = taggedBody(body);
+  const base = { "content-type": "application/json", ...cors(origin) };
+  /* THE SAME ANSWER, NOT SENT AGAIN. The console holds the last reply and its
+     tag; when nothing has changed this is a few hundred bytes instead of a few
+     hundred kilobytes, and the browser skips parsing what it already has. */
+  if (cacheable(request?.method, status)) {
+    if (matches(request?.headers?.get("if-none-match"), etag))
+      return new Response(null, { status: 304, headers: { ETag: etag, ...cors(origin) } });
+    return new Response(text, { status, headers: { ...base, ETag: etag } });
+  }
+  return new Response(text, { status, headers: base });
+};
 
 /* ── the nightly jobs ────────────────────────────────────────────────────
    The whole point of moving off a laptop: these used to need a machine that
@@ -320,7 +336,7 @@ export default {
           await Promise.allSettled(left);
         }
       })());
-      return json(await pending, 200, origin);
+      return json(await pending, 200, origin, request);
     } catch (e) {
       const status = e.status || 502;
       log(`! ${url.pathname} ${status} ${e.message}`);

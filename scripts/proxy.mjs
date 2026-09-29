@@ -23,6 +23,7 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createHandlers } from "./handlers.mjs";
+import { taggedBody, matches, cacheable } from "./etag.mjs";
 import { fileStore } from "./store.mjs";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -82,8 +83,11 @@ const server = createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   /* authorization is not sent to a localhost proxy, but the two shells
      answering differently is a difference somebody has to rediscover. */
-  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, if-none-match");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  /* Script on another origin cannot read ETag off a response unless it is
+     exposed, so without this the console never has a tag to send back. */
+  res.setHeader("Access-Control-Expose-Headers", "etag");
   res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
 
@@ -104,8 +108,15 @@ const server = createServer(async (req, res) => {
       catch { throw Object.assign(new Error("the request body is not valid JSON"), { status: 400 }); }
     }
     const body = await handler(url, parsed);
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(body));
+    /* The same conditional reply the Worker gives, so the two runtimes cannot
+       differ on something the console depends on. */
+    const { text, etag } = taggedBody(body);
+    if (cacheable(req.method, 200) && matches(req.headers["if-none-match"], etag)) {
+      res.writeHead(304, { ETag: etag });
+      return res.end();
+    }
+    res.writeHead(200, { "content-type": "application/json", ETag: etag });
+    res.end(text);
   } catch (e) {
     const status = e.status || 502;
     log(`! ${url.pathname} ${status} ${e.message}`);

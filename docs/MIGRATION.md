@@ -251,21 +251,41 @@ At 10,000 companies the whole database is 13MB against D1's 10GB ceiling:
 about 785x headroom. Airtable's per-base record cap would have been passed
 long before.
 
-### The finding the benchmark turned up
+### The payload, and a correction
 
-**The database stops being the bottleneck and the payload becomes one.** At
-10,000 companies `/companies` answers in 309ms and then has to send 5.7MB to
-a browser. On a laptop on office wifi that is the slower half; on a phone it
-is most of the wait.
+An earlier version of this note said the 5.7MB reply at 10,000 companies was
+the next bottleneck. **That overstated it: 5.7MB is the uncompressed size, and
+the network compresses this to about 300KB.** The figure to care about was
+always the compressed one.
 
-This is not caused by the migration — the same reply is 10.7MB out of
-Airtable today, so the move roughly halves it. But it is the next thing worth
-fixing once the move is done, and it is worth knowing before anyone reads
-"162x faster" and expects the screen to be 162x faster. It will not be.
+Two things were done anyway, because 300KB on every console open is still
+worth not sending.
 
-Three ways out when the time comes, cheapest first: send only the columns the
-table has switched on; page the list and fetch the rest as it scrolls; or
-filter server-side, which is only possible once the data is in SQL.
+**Dead weight removed.** `_airtable.updatedAt` rode on every company row and
+nothing had ever read it — not the console, not a report, not a test. `kpi.name`
+and `kpi.owner` repeated the company's own name and owner, and the console
+already fell back to the row. Removing all three: 5.66MB → 4.94MB raw,
+304KB → 255KB compressed, and 13% less JSON for the browser to parse.
+
+**The same answer is not sent twice.** Every reply now carries an `ETag`; the
+console sends it back as `If-None-Match`; an unchanged answer is a **304 with
+no body at all**. Measured on the live stack: first ask 19KB, second ask 0
+bytes in 5ms.
+
+That is the change that matters, because the company list barely changes
+between console opens and the console asks for it every time. The browser
+also skips parsing a reply it already holds, which on a big list is the
+larger half of the cost.
+
+The tag is a hash of the reply rather than a version number somebody has to
+remember to bump — a forgotten bump shows as yesterday's list with nothing on
+screen to say so. `cachedSeconds` is left out of the hash: it changes on every
+request without the answer changing, and including it would have made this
+quietly do nothing.
+
+If the list ever does need to get smaller than 255KB, the options in order are:
+send only the columns the table has switched on, page it, or filter
+server-side — the last only possible once the data is in SQL.
 
 ## Still to build
 
