@@ -2,6 +2,12 @@
 # One entry point for every scheduled job.
 #
 #   scripts/cron.sh sync       Kylas -> Airtable   (twice a day)
+#   scripts/cron.sh push       Airtable -> Kylas   (nightly, the two derived
+#                              fields only: the call-back and the offsite
+#                              quarter. Never a stage, a name or a phone —
+#                              Kylas owns those, and a job that overwrites
+#                              them from a copy is how a CRM loses an edit
+#                              somebody made in the CRM.)
 #   scripts/cron.sh rollup     Call Log retention  (weekly)
 #   scripts/cron.sh snapshot   freeze yesterday    (daily)
 #
@@ -24,7 +30,7 @@ set -eu
 
 JOB="${1:-}"
 if [ -z "$JOB" ]; then
-  echo "usage: $0 sync|rollup|snapshot" >&2
+  echo "usage: $0 sync|push|rollup|snapshot" >&2
   exit 2
 fi
 
@@ -74,8 +80,8 @@ fi
 missing=""
 [ -n "${AIRTABLE_PAT:-}" ] || missing="$missing AIRTABLE_PAT"
 [ -n "${AIRTABLE_BASE:-}" ] || missing="$missing AIRTABLE_BASE"
-# Only the sync talks to Kylas; the other two are Airtable-only.
-if [ "$JOB" = "sync" ]; then
+# The sync and the push talk to Kylas; the other two are Airtable-only.
+if [ "$JOB" = "sync" ] || [ "$JOB" = "push" ]; then
   [ -n "${KYLAS_KEY:-}" ] || missing="$missing KYLAS_KEY"
 fi
 if [ -n "$missing" ]; then
@@ -104,6 +110,7 @@ fi
 # ── what each job actually is ──────────────────────────────────────────
 case "$JOB" in
   sync)     set -- scripts/sync-kylas.mjs --apply ;;
+  push)     set -- scripts/push-kylas.mjs --apply ;;
   # 30 days, not the script's own default of 90. 90 days at this team's volume
   # is ~54,000 raw rows, which is over a Team base on its own — the script says
   # so when you run it. Passed explicitly so the number is visible in the log

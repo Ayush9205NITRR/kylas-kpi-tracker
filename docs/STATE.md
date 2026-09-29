@@ -68,7 +68,6 @@ node scripts/test-ladder-migration.mjs   # 33 · stage ladder remaps
 node scripts/test-idempotency.mjs        # 17 · starts its own stack. The template to copy.
 node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: the save
                                          #      survives it, and the backfill repairs it
-node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of event-row text
 node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
 node scripts/test-days.mjs               # 43 · where one day ends. Every case is an hour
                                          #      the old code got wrong
@@ -76,6 +75,8 @@ node scripts/test-buckets.mjs            # 38 · the six call buckets, and the s
                                          #      are easy to file by rung and should not be
 node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup, drift, and a
                                          #      formula reading the wrong field
+node scripts/test-offsite.mjs            # 45 · Offsite Timeline out of event-row text, and the
+                                         #      old FY chips landing where the new picker does
 node scripts/test-replace.mjs            # 27 · the PUT replaces the record, so every field the
                                          #      card is silent about is carried over from it
 node scripts/test-write-map.mjs          # 29 · which Kylas field is the call-back and which is
@@ -507,6 +508,46 @@ one bad value with a 400 that names neither the field nor the rule. Its verdict
 separates `KEPT` from `DROPPED (200, nothing stored)` — the second is a
 permissions or shape problem, and it is the one that would otherwise look like
 success.
+
+## 3ab · The nightly push, and what happens to the rows written before it
+
+`scripts/push-kylas.mjs`, in the schedule at **01:45**, after the sync so it
+works from a base that was just refreshed:
+
+```sh
+node --env-file=.env.local scripts/push-kylas.mjs            # dry run, prints what would move
+node --env-file=.env.local scripts/push-kylas.mjs --apply
+```
+
+A save writes the call-back and the offsite quarter from 1.29. This is the
+other half: every contact saved *before* that, and every contact whose quarter
+moved because somebody edited an event row rather than logging a call. Without
+it the two fields are right on the contacts worked since the upgrade and blank
+on the thousands worked before, which is worse than either — a filter in Kylas
+would look like it works and quietly miss most of the pipeline.
+
+It writes **only those two fields**. Not the stage, the name or the phone:
+Kylas is the system of record for those, and a nightly job that overwrites them
+from a copy is how a CRM loses an edit somebody made in the CRM. Every write is
+the whole contact (the PUT replaces), and a contact whose values already agree
+is not written at all, so the second night is cheap.
+
+**THE OLD ROWS NEED NO MIGRATION.** The quarter is never stored — it is derived
+from the Timeline text each time it is asked for. Until 1.29 the chips offered
+*financial*-year quarters (`Q2 FY27`); the picker writes *calendar* ones
+(`Jul-Sep`). The parser reads FY as FY, so both land in the same bucket:
+
+| written on the row | derives | written by |
+|---|---|---|
+| `Q2 FY27` | `JUL_SEP` | the old chips |
+| `Jul-Sep`, `Aug`, `Aug, week 2` | `JUL_SEP` | the picker |
+| `Q3 FY27` | `OCT_DEC` | the old chips |
+| `Oct-Dec`, `Nov` | `OCT_DEC` | the picker |
+
+A bare `Q3` is the calendar quarter and `Q3 FY27` is not — the `FY` token is
+what separates them, and both spellings are in the data. `test-offsite.mjs` §3
+holds every pair; if it ever fails, every event row written before 1.29 has
+silently moved one quarter.
 
 ## 3b · The daily write-back email
 

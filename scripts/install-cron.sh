@@ -8,6 +8,10 @@
 # THE SCHEDULE, in the machine's LOCAL time
 #   00:30 daily    snapshot   yesterday is over, freeze it
 #   01:00 daily    sync       Kylas -> Airtable
+#   01:45 daily    push       Airtable -> Kylas: the call-back and the offsite
+#                             quarter, for every contact whose derived value
+#                             has moved. After the sync, so it works from a
+#                             base that has just been refreshed.
 #   13:00 daily    sync       again, so an afternoon's CRM edits reach the
 #                             console before the next morning
 #   02:00 Sunday   rollup     Call Log retention, after that night's sync
@@ -68,6 +72,7 @@ $BEGIN
 # the next --apply will overwrite them. Times are this machine's local time.
 30 0 * * *   $RUNNER snapshot
 0 1 * * *    $RUNNER sync
+45 1 * * *   $RUNNER push
 0 13 * * *   $RUNNER sync
 0 2 * * 0    $RUNNER rollup
 $END
