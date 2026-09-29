@@ -34,10 +34,49 @@ const spawnIt = (args, env) => {
   return p;
 };
 
+/* THESE TESTS MUST OWN THEIR MOCKS.
+   A dev stack left running on 9900/9901 does not fail this suite — it QUIETLY
+   PASSES FOR IT. The spawned mock dies on EADDRINUSE (silently, because it is
+   spawned with stdio:'ignore'), every request then goes to the stale one, and
+   whatever that one has been seeded with becomes the fixture. That happened on
+   2026-09-29: a stack seeded with 64 companies made §6b's "a base the sync has
+   never filled" fail three checks, identically on code from before the change
+   being tested — an hour spent reading a product for a fault that was a port.
+
+   So: refuse to start if anything is already listening, and refuse to continue
+   if a mock we spawned is not the one answering. */
+async function portFree(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(700) });
+    return false;                       /* answered — somebody is there */
+  } catch (e) {
+    /* A refused connection is what free looks like. A timeout is not: something
+       is listening and simply slow, and treating that as free is the bug. */
+    return !/timed out|abort/i.test(e.message);
+  }
+}
+
 async function mocks() {
-  spawnIt(['scripts/mock-kylas.mjs'], { MOCK_MANY: '4' });
-  spawnIt(['scripts/mock-airtable.mjs'], {});
+  for (const port of [9900, 9901]) {
+    if (await portFree(port)) continue;
+    console.error(`\n! Port ${port} is already in use — these tests spawn their own mocks and
+` +
+                  `  cannot share one. A stale dev stack here does not fail the suite, it
+` +
+                  `  silently becomes the fixture.\n` +
+                  `      ss -lptn 'sport = :${port}'   # find it\n` +
+                  `      kill <pid>                    # then run this again\n`);
+    process.exit(2);
+  }
+  const k = spawnIt(['scripts/mock-kylas.mjs'], { MOCK_MANY: '4' });
+  const a = spawnIt(['scripts/mock-airtable.mjs'], {});
+  /* A mock that exits during startup is the failure this guards against, so it
+     is watched for rather than waited out. */
+  let died = null;
+  k.on('exit', (c) => { if (c) died = `mock-kylas exited ${c}`; });
+  a.on('exit', (c) => { if (c) died = `mock-airtable exited ${c}`; });
   for (let i = 0; i < 50; i++) {
+    if (died) { console.error(`\n! ${died} — see the message it printed above.\n`); process.exit(2); }
     try {
       await fetch('http://127.0.0.1:9901/v0/appMOCK/Contacts', { headers: { Authorization: 'Bearer x' } });
       await fetch('http://127.0.0.1:9900/__writes', { headers: { 'api-key': 'x' } });

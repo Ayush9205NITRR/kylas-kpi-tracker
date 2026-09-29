@@ -127,6 +127,20 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A stale dev stack did not fail the tests, it BECAME their fixture.** The
+mocks are spawned with `stdio:'ignore'`, so a mock that died on EADDRINUSE
+said nothing — and every request then went to the mock already running on that
+port, whatever it had been seeded with. On 2026-09-29 a dev stack holding 64
+companies made `test-worker` §6b ("a base the sync has never filled") fail
+three checks, **identically on code from before the change under test**, and
+an hour went into reading the product for a fault that was a port.
+
+Both mocks now exit 98 with the port number and how to find the process, and
+`test-worker` refuses to start when anything is already answering on 9900 or
+9901 — and watches for a spawned mock that exits during startup. Note `ss` is
+not reliable in this container for sockets opened by backgrounded subshells;
+the guard asks the port over HTTP instead, which is what actually matters.
+
 **A rollup Airtable never computed, and a quarter of the KPIs read zero.**
 `Companies.Ever Picked` is declared `MAX(values)` over `Contacts.Ever Picked`,
 which is a **checkbox** — and Airtable returns blank for the maximum of a set

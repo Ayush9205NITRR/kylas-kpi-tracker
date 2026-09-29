@@ -295,6 +295,22 @@ createServer(async (req, res) => {
   }
 
   json(res, 405, { error: "not mocked", method: req.method });
+}).on("error", (e) => {
+/* A PORT ALREADY TAKEN IS NOT A WARNING, IT IS THE END OF THE RUN.
+   Node's default here is an unhandled 'error' event, which prints a stack and
+   exits 1 — but a parent that spawned this with stdio:'ignore' sees neither.
+   test-worker did exactly that: its own mock died on EADDRINUSE, the tests
+   went on talking to the mock ALREADY running (a dev stack, seeded with 64
+   companies), and three checks failed describing the product. Say which port,
+   say what to do, and use an exit code the parent can act on. */
+  if (e.code === "EADDRINUSE") {
+    console.error(`mock airtable: port ${PORT} is already in use — something else is serving it.`);
+    console.error(`  Find it:  ss -lptn 'sport = :${PORT}'   (or lsof -i :${PORT})`);
+    console.error(`  A test that spawns its own mocks must OWN them; a stale dev stack is not a stand-in.`);
+    process.exit(98);
+  }
+  console.error(`mock airtable: ${e.message}`);
+  process.exit(1);
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`mock airtable on http://127.0.0.1:${PORT}`);
   console.log(`  upsert / select / delete · 429s above 5 req/s · /__writes /__reset`);
