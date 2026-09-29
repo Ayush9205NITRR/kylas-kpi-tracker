@@ -16,6 +16,8 @@
  * rollup aggregation and every select's choices.
  */
 import { diffBase, manualCount, cleanExceptExtras } from "./schema-diff.mjs";
+import { createAirtable } from "./airtable.mjs";
+import { checkKpiData, printKpiData } from "./check-kpi-data.mjs";
 
 const PAT = process.env.AIRTABLE_PAT;
 const BASE = process.env.AIRTABLE_BASE;
@@ -33,6 +35,33 @@ if (!res.ok) {
 }
 const tables = (await res.json()).tables;
 const d = diffBase(tables);
+
+/* ── and then: does it COMPUTE what it says it computes? ───────────────
+   Everything above compares the base to schema.mjs, and there is a whole
+   class of fault it cannot see — the meta API does not report a rollup's
+   aggregation (d.rollupUnreadable below), so a rollup Airtable silently
+   declines to compute has the right name, the right type and nothing
+   visibly wrong with it. Companies.Ever Picked was exactly that for weeks,
+   and Phone Picked read 0 on every company because of it.
+
+   So the values get read too, and every rollup recomputed from the rows
+   underneath it. --schema-only skips it when only the shape is in question;
+   a base with no records yet is simply clean. */
+async function dataCheck() {
+  if (process.argv.includes("--schema-only")) return;
+  console.log(`\n── the values ─────────────────────────────────────────────────────`);
+  let out;
+  try {
+    const at = createAirtable(PAT, BASE, { log: () => {},
+      ...(process.env.AIRTABLE_BASE_URL ? { apiUrl: process.env.AIRTABLE_BASE_URL } : {}) });
+    out = await checkKpiData(at, { log: (s) => console.log(s) });
+  } catch (e) {
+    console.log(`  could not read the rows — ${e.message.slice(0, 160)}`);
+    process.exit(1);
+  }
+  printKpiData(out);
+  if (!out.clean) process.exit(1);
+}
 
 /* ── per table ─────────────────────────────────────────────────────── */
 const at = (list, table) => list.filter((x) => x.table === table);
@@ -95,11 +124,12 @@ for (const name of allTables) {
 d.missingReverse.forEach((r) =>
   console.log(`MISSING LINK   ${r.table}.${r.name} — the reverse half of a link the rollups read through`));
 
-/* ── the verdict ───────────────────────────────────────────────────── */
+/* ── the verdict on the SHAPE ──────────────────────────────────────── */
 console.log();
 if (cleanExceptExtras(d)) {
   console.log(`Everything in the schema is present, correctly typed, and matches — ` +
               `${d.checked} field(s) compared including every formula, rollup and choice list.`);
+  await dataCheck();
   process.exit(0);
 }
 
@@ -130,4 +160,5 @@ if (manualCount(d) - d.missingTables.length > 0)
               `                                     update endpoint takes only options.formula`);
 if (d.missingTables.length)
   console.log(`  create-base.mjs                    for the missing tables (it refuses if any exist)`);
+await dataCheck();
 process.exit(1);

@@ -36,7 +36,7 @@ Five tables. Two are append-only logs; three are current-state.
 | `First Call At` | rollup MIN(`Contacts.First Call At`) | |
 | `Last Call At` | rollup MAX(`Contacts.Last Call At`) | §3 — "companies reached" |
 | `Reached` | formula `Last Call At` is not blank | |
-| `Phone Picked` | rollup `OR(values)` of `Contacts.Picked` | §4 |
+| `Phone Picked` | `IF({First Picked At}, 1, 0)` — *not* the `Ever Picked` rollup, §4 | §4 |
 | `Right POC Contacts` | rollup `ARRAYJOIN(values)` over contacts where right-POC | §5 |
 | `Right POC` | formula `Right POC Contacts` is not blank | §5 |
 | `Discovery Contacts` | rollup `ARRAYJOIN(values)` over contacts with a complete row | §6 |
@@ -133,6 +133,22 @@ Contact.Picked        = Current Stage != "Could Not Connect"
 Company.Phone Picked  = OR(linked Contacts.Picked)
 Phone Picked Rate     = Companies picked / Companies reached
 ```
+
+> **AS BUILT, and why it differs.** `Contacts.Ever Picked` is the monotonic
+> version recommended below — a checkbox, set the first time the contact holds
+> a stage that is not CNC and never cleared. The company-level field was then
+> `MAX(values)` over it, and **Airtable does not compute MAX over a set of
+> checkboxes**: it returned blank on every company, so `Phone Picked` read 0
+> on all 98 of them while 71 had picked up. Since 2026-09-29:
+>
+> ```
+> Company.Phone Picked = IF({First Picked At}, 1, 0)
+> ```
+>
+> `First Picked At` is `MIN(values)` over `Contacts.First Picked At`, a
+> date — which Airtable does compute — and the two contact fields agree on
+> every row by construction. `Companies.Ever Picked` still exists and is read
+> by nothing. See STATE.md §3.
 
 > **OPEN — current stage vs ever.**
 > Reading `Current Stage` means a contact who picked up, was qualified, then

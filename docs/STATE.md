@@ -74,6 +74,8 @@ node scripts/test-days.mjs               # 43 · where one day ends. Every case 
                                          #      the old code got wrong
 node scripts/test-buckets.mjs            # 38 · the six call buckets, and the stages that
                                          #      are easy to file by rung and should not be
+node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup, drift, and a
+                                         #      formula reading the wrong field
 node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
 node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
                                          #       page documenting them, all agreeing
@@ -107,6 +109,34 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 ---
 
 ## 3 · The bug catalogue
+
+**A rollup Airtable never computed, and a quarter of the KPIs read zero.**
+`Companies.Ever Picked` is declared `MAX(values)` over `Contacts.Ever Picked`,
+which is a **checkbox** — and Airtable returns blank for the maximum of a set
+of checkboxes. `Companies.Phone Picked` read that rollup, so it was `0` on all
+98 companies in the live base while 71 of them had a contact who had picked up.
+Every picked-up number on every screen was zero, and nothing looked broken.
+
+Nothing that compares the base to `schema.mjs` could see it: the field was
+present, the type was right, the formula text was right, and **the meta API
+does not report a rollup's aggregation at all** (that is `d.rollupUnreadable`
+in `verify-base.mjs`). The fault existed only in the values.
+
+Fixed on the live base 2026-09-29 by repointing the formula at the rollup that
+does work — `Phone Picked = IF({First Picked At}, 1, 0)` — after checking that
+`Ever Picked` and `First Picked At` agree on **every** contact row, 0
+disagreements in both directions. 0 → 71 of 98. `schema.mjs` carries the new
+formula so `repair-base.mjs --update-formulas` cannot revert it. Repairing
+`Ever Picked` in place was not an option: **a rollup's aggregation cannot be
+changed through the API**, only formulas can. Nothing reads it now.
+
+The check that would have caught it on day one is
+`scripts/check-kpi-data.mjs`, which `verify-base.mjs` now runs at the end of
+every run: it recomputes each Companies rollup from the contacts underneath it
+and reports **DEAD** (blank or 0 on every row while the rows say otherwise)
+separately from **DRIFT** (wrong on some rows — usually a link that never got
+written), plus the per-row invariants, so a formula pointed at the wrong input
+is caught against its own input. `--schema-only` skips it.
 
 **A result window read as the end of the list.** Kylas' company search serves
 10,000 rows and stops, while reporting the true total (17,926 on Ayush's

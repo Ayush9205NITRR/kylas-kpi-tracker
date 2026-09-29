@@ -10,6 +10,7 @@
 import { execSync } from "node:child_process";
 import { diffBase, normFormula, wantedFields, cleanExceptExtras } from "./schema-diff.mjs";
 import { TABLES, FOLLOWUPS, ladderFormula } from "./schema.mjs";
+import { MILESTONE, LADDER } from "./stages.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -137,7 +138,10 @@ console.log("\nwhitespace is not drift");
 {
   const tables = liveFromSchema();
   const f = find(tables, "Companies", "SQL");
-  f.options = { formula: "  IF( {KPI Rank}   >= 23 ,\n 1, 0 )  " };
+  /* The floor is read from the ladder, not typed: this case is about
+     WHITESPACE, and hard-coding the number made it fail the day the ladder
+     grew from 23 rungs to 26 — a false drift report about the wrong thing. */
+  f.options = { formula: `  IF( {KPI Rank}   >= ${MILESTONE.sql.floor} ,\n 1, 0 )  ` };
   const d = diffBase(tables);
   /* Airtable reformats what it accepts. Only the whitespace differs here, and
      reporting that would make the check cry wolf on every run. */
@@ -218,8 +222,8 @@ console.log("\nthe schema itself");
      w.filter((x) => x.field.type === "formula").every((x) => x.field.options?.formula));
   ok("the ladder no longer mentions the retired stage",
      !ladderFormula("KPI Rank").includes("Reschedule Pending"));
-  ok("the ladder tops out at 23", ladderFormula("KPI Rank").includes("= 23,"));
-  ok("and has no rung 24", !ladderFormula("KPI Rank").includes("= 24,"));
+  ok(`the ladder tops out at ${LADDER.length}`, ladderFormula("KPI Rank").includes(`= ${LADDER.length},`));
+  ok("and has no rung above it", !ladderFormula("KPI Rank").includes(`= ${LADDER.length + 1},`));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

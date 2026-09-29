@@ -507,7 +507,25 @@ export const FOLLOWUPS = [
   rollup("Companies", "Contact Count", "Contacts", "Name", "COUNTA(values)"),
 
   formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`),
-  formula("Companies", "Phone Picked", `IF({Ever Picked} = 1, 1, 0)`),
+  /* READS First Picked At, NOT the Ever Picked rollup above it.
+     Ever Picked is MAX(values) over a CHECKBOX, and Airtable returns blank for
+     that — so this field read 0 on every company in the live base while the
+     contacts underneath had the box ticked. A single-contact company whose one
+     contact was at rank 23, Right POC and Discovery still reported nobody had
+     picked up. Fixed on the live base 2026-09-29.
+
+     First Picked At is a MIN(values) date rollup over the same link and works.
+     The two contact-level fields are written together by the save path, and
+     were checked against each other on every row before this was repointed:
+     zero contacts had one without the other, in either direction. It also
+     makes this agree with the ladder's "Companies picked" rung, which already
+     read First Picked At.
+
+     A rollup's aggregation cannot be changed through the API at all — see
+     repair-base.mjs — so fixing Ever Picked in place was not an option, and
+     nothing else reads it now. */
+  formula("Companies", "Phone Picked", `IF({First Picked At}, 1, 0)`,
+    "1 when any contact of this company has ever picked up."),
   formula("Companies", "Right POC", `IF({Right POC Contacts}, 1, 0)`,
     "Any of budget | timeline | pax on any row, Past or Current, on any contact."),
   /* Cumulative by construction: a complete row has all three filled, so it also
