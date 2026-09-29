@@ -172,7 +172,12 @@ const STEPS = [
     body: { customFieldValues: { [map.nextCall.name]: extra[map.nextCall.name] } }, check: map.nextCall.name }] : []),
   ...(map.offsite ? [{ what: `offsite timeline (${map.offsite.name})`,
     body: { customFieldValues: { [map.offsite.name]: extra[map.offsite.name] } }, check: map.offsite.name }] : []),
-  { what: "the whole payload at once", body: whole(), check: null },
+  /* CHECKED ON REMARKS, not left unchecked. A bare {remarks} PUT came back
+     200 with nothing stored on the live account (2026-09-29) while the same
+     text inside the full payload was accepted — so the question is whether
+     Kylas ignores a standard field sent on its own and takes it as part of a
+     fuller write. Unchecked, this step could not tell us. */
+  { what: "the whole payload at once", body: whole(), check: "remarks" },
 ];
 
 /* Belt and braces on the same hazard: a key that would go out EMPTY is left
