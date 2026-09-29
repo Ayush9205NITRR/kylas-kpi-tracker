@@ -32,7 +32,12 @@ const WRITE = process.argv.includes("--write");
 const TZ = Number(process.env.TZ_OFFSET_MIN ?? 330);
 
 if (!KEY) { console.error("Set KYLAS_KEY — app.kylas.io/setup/integrations/api-keys/list"); process.exit(1); }
-if (!CONTACT) { console.error("Pass --contact <id> — a contact you do not mind editing."); process.exit(1); }
+const LIST = process.argv.includes("--list");
+if (!CONTACT && !LIST) {
+  console.error("Pass --contact <id> — a contact you do not mind editing.\n" +
+                "Don't know one? Run it with --list to see a few from your own account.");
+  process.exit(1);
+}
 
 /* Kylas rate-limits hard; everything goes through one queue with a gap. */
 const GAP = Number(process.env.KYLAS_GAP || 450);
@@ -91,6 +96,24 @@ if (map.offsite?.options?.length)
    silent — this is the line to read if the offsite write goes nowhere. */
 const near = fields.filter((f) => /off\s*-?site|next.*call|call.*back|follow.*up/i.test(`${f.label} ${f.name}`));
 if (near.length) console.log(`  candidates seen: ${near.map((f) => `${f.name} (${f.type})`).join(", ")}`);
+
+/* ── 1b · a contact to use, for whoever does not have an id to hand ────── */
+if (LIST) {
+  head("contacts you own");
+  /* The search shape the probe already proved works on this API: a free-text
+     rule matching everything, sorted by what changed last. */
+  const me = await api("GET", "/v1/users/me");
+  const rule = { condition: "AND", valid: true, rules: [
+    { id: "ownerId", field: "ownerId", type: "long", input: "select", operator: "equal", value: me.json?.id }] };
+  const r = await api("POST", "/v1/search/contact?sort=updatedAt,desc&page=0&size=15",
+    { fields: ["id", "firstName", "lastName", "designation", "updatedAt"], jsonRule: rule });
+  const rows = r.json?.content || r.json?.data || [];
+  if (!rows.length) console.log(`  none came back — ${r.status} ${String(r.text).slice(0, 160)}`);
+  for (const c of rows)
+    console.log(`  ${String(c.id).padEnd(10)} ${`${c.firstName || ""} ${c.lastName || ""}`.trim().padEnd(28)} ${c.designation || ""}`);
+  console.log(`\nPick one you do not mind editing and run:\n  KYLAS_KEY=... node scripts/probe-write.mjs --contact <id>`);
+  process.exit(0);
+}
 
 /* ── 2 · the contact as it stands ──────────────────────────────────────── */
 head("2 · the contact before anything is written");
