@@ -213,7 +213,19 @@ const JOBS = {
      the phone, and a nightly job overwriting those from a copy is how a CRM
      loses an edit made in the CRM. A contact that already agrees is not
      written, so this is expensive once and nearly free afterwards. */
-  push: async (env, log) => (await import("../scripts/push-kylas.mjs")).run({ env, log, apply: true }),
+  /* DRY UNTIL SOMEBODY SAYS OTHERWISE. PUSH_APPLY is not a style preference:
+     this job writes to every contact in the base, its first run is the one
+     nobody is watching, and a PUT on this API replaces the record. So the
+     schedule starts by REPORTING what it would change — the run shows up in
+     `wrangler tail` with its counts and a dozen examples — and writes only
+     once wrangler.toml says PUSH_APPLY = "1".
+     PUSH_LIMIT caps the first real pass, so a mistake is a hundred contacts
+     and not nine thousand. */
+  push: async (env, log) => (await import("../scripts/push-kylas.mjs")).run({
+    env, log,
+    apply: String(env.PUSH_APPLY || "") === "1",
+    limit: Number(env.PUSH_LIMIT || 0) || Infinity,
+  }),
   /* Every few minutes. Idle, it asks nothing of Airtable or Kylas. */
   maintain: async (env, log) => (await handlers(env, log)).maintain(),
   snapshot: async (env, log) =>

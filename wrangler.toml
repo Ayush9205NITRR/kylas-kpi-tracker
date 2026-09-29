@@ -138,6 +138,15 @@ CRON_ROLLUP = "0 21 * * SUN"
 # 02:45 IST, daily — 45 minutes after the sync, so it reads a base that was
 # just refreshed and cannot race it.
 CRON_PUSH = "15 21 * * *"
+
+# THE PUSH STARTS DRY. It writes the call-back and the offsite quarter onto
+# every contact in the base, and a PUT on the Kylas contacts endpoint REPLACES
+# the record — a first unattended run is not the place to find out something is
+# shaped wrong. Leave this unset and the nightly run reports what it would
+# change (read it with `npx wrangler tail`); set it to "1" when the counts look
+# right, ideally alongside PUSH_LIMIT for the first real pass.
+# PUSH_APPLY = "1"
+# PUSH_LIMIT = "100"
 # Every minute: keeps the D1 copy of Airtable and the Kylas company list
 # current (scripts/mirror.mjs), and retries saves. Every minute rather than
 # every five so a first build is ready in two or three minutes, not ten. Idle,
