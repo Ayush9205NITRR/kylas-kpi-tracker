@@ -162,7 +162,16 @@ body.framed .ovOnly{display:inline-block}
 .gd.live .dl,.vd.live .dl{color:var(--amber)}
 
 /* ── the report views on /sales/home and /sales/companies/list ───────── */
-.viewport{position:absolute;inset:0;background:var(--ground);overflow-y:auto;z-index:20}
+/* IT STARTS BELOW THE BAR, NOT AT THE TOP OF THE WINDOW.
+   This was `inset:0`, which covered the header — and the header is the only
+   place the console keeps Dock, Close and the handle you drag it by. On the
+   two views an associate actually sits in all day, the panel therefore had no
+   way to be moved, resized or closed except the Escape key, and the grab
+   cursor was on an element no pointer could ever reach. A full-bleed report
+   is not worth a window you cannot pick up. 48px is `.bar`'s min-height, and
+   the bar cannot grow past it — it is nowrap with overflow hidden. */
+.viewport{position:absolute;inset:0;top:calc(48px + env(safe-area-inset-top,0px));
+  background:var(--ground);overflow-y:auto;z-index:20}
 /* TABULAR FIGURES EVERYWHERE IN A REPORT. Plus Jakarta Sans ships
    proportional digits by default, so a 1 is narrower than a 7 and a column of
    percentages shifts left and right down the page. Reading down a column is the

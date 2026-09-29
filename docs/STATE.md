@@ -80,6 +80,11 @@ node scripts/test-migration.mjs          # 22 · backfill and reconcile against 
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
+
+xvfb-run -a node scripts/test-move-live.mjs   # 15 · a REAL Chrome with the extension
+                                              #      loaded: the console moves, resizes,
+                                              #      remembers and resets. Needs the :8778
+                                              #      stub and a patched copy of extension/
 ```
 
 `test-idempotency.mjs` is the one to imitate for anything new: it spawns its own
@@ -287,6 +292,16 @@ lived only in the browser. Needs `repair-base` on the live base. From it,
 and next call, and whether promised call-backs were kept — the focus pane in
 the Today tab, the Next call column/chips, and TAT (pick → SQL days, days
 open, call-backs on time %). A focus account stays on the pane until SQL.
+
+**A handler that fires is not a feature that works.** `.viewport` was
+`position:absolute; inset:0`, so on the two screens an associate actually uses
+— the dashboard and the accounts list — the report covered the console's
+header. That header is the handle you drag the console by, and it carries Dock
+and Close. The grab cursor was set, the tooltip was set, the mousedown handler
+was bound and fired perfectly when a test dispatched an event straight at the
+element; a real pointer never reached it, so the console could not be moved,
+resized or closed except with Escape. `scripts/test-move-live.mjs` presses at
+real coordinates in a real Chrome, which is the only thing that finds this.
 
 **Enrichment reads as "—" for four different reasons, and they look identical.**
 The Revenue / LinkedIn / Boolean post / Account stage columns come out of the

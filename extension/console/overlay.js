@@ -415,10 +415,19 @@
   const bar = document.querySelector("header");
   if (bar && framed) {
     bar.style.cursor = "grab";
+    /* A grab cursor says "this moves" only to somebody already hovering over
+       the right six hundred pixels. The tooltip says the whole of it — the
+       resize grips on the edges and the double-click back to full screen are
+       both invisible until you know they are there, and nobody goes looking
+       for a feature they have not been told about. */
+    bar.title = "Drag to move · drag an edge or corner to resize · double-click to reset";
     bar.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       if (e.target.closest("button, a, input, select, label, .link")) return;
-      /* The header's own coordinates ARE the wrap's: the iframe fills it. */
+      /* The header's own coordinates ARE the wrap's: the iframe fills it. The
+         host moves it from there — its .dragcatch goes over everything the
+         moment the drag starts, so it, not this document, hears the rest of
+         the gesture. */
       post("dragstart", { x: e.clientX, y: e.clientY });
       e.preventDefault();
     });

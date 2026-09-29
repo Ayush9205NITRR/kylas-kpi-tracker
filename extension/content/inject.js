@@ -174,6 +174,12 @@
     wrap.classList.add("free");
     place(r.left, r.top, r.width, r.height);
   }
+  /* WHERE INSIDE THE CONSOLE IT WAS PICKED UP, which the console sends
+     because the press happened in its document. Every move then puts that
+     same point under the cursor — absolute, not accumulated, so the handful
+     of moves lost between the press and the host hearing about it (the
+     message is async, and .dragcatch only goes up once it arrives) cost
+     nothing at all. */
   function startDrag(grabX, grabY) {
     goFree();
     drag = { grabX, grabY };
