@@ -1375,11 +1375,16 @@
     const n = RCA.due.length;
     if (!n) return "";
     /* One line. The count is the message; the detail is one click away, because
-       a strip that lists nine accounts is a view, and this sits on top of one. */
+       a strip that lists nine of them is a view, and this sits on top of one.
+
+       CONTACTS, NOT ACCOUNTS. readRcaDue walks the Contacts table and the gates
+       are per person — one company can owe three reasons, one per POC, and the
+       name shown is a POC's. This said "accounts" and named a contact, which
+       reads as a count of companies and is not one. */
     const worst = RCA.due[0];
     return `<div class="vrca">
       <b>${n}</b>
-      <span>account${n === 1 ? "" : "s"} stalled with no reason recorded${
+      <span>contact${n === 1 ? "" : "s"} stalled with no reason recorded${
         worst ? ` — longest is <b>${esc(worst.name)}</b>, ${worst.days} days` : ""}</span>
       <button class="gbtn sm" id="rcaOpen" type="button">Give reasons</button>
     </div>`;
@@ -1397,7 +1402,7 @@
       if (!item) {
         s.innerHTML = `<div class="sheet"><div class="h"><h3>Done</h3>
           <button class="gbtn" id="rx" type="button">Close</button></div>
-          <div class="b"><p class="dnote">Every stalled account has a reason recorded.</p></div></div>`;
+          <div class="b"><p class="dnote">Every stalled contact has a reason recorded.</p></div></div>`;
         s.querySelector("#rx").onclick = () => { s.remove(); repaint?.(); };
         return;
       }
