@@ -136,6 +136,14 @@ console.log(`  custom fields set: ${Object.keys(cf0).join(", ") || "(none)"}`);
 const watched = [map.nextCall?.name, map.offsite?.name, "cfPipelineStageBd", "cfSourceOfData"].filter(Boolean);
 for (const k of watched) console.log(`    ${k.padEnd(28)} ${show(cf0[k])}`);
 console.log(`    ${"remarks".padEnd(28)} ${show((c0.remarks || "").slice(0, 60))}`);
+/* PRINTED BEFORE ANYTHING IS WRITTEN, so this run is its own backup. An
+   earlier version of this script sent empty arrays in the whole-payload step
+   and blanked both on a live contact, and nothing on screen said what they
+   had been. The payload cannot do that any more — and the record is here
+   regardless, because a probe that cannot be undone from its own output is
+   not a probe. */
+console.log(`    ${"phoneNumbers".padEnd(28)} ${JSON.stringify(c0.phoneNumbers || [])}`);
+console.log(`    ${"emails".padEnd(28)} ${JSON.stringify(c0.emails || [])}`);
 
 /* ── 3 · the payloads ──────────────────────────────────────────────────── */
 head("3 · what the console would send");
