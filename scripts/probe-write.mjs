@@ -146,7 +146,16 @@ const card = {
   kid: String(CONTACT),
   pocName: `${c0.firstName || ""} ${c0.lastName || ""}`.trim() || "Unknown",
   stage: "MQL_MARKETING_QUALIFIED_LEAD",
-  owner: "", phones: [], emails: [],
+  owner: "",
+  /* THE CONTACT'S OWN PHONES AND EMAILS, CARRIED STRAIGHT BACK.
+     A PUT with "phoneNumbers": [] is not "leave them alone" — it is "there are
+     none", and Kylas stores that. The restore at the end only knows about the
+     custom fields and the remarks, so a wiped number would be gone for good.
+     The console never has this problem (a real save carries the real phones);
+     this fake card did, until the read above started feeding it. */
+  phones: (c0.phoneNumbers || []).map((p) => ({ type: p.type || "MOBILE", cc: p.dialCode || "+91",
+                                                value: p.value, primary: !!p.primary })),
+  emails: (c0.emails || []).map((e) => ({ type: e.type || "OFFICE", value: e.value, primary: !!e.primary })),
   nextCallDate: tomorrow, nextCallTime: "16:00",
   past: [], current: [{ eventType: "Employee offsites", budget: "8L", timeline: "Aug, week 2", pax: "120", remarks: "probe" }],
 };
@@ -163,8 +172,17 @@ const STEPS = [
     body: { customFieldValues: { [map.nextCall.name]: extra[map.nextCall.name] } }, check: map.nextCall.name }] : []),
   ...(map.offsite ? [{ what: `offsite timeline (${map.offsite.name})`,
     body: { customFieldValues: { [map.offsite.name]: extra[map.offsite.name] } }, check: map.offsite.name }] : []),
-  { what: "the whole payload at once", body: toKylasContact(card, { extra }), check: null },
+  { what: "the whole payload at once", body: whole(), check: null },
 ];
+
+/* Belt and braces on the same hazard: a key that would go out EMPTY is left
+   off the payload entirely, so no array can clear anything even if the read
+   above returned a shape this did not expect. */
+function whole() {
+  const b = toKylasContact(card, { extra });
+  for (const k of ["emails", "phoneNumbers"]) if (Array.isArray(b[k]) && !b[k].length) delete b[k];
+  return b;
+}
 for (const s of STEPS) console.log(`  ${s.what.padEnd(34)} ${JSON.stringify(s.body).slice(0, 150)}`);
 
 if (!WRITE) {
@@ -203,8 +221,15 @@ for (const s of STEPS) {
 head("5 · restoring");
 const restore = { remarks: c0.remarks ?? "", customFieldValues: {} };
 for (const k of watched) restore.customFieldValues[k] = cf0[k] ?? null;
+/* Put the phones and emails back as Kylas handed them over, whatever the
+   writes above did to them. Only when there were some: sending [] here would
+   be the very wipe this is guarding against. */
+if (c0.phoneNumbers?.length) restore.phoneNumbers = c0.phoneNumbers;
+if (c0.emails?.length) restore.emails = c0.emails;
 const back = await api("PUT", `/v1/contacts/${CONTACT}`, restore);
-console.log(back.ok ? `  restored the ${watched.length} field(s) and the remarks`
+console.log(back.ok ? `  restored the ${watched.length} field(s), the remarks` +
+                      `${c0.phoneNumbers?.length ? `, ${c0.phoneNumbers.length} phone(s)` : ""}` +
+                      `${c0.emails?.length ? ` and ${c0.emails.length} email(s)` : ""}`
                     : `  ! could not restore — ${back.status} ${back.text.slice(0, 160)}\n    ${JSON.stringify(restore).slice(0, 300)}`);
 
 head("verdict");
