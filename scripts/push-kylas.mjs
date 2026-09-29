@@ -34,29 +34,92 @@ import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas
 import { offsiteOf } from "./offsite.mjs";
 import { tzMinOf } from "./day.mjs";
 
-const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
-const APPLY = process.argv.includes("--apply");
-const LIMIT = Number(arg("limit", "0")) || Infinity;
-const ONLY = arg("contact", "");
-const TZ = tzMinOf(process.env);
+export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, only = "" } = {}) {
+  const TZ = tzMinOf(env);
+  const { KYLAS_KEY, AIRTABLE_PAT, AIRTABLE_BASE } = env;
+  if (!KYLAS_KEY || !AIRTABLE_PAT || !AIRTABLE_BASE)
+    throw new Error("push needs KYLAS_KEY, AIRTABLE_PAT and AIRTABLE_BASE");
 
-const { KYLAS_KEY, AIRTABLE_PAT, AIRTABLE_BASE } = process.env;
-if (!KYLAS_KEY || !AIRTABLE_PAT || !AIRTABLE_BASE) {
-  console.error("Needs KYLAS_KEY, AIRTABLE_PAT and AIRTABLE_BASE (use --env-file=.env.local).");
-  process.exit(1);
+  const at = createAirtable(AIRTABLE_PAT, AIRTABLE_BASE, { log: () => {},
+    ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}) });
+  const kylas = createClient(KYLAS_KEY, { log: () => {},
+    ...(env.KYLAS_BASE ? { base: env.KYLAS_BASE } : {}) });
+
+  /* ── which fields, on this account ─────────────────────────────────── */
+  const fieldList = await kylas.raw("GET",
+    "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
+  const rawFields = Array.isArray(fieldList) ? fieldList : fieldList?.content || fieldList?.data || [];
+  const picklists = {};
+  for (const f of rawFields) { const o = findOptions(f); if (o && (f.name || f.displayName)) picklists[f.name || f.displayName] = o; }
+  const map = resolveWriteFields(rawFields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })), picklists);
+  describeWriteMap(map).forEach((l) => log(`  ${l}`));
+  if (!map.nextCall && !map.offsite) {
+    log("  neither field exists on this account — nothing to push.");
+    return { checked: 0, changed: 0, wrote: 0, failed: 0, skipped: 0, reason: "no fields" };
+  }
+
+  /* ── what the console knows ────────────────────────────────────────── */
+  const [contacts, rows] = await Promise.all([
+    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Next Call Date", "Next Call Time"],
+                                   pageSize: 100, maxPages: 5000 }),
+    listTolerant(at, "Event Rows", { fields: ["Contact", "Event Type", "Timeline"], pageSize: 100, maxPages: 5000 }),
+  ]);
+  const rowsByContact = new Map();
+  for (const r of rows)
+    for (const id of r.fields?.Contact || [])
+      (rowsByContact.get(id) || rowsByContact.set(id, []).get(id)).push(r.fields);
+  log(`  ${contacts.length} contact(s), ${rows.length} event row(s)`);
+
+  /* The card shape offsite.js reads. Past and Now are the same question here —
+     an offsite held last February is the best guess for this year's. */
+  const wantedFor = (rec) => {
+    const evs = (rowsByContact.get(rec.id) || [])
+      .map((f) => ({ eventType: f["Event Type"] || "", timeline: f.Timeline || "" }));
+    return extraCustomFields(map, { nextCallDate: rec.fields?.["Next Call Date"] || "",
+                                    nextCallTime: rec.fields?.["Next Call Time"] || "" },
+                             { tzMin: TZ, quarters: offsiteOf({ past: [], current: evs }) });
+  };
+
+  /* ── the pass ──────────────────────────────────────────────────────── */
+  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0;
+  const examples = [];
+  for (const rec of contacts) {
+    const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
+    if (!kid) { skipped++; continue; }
+    if (only && kid !== only) continue;
+    const want = wantedFor(rec);
+    if (!Object.keys(want).length) { skipped++; continue; }
+    if (checked >= limit) break;
+    checked++;
+
+    let base;
+    try { base = await kylas.contact(kid); }
+    catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: could not read — ${e.message.slice(0, 90)}`); continue; }
+
+    const have = base?.customFieldValues || {};
+    const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
+    if (!diff.length) continue;
+    changed++;
+    if (examples.length < 12)
+      examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${diff.map(([k, v]) =>
+        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}`).join(" · ")}`);
+    if (!apply) continue;
+
+    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, want)); wrote++; }
+    catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: write refused — ${e.message.slice(0, 120)}`); }
+  }
+
+  log(`\n  ${checked} checked · ${changed} differ · ${skipped} had nothing to push`);
+  examples.forEach((e) => log(`    ${e}`));
+  if (examples.length && changed > examples.length) log(`    …and ${changed - examples.length} more`);
+  log(apply ? `\n  ${wrote} written, ${failed} failed.` : `\n  Dry run — nothing written. Add --apply.`);
+  return { checked, changed, wrote, failed, skipped };
 }
 
-const log = (...a) => console.log(...a);
-const at = createAirtable(AIRTABLE_PAT, AIRTABLE_BASE, { log: () => {},
-  ...(process.env.AIRTABLE_BASE_URL ? { apiUrl: process.env.AIRTABLE_BASE_URL } : {}) });
-const kylas = createClient(KYLAS_KEY, { log: () => {},
-  ...(process.env.KYLAS_BASE ? { base: process.env.KYLAS_BASE } : {}) });
+/* ── the pieces run() uses, out here so they are testable ──────────────── */
 
-/* ── which fields, on this account ─────────────────────────────────────── */
-const fieldList = await kylas.raw("GET",
-  "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
-const rawFields = Array.isArray(fieldList) ? fieldList : fieldList?.content || fieldList?.data || [];
-function findOptions(f, d = 0) {
+/* Options are nested at a different depth per field type. */
+export function findOptions(f, d = 0) {
   if (!f || d > 4) return null;
   if (Array.isArray(f)) {
     if (f.length && f.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
@@ -67,42 +130,15 @@ function findOptions(f, d = 0) {
   if (typeof f === "object") for (const k of Object.keys(f)) { const h = findOptions(f[k], d + 1); if (h) return h; }
   return null;
 }
-const picklists = {};
-for (const f of rawFields) { const o = findOptions(f); if (o && (f.name || f.displayName)) picklists[f.name || f.displayName] = o; }
-const map = resolveWriteFields(rawFields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })), picklists);
-describeWriteMap(map).forEach((l) => log(`  ${l}`));
-if (!map.nextCall && !map.offsite) { console.error("Neither field exists on this account — nothing to push."); process.exit(1); }
 
-/* ── what the console knows ────────────────────────────────────────────── */
-log(`\n  reading the KPI base…`);
-const [contacts, rows] = await Promise.all([
-  listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Next Call Date", "Next Call Time"],
-                                 pageSize: 100, maxPages: 5000 }),
-  listTolerant(at, "Event Rows", { fields: ["Contact", "Event Type", "Timeline"], pageSize: 100, maxPages: 5000 }),
-]);
-const rowsByContact = new Map();
-for (const r of rows)
-  for (const id of r.fields?.Contact || [])
-    (rowsByContact.get(id) || rowsByContact.set(id, []).get(id)).push(r.fields);
-log(`  ${contacts.length} contact(s), ${rows.length} event row(s)`);
-
-/* The card shape offsite.js reads. Past and Now are the same question here —
-   an offsite held last February is the best guess for this year's. */
-const wantedFor = (rec) => {
-  const evs = (rowsByContact.get(rec.id) || [])
-    .map((f) => ({ eventType: f["Event Type"] || "", timeline: f.Timeline || "" }));
-  const quarters = offsiteOf({ past: [], current: evs });
-  return extraCustomFields(map, { nextCallDate: rec.fields?.["Next Call Date"] || "",
-                                  nextCallTime: rec.fields?.["Next Call Time"] || "" },
-                           { tzMin: TZ, quarters });
-};
-
-/* ── the payload, which is the WHOLE contact ───────────────────────────── */
 const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
 const same = (a, b) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) ===
                        JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
 
-function bodyFor(base, extra) {
+/* THE WHOLE CONTACT, because the PUT replaces it. Anything left out of this
+   object is deleted from the record — see the header of toKylasContact, which
+   was learned the expensive way. */
+export function bodyFor(base, extra) {
   const body = {
     firstName: base.firstName, lastName: base.lastName || "Unknown",
     designation: base.designation, linkedin: base.linkedin,
@@ -122,38 +158,21 @@ function bodyFor(base, extra) {
   return body;
 }
 
-/* ── the pass ──────────────────────────────────────────────────────────── */
-let looked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0;
-const examples = [];
-for (const rec of contacts) {
-  const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
-  if (!kid) { skipped++; continue; }
-  if (ONLY && kid !== ONLY) continue;
-  const want = wantedFor(rec);
-  if (!Object.keys(want).length) { skipped++; continue; }
-  if (looked >= LIMIT) break;
-  looked++;
+/* ── from a terminal ───────────────────────────────────────────────────── */
+const isMain = (() => {
+  try {
+    return typeof process !== "undefined" && process.argv?.[1]
+      && import.meta.url.endsWith(process.argv[1].split("/").pop());
+  } catch { return false; }
+})();
 
-  let base;
-  try { base = await kylas.contact(kid); }
-  catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: could not read — ${e.message.slice(0, 90)}`); continue; }
-
-  const have = base?.customFieldValues || {};
-  const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
-  if (!diff.length) continue;
-  changed++;
-  if (examples.length < 12)
-    examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${diff.map(([k, v]) =>
-      `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}`).join(" · ")}`);
-  if (!APPLY) continue;
-
-  try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, want)); wrote++; }
-  catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: write refused — ${e.message.slice(0, 120)}`); }
+if (isMain) {
+  const argv = process.argv;
+  const a = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i > -1 && argv[i + 1] ? argv[i + 1] : d; };
+  try {
+    const out = await run({ env: process.env, log: (...x) => console.log(...x),
+                            apply: argv.includes("--apply"),
+                            limit: Number(a("limit", "0")) || Infinity, only: a("contact", "") });
+    process.exit(out.failed ? 1 : 0);
+  } catch (e) { console.error(`\npush failed: ${e.message}`); process.exit(1); }
 }
-
-log(`\n  ${looked} checked · ${changed} differ · ${skipped} had nothing to push`);
-examples.forEach((e) => log(`    ${e}`));
-if (examples.length && changed > examples.length) log(`    …and ${changed - examples.length} more`);
-log(APPLY ? `\n  ${wrote} written, ${failed} failed.`
-          : `\n  Dry run — nothing written. Add --apply.`);
-process.exit(failed ? 1 : 0);

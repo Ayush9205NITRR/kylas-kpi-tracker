@@ -206,6 +206,14 @@ const JOBS = {
     return { ...out, after: await (await handlers(env, log)).maintain({
       rebuild: true, only: ["Call Log", "Call Rollup"] }) };
   },
+  /* THE OTHER DIRECTION, once a night, after the sync. The call-back and the
+     offsite quarter the console derived, pushed onto the Kylas contact — for
+     the contacts saved before 1.29 wrote them, and for any whose quarter has
+     since moved. Two fields and no more: Kylas owns the stage, the name and
+     the phone, and a nightly job overwriting those from a copy is how a CRM
+     loses an edit made in the CRM. A contact that already agrees is not
+     written, so this is expensive once and nearly free afterwards. */
+  push: async (env, log) => (await import("../scripts/push-kylas.mjs")).run({ env, log, apply: true }),
   /* Every few minutes. Idle, it asks nothing of Airtable or Kylas. */
   maintain: async (env, log) => (await handlers(env, log)).maintain(),
   snapshot: async (env, log) =>
@@ -219,6 +227,7 @@ export default {
       [String(env.CRON_SYNC || ""), "sync"],
       [String(env.CRON_ROLLUP || ""), "rollup"],
       [String(env.CRON_SNAPSHOT || ""), "snapshot"],
+      [String(env.CRON_PUSH || ""), "push"],
       [String(env.CRON_MAINTAIN || ""), "maintain"],
     ].filter(([cron]) => cron));
     const which = byCron.get(event.cron) || "";
@@ -229,7 +238,8 @@ export default {
          job that simply never happens. */
       log(`! cron "${event.cron}" matches no job. wrangler.toml has ` +
           `CRON_SYNC=${env.CRON_SYNC || "(unset)"} CRON_ROLLUP=${env.CRON_ROLLUP || "(unset)"} ` +
-          `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"} CRON_MAINTAIN=${env.CRON_MAINTAIN || "(unset)"}`);
+          `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"} CRON_PUSH=${env.CRON_PUSH || "(unset)"} ` +
+          `CRON_MAINTAIN=${env.CRON_MAINTAIN || "(unset)"}`);
       return;
     }
 

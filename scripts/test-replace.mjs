@@ -18,6 +18,7 @@
  * Run: node scripts/test-replace.mjs
  */
 import { toKylasContact } from "./kylas.mjs";
+import { bodyFor } from "./push-kylas.mjs";
 import { STAGE_ID } from "./stages.mjs";
 
 let pass = 0, fail = 0;
@@ -111,6 +112,34 @@ const withExtra = toKylasContact(CARD, { remarks: "x", base: BASE,
 is("next call", withExtra.customFieldValues.cfNextCallDateCallLater, "2026-10-01T10:30:00.000Z");
 is("offsite", withExtra.customFieldValues.cfOffsiteTimeline, [2880426]);
 is("...beside everything carried over", withExtra.customFieldValues.cfBatch, "B-11");
+
+/* ── the nightly push builds its own payload, and must not be the exception ──
+   push-kylas.mjs does not go through toKylasContact: it is not saving a card,
+   it is changing two fields on a record it just read. Same hazard, so the same
+   rules, asserted separately — a fix applied to one and not the other is
+   exactly how this comes back. */
+console.log("\n8. the nightly push, which writes the record back too");
+const pushed = bodyFor(BASE, { cfOffsiteTimeline: [2880426] });
+is("the phone survives", pushed.phoneNumbers, BASE.phoneNumbers);
+is("the email survives", pushed.emails, BASE.emails);
+is("the name survives", `${pushed.firstName} ${pushed.lastName}`, "Preeti Pagote");
+is("the remarks survive", pushed.remarks, BASE.remarks);
+is("the company is its id", pushed.company, 1777335);
+is("cfBatch survives", pushed.customFieldValues.cfBatch, "B-11");
+/* THE STAGE IS NOT THE PUSH'S BUSINESS. It writes the two derived fields and
+   carries everything else over — including a stage that has since moved in
+   Kylas, which it must not roll back to whatever the copy remembers. */
+is("...and the stage is whatever Kylas holds, untouched",
+  pushed.customFieldValues.cfPipelineStageBd, 2862827);
+is("the new value is there", pushed.customFieldValues.cfOffsiteTimeline, [2880426]);
+const objPush = bodyFor({ ...BASE, customFieldValues: { cfBatch: { id: 77, name: "B-11" }, cfWebsite: "" } },
+                        { cfOffsiteTimeline: [2880426] });
+is("an object value goes back as its id", objPush.customFieldValues.cfBatch, 77);
+ok("a blank one is left out", !("cfWebsite" in objPush.customFieldValues));
+/* A record with nothing on it must not send empty arrays — that is the wipe. */
+const bare = bodyFor({ firstName: "A", lastName: "B" }, { cfOffsiteTimeline: [2880426] });
+ok("no empty phoneNumbers key", !("phoneNumbers" in bare));
+ok("no empty emails key", !("emails" in bare));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

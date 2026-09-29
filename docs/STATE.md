@@ -77,8 +77,9 @@ node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup
                                          #      formula reading the wrong field
 node scripts/test-offsite.mjs            # 45 · Offsite Timeline out of event-row text, and the
                                          #      old FY chips landing where the new picker does
-node scripts/test-replace.mjs            # 27 · the PUT replaces the record, so every field the
-                                         #      card is silent about is carried over from it
+node scripts/test-replace.mjs            # 39 · the PUT replaces the record, so every field the
+                                         #      card is silent about is carried over from it —
+                                         #      for the save AND for the nightly push
 node scripts/test-write-map.mjs          # 29 · which Kylas field is the call-back and which is
                                          #      the offsite timeline, per account, and the
                                          #      values sent under them
@@ -518,6 +519,10 @@ works from a base that was just refreshed:
 node --env-file=.env.local scripts/push-kylas.mjs            # dry run, prints what would move
 node --env-file=.env.local scripts/push-kylas.mjs --apply
 ```
+
+On the Worker it is `CRON_PUSH = "15 21 * * *"` — **02:45 IST**, 45 minutes
+after the sync so it reads a base that was just refreshed and cannot race it.
+On a laptop crontab it is 01:45 local. Both run the same `run()`.
 
 A save writes the call-back and the offsite quarter from 1.29. This is the
 other half: every contact saved *before* that, and every contact whose quarter

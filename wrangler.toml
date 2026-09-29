@@ -135,6 +135,9 @@ VERSION = "1.27.1"
 CRON_SYNC = "30 20 * * *"
 CRON_SNAPSHOT = "45 18 * * *"
 CRON_ROLLUP = "0 21 * * SUN"
+# 02:45 IST, daily — 45 minutes after the sync, so it reads a base that was
+# just refreshed and cannot race it.
+CRON_PUSH = "15 21 * * *"
 # Every minute: keeps the D1 copy of Airtable and the Kylas company list
 # current (scripts/mirror.mjs), and retries saves. Every minute rather than
 # every five so a first build is ready in two or three minutes, not ten. Idle,
@@ -157,6 +160,7 @@ crons = [
   "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
   "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
   "0 21 * * SUN",  # 02:30 IST, Monday  · roll up the call log
+  "15 21 * * *",   # 02:45 IST, daily   · Airtable -> Kylas: call-back + offsite quarter
   "* * * * *",     # every minute       · keep the D1 copies current
 ]
 
