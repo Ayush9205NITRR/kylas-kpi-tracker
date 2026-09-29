@@ -1785,6 +1785,10 @@
                 offsiteSet: new Set(), priMin: "", moreOpen: false,
                 /* the demand team's own pipeline stage, out of Company List */
                 apsSet: new Set(),
+                /* How the board piles accounts: the six call buckets, or one
+                   column per account pipeline stage. Both read the same
+                   calculated field — see boardHTML. */
+                bgroup: "bucket",
                 /* THE SEARCH BOX. One string, every word of which has to land
                    somewhere on the row — see textOf below. Not remembered and
                    not in the stored preference: it is the most temporary
@@ -1820,6 +1824,7 @@
                                                   : COL_DEFAULTS);
     if (saved?.sort && SORT_KEYS.includes(saved.sort)) ACC.sort = saved.sort;
     if (saved?.view === "board" || saved?.view === "table") ACC.view = saved.view;
+    if (saved?.bgroup === "bucket" || saved?.bgroup === "stage") ACC.bgroup = saved.bgroup;
     if (saved?.widths && typeof saved.widths === "object")
       for (const [k, w] of Object.entries(saved.widths))
         if (ACOLS.some((c) => c.k === k) && Number.isFinite(Number(w))) ACC.widths[k] = Number(w);
@@ -1829,7 +1834,8 @@
     readHash();
   }
   const saveAccPrefs = () => {
-    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths, view: ACC.view }); }
+    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths,
+                                       view: ACC.view, bgroup: ACC.bgroup }); }
     catch { /* a browser with no storage still works, it just forgets */ }
   };
   const SORT_KEYS = ["next", "recent", "stale", "kpi", "priority", "revenue", "az"];
@@ -1928,7 +1934,12 @@
      chip counting rows the search has already ruled out would be lying. */
   function accMatch(co, skip) {
     if (!qMatch(co)) return false;
-    if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(stageOf(co) || "")) return false;
+    /* THE ACCOUNT'S stage, not one contact's. A row here is an account, so the
+       question "show me everything at Discovery" is a question about how far
+       the account got — the furthest rung any of its POCs reached. Filtering on
+       a contact-level stage made an account with four POCs match on whichever
+       one the browser happened to have loaded. */
+    if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(acctStageOf(co) || "")) return false;
     if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsiteSet.size &&
@@ -2384,7 +2395,7 @@
   function stagePicker(all) {
     const cnt = new Map();
     for (const c of all.filter((x) => accMatch(x, "stage"))) {
-      const k = stageOf(c) || "";
+      const k = acctStageOf(c) || "";
       cnt.set(k, (cnt.get(k) || 0) + 1);
     }
     const sel = ACC.stages;
@@ -2397,9 +2408,9 @@
     return `<div class="msel" id="stagePick">
       <button type="button" class="msel-btn${sel.size ? " on" : ""}" id="stageBtn"
         aria-haspopup="true" aria-expanded="${ACC.stageOpen}">
-        <span class="msel-k">Stage</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
+        <span class="msel-k">Account stage</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
       </button>
-      ${ACC.stageOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by pipeline stage">
+      ${ACC.stageOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by account pipeline stage">
         <input id="stageFind" class="msel-find" type="search" placeholder="Find a stage…"
           aria-label="Find a stage" autocomplete="off" value="${esc(ACC.stageFind)}">
         <div class="msel-list" id="stageList">
@@ -2456,7 +2467,12 @@
         ${open ? "▾" : "▸"} More filters${moreActive() ? `<span class="k tnum">${moreCount()}</span>` : ""}
       </button>
       ${open ? `<div class="morebody">
-        ${chipRow(all, "Account stage", "aps", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.apsSet,
+        ${/* The DEMAND TEAM's own read, under the name of its own column: it was
+             labelled "Account stage", which is the calculated field in the
+             toolbar, so a row reading "Unknown 151" looked like the calculation
+             had failed when it only meant Company List has no value for these.
+             Two facts can share a screen; they cannot share a name. */ ""}
+        ${chipRow(all, "Demand team stage", "aps", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.apsSet,
           null, { limit: 10, expanded: ACC.apsMore, moreNoun: "stages", moreOne: "stage" })}
         ${bandRow("Revenue", "rev", E.REVENUE_BANDS, ACC.rev)}
         ${chipRow(all, "Employees", "emp", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.emp,
@@ -2679,17 +2695,51 @@
      Every filter above still applies, because the board is handed the same
      rows the table would have shown. Filter to one owner and the board is
      that person's day. */
-  function boardHTML(rows) {
-    const cards = new Map(STAGE_FAMILIES.map((f) => [f.key, []]));
-    /* An account with no contact saved yet has no calculated stage. It is not
-       "Not started" — that is a real stage somebody set — so it gets its own
-       pile rather than being quietly filed under one of the six. */
+  /* THE COLUMNS, TWO WAYS, BOTH OFF THE SAME FIELD.
+     Every card is filed by acctStageOf — the account's own calculated pipeline
+     stage, which is the FURTHEST rung any of its contacts has reached. What
+     differs is only how fine the columns are:
+
+       Buckets  the six from docs/stages.json, which are an ACTION order:
+                what to do with this account next. Discovery Call No-Show is
+                rung 20 and needs a call today; Not Interested is rung 10 and
+                never needs one again. Six columns fit on a screen.
+       Stages   one column per stage actually present, furthest first. The
+                ladder has 26 rungs and a board of 26 columns, 19 of them
+                empty, is not a board — so only the stages with accounts in
+                them get a column.
+
+     An account with no calculated stage is not filed under either. It has its
+     own pile: "Not started" is a stage somebody set, and "nobody has saved a
+     contact here" is not that. */
+  function boardLanes(rows) {
     const unplaced = [];
+    if (ACC.bgroup === "stage") {
+      const by = new Map();
+      for (const c of rows) {
+        const st = acctStageOf(c);
+        if (!st) { unplaced.push(c); continue; }
+        if (!by.has(st)) by.set(st, []);
+        by.get(st).push(c);
+      }
+      const lanes = [...by.entries()]
+        .sort((a, b) => (STAGE_RUNG[b[0]] || 0) - (STAGE_RUNG[a[0]] || 0))
+        .map(([st, list]) => ({ key: st, label: stageName(st),
+                                hint: `rung ${STAGE_RUNG[st] || 0} of 26`, list }));
+      return { lanes, unplaced };
+    }
+    const cards = new Map(STAGE_FAMILIES.map((f) => [f.key, []]));
     for (const c of rows) {
       const st = acctStageOf(c);
       const k = st ? FAMILY_OF[st] : null;
       if (k && cards.has(k)) cards.get(k).push(c); else unplaced.push(c);
     }
+    return { lanes: STAGE_FAMILIES.map((f) => ({ key: f.key, label: f.label, hint: f.hint,
+                                                 list: cards.get(f.key) || [] })), unplaced };
+  }
+
+  function boardHTML(rows) {
+    const { lanes, unplaced } = boardLanes(rows);
     const col = (key, label, hint, list) => {
       /* Call-backs first inside every column, whatever the table is sorted
          by: a pile is worked from the top, and the top of a calling pile is
@@ -2723,13 +2773,15 @@
       </section>`;
     };
     return `<div class="board">
-      ${STAGE_FAMILIES.map((f) => col(f.key, f.label, f.hint, cards.get(f.key))).join("")}
+      ${lanes.map((l) => col(l.key, l.label, l.hint, l.list)).join("")}
       ${unplaced.length ? col("none", "No contacts yet", "nobody has been saved against these", unplaced) : ""}
     </div>`;
   }
   /* One cap for every column. A pile of nine thousand untouched accounts is
      not a pile anybody works from, and rendering it costs the scroll. */
   const BOARD_LIMIT = { new: 50, cnc: 50, active: 100, meeting: 100, newpoc: 50, closed: 25, none: 25 };
+  /* A stage column is keyed by the stage code, which is not in the table
+     above, so it falls back to the same 50 the bucket columns start from. */
   /* A stage's own name, for the line under the company. */
   const label2 = (code) => (code ? (label(code) || code) : "—");
 
@@ -2843,6 +2895,12 @@
             <button type="button" id="accTable"${ACC.view === "table" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Table</button>
             <button type="button" id="accBoard"${ACC.view === "board" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Board</button>
           </div>
+          ${ACC.view === "board" ? `<div class="vtoggle" role="group" aria-label="What the board's columns are">
+            <button type="button" id="bgBucket"${ACC.bgroup === "bucket" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}
+              title="Six columns: what to do with the account next">Buckets</button>
+            <button type="button" id="bgStage"${ACC.bgroup === "stage" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}
+              title="One column per account pipeline stage, furthest first">Stages</button>
+          </div>` : ""}
           ${stagePicker(all)}
           ${filterPanel()}
           ${sourcePicker(all, sources)}
@@ -2880,7 +2938,7 @@
      different board. */
   const AXES = [
     { key: "state",  label: "KPI state" },
-    { key: "stage",  label: "Pipeline stage" },
+    { key: "stage",  label: "Account pipeline stage" },
     { key: "source", label: "Source of Data" },
   ];
   let GROUP_BY = "state";
@@ -2940,7 +2998,12 @@
     }
     const by = new Map();
     for (const c of list) {
-      const k = GROUP_BY === "stage" ? stageOf(c) : (c.source || "");
+      /* THE ACCOUNT'S stage (Ayush, 2026-09-29: "I want to change it to account
+         pipeline stage"). A board of accounts grouped by one contact's stage
+         puts the same account in whichever column its loaded POC happens to
+         sit in; grouped by the account's own calculated stage it lands where
+         the account actually is. */
+      const k = GROUP_BY === "stage" ? acctStageOf(c) : (c.source || "");
       if (!by.has(k)) by.set(k, []);
       by.get(k).push(c);
     }
@@ -3379,6 +3442,12 @@
     const setView = (v) => { ACC.view = v; saveAccPrefs(); redraw(); };
     on("accTable", "click", () => setView("table"));
     on("accBoard", "click", () => setView("board"));
+    /* What the board's columns ARE. Remembered like the other view
+       preferences — a BD who works the stage board should not re-pick it
+       every morning. */
+    const setGroup = (g) => { ACC.bgroup = g; saveAccPrefs(); redraw(); };
+    on("bgBucket", "click", () => setGroup("bucket"));
+    on("bgStage", "click", () => setGroup("stage"));
     /* A card opens the account, exactly as a row does. */
     host.querySelectorAll(".bcard[data-id]").forEach((b) =>
       b.addEventListener("click", () =>
