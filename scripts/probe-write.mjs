@@ -118,7 +118,17 @@ if (LIST) {
 /* ── 2 · the contact as it stands ──────────────────────────────────────── */
 head("2 · the contact before anything is written");
 const before = await api("GET", `/v1/contacts/${CONTACT}`);
-if (!before.ok) { console.error(`  could not read contact ${CONTACT} — ${before.status} ${before.text.slice(0, 200)}`); process.exit(1); }
+if (!before.ok) {
+  console.error(`  could not read contact ${CONTACT} — ${before.status} ${before.text.slice(0, 200)}`);
+  /* KYLAS SAYS "doesnt seem to exist or you dont have enough permissions" and
+     does not say which — and a COMPANY id put here gets exactly that answer,
+     because contacts and companies have separate id spaces. It is the likely
+     mistake, so the fix is printed rather than left to be guessed. */
+  if (before.status === 404)
+    console.error(`  That is a contact id, not a company id — the two are separate in Kylas.\n` +
+                  `  Run the same command with --list instead of --contact ${CONTACT} to see your own.`);
+  process.exit(1);
+}
 const c0 = before.json;
 console.log(`  ${c0.firstName || ""} ${c0.lastName || ""} · id ${c0.id}`);
 const cf0 = c0.customFieldValues || {};
