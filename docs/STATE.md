@@ -96,6 +96,14 @@ node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the exi
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
+xvfb-run -a node scripts/test-ui-live.mjs     # 21 · the three things that only exist on
+                                              #      screen: draggable pane widths, the
+                                              #      quarter→month→week picker, and the
+                                              #      board's Buckets/Stages columns. Needs
+                                              #      the stack, the :8778 stub, a patched
+                                              #      extension copy AND API.setBase — see
+                                              #      its header, every line of which was
+                                              #      learned by it blaming the product
 xvfb-run -a node scripts/test-fab-live.mjs    # 10 · the launcher moves, and moving it
                                               #      does not open the console — a click
                                               #      and a drag start identically
