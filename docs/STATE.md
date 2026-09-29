@@ -76,6 +76,8 @@ node scripts/test-buckets.mjs            # 38 · the six call buckets, and the s
                                          #      are easy to file by rung and should not be
 node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup, drift, and a
                                          #      formula reading the wrong field
+node scripts/test-replace.mjs            # 27 · the PUT replaces the record, so every field the
+                                         #      card is silent about is carried over from it
 node scripts/test-write-map.mjs          # 29 · which Kylas field is the call-back and which is
                                          #      the offsite timeline, per account, and the
                                          #      values sent under them
@@ -416,6 +418,41 @@ code and answers everything cheerfully. **Restart the proxy after editing
 
 ---
 
+## 3 · (cont.) THE PUT REPLACES THE RECORD
+
+**`PUT /v1/contacts/{id}` does not merge. What you do not send, you delete.**
+
+Learned on the live account on 2026-09-29, at the cost of one contact's name,
+phone and email. `probe-write.mjs` sent one field per request — sound
+reasoning (Kylas rejects a whole payload over one bad value with a 400 naming
+nothing) and a catastrophic method. A PUT carrying `{remarks,
+customFieldValues}` returned **200** and left a record with no `firstName`, no
+`lastName`, no `phoneNumbers`, no `emails`. The same rule explains the other
+puzzle in that run: a PUT of `{remarks}` alone looked like "200 but nothing
+stored" — it stored exactly what it was given and dropped everything else.
+
+This was a production bug, not only a probe bug. `toKylasContact` deleted every
+`undefined` key from the body, which reads as "leave it alone" and means
+"clear it", and the validator explicitly allows an existing contact to have no
+phone on the card. **Any save of a contact whose card lacked a phone would have
+wiped the real one**, with a 200 in the log and the associate told it worked.
+
+Since 1.30, the payload is built against `base` — the contact as Kylas holds
+it, which the save already fetches for the remarks block:
+
+- no phone on the card → the phone Kylas has, never an empty array
+- no designation typed → the designation already on the record
+- `cfBatch`, `cfAccountHealthBd`, `cfPreviousOffsiteLocation` → every custom
+  field the CRM owns, carried over first so ours overwrite and none are lost
+- a value that arrives as `{id, name}` is written back as its id; a blank one
+  is left out (both are 400s otherwise)
+
+A failed read of the record now **fails the save** and the queue retries it.
+Writing blind would replace the contact with only what the card knows.
+
+`scripts/test-replace.mjs` (27) is the guard: every case in it is something a
+save would otherwise have deleted.
+
 ## 3a · What the console writes back to Kylas
 
 One `PUT /v1/contacts/{id}` (or a `POST` for a new one) and one
@@ -446,9 +483,18 @@ all derive `JUL_SEP` — so the picklist's spelling never has to be known here.
 **Still not written:** budget, pax, event type, mode, vendor and service
 offering (remarks text only), and salutation.
 
-**Nothing has been written to a live Kylas account yet.** All of the above is
-verified against `mock-kylas.mjs` and `test-worker.mjs` §4, which asserts the
-exact `customFieldValues` that leave the Worker. `scripts/probe-write.mjs`
+**Verified on the live account, 2026-09-29** (contact 6258147): the call-back
+stored as `cfNextCallDateCallLater = "2026-10-01T10:30:00.000Z"` — 16:00 IST,
+the right instant — and the offsite as `cfOffsiteTimeline = [2880426]`, Jul-Sep,
+derived from a card that said "Aug, week 2". The account's fields are
+`cfNextCallDateCallLater` (DATETIME_PICKER) and `cfOffsiteTimeline`
+(MULTI_PICKLIST: 2880424 Jan-Mar, 2880425 Apr-Jun, 2880426 Jul-Sep, 2880427
+Oct-Dec); `cfPreviousOffsiteDate` and `cfPreviousOffsiteLocation` are text
+fields about the *previous* offsite and are correctly not chosen.
+
+Whether **remarks** stores is still open: alone it does not (that is the
+replace rule), and the run restored before reading it back inside a full
+payload. The re-run answers it. `scripts/probe-write.mjs`
 is the live check, one contact at a time, restoring what it changed:
 
 ```sh

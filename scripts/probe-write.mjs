@@ -171,31 +171,39 @@ const quarters = ["JUL_SEP"];              /* what "Aug" derives — offsite.js 
 const extra = extraCustomFields(map, card, { tzMin: TZ, quarters });
 console.log(`  customFieldValues the map adds: ${JSON.stringify(extra)}`);
 
+/* EVERY STEP SENDS A WHOLE CONTACT.
+   The first version of this file sent one field per request, reasoning that a
+   400 naming nothing is useless when eight fields are in the air. That was
+   right about the diagnosis and catastrophically wrong about the method: PUT
+   REPLACES THE RECORD, so a request carrying one field deletes the other
+   fifty-five. It cost a live contact its name, phone and email on
+   2026-09-29.
+
+   So each step is the full payload the console would send, with ONE thing
+   changed from the step before, built through toKylasContact against the
+   record as read. Same diagnostic power — the step that fails is the field
+   that broke it — and nothing is ever left out of a write. */
+const full = (over = {}) => {
+  const b = toKylasContact({ ...card, ...over.card }, { remarks: over.remarks, extra: over.extra ?? {}, base: c0 });
+  for (const k of ["emails", "phoneNumbers"]) if (Array.isArray(b[k]) && !b[k].length) delete b[k];
+  return b;
+};
 const STEPS = [
-  { what: "pipeline stage", body: { customFieldValues: { cfPipelineStageBd: STAGE_ID[card.stage] } },
-    check: "cfPipelineStageBd" },
-  { what: "remarks block", body: { remarks: mergeRemarks(c0.remarks || "", renderRemarks(card, { stageLabel: "MQL" })) },
+  { what: "pipeline stage", body: full(), check: "cfPipelineStageBd" },
+  { what: "remarks block", body: full({ remarks: mergeRemarks(c0.remarks || "", renderRemarks(card, { stageLabel: "MQL" })) }),
     check: "remarks" },
   ...(map.nextCall ? [{ what: `next call (${map.nextCall.name})`,
-    body: { customFieldValues: { [map.nextCall.name]: extra[map.nextCall.name] } }, check: map.nextCall.name }] : []),
+    body: full({ extra: { [map.nextCall.name]: extra[map.nextCall.name] } }), check: map.nextCall.name }] : []),
   ...(map.offsite ? [{ what: `offsite timeline (${map.offsite.name})`,
-    body: { customFieldValues: { [map.offsite.name]: extra[map.offsite.name] } }, check: map.offsite.name }] : []),
+    body: full({ extra: { [map.offsite.name]: extra[map.offsite.name] } }), check: map.offsite.name }] : []),
   /* CHECKED ON REMARKS, not left unchecked. A bare {remarks} PUT came back
      200 with nothing stored on the live account (2026-09-29) while the same
      text inside the full payload was accepted — so the question is whether
      Kylas ignores a standard field sent on its own and takes it as part of a
      fuller write. Unchecked, this step could not tell us. */
-  { what: "the whole payload at once", body: whole(), check: "remarks" },
+  { what: "everything together", check: "remarks",
+    body: full({ remarks: mergeRemarks(c0.remarks || "", renderRemarks(card, { stageLabel: "MQL" })), extra }) },
 ];
-
-/* Belt and braces on the same hazard: a key that would go out EMPTY is left
-   off the payload entirely, so no array can clear anything even if the read
-   above returned a shape this did not expect. */
-function whole() {
-  const b = toKylasContact(card, { extra });
-  for (const k of ["emails", "phoneNumbers"]) if (Array.isArray(b[k]) && !b[k].length) delete b[k];
-  return b;
-}
 for (const s of STEPS) console.log(`  ${s.what.padEnd(34)} ${JSON.stringify(s.body).slice(0, 150)}`);
 
 if (!WRITE) {
@@ -232,13 +240,23 @@ for (const s of STEPS) {
 
 /* ── 5 · put it back ───────────────────────────────────────────────────── */
 head("5 · restoring");
-const restore = { remarks: c0.remarks ?? "", customFieldValues: {} };
-for (const k of watched) restore.customFieldValues[k] = cf0[k] ?? null;
-/* Put the phones and emails back as Kylas handed them over, whatever the
-   writes above did to them. Only when there were some: sending [] here would
-   be the very wipe this is guarding against. */
-if (c0.phoneNumbers?.length) restore.phoneNumbers = c0.phoneNumbers;
-if (c0.emails?.length) restore.emails = c0.emails;
+/* THE RECORD AS IT WAS, WHOLE. A restore that sends only the fields it changed
+   is the same mistake as a write that does — under a replacing PUT it deletes
+   everything it leaves out, which is exactly how the fields it was supposed to
+   protect were lost the first time. */
+const restore = {
+  firstName: c0.firstName, lastName: c0.lastName,
+  designation: c0.designation, linkedin: c0.linkedin,
+  remarks: c0.remarks ?? "",
+  ...(c0.company ? { company: typeof c0.company === "object" ? c0.company.id : c0.company } : {}),
+  ...(c0.ownerId ? { ownerId: c0.ownerId } : {}),
+  ...(c0.phoneNumbers?.length ? { phoneNumbers: c0.phoneNumbers } : {}),
+  ...(c0.emails?.length ? { emails: c0.emails } : {}),
+  customFieldValues: Object.fromEntries(Object.entries(cf0)
+    .map(([k, v]) => [k, v && typeof v === "object" ? (v.id ?? v.value) : v])
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")),
+};
+for (const k of Object.keys(restore)) if (restore[k] === undefined) delete restore[k];
 const back = await api("PUT", `/v1/contacts/${CONTACT}`, restore);
 console.log(back.ok ? `  restored the ${watched.length} field(s), the remarks` +
                       `${c0.phoneNumbers?.length ? `, ${c0.phoneNumbers.length} phone(s)` : ""}` +

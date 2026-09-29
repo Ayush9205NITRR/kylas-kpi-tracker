@@ -706,8 +706,32 @@ export function renderRemarks(c, { stageLabel } = {}) {
 
 /* The console's shape back into Kylas'. Only fields Kylas owns — the overlay's
    own data lives in Airtable and in the remarks block. */
-export function toKylasContact(c, { remarks, extra } = {}) {
+/* THE PUT REPLACES THE RECORD. IT DOES NOT MERGE.
+ *
+ * Proved on the live account on 2026-09-29, at the cost of one contact's name,
+ * phone and email: a PUT carrying {remarks, customFieldValues} came back 200
+ * and left a record with no firstName, no lastName, no phoneNumbers and no
+ * emails — Kylas had replaced the contact with what was sent. The same rule
+ * explains why a PUT of {remarks} alone appeared to "store nothing": it stored
+ * exactly what it was given and dropped the rest.
+ *
+ * So a field this payload leaves out is a field this payload DELETES, and
+ * every `undefined` below used to be deleted from the body before sending —
+ * which read as "leave it alone" and meant "clear it". `base` is the contact
+ * as Kylas currently holds it (the save already fetches it for the remarks
+ * block), and anything the card does not have is carried over from it rather
+ * than left out:
+ *
+ *   no phone on the card   →  the phone Kylas has, not an empty array
+ *   no designation typed   →  the designation already on the record
+ *   cfBatch, cfWebsite…    →  every other custom field, untouched
+ *
+ * Without `base` this behaves as it always did, which is why the argument is
+ * optional and why every caller that writes to a real contact passes it.
+ */
+export function toKylasContact(c, { remarks, extra, base } = {}) {
   const { firstName, lastName } = splitName(c.pocName);
+  const had = base || {};
   const body = {
     firstName: firstName || undefined,
     lastName: lastName || "Unknown",
@@ -728,11 +752,34 @@ export function toKylasContact(c, { remarks, extra } = {}) {
                             value: s.value, primary: !!p.primary })),
     customFieldValues: {},
   };
+  /* Carry over what the card has no opinion about. An empty list on the card
+     is "the console does not know", never "there are none" — the console only
+     ever shows what it read from this same record. */
+  if (!body.emails.length && had.emails?.length) body.emails = had.emails;
+  if (!body.phoneNumbers.length && had.phoneNumbers?.length) body.phoneNumbers = had.phoneNumbers;
+  if (!body.designation && had.designation) body.designation = had.designation;
+  if (!body.linkedin && had.linkedin) body.linkedin = had.linkedin;
+  if (!firstName && had.firstName) body.firstName = had.firstName;
+  if (lastName === "Unknown" && had.lastName) body.lastName = had.lastName;
+
   if (c.companyId) body.company = Number(c.companyId);
+  else if (had.company) body.company = idOf(had.company);
   if (c.ownerId) body.ownerId = Number(c.ownerId);
+  else if (had.ownerId) body.ownerId = idOf(had.ownerId);
   if (remarks !== undefined) body.remarks = remarks;
+  else if (had.remarks) body.remarks = had.remarks;
 
   /* A picklist is set by value id, never by code. */
+  /* EVERY OTHER CUSTOM FIELD THE RECORD HOLDS, first, so ours overwrite it and
+     nobody else's is dropped. cfBatch, cfAccountHealthBd and the rest belong to
+     the CRM, not to this console, and a replace that leaves them out erases
+     them. Values arrive as ids or as { id, name }; the id is what a write
+     takes. */
+  for (const [k, v] of Object.entries(had.customFieldValues || {})) {
+    const id = idOf(v);
+    if (id !== undefined && id !== null && id !== "") body.customFieldValues[k] = id;
+  }
+
   const stageId = STAGE_ID[c.stage];
   if (stageId) body.customFieldValues.cfPipelineStageBd = stageId;
   if (c.source) body.customFieldValues.cfSourceOfData = c.source;

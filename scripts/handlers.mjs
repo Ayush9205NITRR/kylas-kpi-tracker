@@ -1239,13 +1239,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       };
       let atP = c.kid ? airtableLeg() : null;
       try {
-        /* Remarks: read what is there first so a human's own text survives. */
-        let existing = "";
-        if (c.kid) {
-          try { existing = (await kylas.contact(c.kid))?.remarks || ""; }
-          catch { /* a failed read should not block the write */ }
-        }
-        const remarks = mergeRemarks(existing, renderRemarks(c, { stageLabel }));
+        /* THE WHOLE RECORD, not just its remarks. The PUT replaces the
+           contact rather than patching it (see toKylasContact), so what is not
+           sent is deleted — the record as Kylas holds it is what everything the
+           card has no opinion about is carried over from. Read for the remarks
+           block anyway, so this costs nothing extra.
+
+           A FAILED READ IS NOT A REASON TO WRITE BLIND. Without `base` a save
+           would replace the contact with only what the card knows, which for a
+           contact opened from the queue is a name, a stage and a phone — and
+           would drop every other custom field the CRM holds. So a read that
+           fails fails the save, and the queue retries it. */
+        let base = null;
+        if (c.kid) base = await kylas.contact(c.kid);
+        const remarks = mergeRemarks(base?.remarks || "", renderRemarks(c, { stageLabel }));
         /* THE CALL-BACK AND THE OFFSITE QUARTER, WRITTEN BACK (Ayush,
            2026-09-29). Both were on the card and in Airtable and reached Kylas
            only as a line of remarks text nothing can filter on. The field
@@ -1259,7 +1266,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           const map = await writeMap();
           extra = extraCustomFields(map, c, { tzMin: TZ_MIN, quarters: offsiteOf(c) });
         } catch (e) { log(`  write map unavailable (${e.message.slice(0, 60)}) — stage and remarks only`); }
-        const payload = toKylasContact(c, { remarks, extra });
+        const payload = toKylasContact(c, { remarks, extra, base });
 
         if (!c.kid) {
           /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
