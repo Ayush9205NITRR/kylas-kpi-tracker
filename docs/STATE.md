@@ -70,6 +70,8 @@ node scripts/test-behind-base.mjs        # 24 · a base one repair-base behind: 
                                          #      survives it, and the backfill repairs it
 node scripts/test-offsite.mjs            # 30 · Offsite Timeline read out of event-row text
 node scripts/test-company-crawl.mjs      # 9 · every company past Kylas' 10,000 window
+node scripts/test-days.mjs               # 43 · where one day ends. Every case is an hour
+                                         #      the old code got wrong
 node scripts/test-enrich.mjs             # 62 · the tolerant number parser and its bands
 node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
                                          #       page documenting them, all agreeing
@@ -292,6 +294,44 @@ lived only in the browser. Needs `repair-base` on the live base. From it,
 and next call, and whether promised call-backs were kept — the focus pane in
 the Today tab, the Next call column/chips, and TAT (pick → SQL days, days
 open, call-backs on time %). A focus account stays on the pane until SQL.
+
+**Every date was UTC, and half of them were a rolling 24 hours.** Fixed
+2026-09-29; `scripts/day.mjs` and `extension/console/day.js` are now the only
+two places that decide what day something happened on, and
+`scripts/test-days.mjs` is the boundary list. Two faults, about twenty sites:
+
+  `new Date(x).toISOString().slice(0, 10)` is the **UTC** day. In IST that is
+  yesterday's date until 05:30, so every call on the early shift was missing
+  from the Today tab, counted on the previous day by the snapshot — which then
+  freezes and is never recounted — rolled into the wrong week and month, and
+  made a call-back promised for that morning read as overdue before it was due.
+
+  `Math.floor((Date.now() - t) / 864e5)` is a **rolling day**. A call at 23:00
+  yesterday read "Today" at 09:00 this morning, with a green freshness dot, on
+  an account nobody had touched since the day before. That one drove the Last
+  call column, all five freshness bands, the stale flag and "Days since last
+  call".
+
+A date field with no time (Airtable's `Next Call Date`) is never shifted
+through a timezone — doing so moves a call-back promised for the 29th onto the
+28th. `dayOf` returns a plain date untouched, and that has its own tests.
+
+**Account pipeline stage is CALCULATED, and is not any of the fields it sits
+between.** Ayush, 2026-09-29: an account with three contacts has three pipeline
+stages, and the account sits at the furthest of them by the 26-rung order in
+`docs/stages.json`. Three different things are on the row and they disagree
+often — where they do, somebody has worked the account somewhere the other two
+cannot see:
+
+  **Pipeline stage** the company's own `Pipeline Stage - BD` in Kylas: one
+  value typed on the company record, stale the moment a POC moves.
+  **Account stage** the calculation. `scripts/progress.mjs` already worked it
+  out for the focus pane and only the `nextCall` it derived was ever sent;
+  `/companies` now carries `acctStage`/`acctRung` too. Blank means no contact
+  of that account has been saved to the KPI base yet — **not** "nothing is
+  happening", and on a base with 40 companies out of 17,924 that is most rows.
+  **Demand team stage** Company List's `Account Pipeline Stage`, a reference
+  the demand team keeps by hand. Off by default.
 
 **A handler that fires is not a feature that works.** `.viewport` was
 `position:absolute; inset:0`, so on the two screens an associate actually uses

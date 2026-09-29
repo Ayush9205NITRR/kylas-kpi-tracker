@@ -192,8 +192,12 @@ function refreshQual(){
 }
 const rec=()=>{const a=DATA[cur];
   for(const r of [...(a.past||[]),...(a.current||[])]) if(!r.rowKey)r.rowKey=rowKey();if(a.pastAsked===undefined)a.pastAsked=a.past.length?"yes":"";if(a.currAsked===undefined)a.currAsked=a.current.length?"yes":"";if(a.pitched===undefined)a.pitched=a.serviceOffering?"yes":"";return a;};
-const today=()=>new Date().toISOString().slice(0,10);
-const dateIn=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
+/* MIDNIGHT TO MIDNIGHT, ON THIS MACHINE. Both of these were toISOString(),
+   which is the UTC day: in IST that is yesterday's date until 05:30, so a
+   call logged at 02:00 was missing from Today and "tomorrow" on a call-back
+   button was sometimes today. day.js. */
+const today=()=>Day.today();
+const dateIn=n=>Day.shift(n);
 /* Associates paste "linkedin.com/in/x", "www.linkedin.com/in/x" or a full url.
    Accept all three, reject anything that is not a linkedin address. */
 function liUrl(v){
@@ -450,7 +454,9 @@ function bySession(x,y){
 }
 /* "Today" is a record of work done, not a queue of work outstanding: the calls
    actually made today, most recent first. */
-const calledToday=a=>String(a.lastCallAt||"").slice(0,10)===today();
+/* The day the call fell on HERE, not its UTC date — a call at 02:00 IST
+   belongs to this morning's list, and used to be filed under yesterday. */
+const calledToday=a=>Day.isToday(a.lastCallAt);
 const byRecentCall=(x,y)=>String(y.a.lastCallAt||"").localeCompare(String(x.a.lastCallAt||""));
 
 function visible(){
@@ -515,7 +521,7 @@ function renderQueue(){
       </span>
       <span class="told">
         <i class="spoke${spoke?"":" no"}">${spoke?"spoken to":"not spoken to"}</i>
-        ${last?`<i class="when" title="Last call ${esc(String(a.lastCallAt).slice(0,10))}">${esc(last)}</i>`:""}
+        ${last?`<i class="when" title="Last call ${esc(Day.dayOf(a.lastCallAt))}">${esc(last)}</i>`:""}
         ${evs.length?evs.slice(0,2).map(e=>
             `<i class="ev${past.includes(e)?" past":""}" title="${
               past.includes(e)?"Ran this before":"On the table now"}">${esc(label(e))}</i>`).join(""):""}
@@ -952,7 +958,7 @@ function renderBasic(){
   const qc=el("div","qchips");
   [["Tomorrow",1],["+3 days",3],["Next week",7]].forEach(([l,n])=>{
     const b=el("button","qc",l);b.type="button";b.tabIndex=-1;
-    b.onclick=()=>{const dt=new Date();dt.setDate(dt.getDate()+n);a.nextCallDate=dt.toISOString().slice(0,10);render();};
+    b.onclick=()=>{a.nextCallDate=Day.shift(n);render();};
     qc.appendChild(b);
   });
   ncd.appendChild(qc);
@@ -1799,7 +1805,7 @@ async function boot(){
   if(c)c.textContent=log.length;
   /* done means "logged today", derived from the log — not a stored field. */
   const t=today();
-  const loggedToday=new Set(log.filter(e=>(e.at||"").slice(0,10)===t).map(e=>e.kid));
+  const loggedToday=new Set(log.filter(e=>Day.dayOf(e.at)===t).map(e=>e.kid));
   DATA.forEach(a=>{a.done=loggedToday.has(a.kid);});
   addOwners(DATA.map(a=>a.owner));
   renderFilters();render();

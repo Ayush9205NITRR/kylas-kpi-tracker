@@ -15,13 +15,23 @@
  * testable — see scripts/test-report.mjs.
  */
 import { STAGE_RUNG, MILESTONE } from "./stages.mjs";
+import { dayOf, IST_MIN } from "./day.mjs";
 
 /* ── periods ───────────────────────────────────────────────────────── */
 /* ISO dates throughout, because they sort as strings and a KPI report that
    disagrees with itself about what "this week" means is worse than no report.
    Weeks start MONDAY: a BD week is Monday to Friday, and a Sunday-start week
    splits it across two rows. */
-export const dayKey = (iso) => String(iso || "").slice(0, 10);
+/* WHICH DAY A CALL COUNTS ON. This was slice(0, 10) — the UTC date — so
+   every call on the early shift, before 05:30 IST, was counted on the
+   previous day, and that rolled up into the wrong week and the wrong month.
+   The offset is a module setting rather than a parameter because dayKey is
+   handed around as a function reference (KEY_OF below) and threading a second
+   argument through every call site would be a much larger change for the same
+   answer. It is set once, from env, at startup. */
+let TZ = IST_MIN;
+export const setReportTz = (min) => { TZ = Number.isFinite(Number(min)) ? Number(min) : IST_MIN; };
+export const dayKey = (iso) => dayOf(iso, TZ);
 
 export function weekKey(iso) {
   const d = new Date(dayKey(iso) + "T00:00:00Z");
@@ -32,7 +42,7 @@ export function weekKey(iso) {
   return d.toISOString().slice(0, 10);
 }
 
-export const monthKey = (iso) => String(iso || "").slice(0, 7);
+export const monthKey = (iso) => dayKey(iso).slice(0, 7);
 
 /* Quarter and year, so the report can be read from the top down: a year opens
    into its four quarters, a quarter into its months, a month into its days.

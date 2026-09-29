@@ -42,6 +42,7 @@ on it, which nobody reports as a bug.
 | KPI status | Single select | the derived rung | |
 | Last call | **Date** | `lastCalledAt` | the cell shows a band; the filter holds the date. "Before 1 April" and "cold" are different questions |
 | Next call | **Date** | `nextCall` | the promised call-back. `is within the next 0 days` is today alone |
+| Account stage | Single select | **calculated** | the furthest rung any contact of the account has reached — see *Three stages* below. Ordered by rung, furthest first, because sorting a ladder alphabetically puts Activation above SQL |
 | Priority | Number | `enrich.pri` | the team's own `at_priority` |
 | Revenue | Number | `enrich.rev` | **US dollars**, as Apollo stores them. Nothing is converted |
 | Rev / employee | Number | `enrich.rpe` | dollars |
@@ -49,9 +50,26 @@ on it, which nobody reports as a bug.
 | Total funding | Number | `enrich.fund` | dollars |
 | Latest round | Number | `enrich.amt` | dollars. Apollo writes `0` for "no round", which is read as *unknown*, never as zero |
 | Funding stage | Single select | `enrich.type` | the latest round's type |
-| Account stage | Single select | `enrich.aps` | the **demand team's** `Account Pipeline Stage`, not Kylas'. The two disagree often, and where they do somebody has worked that account somewhere the other side cannot see |
+| Demand team stage | Single select | `enrich.aps` | Company List's `Account Pipeline Stage`, a reference the demand team maintains by hand. Off by default |
 | LinkedIn | Link | `enrich.li` | |
 | Boolean post | Link | `enrich.bp` | whichever of the three Boolean columns is filled |
+
+### Three stages, and why all three are here
+
+An account with three contacts has three pipeline stages. These are three
+different answers to "where is this account", and they disagree often — where
+they do, somebody has worked the account somewhere the other two cannot see.
+
+| column | what it is |
+|---|---|
+| **Pipeline stage** | the company's own `Pipeline Stage - BD` in Kylas. One value, typed on the company record, stale the moment a POC moves |
+| **Account stage** | **calculated**: the furthest of its contacts' stages, by the 26-rung order in `docs/stages.json`. Never typed. Blank means no contact of that account has been saved yet — not "nothing is happening" |
+| **Demand team stage** | Company List's `Account Pipeline Stage`, a reference column the demand team keeps by hand |
+
+The calculated one is computed server-side in `scripts/progress.mjs` from the
+contacts in the KPI base, and recomputed in the browser over any contacts the
+open card has that the base has not seen yet — whichever is further along
+wins, so a stage moved thirty seconds ago already counts.
 
 ### Three fields that are not columns
 

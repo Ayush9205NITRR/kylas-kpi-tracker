@@ -331,6 +331,13 @@ body.framed .ovOnly{display:inline-block}
 .vrca span b{font-weight:var(--w-strong)}
 .vrca .gbtn{margin-left:auto;border-color:var(--amber);color:var(--amber)}
 .vrca .gbtn:hover{background:var(--amber);color:var(--panel)}
+/* TODAY'S FOLLOW-UPS, in the same one-line shape as the stall strip. Amber is
+   the flag colour and it is earned here only while something is overdue — a
+   broken promise is a flag; work that is due today is just the day's work, so
+   with nothing overdue the strip drops back to the accent. */
+.vrca.calm{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
+.vrca.calm .gbtn{border-color:var(--blue);color:var(--blue)}
+.vrca.calm .gbtn:hover{background:var(--blue);color:var(--onBlue)}
 
 .rcaWho{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
 .rcaWho b{font-size:var(--t-body);font-weight:var(--w-strong)}

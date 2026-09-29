@@ -105,10 +105,13 @@
        is an event log, so a day can always be recounted identically from it.
        Standing totals (how many companies sit at each rung) need record state
        over time, which belongs in Airtable, not in this browser. */
-    dayOf(entry) { return (entry.at || "").slice(0, 10); },
+    /* THE DAY IT HAPPENED HERE. This was the UTC date, so every call on the
+       early shift — before 05:30 IST — was frozen into the previous day and
+       counted there for ever, because a frozen day is never recounted. */
+    dayOf(entry) { return Day.dayOf(entry.at); },
 
     countDay(log, date) {
-      const rows = log.filter((e) => (e.at || "").slice(0, 10) === date);
+      const rows = log.filter((e) => Day.dayOf(e.at) === date);
       const uniq = (f) => new Set(rows.map(f).filter(Boolean)).size;
       const connected = rows.filter((e) => e.outcome && e.outcome !== "No answer");
       return {
@@ -136,7 +139,7 @@
       const log = (await get(KEY.log)) || [];
       if (!log.length) return 0;
       const snaps = await this.loadSnapshots();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = Day.today();
       const days = [...new Set(log.map((e) => this.dayOf(e)).filter(Boolean))];
       let frozen = 0;
       for (const d of days) {
@@ -152,10 +155,12 @@
     async series(days) {
       const log = (await get(KEY.log)) || [];
       const snaps = await this.loadSnapshots();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = Day.today();
       const out = [];
       for (let i = days - 1; i >= 0; i--) {
-        const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+        /* Stepped from today's CALENDAR day, not by subtracting 24h from now —
+           the latter drifts off the day boundary and can repeat or skip one. */
+        const d = Day.shift(-i);
         if (d === today) out.push({ ...this.countDay(log, d), live: true });
         else if (snaps[d]) out.push({ ...snaps[d], live: false });
         else out.push({ ...this.countDay(log, d), live: false, unfrozen: true });

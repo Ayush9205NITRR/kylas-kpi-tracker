@@ -158,7 +158,7 @@
          reached". Two different facts, two fields — merging them would make the
          Stage filter match rows whose POCs are somewhere else entirely. */
       if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch",
-                                 "health", "lastCalledAt", "kylasStage"])
+                                 "health", "lastCalledAt", "kylasStage", "acctStage"])
         if (!co[k] && seed[k]) co[k] = seed[k];
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
@@ -179,7 +179,10 @@
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
                            lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
-                           offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich });
+                           offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich,
+                           /* The server's calculated account stage — the furthest
+                              rung any of this account's contacts has reached. */
+                           acctStage: co.acctStage });
     }
 
     for (const c of data) {
@@ -203,6 +206,12 @@
         /* The company sits at the best rung any of its POCs has reached. */
         const r = STAGE_RUNG[c.stage] || 0;
         if (r > co.rung) { co.rung = r; co.stage = c.stage; }
+        /* And the ACCOUNT STAGE is that same calculation over every contact,
+           including the ones this browser has open but not saved yet. The
+           server computed it from the KPI base; a contact moved on this card
+           a moment ago is not in there, and the row should not wait for a
+           save to tell the truth. */
+        if (r > (STAGE_RUNG[co.acctStage] || 0)) co.acctStage = c.stage;
 
         /* Last quality date: the most recent stage change across its POCs. A
            second call two hours later moves it; a call that changes nothing
@@ -295,7 +304,8 @@
 
   /* ── dashboard ─────────────────────────────────────────────────────── */
   const pct = (n, d) => (d ? Math.round((n / d) * 100) + "%" : "—");
-  const day = (iso) => (iso ? String(iso).slice(0, 10) : "—");
+  /* The day it happened here, for display. */
+  const day = (iso) => (iso ? (global.Day.dayOf(iso) || "—") : "—");
 
   /* The allotted list is a search over up to 200 companies, so it is fetched
      once and reused by both views rather than on every repaint. */
@@ -998,9 +1008,9 @@
       return [`${key}-01`, `${key}-${endDay}`];
     }
     if (level === "week") {
-      const a = new Date(key + "T00:00:00Z");
-      const b = new Date(a); b.setUTCDate(b.getUTCDate() + 6);
-      return [key, b.toISOString().slice(0, 10)];
+      /* Plain-date arithmetic on a plain date — no instant, so no timezone.
+         Putting this through one would move the week's end a day. */
+      return [key, global.Day.shiftDay(key, 6)];
     }
     return [key, key];
   }
@@ -1398,7 +1408,7 @@
           <button class="gbtn" id="rx" type="button">Close</button></div>
         <div class="b">
           <div class="rcaWho"><b>${esc(item.name)}</b>
-            <em>stuck ${item.days} days · since ${esc(String(item.since).slice(0, 10))}</em></div>
+            <em>stuck ${item.days} days · since ${esc(day(item.since))}</em></div>
           <p class="dnote">${esc(g?.ask || "")}</p>
           <div class="rcaReasons">${(g?.reasons || []).map((r) =>
             `<button class="rchip" type="button" data-code="${esc(r.code)}">${esc(r.label)}</button>`).join("")}</div>
@@ -1539,7 +1549,7 @@
          zeros — the newest period is first, so the first thing you read after
          drilling was a row about the future. A period that has not started is
          not a period with no activity. */
-      const today = new Date().toISOString().slice(0, 10);
+      const today = global.Day.today();
       if (from > today) return;
       if (to > today) to = today;
       const row = REP.data?.periods.find((p) => p.key === key);
@@ -1679,11 +1689,13 @@
   /* Days since the last call — the whole prioritisation signal. Null for a
      company nobody has called, which is not "infinitely stale", it is a
      different state with its own column. */
-  const daysSince = (iso) => {
-    const t = Date.parse(iso || "");
-    if (!Number.isFinite(t)) return null;
-    return Math.floor((Date.now() - t) / 86400000);
-  };
+  /* MIDNIGHTS CROSSED, not hours elapsed. This was
+     `Math.floor((Date.now() - t) / 864e5)`, a rolling twenty-four hours — so
+     a call at 23:00 yesterday read "Today" at nine this morning, with a green
+     freshness dot, on an account nobody had touched since the day before.
+     Everything downstream of this is affected: the Last call column, the five
+     freshness bands, the stale flag and "Days since last call". day.js. */
+  const daysSince = (iso) => global.Day.daysAgo(iso);
   /* Amber is the flag colour and this is a flag: an account in the loop that
      nobody has touched in a fortnight is the thing the board exists to surface.
      One threshold, not a gradient — a scale of five ambers is a heat map, and a
@@ -2208,15 +2220,12 @@
   /* The numbers people type are the ones they say: 10M, 2.5b, 40 — all read
      by the same parser the columns use. */
   const fbNum = (s) => global.Enrich.num(s);
-  /* A date, as the day it falls on. Kylas hands back "2026-04-17" for some
-     fields and a full timestamp for others, and comparing those two as
-     strings quietly puts every timestamp after every date. Ten characters is
-     the day in both. */
-  const fbDay = (v) => String(v ?? "").slice(0, 10);
-  /* Today on THIS machine, not in UTC — an associate in Delhi filtering for
-     "due today" at nine in the morning means their today. */
-  const fbToday = () => new Date().toLocaleDateString("sv");
-  const fbShift = (days) => new Date(Date.parse(fbToday()) + days * 864e5).toLocaleDateString("sv");
+  /* Kylas hands back "2026-04-17" for some fields and a full timestamp for
+     others, and comparing those two as strings quietly puts every timestamp
+     after every date. day.js reduces both to the day they fell on here. */
+  const fbDay = (v) => global.Day.dayOf(v);
+  const fbToday = () => global.Day.today();
+  const fbShift = (days) => global.Day.shift(days);
 
   function fbTest(co, c) {
     const f = fbField(c.f);
@@ -2465,8 +2474,8 @@
   const FOCUS_CHIPS = { focus: "★ Focus", normal: "Not picked", depri: "Deprioritized" };
   /* NEXT CALL — the earliest call-back set on a contact still in play at the
      company (saved to Airtable since 1.20). "Today" is this machine's day. */
-  const localDay = () => new Date().toLocaleDateString("sv");
-  const nextIn = (co) => co.nextCall ? Math.round((Date.parse(co.nextCall) - Date.parse(localDay())) / 864e5) : null;
+  const localDay = () => global.Day.today();
+  const nextIn = (co) => (co.nextCall ? global.Day.daysUntil(co.nextCall) : null);
   const nextOf = (co) => { const d = nextIn(co); return d === null ? "none" : d < 0 ? "overdue" : d === 0 ? "today" : d <= 7 ? "week" : "later"; };
   const NEXT_CHIPS = { overdue: "Overdue", today: "Due today", week: "Next 7 days", later: "Later", none: "No call-back" };
   const nextText = (co) => {
@@ -2583,12 +2592,34 @@
     { k: "fstage", label: "Funding stage", w: "1fr",
       ff: { type: "enum", get: (c) => en(c).type || "" },
       cell: (c) => dash(esc(en(c).type || "")) },
-    /* NOT the Kylas pipeline stage in the column beside it. This is the demand
-       team's own read of the account out of Company List — "LinkedIn Outreach
-       Initiated", "Invalid Contact" — and the two disagree often. Where they
-       do, somebody has worked the account somewhere the other side cannot see,
-       which is exactly why both are on the row. */
-    { k: "aps", label: "Account stage", w: "1.1fr", on: true,
+    /* ACCOUNT PIPELINE STAGE — CALCULATED, and the highest one wins.
+       An account with three contacts has three pipeline stages, and the
+       account sits at the furthest of them by the 26-rung order in
+       docs/stages.json. That is a different fact from the two columns either
+       side of it:
+
+         Pipeline stage    the company's own Pipeline Stage - BD in Kylas, a
+                           single value somebody typed on the company record,
+                           which goes stale the moment a POC moves
+         Account stage     THIS — computed from the contacts
+         Demand team stage Company List's Account Pipeline Stage column, a
+                           reference the demand team maintains by hand
+
+       Where they disagree somebody has worked the account somewhere the other
+       two cannot see, which is why all three are available. Blank means no
+       contact of this account has been saved yet, not "nothing is happening".
+       (Ayush, 2026-09-29.) */
+    { k: "acct", label: "Account stage", w: "1.3fr", on: true,
+      ff: { type: "enum", get: (c) => acctStageOf(c),
+            labelOf: (v) => stageName(v),
+            /* Furthest first: this is a ladder, and sorting its rungs
+               alphabetically is how "Activation" ends up above "SQL". */
+            order: (a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0) },
+      cell: (c) => { const v = acctStageOf(c); return v ? esc(label(v) || v) : "—"; } },
+    /* The demand team's own read, kept and clearly named rather than confused
+       with the calculated one above. Off by default — it is a second opinion,
+       not the answer. */
+    { k: "aps", label: "Demand team stage", w: "1.1fr",
       ff: { type: "enum", get: (c) => en(c).aps || "" },
       cell: (c) => dash(esc(en(c).aps || "")) },
     /* A url is not text. "Which accounts still have no LinkedIn" is the
@@ -2665,7 +2696,35 @@
     }
     const shown = rows.slice(0, ACC.limit);
 
+    /* ── TODAY'S FOLLOW-UPS ──────────────────────────────────────────
+       The call-backs promised for today, and the ones already missed. This
+       is the only thing on the screen with a deadline, and until now it was
+       a chip among fourteen other chips with the same weight as "Employees".
+       Ayush, 2026-09-29: "today followup where next call date is of today,
+       unke followup".
+
+       It counts the WHOLE account list, not the filtered rows — a promise
+       does not stop being due because you are looking at Series B companies
+       — and it says so when the two differ, or the number would look wrong
+       to anyone who had filtered. One line: the count is the message, and
+       one click filters to them. Nothing shows when nothing is owed, which
+       is most afternoons. Amber only when something is overdue: a broken
+       promise is a flag, work due today is not. */
+    const due = { overdue: 0, today: 0 };
+    for (const c of all) { const k = nextOf(c); if (k in due) due[k]++; }
+    const owed = due.overdue + due.today;
+    const inView = shown.length < all.length || any;
+    const dueHere = inView ? rows.filter((c) => ["overdue", "today"].includes(nextOf(c))).length : owed;
+    const strip = !owed ? "" : `<div class="vrca vfu${due.overdue ? "" : " calm"}">
+      <b>${owed}</b>
+      <span>${[due.overdue ? `<b>${due.overdue}</b> overdue` : "",
+               due.today ? `<b>${due.today}</b> due today` : ""].filter(Boolean).join(" · ")
+        }${inView && dueHere !== owed ? ` — ${dueHere} of them in this filtered list` : ""}</span>
+      <button class="gbtn sm" id="accToday" type="button">Show them</button>
+    </div>`;
+
     return `
+      ${strip}
       <div class="card explorer">
         <div class="exhead">
           <h2>${esc(ACC.stages.size === 1 ? stageName([...ACC.stages][0]) : "All accounts")}</h2>
@@ -2743,6 +2802,17 @@
      mirrored stage otherwise. Same fallback the card's stage line uses, so a
      company cannot be filed under one stage and labelled with another. */
   const stageOf = (co) => co.stage || co.kylasStage || "";
+  /* THE ACCOUNT'S STAGE, which is a calculation and not a field: the furthest
+     rung any contact of the account has reached, by docs/stages.json. The
+     server sends it (from the KPI base); co.stage is the same calculation over
+     the contacts THIS browser has loaded, which is fresher when a card is
+     open. Whichever is further along is the account's stage. */
+  const acctStageOf = (co) => {
+    const a = co.acctStage || "", b = co.stage || "";
+    if (!a) return b;
+    if (!b) return a;
+    return (STAGE_RUNG[b] || 0) > (STAGE_RUNG[a] || 0) ? b : a;
+  };
   /* A stage's name for a chip. The blank one is a real answer — thousands of
      allotted companies have never been given a stage in Kylas — so it is
      named rather than left as an empty chip. */
@@ -3228,6 +3298,20 @@
       ACC.limit = 100; saveAccPrefs(); redraw();
     }));
     /* ── columns, and the bands behind More filters ── */
+    /* Everything else off, the two call-back chips on, call-backs first. A
+       filter is what this is, so it goes through the same state as the chips
+       rather than becoming a fourth kind of view — Clear filters undoes it,
+       and Copy link carries it. */
+    on("accToday", "click", () => {
+      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.focusSet.clear();
+      for (const st of moreSets()) st.clear();
+      ACC.priMin = ""; ACC.q = ""; FB.tree = { join: "and", items: [] };
+      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
+      ACC.nextSet = new Set(["overdue", "today"]);
+      ACC.sort = "next"; ACC.limit = 100;
+      saveAccPrefs(); redraw();
+    });
     on("accLink", "click", async () => {
       const url = String(location.href).split("#")[0] + HASH + filtersToQuery();
       try { await navigator.clipboard.writeText(url); toast("Link copied — it opens this list with these filters"); }

@@ -234,8 +234,23 @@ async function callbacks() {
     Company: made[i] ? [made[i].id] : undefined,
     "Next Call Date": day(d),
   }));
+  /* THREE CONTACTS ON ONE ACCOUNT, EACH AT A DIFFERENT STAGE — the case the
+     Account stage column exists for, and the one no fixture had. The account
+     sits at the FURTHEST of them (Follow-up 2, rung 17), not the first, not
+     the last written, and not the company's own field. Without this every
+     account had exactly one contact and "highest wins" was a rule nothing
+     could disagree with. */
+  const SPREAD = ["CNC_COULD_NOT_CONNECT", "MQL_MARKETING_QUALIFIED_LEAD", "FOLLOW_UP_2"];
+  SPREAD.forEach((stage, i) => people.push({
+    Name: `Spread Contact ${i + 1}`, "Kylas Contact ID": String(72100 + i),
+    Owner: "Enout Super Admin", "Current Stage": stage,
+    Company: made[0] ? [made[0].id] : undefined,
+  }));
+
   await post("Contacts", people);
-  console.log(`callbacks  ${people.length} promised on real Kylas ids — `
+  console.log(`           ${SPREAD.length} contacts on ${PLAN[0][0]} at ${SPREAD.length} different stages `
+    + `— the account sits at ${SPREAD[SPREAD.length - 1]}`);
+  console.log(`callbacks  ${people.length - SPREAD.length} promised on real Kylas ids — `
     + `${PLAN.filter(([, d]) => d < 0).length} overdue, 1 today, `
     + `${PLAN.filter(([, d]) => d > 0 && d <= 7).length} inside the week, `
     + `${PLAN.filter(([, d]) => d > 7).length} beyond it`);

@@ -19,12 +19,23 @@
 import { STAGE_RUNG, EXIT_STAGES } from "./stages.mjs";
 
 export const QUALIFIED = ["SQL_SALES_QUALIFIED_LEAD", "ACTIVATION"];
-const DAY = 864e5;
-const day = (iso) => String(iso || "").slice(0, 10);
-export const daysBetween = (a, b) => Math.round((Date.parse(day(b)) - Date.parse(day(a))) / DAY);
+/* DAYS ARE THE ASSOCIATE'S, NOT UTC'S. `day` used to be slice(0, 10), which
+   is the UTC date of a timestamp — so a call logged at 02:00 IST was filed
+   against the evening before, and a call-back promised for that morning read
+   as overdue before it was due. Every call on the early shift was on the
+   wrong day. See scripts/day.mjs. */
+import { dayOf, daysBetween as between, today as todayIn, IST_MIN } from "./day.mjs";
+/* Kept as an export because callers outside this file use it, and re-exported
+   through a real binding rather than `export … from`, which would leave the
+   two functions below reaching for a name that does not exist here. */
+export const daysBetween = between;
+const day = (v, tzMin = IST_MIN) => dayOf(v, tzMin);
 
-export function accountProgress({ companies = [], contacts = [], transitions = [], calls = [], today }) {
-  const t = day(today || new Date().toISOString());
+export function accountProgress({ companies = [], contacts = [], transitions = [],
+                                  calls = [], today, tzMin = IST_MIN }) {
+  const at = (v) => dayOf(v, tzMin);
+  const span = (a, b) => between(a, b, tzMin);
+  const t = at(today || todayIn(tzMin));
   const kidOf = new Map(companies.map((r) => [r.id, String(r.fields?.["Kylas Company ID"] || "")]));
   const contactCo = new Map();                 /* contact record id -> kid */
   const byCo = new Map();
@@ -47,7 +58,7 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
     if (rung > p.rung) { p.rung = rung; p.stage = stage; }
     if (QUALIFIED.includes(stage)) p.done = true;
     /* A call-back only counts while the contact is still in play. */
-    const next = day(f["Next Call Date"]);
+    const next = at(f["Next Call Date"]);
     if (next && !EXIT_STAGES.includes(stage) && (!p.nextCall || next < p.nextCall)) p.nextCall = next;
   }
 
@@ -73,7 +84,7 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
       if (!p.lastCallAt || f["Called At"] > p.lastCallAt) p.lastCallAt = f["Called At"];
     }
     if (!perContact.has(cid)) perContact.set(cid, []);
-    perContact.get(cid).push({ at: f["Called At"], promised: day(f["Next Call Date"]), owner: f.Owner || "" });
+    perContact.get(cid).push({ at: f["Called At"], promised: at(f["Next Call Date"]), owner: f.Owner || "" });
   }
 
   const followups = new Map();                 /* owner -> { due, onTime, late, open, delays[] } */
@@ -89,10 +100,10 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
       const o = fu(c.owner || "—");
       if (nxt) {
         o.due++;
-        const late = daysBetween(c.promised, nxt.at);
+        const late = span(c.promised, nxt.at);
         if (late <= 0) o.onTime++; else { o.late++; o.delays.push(late); }
       } else if (c.promised < t) {
-        o.due++; o.open++; o.late++; o.delays.push(daysBetween(c.promised, t));
+        o.due++; o.open++; o.late++; o.delays.push(span(c.promised, t));
       }
     });
   }
@@ -108,16 +119,16 @@ export const median = (xs) => {
 };
 
 /* A focus account's standing, for the reminder pane: what is owed today. */
-export function focusStanding(entry, p, today) {
-  const t = day(today || new Date().toISOString());
+export function focusStanding(entry, p, today, tzMin = IST_MIN) {
+  const t = day(today || todayIn(tzMin), tzMin);
   const pickedAt = entry?.setAt || null;
-  const daysOpen = pickedAt ? daysBetween(pickedAt, t) : null;
+  const daysOpen = pickedAt ? between(pickedAt, t, tzMin) : null;
   const base = { daysOpen, stage: p?.stage || "", rung: p?.rung || 0, lastCallAt: p?.lastCallAt || null,
                  nextCall: p?.nextCall || null, sqlAt: p?.sqlAt || null };
   if (p?.done) return { ...base, state: "done",
-                        tatDays: pickedAt && p.sqlAt ? Math.max(0, daysBetween(pickedAt, p.sqlAt)) : null };
+                        tatDays: pickedAt && p.sqlAt ? Math.max(0, between(pickedAt, p.sqlAt, tzMin)) : null };
   if (p?.closed) return { ...base, state: "closed" };
   if (!p?.nextCall) return { ...base, state: "no-date" };
-  const d = daysBetween(t, p.nextCall);
+  const d = between(t, p.nextCall, tzMin);
   return { ...base, state: d < 0 ? "overdue" : d === 0 ? "today" : "later", dueIn: d };
 }

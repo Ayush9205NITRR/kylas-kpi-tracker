@@ -11,6 +11,7 @@
  */
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG } from "./stages.mjs";
+import { dayOf, today as todayIn, tzMinOf } from "./day.mjs";
 
 /* Callable, so the same job runs from a terminal and from a scheduled Worker. */
 export async function run({ env = {}, log = () => {}, dry = false, date = "" } = {}) {
@@ -32,7 +33,10 @@ export async function run({ env = {}, log = () => {}, dry = false, date = "" } =
       ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
       ...(env.AIRTABLE_GAP ? { gap: Number(env.AIRTABLE_GAP) } : {}),
     });
-  const day = (v) => String(v || "").slice(0, 10);
+  /* The day a call fell on, where the associates are — not UTC, or the
+     early shift is frozen into yesterday. scripts/day.mjs. */
+  const TZ_MIN = tzMinOf(env);
+  const day = (v) => dayOf(v, TZ_MIN);
   const filled = (v) => String(v || "").trim() !== "";
 
   log(`Freezing ${DATE}…`);

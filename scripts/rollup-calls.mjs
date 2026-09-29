@@ -35,6 +35,7 @@
  * the day every time the script was re-run over rows it had not yet deleted.
  */
 import { createAirtable } from "./airtable.mjs";
+import { dayOf, today as todayIn, tzMinOf } from "./day.mjs";
 
 /* Callable, so the same job runs from a terminal and from a scheduled Worker. */
 export async function run({ env = {}, log = () => {}, apply = false,
@@ -56,8 +57,10 @@ export async function run({ env = {}, log = () => {}, apply = false,
       ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
       ...(env.AIRTABLE_GAP ? { gap: Number(env.AIRTABLE_GAP) } : {}),
     });
-  const day = (v) => String(v || "").slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  /* Same day boundary as everything else: theirs, not UTC. */
+  const TZ_MIN = tzMinOf(env);
+  const day = (v) => dayOf(v, TZ_MIN);
+  const today = todayIn(TZ_MIN);
 
   /* Everything strictly BEFORE this stays raw. */
   const cutoff = before

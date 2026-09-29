@@ -465,8 +465,8 @@
   async function openData() {
     const dump = await Store.exportAll();
     const log = dump.callLog;
-    const today = new Date().toISOString().slice(0, 10);
-    const todays = log.filter((e) => (e.at || "").slice(0, 10) === today);
+    const today = Day.today();
+    const todays = log.filter((e) => Day.dayOf(e.at) === today);
     const connected = todays.filter((e) => e.outcome && e.outcome !== "No answer").length;
     const secs = todays.reduce((n, e) => n + (e.duration || 0), 0);
     const drafts = Object.keys(dump.drafts).length;

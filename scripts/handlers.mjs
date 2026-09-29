@@ -39,7 +39,7 @@ import { createAirtable, syncContact, readCompanyKpis,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
-import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung } from "./report.mjs";
+import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung, setReportTz } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
 import { createSaveQueue } from "./save-queue.mjs";
@@ -48,6 +48,7 @@ import { createShadowReads } from "./shadow-read.mjs";
 import { readCompaniesSql } from "./sql-read.mjs";
 import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 import { accountProgress, focusStanding, median } from "./progress.mjs";
+import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -1304,8 +1305,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   /* WHERE EACH ACCOUNT STANDS (scripts/progress.mjs): furthest stage, SQL
      date, last call, next call-back — and whether promised call-backs were
      kept. Held until one of its four tables changes. "Today" is India's. */
-  const TZ_MIN = Number(env.TZ_OFFSET_MIN ?? 330);
-  const todayLocal = () => new Date(Date.now() + TZ_MIN * 60000).toISOString().slice(0, 10);
+  /* MIDNIGHT TO MIDNIGHT, WHERE THE ASSOCIATES ARE. Not the host's local
+     time — a Worker has none, it runs in UTC — and not UTC either, or the
+     early shift's calls land on yesterday. scripts/day.mjs. */
+  const TZ_MIN = tzMinOf(env);
+  const todayLocal = () => todayIn(TZ_MIN);
+  /* report.mjs buckets calls into days, weeks and months by a function it
+     hands around as a reference, so its offset is set once here rather than
+     passed to every call. */
+  setReportTz(TZ_MIN);
   const progressData = memo("account progress", {
     ttl: REPORT_TTL,
     key: mirror ? () => mirror.stamp(["Contacts", "Companies", "Stage Transitions", "Call Log"]) : null,
@@ -1316,7 +1324,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       listTolerant(airtable, "Stage Transitions", { fields: ["To Stage", "Changed At", "Contact"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Contact", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
     ]);
-    return accountProgress({ companies, contacts, transitions, calls, today: todayLocal() });
+    return accountProgress({ companies, contacts, transitions, calls, today: todayLocal(), tzMin: TZ_MIN });
   });
   const progress = async () => {
     if (!airtable) return { byCompany: new Map(), followups: new Map() };
@@ -1518,7 +1526,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             const e = enrich.get(String(co.id));
             if (e) co.enrich = e;
             co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
-            co.nextCall = prog.get(String(co.id))?.nextCall || null;
+            const p = prog.get(String(co.id));
+            co.nextCall = p?.nextCall || null;
+            /* THE ACCOUNT'S OWN STAGE, CALCULATED. See acctStage below. */
+            if (p?.stage) { co.acctStage = p.stage; co.acctRung = p.rung || 0; }
           }
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
@@ -1605,7 +1616,28 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
         /* Only where there is something — see the Airtable path. */
         ...(enrich.get(String(co.id)) ? { enrich: enrich.get(String(co.id)) } : {}),
-        nextCall: prog.get(String(co.id))?.nextCall || null }));
+        nextCall: prog.get(String(co.id))?.nextCall || null,
+        /* ACCOUNT PIPELINE STAGE, CALCULATED — Ayush, 2026-09-29: "it is a
+           calculated field, not a reference field ... agar mere pass ek
+           account hai usme 3 contact hai, har ek contact ke alag alag
+           pipeline stage hoga", and the account sits at the FURTHEST of them.
+           The order is the 26-rung ladder in docs/stages.json, which is the
+           one Kylas' own Pipeline Stage - BD picklist is built from.
+
+           It is NOT the company's own Pipeline Stage - BD field (that is one
+           value somebody typed on the company record, and it goes stale the
+           moment a POC moves), and it is NOT the demand team's Account
+           Pipeline Stage column in Company List (that is a reference). Those
+           two are still on the row, under their own names, because where the
+           three disagree is worth seeing.
+
+           progress.mjs already worked this out for the focus pane; only the
+           nextCall it derived was ever sent. It is computed from the contacts
+           in the KPI base, so an account nobody has saved a contact for has
+           none — which is honest, and is what the Unknown chip counts. */
+        ...(prog.get(String(co.id))?.stage
+          ? { acctStage: prog.get(String(co.id)).stage, acctRung: prog.get(String(co.id)).rung || 0 }
+          : {}) }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the
@@ -1859,7 +1891,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         const today = todayLocal();
         const tat = {};
         for (const [id, f] of Object.entries(focus)) {
-          f.standing = focusStanding(f, byCompany.get(id), today);
+          f.standing = focusStanding(f, byCompany.get(id), today, TZ_MIN);
           if (f.status !== "focus") continue;
           const o = (tat[f.ownerName || "—"] ||= { open: 0, overdue: 0, today: 0, noDate: 0, done: 0, closed: 0,
                                                      daysOpen: [], pickToSql: [] });
