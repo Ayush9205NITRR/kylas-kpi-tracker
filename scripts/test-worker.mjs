@@ -525,6 +525,40 @@ console.log('\n9a. sync now');
   check('asking twice does not queue two crawls', b.body.alreadyQueued === true, JSON.stringify(b.body));
 }
 
+/* ── 9a2 · save → dashboard, measured ──────────────────────────────────
+   "It writes Airtable directly" is not a latency. The report memo is keyed on
+   the mirror's stamp rather than a TTL, so the question is how long after a
+   save the stamp moves and the next read rebuilds — measured here rather than
+   asserted, because the number is the thing being promised. */
+console.log('\n9a2. how long from a save to the dashboard');
+{
+  const w = await coldWorker(42);
+  const get = async (path) => {
+    const held = [];
+    const r = await w.fetch(new Request(`https://bd.enout.website${path}`, { headers: { Origin: ORIGIN } }),
+      withStore(ENV), { waitUntil: (p) => held.push(p) });
+    return { body: await r.json(), settle: () => Promise.allSettled(held) };
+  };
+  const before = (await get('/report?period=day&owner=all')).body;
+  const t0 = performance.now();
+  const sv = await post(w, '/save', { contact: { ...contact, lid: 'wk-lat', kid: '', pocName: 'Latency Person',
+      phones: [{ type: 'MOBILE', cc: '+91', value: '9800007777', primary: true }] },
+    call: { at: new Date().toISOString(), outcome: 'Connected', duration: 20,
+            durationSource: 'dialed', createdHere: true } });
+  await sv.settle();
+  const replied = performance.now() - t0;
+  let seen = null, calls0 = before.totals?.calls ?? 0;
+  for (let i = 0; i < 60; i++) {
+    const r = (await get('/report?period=day&owner=all')).body;
+    if ((r.totals?.calls ?? 0) > calls0) { seen = performance.now() - t0; break; }
+    await sleep(100);
+  }
+  console.log(`   save answered in ${replied.toFixed(0)}ms · dashboard showed it ` +
+              `${seen === null ? 'NOT WITHIN 6s' : `${seen.toFixed(0)}ms after the save began`}`);
+  check('the dashboard shows a console save in well under a minute',
+        seen !== null && seen < 15000, seen === null ? 'not within 6s' : `${seen.toFixed(0)}ms`);
+}
+
 console.log('\n9b. offsite timeline, derived');
 const heldO = [];
 const offRes = await (await coldWorker(36)).fetch(new Request('https://bd.enout.website/save', {

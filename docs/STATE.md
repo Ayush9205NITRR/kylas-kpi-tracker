@@ -618,11 +618,23 @@ numbers:
 | Kylas → Airtable (stage changes) | **once a day, 02:00 IST** | hourly at :40, contacts only |
 | Airtable → D1 copy | delta every 10 min | unchanged |
 | D1 → dashboard | memo, 60 s TTL, keyed on the copy's stamp | unchanged |
-| a save made IN the console | ~1 min — it writes Airtable directly and refetches its two records | unchanged |
+| a save made IN the console | **~3 s** — measured, test-worker §9a2 | unchanged |
 
 So a stage changed in Kylas at 11:00 appeared on the ladder at 02:00 the next
 morning — up to **fifteen hours**, and it read as "the dashboard is slow" when
-nothing about the dashboard was slow. The last three rows were always minutes.
+nothing about the dashboard was slow.
+
+**REPORT_TTL is NOT what gates a console save, and reading it as though it were
+is how "about a minute" got said out loud.** `memo()` takes a `ttl` and a
+`key`, and when a key is present — the mirror's stamp, which is what runs on
+D1 — the TTL is never consulted: the held value is served while the stamp is
+unchanged and rebuilt the moment it moves. A save's Airtable writes move the
+stamp through `onWrite`, so the next read after the writes land is already the
+new answer. The 60 s TTL only applies to a deployment with no D1 binding.
+
+Measured rather than reasoned about, because that is how it was got wrong:
+**save answered in 3126 ms, dashboard showed it 3129 ms after the save began.**
+Three milliseconds between them. test-worker §9a2 keeps it honest.
 
 **"Sync now"** sits beside the ladder's date for the times an hour is still too
 long. It does NOT run the crawl inside the request — that is the "Too many
