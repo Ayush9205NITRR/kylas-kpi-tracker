@@ -197,6 +197,57 @@ if (pick) {
   ok('...and the id the save reassigns by', got.ownerId === String(ids[pick]), JSON.stringify(got));
 } else ok('an owner to switch to', false, `only ${JSON.stringify(Object.keys(ids))}`);
 
+/* ── the owner filter takes more than one ───────────────────────────────
+   It was a single select: "one owner, or everyone". A manager's question is
+   "Gurnoor and Muskan together". */
+console.log('\n5. the owner filter, multi-select');
+await page.evaluate(() => {
+  const host = document.querySelector('#enout-console-host');
+  host?.shadowRoot?.querySelector('iframe')?.contentWindow
+      ?.postMessage({ source: 'enout-host', type: 'companies' }, '*');
+});
+await page.waitForTimeout(7000);
+ok('the old single select is gone', await f.locator('#accOwner').count() === 0);
+ok('a checklist is in its place', await f.locator('#ownerBtn').count() === 1);
+const total = await f.locator('.acctable .vr, .bcard').count();
+await f.locator('#ownerBtn').click();
+await page.waitForTimeout(500);
+const names = await f.locator('#ownerList .msel-name').allTextContents();
+console.log(`   owners offered: ${JSON.stringify(names.slice(0, 6))}`);
+ok('it lists the owners with counts', names.length >= 2, JSON.stringify(names));
+const boxes = f.locator('#ownerList input[data-ownerv]');
+await boxes.nth(0).check();
+await page.waitForTimeout(700);
+const one = await f.locator('.acctable .vr, .bcard').count();
+await f.locator('#ownerBtn').click().catch(() => {});
+await page.waitForTimeout(300);
+await f.locator('#ownerBtn').click().catch(() => {});
+await page.waitForTimeout(400);
+await f.locator('#ownerList input[data-ownerv]').nth(1).check();
+await page.waitForTimeout(700);
+const two = await f.locator('.acctable .vr, .bcard').count();
+/* ACC lives inside views.js's closure, so the selection is read from the
+   checklist itself — which is also what the person sees. */
+const picked = await f.locator('#ownerList input[data-ownerv]:checked')
+  .evaluateAll((ns) => ns.map((n) => n.dataset.ownerv));
+console.log(`   rows: all=${total} one=${one} two=${two} · picked=${JSON.stringify(picked)}`);
+ok('two owners are held at once', picked.length === 2, JSON.stringify(picked));
+ok('...and two owners show more than one', two > one, `one=${one} two=${two}`);
+ok('...and still no more than everybody', two <= total, `two=${two} all=${total}`);
+const label = await f.locator('#ownerBtn .msel-v').textContent();
+ok('the button says how many', /any of 2/.test(label || ''), JSON.stringify(label));
+/* COPY LINK HAS TO CARRY BOTH. The filter state lives in the console's own
+   URL so a question can be sent to somebody; one key per owner, the way the
+   other multi-selects encode. A link from the old build carried one name
+   under the same key, and getAll of one key is still one name — so old links
+   keep working. */
+const hash = await f.evaluate(() => location.hash);
+/* The hash is "#<view>=<querystring>", so the view name comes off first —
+   parsing from the "#" makes the first key read as part of the view name. */
+const owners = [...new URLSearchParams(hash.replace(/^#[^=]*=/, '')).getAll('owner')];
+console.log(`   hash owners: ${JSON.stringify(owners)}`);
+ok('the link carries both owners', owners.length === 2, hash.slice(0, 160));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });

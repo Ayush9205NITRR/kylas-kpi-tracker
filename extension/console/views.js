@@ -1759,7 +1759,13 @@
      a company with no stage belongs to no family and so had no tile. A set of
      chips answers the same question in one line, takes two stages at once, and
      has a chip for the blank. */
-  const ACC = { stages: new Set(), stageOpen: false, stageFind: "", sources: new Set(), kpis: new Set(),
+  const ACC = { stages: new Set(), stageOpen: false, stageFind: "",
+                /* OWNERS, PLURAL. A manager's question is "Gurnoor and Muskan
+                   together", and a single select answered "one, or everyone".
+                   Empty means every owner, exactly as the old "All owners"
+                   option did. */
+                owners: new Set(), ownerOpen: false, ownerFind: "", ownerScroll: 0,
+                sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
                    due today should not have to be sorted for — it is the first
@@ -1858,7 +1864,7 @@
     const q = new URLSearchParams();
     for (const [short, prop] of Object.entries(LINK_SETS))
       if (ACC[prop].size) q.set(short, [...ACC[prop]].join("~"));
-    if (ACC.owner) q.set("owner", ACC.owner);
+    for (const o of ACC.owners) q.append("owner", o);
     if (ACC.q) q.set("q", ACC.q);
     if (ACC.priMin !== "") q.set("pri", ACC.priMin);
     if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
@@ -1875,7 +1881,9 @@
       for (const v of (q.get(short) || "").split("~").filter(Boolean))
         ACC[prop].add(prop === "kpis" ? Number(v) : v);
     }
-    ACC.owner = q.get("owner") || "";
+    /* One "owner" was a single name; several are several keys. A link made
+       by the old build still reads, because getAll of one key is one name. */
+    ACC.owners = new Set(q.getAll("owner").filter((x) => x !== null));
     ACC.q = q.get("q") || "";
     ACC.priMin = q.get("pri") || "";
     ACC.srcOp = q.get("srcop") || "any";
@@ -1940,7 +1948,7 @@
        a contact-level stage made an account with four POCs match on whichever
        one the browser happened to have loaded. */
     if (skip !== "stage" && ACC.stages.size && !ACC.stages.has(acctStageOf(co) || "")) return false;
-    if (ACC.owner && String(co.owner || "") !== ACC.owner) return false;
+    if (skip !== "owner" && ACC.owners.size && !ACC.owners.has(String(co.owner || ""))) return false;
     if (skip !== "source" && !sourceMatches(co.source || "")) return false;
     if (skip !== "offsite" && ACC.offsiteSet.size &&
         !VALUE_OF.offsite(co).some((q) => ACC.offsiteSet.has(q))) return false;
@@ -2425,6 +2433,43 @@
     </div>`;
   }
 
+  /* OWNERS, as a checklist. Same control as Stage and Source of Data, so the
+     toolbar reads as one thing. Counts skip the owner filter itself, or every
+     unticked name would read 0 and the filter could never be widened. */
+  function ownerPicker(all) {
+    const cnt = new Map();
+    for (const c of all.filter((x) => accMatch(x, "owner"))) {
+      const k = String(c.owner || "");
+      cnt.set(k, (cnt.get(k) || 0) + 1);
+    }
+    const sel = ACC.owners;
+    const name = (v) => v || "No owner";
+    /* Picked first so they are never scrolled away from, then busiest. */
+    const ranked = [...new Set([...cnt.keys(), ...sel])]
+      .sort((a, b) => (sel.has(b) - sel.has(a)) || (cnt.get(b) || 0) - (cnt.get(a) || 0)
+        || name(a).localeCompare(name(b)));
+    const summary = !sel.size ? "All"
+      : sel.size === 1 ? name([...sel][0]) : `any of ${sel.size}`;
+    return `<div class="msel" id="ownerPick">
+      <button type="button" class="msel-btn${sel.size ? " on" : ""}" id="ownerBtn"
+        aria-haspopup="true" aria-expanded="${ACC.ownerOpen}">
+        <span class="msel-k">Owner</span><span class="msel-v">${esc(summary)}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.ownerOpen ? `<div class="msel-pop" role="dialog" aria-label="Filter by owner">
+        <input id="ownerFind" class="msel-find" type="search" placeholder="Find an owner…"
+          aria-label="Find an owner" autocomplete="off" value="${esc(ACC.ownerFind)}">
+        <div class="msel-list" id="ownerList">
+          ${ranked.map((v) => `<label class="msel-opt${sel.has(v) ? " on" : ""}" data-name="${esc(name(v).toLowerCase())}">
+            <input type="checkbox" data-ownerv="${esc(v)}"${sel.has(v) ? " checked" : ""}>
+            <span class="msel-name">${esc(name(v))}</span><span class="msel-n">${cnt.get(v) || 0}</span></label>`).join("")}
+          <p class="msel-empty" id="ownerNoMatch" hidden>No owner matches.</p>
+        </div>
+        <div class="msel-foot"><span>${sel.size ? `${sel.size} of ${ranked.length} selected` : `${ranked.length} owners`}</span>
+          <button type="button" class="gbtn sm" id="ownerClear"${sel.size ? "" : " disabled"}>Clear</button></div>
+      </div>` : ""}
+    </div>`;
+  }
+
   /* ── the columns picker ─────────────────────────────────────────────
      Airtable's own gesture: a button that says how many are on, and a
      checklist behind it. The choice is this person's and is remembered —
@@ -2768,7 +2813,7 @@
               <span class="bmeta">
                 ${c.nextCall ? `<i class="nc nc-${nk}">${esc(nextText(c))}</i>` : ""}
                 <i class="f-${freshOf(c)}"></i>${d === null ? "Never called" : d === 0 ? "Called today" : `${d}d ago`}
-                ${ACC.owner ? "" : ` · ${esc(String(c.owner || "—").split(/\s+/)[0])}`}
+                ${ACC.owners.size === 1 ? "" : ` · ${esc(String(c.owner || "—").split(/\s+/)[0])}`}
               </span>
             </button>`;
           }).join("")}
@@ -2791,7 +2836,9 @@
   /* A stage's own name, for the line under the company. */
   const label2 = (code) => (code ? (label(code) || code) : "—");
 
-  function explorerHTML(all, owners) {
+  /* `owners` was the list the old single select was built from; the picker
+     reads the rows themselves, so nothing is passed in any more. */
+  function explorerHTML(all) {
     const cols = colsOn();
     /* Rebuilt each paint so a value list offers what the data holds now. */
     FB_CACHE = FB_FIELDS(all);
@@ -2825,7 +2872,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
-    const any = ACC.stages.size || ACC.owner || srcActive() || ACC.kpis.size || ACC.fresh.size
+    const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
       || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
 
     /* A sentence about what is on screen, so the number at the top is not the
@@ -2840,7 +2887,7 @@
       const coldN = rows.filter((c) => ["cool", "cold"].includes(freshOf(c))).length;
       const never = rows.filter((c) => freshOf(c) === "never").length;
       if (topSrc && Object.keys(bySrc).length > 1) parts.push(`Most came from ${esc(topSrc[0])} (${topSrc[1]})`);
-      if (topOwn && Object.keys(byOwn).length > 1 && !ACC.owner)
+      if (topOwn && Object.keys(byOwn).length > 1 && !ACC.owners.size)
         parts.push(`${esc(String(topOwn[0]).split(/\s+/)[0])} owns the most (${topOwn[1]})`);
       if (coldN) parts.push(`${coldN} have not had a call in over a month`);
       if (never) parts.push(`${never} never called`);
@@ -2890,10 +2937,7 @@
             <input id="accQ" type="search" value="${esc(ACC.q)}" placeholder="Search accounts…"
               aria-label="Search accounts by name, owner, source or stage" autocomplete="off" spellcheck="false">
           </div>
-          <select id="accOwner" aria-label="Owner">
-            <option value="">All owners</option>
-            ${owners.map((o) => `<option value="${esc(o)}"${ACC.owner === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
-          </select>
+          ${ownerPicker(all)}
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
           </select>
@@ -3196,10 +3240,6 @@
       });
     };
     const rows = ordered(all.filter(keep));
-    /* Owner names as the mirror stores them — the explorer filters on the name,
-       not the Kylas id the "Allotted to" select above uses. */
-    const ownerNames = [...new Set(all.map((c) => c.owner).filter(Boolean))].sort();
-
 
     /* One definition, used by the first paint and by every filter tick. */
     const rowHTML = (c) => `
@@ -3352,7 +3392,7 @@
       </div>
       ${chipStrip(rows, all)}
       ${rcaStrip()}
-      ${VIEW_MODE === "accounts" ? explorerHTML(all, ownerNames)
+      ${VIEW_MODE === "accounts" ? explorerHTML(all)
         : VIEW_MODE === "board" ? boardHTML(rows) : `
       <div class="vtable${DENSITY === "compact" ? " dense" : ""}">
         <div class="vr vh">${COLS.map((col) => `<span class="${col.c} srt${
@@ -3497,7 +3537,7 @@
        rather than becoming a fourth kind of view — Clear filters undoes it,
        and Copy link carries it. */
     on("accToday", "click", () => {
-      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear();
       for (const st of moreSets()) st.clear();
       ACC.priMin = ""; ACC.q = ""; FB.tree = { join: "and", items: [] };
@@ -3511,7 +3551,7 @@
       try { await navigator.clipboard.writeText(url); toast("Link copied — it opens this list with these filters"); }
       catch { toast("Could not copy — the link is in the address bar"); }
     });
-    on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = ACC.stageOpen = false; redraw(); });
+    on("colBtn", "click", () => { ACC.colsOpen = !ACC.colsOpen; ACC.srcOpen = ACC.stageOpen = ACC.ownerOpen = false; redraw(); });
     on("colReset", "click", () => { ACC.cols = new Set(COL_DEFAULTS); saveAccPrefs(); redraw(); });
     on("colWidthReset", "click", () => { ACC.widths = {}; saveAccPrefs(); redraw(); });
 
@@ -3711,7 +3751,7 @@
     }
     on("stageBtn", "click", () => {
       ACC.stageOpen = !ACC.stageOpen; ACC.stageScroll = 0;
-      if (!ACC.stageOpen) ACC.stageFind = ""; else ACC.srcOpen = ACC.colsOpen = false;
+      if (!ACC.stageOpen) ACC.stageFind = ""; else ACC.srcOpen = ACC.colsOpen = ACC.ownerOpen = false;
       redraw();
     });
     on("stageFind", "input", (e) => { ACC.stageFind = e.target.value; findStage(); });
@@ -3722,6 +3762,42 @@
       ACC.stageScroll = stageList.scrollTop; ACC.limit = 100; redraw();
     }));
     on("stageClear", "click", () => { ACC.stages.clear(); ACC.limit = 100; redraw(); });
+
+    /* ── the Owner picker ── */
+    const ownerList = document.getElementById("ownerList");
+    const findOwner = () => {
+      if (!ownerList) return;
+      const q = ACC.ownerFind.trim().toLowerCase();
+      let shown = 0;
+      ownerList.querySelectorAll(".msel-opt").forEach((o) => {
+        o.hidden = !!q && !o.dataset.name.includes(q);
+        if (!o.hidden) shown++;
+      });
+      const none = document.getElementById("ownerNoMatch");
+      if (none) none.hidden = shown > 0;
+    };
+    if (ACC.ownerOpen) {
+      findOwner();
+      if (ownerList) ownerList.scrollTop = ACC.ownerScroll || 0;
+      const box = document.getElementById("ownerFind");
+      if (box) {
+        box.focus({ preventScroll: true });
+        try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* not a text box */ }
+      }
+    }
+    on("ownerBtn", "click", () => {
+      ACC.ownerOpen = !ACC.ownerOpen; ACC.ownerScroll = 0;
+      if (!ACC.ownerOpen) ACC.ownerFind = ""; else ACC.srcOpen = ACC.stageOpen = ACC.colsOpen = false;
+      redraw();
+    });
+    on("ownerFind", "input", (e) => { ACC.ownerFind = e.target.value; findOwner(); });
+    on("ownerFind", "keydown", (e) => { if (e.key === "Escape") { ACC.ownerOpen = false; ACC.ownerFind = ""; redraw(); } });
+    ownerList?.querySelectorAll("input[data-ownerv]").forEach((cb) => cb.addEventListener("change", () => {
+      const v = cb.dataset.ownerv;
+      if (cb.checked) ACC.owners.add(v); else ACC.owners.delete(v);
+      ACC.ownerScroll = ownerList.scrollTop; ACC.limit = 100; redraw();
+    }));
+    on("ownerClear", "click", () => { ACC.owners.clear(); ACC.limit = 100; redraw(); });
 
     /* ── the Source of Data picker ── */
     const srcList = document.getElementById("srcList");
@@ -3787,6 +3863,7 @@
         let shut = false;
         for (const [open, id, clear] of [["srcOpen", "#srcPick", () => { ACC.srcFind = ""; }],
                                          ["stageOpen", "#stagePick", () => { ACC.stageFind = ""; }],
+                                         ["ownerOpen", "#ownerPick", () => { ACC.ownerFind = ""; }],
                                          ["colsOpen", "#colPick", () => {}]]) {
           if (!ACC[open] || e.target.closest?.(id)) continue;
           ACC[open] = false; clear(); shut = true;
@@ -3815,11 +3892,10 @@
     global.__focusRedraw = () => { if (host.isConnected && host.querySelector(".explorer")) redraw(); };
     if (global.Focus && !global.__focusBound) { global.__focusBound = true; Focus.onChange(() => global.__focusRedraw?.()); }
     global.Focus?.load();
-    on("accOwner", "change", (e) => { ACC.owner = e.target.value; ACC.limit = 100; redraw(); });
     on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
     on("accClear", "click", () => {
-      ACC.stages.clear(); ACC.owner = ""; ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
+      ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear(); ACC.nextSet.clear();
       for (const s of moreSets()) s.clear();
       ACC.priMin = ""; FB.tree = { join: "and", items: [] }; ACC.q = "";

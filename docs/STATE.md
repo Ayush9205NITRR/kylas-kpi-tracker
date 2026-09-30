@@ -96,7 +96,7 @@ node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the exi
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
-xvfb-run -a node scripts/test-ui-live.mjs     # 21 · the three things that only exist on
+xvfb-run -a node scripts/test-ui-live.mjs     # 34 · the three things that only exist on
                                               #      screen: draggable pane widths, the
                                               #      quarter→month→week picker, and the
                                               #      board's Buckets/Stages columns. Needs
