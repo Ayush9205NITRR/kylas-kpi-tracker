@@ -607,6 +607,29 @@ Set `MAIL_URL`, `MAIL_KEY`, `MAIL_FROM`, `MAIL_TO` (Resend's shape, which most
 providers accept). With them unset it logs the digest and sends nothing, which
 is also what every test does — nothing here can email anybody by accident.
 
+## 3c · Why the dashboard was a day behind
+
+The ladder reads Airtable (through the D1 copy), and work done **straight in
+Kylas** only reaches Airtable when the sync runs. The chain, with its real
+numbers:
+
+| step | was | now |
+|---|---|---|
+| Kylas → Airtable (stage changes) | **once a day, 02:00 IST** | hourly at :40, contacts only |
+| Airtable → D1 copy | delta every 10 min | unchanged |
+| D1 → dashboard | memo, 60 s TTL, keyed on the copy's stamp | unchanged |
+| a save made IN the console | ~1 min — it writes Airtable directly and refetches its two records | unchanged |
+
+So a stage changed in Kylas at 11:00 appeared on the ladder at 02:00 the next
+morning — up to **fifteen hours**, and it read as "the dashboard is slow" when
+nothing about the dashboard was slow. The last three rows were always minutes.
+
+`CRON_SYNC_FAST` (`40 * * * *`) runs the same sync with `only: "contacts"`.
+Contacts are incremental — `contactsChangedSince` — so a quiet hour is a
+request or two. The company crawl has no since-filter (it reads Kylas' whole
+company list and filters locally, ~100 requests) and stays on the nightly run:
+a company that appeared today is rarely what moves today's ladder.
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current

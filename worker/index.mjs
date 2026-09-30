@@ -200,6 +200,17 @@ const JOBS = {
     const out = await (await import("../scripts/sync-kylas.mjs")).run({ env, log, apply: true });
     return { ...out, after: await (await handlers(env, log)).maintain({ rebuild: true }) };
   },
+  /* HOURLY, AND CONTACTS ONLY. A stage changed straight in Kylas becomes a
+     Stage Transition only when the sync sees it, and with one sync a day the
+     ladder could be fifteen hours behind the work — an associate's morning
+     showed up tomorrow. Contacts are incremental, so this is a couple of
+     requests in a quiet hour; the company crawl is not, and stays nightly. */
+  syncFast: async (env, log) => {
+    const out = await (await import("../scripts/sync-kylas.mjs")).run({
+      env, log, apply: true, only: "contacts" });
+    return { ...out, after: await (await handlers(env, log)).maintain({
+      rebuild: true, only: ["Contacts", "Stage Transitions"] }) };
+  },
   rollup: async (env, log) => {
     const out = await (await import("../scripts/rollup-calls.mjs")).run({
       env, log, apply: true, retainDays: Number(env.CALL_RETAIN_DAYS || 30) });
@@ -237,6 +248,7 @@ export default {
     const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
     const byCron = new Map([
       [String(env.CRON_SYNC || ""), "sync"],
+      [String(env.CRON_SYNC_FAST || ""), "syncFast"],
       [String(env.CRON_ROLLUP || ""), "rollup"],
       [String(env.CRON_SNAPSHOT || ""), "snapshot"],
       [String(env.CRON_PUSH || ""), "push"],
@@ -251,6 +263,7 @@ export default {
       log(`! cron "${event.cron}" matches no job. wrangler.toml has ` +
           `CRON_SYNC=${env.CRON_SYNC || "(unset)"} CRON_ROLLUP=${env.CRON_ROLLUP || "(unset)"} ` +
           `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"} CRON_PUSH=${env.CRON_PUSH || "(unset)"} ` +
+          `CRON_SYNC_FAST=${env.CRON_SYNC_FAST || "(unset)"} ` +
           `CRON_MAINTAIN=${env.CRON_MAINTAIN || "(unset)"}`);
       return;
     }

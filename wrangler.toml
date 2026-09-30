@@ -134,6 +134,10 @@ VERSION = "1.27.1"
 # roll those back, so a deploy can half-succeed. SUN is unambiguous everywhere.
 CRON_SYNC = "30 20 * * *"
 CRON_SNAPSHOT = "45 18 * * *"
+# Every hour at :40 — contacts only, so a stage somebody changed in Kylas this
+# morning reaches the ladder within the hour instead of at 02:00 tomorrow. The
+# company crawl is the expensive half and stays on the nightly run.
+CRON_SYNC_FAST = "40 * * * *"
 CRON_ROLLUP = "0 21 * * SUN"
 # 02:45 IST, daily — 45 minutes after the sync, so it reads a base that was
 # just refreshed and cannot race it.
@@ -168,6 +172,7 @@ COMPANY_TTL_MS = "900000"
 crons = [
   "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
   "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
+  "40 * * * *",    # hourly             · Kylas -> Airtable, contacts only
   "0 21 * * SUN",  # 02:30 IST, Monday  · roll up the call log
   "15 21 * * *",   # 02:45 IST, daily   · Airtable -> Kylas: call-back + offsite quarter
   "* * * * *",     # every minute       · keep the D1 copies current

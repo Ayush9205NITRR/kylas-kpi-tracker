@@ -6,6 +6,8 @@
  *   ... node scripts/sync-kylas.mjs --apply        # actually write
  *   ... node scripts/sync-kylas.mjs --full         # ignore the watermark
  *   ... node scripts/sync-kylas.mjs --since 2026-09-01T00:00:00Z
+ *   ... node scripts/sync-kylas.mjs --apply --contacts    # hourly shape: no
+ *                                                           company crawl
  *   ... node scripts/sync-kylas.mjs --limit 500    # stop after N of each
  *
  * A cron at 01:00 and again at 13:00 is what Ayush asked for: "the only
@@ -42,7 +44,8 @@ import { STAGE_RUNG } from "./stages.mjs";
 /* Callable, so the same sync runs from a terminal and from a scheduled Worker.
    Everything it needs arrives as arguments — see scripts/handlers.mjs for why
    reading process.env at module scope is what welds code to one runtime. */
-export async function run({ env = {}, log = () => {}, apply = false, full = false, limit = 0, since = "" } = {}) {
+export async function run({ env = {}, log = () => {}, apply = false, full = false, limit = 0,
+                            since = "", only = "" } = {}) {
   const APPLY = apply, FULL = full, LIMIT = Number(limit || 0);
   const KEY = env.KYLAS_KEY;
     const PAT = env.AIRTABLE_PAT;
@@ -351,7 +354,19 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
     }
   }
 
-    const co = await syncCompanies();
+    /* CONTACTS ONLY, for the hourly run. The company crawl has no since-filter
+       of its own — it reads Kylas' whole company list and filters here, which
+       is a hundred-odd requests — while contacts ARE incremental
+       (contactsChangedSince), so a quiet hour costs a request or two. That
+       difference is what makes an hourly sync affordable at all, and it is why
+       the dashboard could be a day behind on a stage somebody changed in Kylas
+       this morning: the transitions those changes become only reached Airtable
+       at 02:00. A new company still waits for the nightly full run, which is
+       the right trade — a company that appeared today is rarely the thing
+       moving the ladder today. */
+    const co = only === "contacts"
+      ? (log("\ncompanies — skipped (contacts-only run)"), { seen: 0, written: 0 })
+      : await syncCompanies();
     const ct = await syncContacts();
     await recordRun(co, ct);
     const seconds = (Date.now() - started) / 1000;
@@ -386,6 +401,8 @@ if (isMain) {
       full: argv.includes("--full"),
       limit: Number(arg("limit") || 0),
       since: arg("since") || "",
+      /* --only contacts: the hourly shape, runnable by hand. */
+      only: arg("only") || (argv.includes("--contacts") ? "contacts" : ""),
     });
   } catch (e) {
     console.error(`\nsync failed: ${e.message}`);

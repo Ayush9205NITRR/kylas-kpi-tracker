@@ -14,7 +14,7 @@
  * Pure functions over rows the caller fetched. No network here, so it is
  * testable — see scripts/test-report.mjs.
  */
-import { STAGE_RUNG, MILESTONE } from "./stages.mjs";
+import { STAGE_RUNG, MILESTONE, NOT_CONNECTED } from "./stages.mjs";
 import { dayOf, IST_MIN } from "./day.mjs";
 
 /* ── periods ───────────────────────────────────────────────────────── */
@@ -150,10 +150,26 @@ export const METRICS = [
      ladder show 0 connected above 2 right POC. */
   { key: "calls", label: "Calls logged", kind: "flow" },
   { key: "connects", label: "Calls picked", kind: "flow" },
-  /* FIRST — one per company, the period it first reached that rung. These seven
-     are the ladder, in order, and every one counts the same thing. */
-  { key: "worked", label: "Companies worked", kind: "first" },
-  { key: "picked", label: "Companies picked", kind: "first" },
+  /* TOUCH — one per company per PERIOD, not once ever.
+     Ayush, 2026-09-30: "Companies worked — kuch activity (likely any stage
+     change). Companies picked — where pipeline stage != CNC."
+
+     The bottom two rungs are an ACTIVITY measure and the five above them are a
+     progression measure, and that is deliberate. An associate who worked four
+     accounts today worked four accounts today, whether or not any of them had
+     been worked before — under first-arrival counting all four vanished from
+     her column the moment somebody had touched them once, which is what made
+     Anjali's four read as one.
+
+     WHAT THIS COSTS, stated because it is real: the step conversion from
+     "Companies picked" to "Right POC" now divides a per-period number by a
+     first-ever-arrival number. Read the first two rungs as "what we did this
+     period" and the rest as "what arrived this period"; the percentage between
+     rung 2 and rung 3 is not a funnel rate and the screen should not be read
+     as though it were. */
+  { key: "worked", label: "Companies worked", kind: "touch" },
+  { key: "picked", label: "Companies picked", kind: "touch" },
+  /* FIRST — one per company, the period it first reached that rung. */
   { key: "right", label: "Right POC", kind: "first" },
   { key: "discovery", label: "Discovery", kind: "first" },
   { key: "booked", label: "SQL meeting booked", kind: "first" },
@@ -257,6 +273,38 @@ export function arrivalsByCompany(input) {
   return by;
 }
 
+/* ── ACTIVITY, for the bottom two rungs ────────────────────────────────
+   Every stage change is the account being WORKED — that is the only record
+   this system has of an associate touching an account, and it covers work done
+   straight in Kylas as well as through the console, because sync-kylas.mjs
+   writes a Stage Transition either way.
+
+   PICKED is the same event filtered: a move INTO a stage that is not one of
+   the no-answer rungs. NOT_CONNECTED is that list (the three CNC rungs, the
+   CNC follow-up, and never-mined), and it is imported rather than retyped so
+   a stage added to the pipeline cannot quietly fall on the wrong side.
+
+   The console's own First Worked At / First Picked At come through too, for a
+   save that changed no stage — a call logged against an account that stayed
+   where it was is still that account being worked. They date the FIRST touch
+   only, so they add a period rather than every period; the transitions carry
+   the rest. */
+export function touchEvents({ transitions = [], signals = [] } = {}) {
+  const out = [];
+  for (const t of transitions) {
+    if (!t.at || !t.to) continue;
+    const company = t.company || t.contact || "";
+    out.push({ metric: "worked", company, owner: t.owner, at: t.at });
+    if (!NOT_CONNECTED.includes(t.to))
+      out.push({ metric: "picked", company, owner: t.owner, at: t.at });
+  }
+  for (const s of signals) {
+    if (!s.at || (s.metric !== "worked" && s.metric !== "picked")) continue;
+    out.push({ metric: s.metric, company: s.company || s.contact || "", owner: s.owner, at: s.at });
+  }
+  return out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
 export function report(period, { calls = [], transitions = [], signals = [] } = {},
                       { from = "", to = "" } = {}) {
   const key = KEY_OF[period] || dayKey;
@@ -309,8 +357,34 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
      firstArrivals() below, and counted here. The ladder app needs the same
      answer as DATES rather than as counts, and deriving it twice is the bug
      this codebase has paid for more than once. */
+  const TOUCH = new Set(METRICS.filter((m) => m.kind === "touch").map((m) => m.key));
   for (const a of firstArrivals({ transitions, signals })) {
+    if (TOUCH.has(a.metric)) continue;          /* counted per period, below */
     if (inWindow(a.at)) bump(key(a.at), a.owner, a.metric);
+  }
+
+  /* ONE PER COMPANY PER PERIOD, and separately one per company per owner per
+     period. Two associates who both touched the same account in a week are two
+     entries in their own columns and ONE in the team's — so the team total is
+     not the sum of the columns, and must not be: the account was worked once. */
+  const seenTeam = new Set(), seenOwner = new Set();
+  const touch = (k, owner, metric, company) => {
+    const row = rows.get(k);
+    if (!row) return;
+    const tk = `${metric}|${k}|${company}`;
+    if (!seenTeam.has(tk)) { seenTeam.add(tk); row[metric] += 1; }
+    if (!owner) return;
+    const ok = `${metric}|${k}|${owner}|${company}`;
+    if (seenOwner.has(ok)) return;
+    seenOwner.add(ok);
+    if (!owners.has(owner)) owners.set(owner, { owner, ...blank() });
+    owners.get(owner)[metric] += 1;
+    const pk = `${k}|${owner}`;
+    if (!ownerPeriods.has(pk)) ownerPeriods.set(pk, { owner, ...blank() });
+    ownerPeriods.get(pk)[metric] += 1;
+  };
+  for (const e of touchEvents({ transitions, signals })) {
+    if (inWindow(e.at)) touch(key(e.at), e.owner, e.metric, e.company);
   }
 
   const periods = keys.map((k) => rows.get(k));

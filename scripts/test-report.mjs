@@ -4,7 +4,7 @@
  *   node scripts/test-report.mjs
  */
 import { report, withDeltas, weekKey, monthKey, periodsBetween, periodLabel, mergeCalls,
-         firstArrivals, arrivalsByCompany, seededRung } from "./report.mjs";
+         firstArrivals, arrivalsByCompany, seededRung, touchEvents } from "./report.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -231,6 +231,79 @@ eq("a stage this build has never heard of is reached, not promoted",
    seededRung("SOMETHING_NEW"), 0);
 /* Closing Loops can follow either meeting, so its rung cannot claim one. */
 eq("closing loops does not claim a meeting", seededRung("CLOSING_LOOPS_LOW_VALUE"), 1);
+
+/* ── THE BOTTOM TWO RUNGS COUNT ACTIVITY, NOT FIRST ARRIVAL ─────────────
+   Anjali said she had reached out to four accounts and her column read 1.
+   Under first-arrival counting that is exactly right and exactly useless: an
+   account somebody had touched before could never appear in her day again.
+   Ayush, 2026-09-30: worked = any stage change, picked = a move into a stage
+   that is not CNC. */
+console.log("\nactivity, not first arrival");
+{
+  const day = "2026-09-30T06:00:00.000Z";
+  const anjali = (co, to, at = day) => ({ at, owner: "Anjali", to, company: co });
+  /* Four accounts, all worked before — a month ago, by somebody else. */
+  const old = ["c1", "c2", "c3", "c4"].map((co) =>
+    ({ at: "2026-08-30T06:00:00.000Z", owner: "Gurnoor", to: "CNC_COULD_NOT_CONNECT", company: co }));
+  const today = [anjali("c1", "FOLLOW_UP_1"), anjali("c2", "MQL_MARKETING_QUALIFIED_LEAD"),
+                 anjali("c3", "CNC_COULD_NOT_CONNECT_2"), anjali("c4", "FOLLOW_UP_2")];
+  const r = report("day", { transitions: [...old, ...today] }, { from: "2026-09-30", to: "2026-09-30" });
+  eq("all four count as worked", r.totals.worked, 4);
+  eq("...and Anjali gets all four", r.byOwner.find((o) => o.owner === "Anjali").worked, 4);
+  /* c3 went to a CNC rung, so it was worked and NOT picked. */
+  eq("three of them were picked", r.totals.picked, 3);
+  eq("...and the CNC one is not among them",
+     touchEvents({ transitions: today }).filter((e) => e.metric === "picked").map((e) => e.company).sort(),
+     ["c1", "c2", "c4"]);
+}
+
+console.log("\none account touched twice is one account");
+{
+  const t = (co, owner, at, to) => ({ at, owner, to, company: co });
+  const r = report("day", { transitions: [
+    t("c1", "Anjali", "2026-09-30T04:00:00.000Z", "FOLLOW_UP_1"),
+    t("c1", "Anjali", "2026-09-30T09:00:00.000Z", "FOLLOW_UP_2"),
+  ] }, { from: "2026-09-30", to: "2026-09-30" });
+  eq("twice in one day is one", r.totals.worked, 1);
+  eq("...for the owner too", r.byOwner[0].worked, 1);
+}
+
+console.log("\ntwo associates on one account: one for the team, one each");
+{
+  /* THE TEAM TOTAL IS NOT THE SUM OF THE COLUMNS, and must not be. The account
+     was worked once; each of them worked it. */
+  const t = (owner, at) => ({ at, owner, to: "FOLLOW_UP_1", company: "c1" });
+  const r = report("day", { transitions: [
+    t("Anjali", "2026-09-30T04:00:00.000Z"), t("Mayra", "2026-09-30T09:00:00.000Z"),
+  ] }, { from: "2026-09-30", to: "2026-09-30" });
+  eq("the team worked one account", r.totals.worked, 1);
+  eq("Anjali worked one", r.byOwner.find((o) => o.owner === "Anjali").worked, 1);
+  eq("Mayra worked one", r.byOwner.find((o) => o.owner === "Mayra").worked, 1);
+}
+
+console.log("\nthe same account in two periods counts in both");
+{
+  const t = (at) => ({ at, owner: "Anjali", to: "FOLLOW_UP_1", company: "c1" });
+  const r = report("day", { transitions: [t("2026-09-29T06:00:00.000Z"), t("2026-09-30T06:00:00.000Z")] },
+                   { from: "2026-09-29", to: "2026-09-30" });
+  eq("both days", r.periods.map((p) => p.worked), [1, 1]);
+  /* ...which is the whole difference from the rungs above it. */
+  eq("while a milestone arrives once", firstArrivals({ transitions: [
+    { at: "2026-09-29T06:00:00.000Z", owner: "A", to: "SQL_SALES_QUALIFIED_LEAD", company: "c1" },
+    { at: "2026-09-30T06:00:00.000Z", owner: "A", to: "SQL_SALES_QUALIFIED_LEAD", company: "c1" },
+  ] }).filter((a) => a.metric === "sql").length, 1);
+}
+
+console.log("\na save that changed no stage still counts as worked");
+{
+  /* The console writes First Worked At on a save. A call logged against an
+     account that stayed where it was is still that account being worked. */
+  const r = report("day", { signals: [
+    { at: "2026-09-30T06:00:00.000Z", owner: "Sejal", company: "c9", metric: "worked" },
+  ] }, { from: "2026-09-30", to: "2026-09-30" });
+  eq("counted", r.totals.worked, 1);
+  eq("...and not picked, because nothing says it was", r.totals.picked, 0);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -124,6 +124,36 @@ For a period: `COUNT(Companies where Last Call At within [from, to])`.
 
 ---
 
+## 3a. Companies worked / Companies picked — ACTIVITY, not first arrival
+
+**Changed 2026-09-30 (Ayush).** The bottom two rungs count what was DONE in the
+period; the five above them count what ARRIVED in the period.
+
+```
+Companies worked  = distinct companies with any stage change in the period
+                    (plus a console save that set First Worked At)
+Companies picked  = the same, restricted to a move INTO a stage that is not
+                    one of NOT_CONNECTED (the three CNC rungs, Followup - CNC,
+                    and Yet to be Mined)
+```
+
+**Why.** Anjali worked four accounts in a day and her column read 1. Under
+first-arrival counting that is correct and useless: an account anybody had
+touched before could never appear in her day again. A day's work has to be
+countable on the day.
+
+**It covers work done straight in Kylas**, because sync-kylas.mjs writes a
+Stage Transition whichever side the change was made on.
+
+**The team total is not the sum of the columns.** Two associates who both
+touched one account in a period are one for the team and one each for
+themselves — the account was worked once, and each of them worked it.
+
+> **Read the step conversion carefully.** Picked → Right POC now divides a
+> per-period number by a first-ever-arrival number. The first two rungs are
+> "what we did"; the rest are "what arrived". That percentage is not a funnel
+> rate.
+
 ## 4. Phone Picked
 
 **As specified:** picked when the pipeline stage is not `Could Not Connect`.

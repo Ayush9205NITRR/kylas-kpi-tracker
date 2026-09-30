@@ -2,6 +2,11 @@
 # One entry point for every scheduled job.
 #
 #   scripts/cron.sh sync       Kylas -> Airtable   (twice a day)
+#   scripts/cron.sh syncfast   Kylas -> Airtable, CONTACTS ONLY (hourly). A
+#                              stage changed straight in Kylas becomes a Stage
+#                              Transition only when the sync sees it, and with
+#                              one sync a day the ladder ran fifteen hours
+#                              behind the morning's work.
 #   scripts/cron.sh push       Airtable -> Kylas   (nightly, the two derived
 #                              fields only: the call-back and the offsite
 #                              quarter. Never a stage, a name or a phone —
@@ -30,7 +35,7 @@ set -eu
 
 JOB="${1:-}"
 if [ -z "$JOB" ]; then
-  echo "usage: $0 sync|push|rollup|snapshot" >&2
+  echo "usage: $0 sync|syncfast|push|rollup|snapshot" >&2
   exit 2
 fi
 
@@ -81,7 +86,7 @@ missing=""
 [ -n "${AIRTABLE_PAT:-}" ] || missing="$missing AIRTABLE_PAT"
 [ -n "${AIRTABLE_BASE:-}" ] || missing="$missing AIRTABLE_BASE"
 # The sync and the push talk to Kylas; the other two are Airtable-only.
-if [ "$JOB" = "sync" ] || [ "$JOB" = "push" ]; then
+if [ "$JOB" = "sync" ] || [ "$JOB" = "syncfast" ] || [ "$JOB" = "push" ]; then
   [ -n "${KYLAS_KEY:-}" ] || missing="$missing KYLAS_KEY"
 fi
 if [ -n "$missing" ]; then
@@ -110,6 +115,9 @@ fi
 # ── what each job actually is ──────────────────────────────────────────
 case "$JOB" in
   sync)     set -- scripts/sync-kylas.mjs --apply ;;
+  # Contacts only: incremental, a couple of requests in a quiet hour. The
+  # company crawl reads Kylas' whole list and belongs on the nightly run.
+  syncfast) set -- scripts/sync-kylas.mjs --apply --contacts ;;
   push)     set -- scripts/push-kylas.mjs --apply ;;
   # 30 days, not the script's own default of 90. 90 days at this team's volume
   # is ~54,000 raw rows, which is over a Team base on its own — the script says
