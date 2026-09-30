@@ -1505,16 +1505,77 @@
   /* Exported at the bottom of this file with the rest — assigning it here
      would be wiped by that assignment, which is how a hook like this quietly
      stops firing. */
+  /* WHEN IT IS SAFE TO REDRAW THE ACCOUNTS VIEW UNDER SOMEBODY.
+     The explorer already redraws wholesale on every filter tick, so a repaint
+     is a supported operation — but not at any moment. These are the moments a
+     repaint would take something away:
+
+       a column being dragged      the drag is mid-gesture and the grip goes
+       a picker open               the person opened it ON PURPOSE
+       the caret in a text box     focus is restored to the END of the value,
+                                   so somebody editing the middle of a search
+                                   loses their place
+       the condition builder open  same as a picker, with more state in it
+
+     None of them last long. So the repaint is not cancelled, it WAITS — and
+     gives up after a couple of minutes rather than sitting on a timer for the
+     rest of the session. */
+  const busyEditing = () => {
+    if (document.body.classList.contains("colresize")) return "dragging a column";
+    if (ACC.stageOpen) return "the stage picker is open";
+    if (ACC.ownerOpen) return "the owner picker is open";
+    if (ACC.srcOpen) return "the source picker is open";
+    if (ACC.colsOpen) return "the columns picker is open";
+    if (FB.open) return "the condition builder is open";
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.closest?.("#vwrap"))
+      return `the caret is in ${el.id || el.tagName.toLowerCase()}`;
+    return "";
+  };
+  /* Why the last repaint waited, for the live test and for whoever is asking
+     why the list did not move. */
+  global.__repaintWaitedFor = "";
+
+  let landedTries = 0;
+  const repaintOpenView = () => {
+    const wrap = document.getElementById("vwrap");
+    const port = document.getElementById("viewport");
+    if (!wrap || !port || port.hidden) { landedTries = 0; return; }   /* nothing open */
+
+    /* The accounts explorer — identified by its search box, which nothing else
+       renders — or the dashboard. */
+    if (document.getElementById("accQ")) {
+      const why = busyEditing();
+      global.__repaintWaitedFor = why;
+      if (why) {
+        if (landedTries++ < 40) landedTimer = setTimeout(repaintOpenView, 3000);
+        return;
+      }
+      landedTries = 0;
+      /* WHERE THEY HAD SCROLLED TO. A redraw puts the list back at the top,
+         and an associate who was halfway down a board of nine thousand
+         accounts does not want to be. */
+      const scroller = wrap.closest(".viewport") || wrap.parentElement;
+      const top = scroller ? scroller.scrollTop : 0;
+      /* The rows themselves have to be re-read: a save changes a stage and a
+         call-back, and both live in the /companies payload. */
+      const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
+      ensureCompanies(who, () => {
+        companies(wrap).then(() => { if (scroller) scroller.scrollTop = top; }).catch(() => {});
+      }, true);
+      companies(wrap).then(() => { if (scroller) scroller.scrollTop = top; }).catch(() => {});
+      return;
+    }
+    if (!/vsec|ladder/.test(wrap.innerHTML)) return;    /* some other view */
+    landedTries = 0;
+    REPORT_FORCE = true;
+    dashboard(wrap).catch(() => {});
+  };
+
   const savedLanded = () => {
     clearTimeout(landedTimer);
-    landedTimer = setTimeout(() => {
-      const wrap = document.getElementById("vwrap");
-      const port = document.getElementById("viewport");
-      if (!wrap || !port || port.hidden) return;        /* nothing open */
-      if (!/vsec|ladder/.test(wrap.innerHTML)) return;  /* not the dashboard */
-      REPORT_FORCE = true;
-      dashboard(wrap).catch(() => {});
-    }, 1200);
+    landedTries = 0;
+    landedTimer = setTimeout(repaintOpenView, 1200);
   };
 
   /* Set by savedLanded() below: the next dashboard paint must re-ask rather

@@ -290,6 +290,52 @@ const many = await f.evaluate(() => window.__asked || 0);
 ok('thirty saves in a row ask once, not thirty', many === 1, `asked ${many}x`);
 ok('the dashboard is still there afterwards', (await dials()).length > 20, await dials());
 
+/* ── the accounts board live-updates too, but not under somebody's hands ── */
+console.log('\n7. a save repaints the open accounts view');
+await page.evaluate(() => {
+  const host = document.querySelector('#enout-console-host');
+  host?.shadowRoot?.querySelector('iframe')?.contentWindow
+      ?.postMessage({ source: 'enout-host', type: 'companies' }, '*');
+});
+await page.waitForTimeout(7000);
+ok('the accounts view is open', await f.locator('#accQ').count() === 1);
+/* §5 left the owner picker open, and the guard below correctly refuses to
+   repaint under one — so close it, and prove it is closed, before testing the
+   case where nothing is in the way. */
+if (await f.locator('#ownerList').count()) { await f.locator('#ownerBtn').click(); await page.waitForTimeout(600); }
+ok('no picker is in the way', await f.locator('#ownerList').count() === 0);
+const spy = await f.evaluate(() => {
+  window.__cos = 0;
+  const real = API.companies.bind(API);
+  API.companies = (...a) => { window.__cos++; return real(...a); };
+  window.Views.savedLanded();
+  return 'called';
+});
+ok('the hook runs on this view too', spy === 'called', spy);
+await page.waitForTimeout(9000);
+const cos = await f.evaluate(() => window.__cos || 0);
+console.log(`   waited for: ${JSON.stringify(await f.evaluate(() => window.__repaintWaitedFor))}`);
+ok('...and it re-reads the accounts once', cos === 1, `asked ${cos}x`);
+ok('the view survived the repaint', await f.locator('#accQ').count() === 1);
+
+/* THE GUARD. A picker open is a deliberate interaction; the repaint waits. */
+console.log('\n   ...and waits while a picker is open');
+await page.waitForTimeout(1500);                    /* let the repaint settle first */
+await f.locator('#ownerBtn').click();
+await page.waitForTimeout(800);
+ok('a picker is open', await f.locator('#ownerList').count() === 1);
+await f.evaluate(() => { window.__cos = 0; window.Views.savedLanded(); });
+await page.waitForTimeout(5000);
+console.log(`   waited for: ${JSON.stringify(await f.evaluate(() => window.__repaintWaitedFor))}`);
+ok('nothing was re-read while it is open',
+   (await f.evaluate(() => window.__cos || 0)) === 0, `asked ${await f.evaluate(() => window.__cos || 0)}x`);
+ok('...and the picker is still open', await f.locator('#ownerList').count() === 1);
+/* Close it, and the waiting repaint lands on its next try. */
+await f.locator('#ownerBtn').click();
+await page.waitForTimeout(6000);
+ok('once it closes, the repaint happens',
+   (await f.evaluate(() => window.__cos || 0)) >= 1, `asked ${await f.evaluate(() => window.__cos || 0)}x`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });
