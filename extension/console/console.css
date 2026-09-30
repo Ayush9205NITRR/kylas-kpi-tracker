@@ -153,6 +153,10 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qual{font-size:var(--t-meta);font-weight:var(--w-med);letter-spacing:.01em;
   border-radius:4px;padding:1px 7px;flex:none;font-style:normal;border:1px solid transparent}
+/* MQL renders as an EMPTY node, not a missing one, so refreshQual stays a text
+   swap and never has to insert an element while somebody is typing beside it.
+   Empty means it takes no padding, no border and no gap. */
+.qual:empty{display:none}
 .qual.mql{background:transparent;color:var(--text3);border-color:var(--line2)}
 .qual.poc{background:var(--blue);color:var(--onBlue)}
 .dial button{display:inline-flex;align-items:center;gap:8px;border:0;text-decoration:none;background:var(--blue);
@@ -228,8 +232,8 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .qi .row{display:flex;align-items:center;gap:7px;margin-top:4px;flex-wrap:wrap}
 .badge{font-size:var(--t-meta);font-weight:var(--w-med);letter-spacing:.01em;
   border-radius:4px;padding:1px 6px;flex:none;border:1px solid transparent}
+/* No .badge.mql: the queue prints "Right POC" or nothing at all. */
 .badge.poc{background:var(--blue);color:var(--onBlue)}
-.badge.mql{background:transparent;color:var(--text3);border-color:var(--line2)}
 .qi .stage{font-size:var(--t-label);color:var(--text2);font-weight:var(--w-med);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .qi .marks{margin-left:auto;display:flex;gap:8px;align-items:center;flex:none;font-size:var(--t-sec)}

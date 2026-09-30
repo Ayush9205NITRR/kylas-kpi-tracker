@@ -206,11 +206,23 @@ function hasSignal(a){
     (r.budget||"").trim()||(r.timeline||"").trim()||(r.pax||"").trim()));
 }
 const qualOf=a=>hasSignal(a)?"Right POC":"MQL";
-/* swap just the badge — re-rendering the call bar would steal focus mid-typing */
+/* MQL IS NOT PRINTED (Ayush, 2026-09-30: "isme MQL kyon show hota hai, as in
+   just state"). MQL is the ABSENCE of a signal, so on a roster where nearly
+   every contact is one, the badge prints the same word on every row and says
+   nothing — it is a label for "nothing has come back yet", taking the space
+   next to the stage, which is the fact somebody is actually scanning for.
+   "Right POC" is the news; MQL is the background.
+   The derivation is untouched — rule 6 says MQL → Right POC is derived and
+   never typed, not that it must always be on screen. It is still computed,
+   still saved, still what the funnel counts. Only the chrome goes. */
+const qualText=a=>hasSignal(a)?"Right POC":"";
+/* swap just the badge — re-rendering the call bar would steal focus mid-typing.
+   The element is always in the DOM, empty when there is nothing to say, so
+   this stays a text swap and never has to insert a node mid-typing. */
 function refreshQual(){
-  const a=rec(),q=qualOf(a),n=document.querySelector(".qual");
+  const a=rec(),n=document.querySelector(".qual");
   if(!n)return;
-  n.textContent=q;n.className="qual "+(q==="MQL"?"mql":"poc");
+  n.textContent=qualText(a);n.className="qual "+(hasSignal(a)?"poc":"mql");
   renderQueue();
 }
 const rec=()=>{const a=DATA[cur];
@@ -330,7 +342,7 @@ function renderCallbar(){
     `${coName?`<span class="atco">${esc(coName)}${
        scope?.id?`<em>#${esc(scope.id)}</em>`:""}</span>`:""}
      <b>${esc(a.pocName||"New contact")}</b>
-     <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(q)}</i>
+     <span class="sub"><i class="qual ${q==="MQL"?"mql":"poc"}">${esc(qualText(a))}</i>
      ${a.designation?`<span>${esc(a.designation)}</span>`:""}</span>`);
   C.appendChild(who);
   /* THE FOCUS LIST, TOP LEFT, UNDER THE COMPANY IT IS ABOUT — all three
@@ -533,7 +545,7 @@ function renderQueue(){
     b.innerHTML=`<span class="n">${esc(a.pocName)}${sync}</span>
       <span class="c">${esc([a.company,a.designation].filter(Boolean).join(" · "))}</span>
       <span class="row">
-        <span class="badge ${q==="MQL"?"mql":"poc"}">${esc(q)}</span>
+        ${q==="MQL"?"":`<span class="badge poc">${esc(q)}</span>`}
         <span class="stage">${esc(label(a.stage))}</span>
         <span class="marks">
           <i class="li${a.linkedin?"":" off"}" title="${a.linkedin?"LinkedIn on file":"No LinkedIn"}">in</i>

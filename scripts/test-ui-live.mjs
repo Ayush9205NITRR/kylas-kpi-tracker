@@ -352,6 +352,38 @@ const filtered = (await f.locator('.exhead .exn').textContent()) || '';
 console.log(`   header now: ${JSON.stringify(filtered.replace(/\s+/g, ' ').trim())}`);
 ok('with one on it says how many are hidden', / of \d+/.test(filtered), JSON.stringify(filtered));
 
+/* ── one button, the whole job ───────────────────────────────────────── */
+/* "Refresh" and "Sync now" both meant "make these numbers current", and
+   picking between them needed the architecture. There is one now, and the
+   test that matters is that the surviving one still does BOTH halves. */
+console.log('\n9. Refresh re-reads AND asks Kylas, in one press');
+ok('there is no second sync button on Accounts', await f.locator('#syncNow').count() === 0);
+await f.evaluate(() => {
+  window.__cos = 0; window.__sync = 0;
+  const rc = API.companies.bind(API); API.companies = (...a) => { window.__cos++; return rc(...a); };
+  const rs = API.syncNow.bind(API); API.syncNow = (...a) => { window.__sync++; return rs(...a); };
+});
+await f.locator('#fRefresh').click();
+await page.waitForTimeout(6000);
+const both = await f.evaluate(() => ({ cos: window.__cos || 0, sync: window.__sync || 0 }));
+console.log(`   companies ${both.cos}x, sync-now ${both.sync}x`);
+ok('one press re-reads the list', both.cos >= 1, JSON.stringify(both));
+ok('...and asks the server for a Kylas sync', both.sync === 1, JSON.stringify(both));
+ok('the view survived the press', await f.locator('#accQ').count() === 1);
+
+/* On the ladder the sync age is still shown — but as a label now. */
+await page.evaluate(() => {
+  const host = document.querySelector('#enout-console-host');
+  host?.shadowRoot?.querySelector('iframe')?.contentWindow
+      ?.postMessage({ source: 'enout-host', type: 'dashboard' }, '*');
+});
+await page.waitForTimeout(7000);
+ok('the ladder still states how old the Kylas side is', await f.locator('.vsync').count() === 1);
+ok('...and it is a label, not a control',
+   await f.evaluate(() => document.querySelector('.vsync')?.tagName) === 'SPAN');
+ok('the ladder has no sync button either', await f.locator('#syncNow').count() === 0);
+ok('the ladder Refresh is still there', await f.locator('#dRefresh').count() === 1);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });

@@ -172,8 +172,13 @@ export const METRICS = [
   /* FIRST — one per company, the period it first reached that rung. */
   { key: "right", label: "Right POC", kind: "first" },
   { key: "discovery", label: "Discovery", kind: "first" },
-  { key: "booked", label: "SQL meeting booked", kind: "first" },
-  { key: "done", label: "SQL meeting done", kind: "first" },
+  /* SHORT, AND THE SAME WORDS THE CONSOLE USES (Ayush, 2026-09-30: "Bucketing
+     should not have two names of same state"). These were "SQL meeting
+     booked" / "SQL meeting done" while views.js' legend and columns said
+     "SQL booked" / "SQL done" for the same rung, so the email and the screen
+     disagreed about what a thing is called. views.js `RUNG` is the list. */
+  { key: "booked", label: "SQL booked", kind: "first" },
+  { key: "done", label: "SQL done", kind: "first" },
   { key: "sql", label: "SQL", kind: "first" },
 ];
 

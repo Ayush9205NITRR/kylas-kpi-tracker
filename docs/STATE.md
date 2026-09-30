@@ -671,19 +671,74 @@ Measured rather than reasoned about, because that is how it was got wrong:
 **save answered in 3126 ms, dashboard showed it 3129 ms after the save began.**
 Three milliseconds between them. test-worker §9a2 keeps it honest.
 
-**"Sync now"** sits beside the ladder's date for the times an hour is still too
-long. It does NOT run the crawl inside the request — that is the "Too many
-subrequests" failure this codebase has already paid for. It sets a flag the
-every-minute maintenance job picks up, so the wait is under a minute; a second
-press while one is pending is a no-op. The ladder also states how old the Kylas
-side is ("Kylas synced 12m ago"), amber past ninety minutes, because otherwise
-a small number cannot be told apart from a sync that has not run.
+**"Refresh" is the only button**, on the ladder and on Accounts both. There used
+to be a second one, "Sync now", and the difference between them was that one
+re-read what the proxy already held while the other went back to Kylas for more
+— which is the architecture leaking into the toolbar. Nobody outside
+`views.js` could pick between two buttons that both mean "make these numbers
+current", so Refresh does both: it re-reads immediately, and asks for a Kylas
+sync in the same click.
+
+The sync is *asked for*, not waited on. It does NOT run the crawl inside the
+request — that is the "Too many subrequests" failure this codebase has already
+paid for. `POST /sync-now` sets a flag the every-minute maintenance job picks
+up, so the wait is under a minute; asking twice while one is pending is a no-op
+server-side, so leaning on the button costs nothing. The button says
+"syncing Kylas…" while that is outstanding and repaints itself 75 s later,
+through `repaintOpenView` — by then the associate may be looking at something
+else, and that is the one function that knows what is open and when a repaint
+would land under somebody's hands.
+
+The ask is allowed to fail and the re-read still happens: a proxy too old to
+know `/sync-now`, or one that cannot reach Kylas, must still refresh what it
+has. The failure lands in the button's `title`, not in a dialog.
+
+Beside it, the ladder still states how old the Kylas side is ("Kylas synced
+12m ago"), amber past ninety minutes, because otherwise a small number cannot
+be told apart from a sync that has not run. That is a **label now, not a
+control**.
 
 `CRON_SYNC_FAST` (`40 * * * *`) runs the same sync with `only: "contacts"`.
 Contacts are incremental — `contactsChangedSince` — so a quiet hour is a
 request or two. The company crawl has no since-filter (it reads Kylas' whole
 company list and filters locally, ~100 requests) and stays on the nightly run:
 a company that appeared today is rarely what moves today's ladder.
+
+## 3d · One name per rung, and MQL is not printed
+
+Two naming faults, both found by Ayush looking at the screen (2026-09-30).
+
+**"Bucketing should not have two names of same state."** Four lists on the
+dashboard described the same six rungs in their own words — the ladder said
+*SQL meeting booked*, the stacked bar's legend said *SQL booked*, the metric
+column said *SQL booked* and the conversion step said *Discovery → SQL
+booked*, and `report.mjs`' email said *SQL meeting booked* again. Same for
+*Companies reached* / *Reached only* / *Reached*, and *Right POC connected* /
+*Right POC*. Nothing was wrong with any single label; the fault was that
+there were five lists of them.
+
+`views.js` `RUNG` is now the only place a rung is named, and `FUNNEL`,
+`BUCKETS`, `STEPS` and `REPORT_METRICS` are all built from it. The names are
+short, because they are column headers and legend keys read at a glance; the
+sentence that defines each one lives in `sub`, which is what `sub` is for — a
+name and its definition are not two names. `report.mjs` `METRICS` was brought
+into line so the email and the screen agree.
+
+The bucket that used to be called **"Reached only"** is now just "Reached".
+The exclusivity — the segments are the *furthest* rung each company got to, so
+they are disjoint and sum to the total — is a property of the chart, not of
+the state, so it is said once in the legend's heading ("Stopped at") instead
+of being smuggled into one state's name.
+
+**MQL is no longer printed.** It is the *absence* of a signal, so on a roster
+where nearly every contact is one, the badge put the same word on every row
+and took the space beside the stage, which is the fact somebody is actually
+scanning for. "Right POC" is the news; MQL is the background. Rule 6 says
+MQL → Right POC is **derived, never typed** — not that it must always be on
+screen. It is still computed, still saved, still what the funnel counts; only
+the chrome went. The card's badge renders as an *empty* element rather than a
+missing one, so `refreshQual` stays a text swap and never inserts a node while
+somebody is typing beside it (`.qual:empty{display:none}`).
 
 ## 4 · Invariants that look arbitrary and are not
 

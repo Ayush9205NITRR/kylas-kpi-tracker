@@ -27,16 +27,40 @@
   /* Picked up: anything other than never-touched or a no-answer. */
   const picked = (c) => !!c.stage && !NOT_CONNECTED.includes(c.stage);
 
+  /* ── ONE NAME PER RUNG, EVERYWHERE ─────────────────────────────────── */
+  /* Ayush, 2026-09-30: "Bucketing should not have two names of same state".
+     He was right and it was worse than it looked. FOUR lists on the same
+     screen described the same six states in their own words: the ladder said
+     "SQL meeting booked", the stacked bar's legend said "SQL booked", the
+     metric column said "SQL booked" and the conversion step said
+     "Discovery → SQL booked" — and the reader had to work out that these were
+     one thing. Same for "Companies reached" / "Reached only" / "Reached", and
+     "Right POC connected" / "Right POC".
+
+     The name is now defined HERE and nowhere else, and every one of those
+     lists is built from it. The longer sentence lives in `sub`, which is what
+     `sub` is for — a name and its definition are not two names.
+
+     Short over descriptive, deliberately: these are column headers, legend
+     keys and chip labels, read at a glance a hundred times a day. */
+  const RUNG_ORDER = ["reached", "right", "discovery", "booked", "done", "sql"];
+  const RUNG = {
+    reached:   { label: "Reached",    sub: "at least one call logged" },
+    right:     { label: "Right POC",  sub: "any of budget, timeline or pax" },
+    discovery: { label: "Discovery",  sub: "one complete row" },
+    booked:    { label: "SQL booked", sub: "booked, regardless of outcome" },
+    done:      { label: "SQL done",   sub: "the call was held" },
+    sql:       { label: "SQL",        sub: "qualified" },
+  };
+  const rung = (k) => (RUNG[k] || {}).label || k;
+
   /* ── the five benchmark conversions ────────────────────────────────── */
   /* Each is a STEP between adjacent rungs — the drop-off that is actually
      managed. A single overall rate hides which step is losing companies. */
-  const STEPS = [
-    { from: "reached",   to: "right",     label: "Reached → Right POC" },
-    { from: "right",     to: "discovery", label: "Right POC → Discovery" },
-    { from: "discovery", to: "booked",    label: "Discovery → SQL booked" },
-    { from: "booked",    to: "done",      label: "SQL booked → SQL done" },
-    { from: "done",      to: "sql",       label: "SQL done → SQL" },
-  ];
+  const STEPS = RUNG_ORDER.slice(0, -1).map((from, i) => {
+    const to = RUNG_ORDER[i + 1];
+    return { from, to, label: `${rung(from)} → ${rung(to)}` };
+  });
 
   /* Exclusive buckets, highest rung first — WHERE each company stopped.
      This is what makes a stacked bar honest: the funnel rungs are NESTED (an
@@ -45,14 +69,11 @@
      by the furthest rung reached, the segments are disjoint, they sum to
      companies reached, and the chart answers the better question — at which
      step is this associate losing accounts. */
-  const BUCKETS = [
-    { key: "sql",       label: "SQL" },
-    { key: "done",      label: "SQL done" },
-    { key: "booked",    label: "SQL booked" },
-    { key: "discovery", label: "Discovery" },
-    { key: "right",     label: "Right POC" },
-    { key: "reached",   label: "Reached only" },
-  ];
+  /* The bucket for "reached and no further" used to be called "Reached only",
+     which is a SECOND name for the rung called "Reached" — the exclusivity is
+     a property of the chart, not of the state, so it belongs in the chart's
+     own heading ("Stopped at", below) and not in the state's name. */
+  const BUCKETS = [...RUNG_ORDER].reverse().map((key) => ({ key, label: rung(key) }));
   const bucketOf = (co) => (BUCKETS.find((b) => co[b.key]) || {}).key || null;
 
   /* ── the funnel, defined once ──────────────────────────────────────── */
@@ -62,14 +83,7 @@
      having filled a complete row — and cumulative() below only closes the gaps
      that are logically true, so this list is NOT guaranteed to descend. Where
      it widens, the view says so. */
-  const FUNNEL = [
-    { key: "reached",   label: "Companies reached",    sub: "at least one call logged" },
-    { key: "right",     label: "Right POC connected",  sub: "any of budget, timeline or pax" },
-    { key: "discovery", label: "Successful discovery call", sub: "one complete row" },
-    { key: "booked",    label: "SQL meeting booked",   sub: "booked, regardless of outcome" },
-    { key: "done",      label: "SQL meeting done",     sub: "the call was held" },
-    { key: "sql",       label: "SQL",                  sub: "qualified" },
-  ];
+  const FUNNEL = RUNG_ORDER.map((key) => ({ key, label: rung(key), sub: RUNG[key].sub }));
 
   /* Only implications that are actually TRUE.
      The three stage rungs are monotonic already, being floors on one ladder.
@@ -739,7 +753,9 @@
     if (!bars.length) return "";
 
     const max = Math.max(...bars.map((b) => b.total), 1);
-    const legend = `<div class="vlg">${BUCKETS.map((b, i) =>
+    /* "Stopped at" carries the exclusivity that "Reached only" used to smuggle
+       into a state's name. One heading, six names, no second vocabulary. */
+    const legend = `<div class="vlg"><span class="lgt">Stopped at</span>${BUCKETS.map((b, i) =>
       `<span class="lg"><i style="background:${slot(i)}"></i>${esc(b.label)}</span>`).join("")}</div>`;
 
     const chart = `<div class="vbars">${bars.map((b) => `
@@ -756,7 +772,7 @@
 
     const table = `<details class="vtbl"><summary>Show as a table</summary>
       <table><thead><tr><th>Associate</th>${BUCKETS.map((b) =>
-        `<th>${esc(b.label)}</th>`).join("")}<th>Reached</th></tr></thead>
+        `<th>${esc(b.label)}</th>`).join("")}<th>Total</th></tr></thead>
       <tbody>${bars.map((b) => `<tr><td>${esc(b.k)}</td>${
         BUCKETS.map((bu) => `<td class="tnum">${b.v[bu.key] || 0}</td>`).join("")
         }<td class="tnum">${b.total}</td></tr>`).join("")}</tbody></table></details>`;
@@ -933,6 +949,49 @@
     { key: "sql", label: "SQL" },
   ];
 
+  /* ONE BUTTON, THE WHOLE JOB.
+     Refresh used to mean "re-read what the server already holds" and Sync now
+     meant "go back to Kylas for more", and nobody outside this file could be
+     expected to know which they wanted — they both mean "make these numbers
+     current". So Refresh does both: it asks for a sync AND re-reads, and says
+     which part it is on.
+
+     The sync is asked for, not waited on: the server runs it in the
+     every-minute job rather than inside the request, because a crawl inside a
+     request is the "Too many subrequests" failure this codebase has already
+     paid for. Asking twice while one is pending is a no-op server-side, so
+     leaning on the button costs nothing.
+
+     THE RE-READ HAPPENS EITHER WAY. A proxy too old to know /sync-now, or one
+     that cannot reach Kylas, must still refresh what it has — so the ask is
+     allowed to fail and the local half is never skipped over it. */
+  let syncWaitTimer = null;
+  async function refreshEverything(btnId, repaint, reread) {
+    /* BY ID, NEVER BY REFERENCE. repaint() re-renders the toolbar, so the
+       element that was clicked is detached a moment later and writing to it
+       puts the label nowhere. Look it up each time instead. */
+    const at = () => document.getElementById(btnId);
+    const say = (t) => { const b = at(); if (b) b.textContent = t; };
+    reread();                 /* the fast half, straight away */
+    repaint();
+    let asked = null;
+    try { asked = await API.syncNow(); }
+    catch (e) {
+      const b = at();
+      if (b) b.title = `Could not ask the server for a Kylas sync — ${String(e.message || e).slice(0, 120)}`;
+      return;                 /* the re-read above still happened */
+    }
+    if (!asked?.queued) return;
+    say("syncing Kylas…");
+    /* The job fires within the minute; give it that and a little, then repaint
+       with whatever it brought — through repaintOpenView, because in 75
+       seconds they may well be looking at something else by now, and it is the
+       one place that knows what is open and when a repaint would land under
+       somebody's hands. */
+    clearTimeout(syncWaitTimer);
+    syncWaitTimer = setTimeout(() => { say("Refresh"); repaintOpenView(); }, 75000);
+  }
+
   /* HOW OLD THE KYLAS SIDE OF THIS IS.
      The two bottom rungs count stage changes, and a stage changed straight in
      Kylas becomes a Stage Transition only when the sync sees it. Without this
@@ -946,11 +1005,14 @@
     const when = mins === null ? "never" : mins < 1 ? "just now"
       : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
     const stale = mins === null || mins > 90;
+    /* NO BUTTON OF ITS OWN. "Refresh" and "Sync now" both meant "make these
+       numbers current", and choosing between them required knowing that one
+       re-reads what the server holds while the other goes back to Kylas for
+       it. That is the architecture leaking into the toolbar. Refresh does
+       both now; this is a label, not a control. */
     return `<span class="vsync${stale ? " old" : ""}" title="${
       esc(sync.at ? `Kylas → Airtable last ran ${sync.at}` : "The Kylas sync has never run against this base")
-      }">Kylas synced ${esc(when)}</span>
-      <button class="gbtn sm" id="syncNow" type="button"
-        title="Ask for a contacts sync — the background job picks it up within a minute">Sync now</button>`;
+      }">Kylas synced ${esc(when)}</span>`;
   };
 
   /* A number on its own motivates nobody. Every figure here carries what it was
@@ -1615,7 +1677,8 @@
           CACHE.at ? ` · ${esc(ageText())}` : ""}</span>
         ${kpiNote(cos, { storeIsPopulation: fromStore.length > 0, repaint: () => dashboard(host) })}
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
-          title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
+          title="Re-read the list, and ask the server to pull fresh stage changes from Kylas">${
+            loading ? "refreshing…" : "Refresh"}</button>
       </div>
       ${CACHE.error ? (API.needsSignIn
         ? signInNote("showing only the companies this browser holds, so these counts are not your real funnel")
@@ -1651,7 +1714,8 @@
     /* No network: the whole account is already held, so this is a filter. */
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };
     const rf = document.getElementById("dRefresh");
-    if (rf) rf.onclick = () => { ensureCompanies(DASH_OWNER, () => dashboard(host), true); dashboard(host); };
+    if (rf) rf.onclick = () => { REPORT_FORCE = true; refreshEverything("dRefresh",
+      () => dashboard(host), () => ensureCompanies(DASH_OWNER, () => dashboard(host), true)); };
     /* A level button JUMPS, and a jump is a fresh start: keeping a window from
        a drill-down would show "Year" filtered to one week and look broken. */
     host.querySelectorAll(".vperiod button").forEach((b) => {
@@ -1711,20 +1775,7 @@
     ensureTeam(() => dashboard(host));
     const tb = host.querySelector("#teamBtn");
     if (tb) tb.addEventListener("click", () => openTeamSheet(() => dashboard(host)));
-    const sn = host.querySelector("#syncNow");
-    if (sn) sn.addEventListener("click", async () => {
-      sn.disabled = true; sn.textContent = "Asked…";
-      try {
-        const r = await API.syncNow();
-        /* The job runs within the minute; the numbers arrive with the redraw
-           after it. Saying "asked" rather than "done" because it is asked. */
-        sn.textContent = r?.alreadyQueued ? "Already queued" : "Syncing…";
-        setTimeout(() => dashboard(host), 70000);
-      } catch (e) {
-        sn.textContent = "Could not ask";
-        sn.title = String(e.message || e).slice(0, 160);
-      }
-    });
+
   }
 
   /* paintDays() and the "Last 14 days" list are gone. That data is frozen into
@@ -3510,7 +3561,8 @@
         `<label>Called since<input type="date" id="fSince" value="${esc(FILTERS.calledSince)}"></label>
         <button class="gbtn" id="fClear" type="button">Clear</button>`}
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
-          title="Re-read the companies from Kylas now">${loading ? "refreshing…" : "Refresh"}</button>
+          title="Re-read the list, and ask the server to pull fresh stage changes from Kylas">${
+            loading ? "refreshing…" : "Refresh"}</button>
         ${VIEW_MODE === "board" ? `<label>Group by<select id="fGroup">
           ${AXES.map((a) => `<option value="${a.key}"${GROUP_BY === a.key ? " selected" : ""}>${esc(a.label)}</option>`).join("")}
         </select></label>` : ""}
@@ -3580,7 +3632,8 @@
     const on = (id, ev, fn) => { const n = document.getElementById(id); if (n) n.addEventListener(ev, fn); };
     on("fOwner", "change", (e) => { FILTERS.owner = e.target.value; companies(host); });
     on("fSince", "change", (e) => { FILTERS.calledSince = e.target.value; companies(host); });
-    on("fRefresh", "click", () => { ensureCompanies(who, () => companies(host), true); companies(host); });
+    on("fRefresh", "click", () => refreshEverything("fRefresh",
+      () => companies(host), () => ensureCompanies(who, () => companies(host), true)));
     /* Clear is also the retry: it drops the cache so a failed fetch is tried
        again, which is otherwise a reload. */
     on("fClear", "click", () => {

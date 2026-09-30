@@ -874,7 +874,12 @@ body.colresize .cgrip{border-right-color:var(--blue)}
   .vfr .fb,.vfr .fo{display:none}
 }
 
-.vlg{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 12px}
+.vlg{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 12px;align-items:center}
+/* The legend's heading. The buckets are EXCLUSIVE — furthest rung reached —
+   and that used to be said by naming one of them "Reached only", which is a
+   second name for a state that already has one. Said here instead. */
+.vlg .lgt{font-size:var(--t-meta);color:var(--text3);font-weight:var(--w-med);
+  text-transform:uppercase;letter-spacing:.06em}
 .vlg .lg{display:inline-flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-med)}
 .vlg .lg i{width:11px;height:11px;border-radius:3px;flex:none}
 
