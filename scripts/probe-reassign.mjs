@@ -245,7 +245,12 @@ function flat(o, prefix = "", out = {}) {
    goes and one for the new one appears — that is the owner change being
    reflected, not a second field being edited, and flagging it buries the real
    diffs under noise. */
-const IGNORE = /(^|\.)(updatedAt|updatedBy|recordActions|lastModified)|^metaData\.idNameStore\.ownerId\./;
+/* updatedVia* is Kylas' AUDIT TRAIL — what made the last edit, not what the
+   record holds. A contact last touched by a workflow and then by us flips
+   "Workflow / Last Called Update Staus" to "API Key / Universal API Key",
+   which is Kylas recording the truth. The first live run reported it as two
+   FAULTS and buried a clean result under them. */
+const IGNORE = /(^|\.)(updatedAt|updatedBy|recordActions|lastModified|updatedViaId|updatedViaName|updatedViaType)|^metaData\.idNameStore\.ownerId\./;
 
 /* A SNAPSHOT A RETRY CANNOT DESTROY.
    This used to overwrite the file on every --write. The first run on lucidity
@@ -659,12 +664,21 @@ if (RESTORE) {
   const snap = JSON.parse(readFileSync(snapFile, "utf8"));
   const wasOwner = idOf(snap.company.ownerId);
   console.log(`\nrestoring from ${snapFile} (taken ${snap.at})`);
-  console.log(`  the company's owner in the snapshot: ${wasOwner ?? "(none recorded)"}`);
-  if (wasOwner == null) {
-    console.error("  ! the snapshot has no owner either — pass --fix-owner <userId> to set one explicitly.");
-    process.exit(1);
-  }
-  await putCompany(snap.company, wasOwner);
+  /* RESTORE THE CONTACTS, WHATEVER THE COMPANY SAYS.
+     This used to refuse outright when the snapshot had no company owner —
+     and it refused on moonfroglabs, whose contacts were sitting on the wrong
+     person, because of a company field that was ALREADY empty before anything
+     was written and that Kylas will not let us set anyway. The undo was
+     blocked by something it was never going to touch.
+
+     The engine moves contacts. So does the undo. The company's owner is
+     reported and left alone, exactly as the forward path does it. */
+  if (wasOwner == null)
+    console.log(`  the company had no owner when the snapshot was taken — it still will not,` +
+                `\n  and that is not something this tool can set. Restoring the CONTACTS.`);
+  else
+    console.log(`  the company's owner in the snapshot: ${wasOwner} (left alone — Kylas does not` +
+                `\n  allow it to be set through the API; see reassign.mjs)`);
   await sleep(220);
   for (const c of snap.contacts) {
     await call("PUT", `/v1/contacts/${c.id}`, contactBody(c, idOf(c.ownerId)));
