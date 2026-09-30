@@ -294,6 +294,10 @@
     rca: (owner) => req(`/rca${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     /* Who the funnel counts, and every name it could count. */
+    /* ASK FOR A SYNC. The server does not run it inside this request — it sets
+       a flag the every-minute job picks up, so this returns immediately and the
+       numbers change within a minute or so. */
+    syncNow: () => req("/sync-now", { method: "POST", body: {}, timeout: 20000 }),
     team: () => req("/team", { timeout: 20000 }),
     /* Every company's focus-list status, and setting one. */
     focusAll: () => req("/focus", { timeout: 20000 }),

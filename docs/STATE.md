@@ -624,6 +624,14 @@ So a stage changed in Kylas at 11:00 appeared on the ladder at 02:00 the next
 morning — up to **fifteen hours**, and it read as "the dashboard is slow" when
 nothing about the dashboard was slow. The last three rows were always minutes.
 
+**"Sync now"** sits beside the ladder's date for the times an hour is still too
+long. It does NOT run the crawl inside the request — that is the "Too many
+subrequests" failure this codebase has already paid for. It sets a flag the
+every-minute maintenance job picks up, so the wait is under a minute; a second
+press while one is pending is a no-op. The ladder also states how old the Kylas
+side is ("Kylas synced 12m ago"), amber past ninety minutes, because otherwise
+a small number cannot be told apart from a sync that has not run.
+
 `CRON_SYNC_FAST` (`40 * * * *`) runs the same sync with `only: "contacts"`.
 Contacts are incremental — `contactsChangedSince` — so a quiet hour is a
 request or two. The company crawl has no since-filter (it reads Kylas' whole

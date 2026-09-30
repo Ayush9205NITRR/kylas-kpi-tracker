@@ -510,6 +510,21 @@ check('an older console (no queue flag) still gets the finished save', legacy.st
 /* Nobody types it. The contact's offsite row says "Q3", so the company's
    offsite timeline is Jul–Sep — read out of Event Rows, not a column of its
    own that a base behind on repair-base would refuse. */
+/* ── 9a · asking for a sync ─────────────────────────────────────────── */
+/* The ladder counts stage changes, and a change made straight in Kylas becomes
+   one only once the sync has seen it — so "Sync now" has to exist. It must NOT
+   run the crawl inside the request, which is the "Too many subrequests"
+   failure §10 counts every other route against. */
+console.log('\n9a. sync now');
+{
+  const w = await coldWorker(41);
+  const a = await post(w, '/sync-now', {});
+  check('asking for a sync is accepted', a.status === 200 && a.body.queued === true, JSON.stringify(a.body));
+  check('and it is answered immediately, not after a crawl', a.ms < 400, `${a.ms.toFixed(0)}ms`);
+  const b = await post(w, '/sync-now', {});
+  check('asking twice does not queue two crawls', b.body.alreadyQueued === true, JSON.stringify(b.body));
+}
+
 console.log('\n9b. offsite timeline, derived');
 const heldO = [];
 const offRes = await (await coldWorker(36)).fetch(new Request('https://bd.enout.website/save', {

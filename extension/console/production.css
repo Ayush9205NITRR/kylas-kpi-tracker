@@ -193,6 +193,12 @@ body.framed .ovOnly{display:inline-block}
    a badge on 17,827 rows is not a badge. */
 .acctown{color:var(--text3)}
 .vhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 18px;flex-wrap:wrap}
+/* How old the Kylas side of the ladder is. Neutral while it is fresh; amber —
+   the flag colour, the only thing amber marks — once an hourly job has plainly
+   missed a beat. */
+.vsync{font-size:var(--t-meta);color:var(--text3);padding:3px 8px;border-radius:var(--r);
+  background:var(--panel3);white-space:nowrap}
+.vsync.old{color:var(--amber);background:var(--amberSoft)}
 .vhead.sm{margin-top:34px}
 /* The display face on headings and on the numbers meant to be read first —
    which is the whole job it was picked for. Everything else stays on the body

@@ -928,6 +928,26 @@
     { key: "sql", label: "SQL" },
   ];
 
+  /* HOW OLD THE KYLAS SIDE OF THIS IS.
+     The two bottom rungs count stage changes, and a stage changed straight in
+     Kylas becomes a Stage Transition only when the sync sees it. Without this
+     line the screen cannot tell "nobody worked those accounts" apart from "the
+     sync has not run since breakfast", and both read as a small number. The
+     hourly job makes it usually minutes; it goes amber past ninety, which is
+     an hourly job that has missed a beat. */
+  const syncHTML = (sync) => {
+    if (!sync) return "";
+    const mins = sync.at ? Math.max(0, Math.round((Date.now() - Date.parse(sync.at)) / 60000)) : null;
+    const when = mins === null ? "never" : mins < 1 ? "just now"
+      : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+    const stale = mins === null || mins > 90;
+    return `<span class="vsync${stale ? " old" : ""}" title="${
+      esc(sync.at ? `Kylas → Airtable last ran ${sync.at}` : "The Kylas sync has never run against this base")
+      }">Kylas synced ${esc(when)}</span>
+      <button class="gbtn sm" id="syncNow" type="button"
+        title="Ask for a contacts sync — the background job picks it up within a minute">Sync now</button>`;
+  };
+
   /* A number on its own motivates nobody. Every figure here carries what it was
      last period, so the reader is told whether it went up — which is the only
      part anybody acts on. */
@@ -1182,6 +1202,7 @@
       <div class="vsec">
         <div class="vhead sm"><h2>The ladder</h2>
           <span class="vsub">${esc(cur.label)} · every number counts companies, not contacts</span>
+          ${syncHTML(r.sync)}
           <button class="gbtn sm" id="teamBtn" type="button"
             title="Choose who is counted in the funnel">Team${people.length ? ` · ${people.length}` : ""}</button></div>
         ${(r.excluded || []).length ? `<p class="vnote">Not counted: ${
@@ -1592,6 +1613,20 @@
     ensureTeam(() => dashboard(host));
     const tb = host.querySelector("#teamBtn");
     if (tb) tb.addEventListener("click", () => openTeamSheet(() => dashboard(host)));
+    const sn = host.querySelector("#syncNow");
+    if (sn) sn.addEventListener("click", async () => {
+      sn.disabled = true; sn.textContent = "Asked…";
+      try {
+        const r = await API.syncNow();
+        /* The job runs within the minute; the numbers arrive with the redraw
+           after it. Saying "asked" rather than "done" because it is asked. */
+        sn.textContent = r?.alreadyQueued ? "Already queued" : "Syncing…";
+        setTimeout(() => dashboard(host), 70000);
+      } catch (e) {
+        sn.textContent = "Could not ask";
+        sn.title = String(e.message || e).slice(0, 160);
+      }
+    });
   }
 
   /* paintDays() and the "Last 14 days" list are gone. That data is frozen into

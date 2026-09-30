@@ -2044,7 +2044,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          got what it asked for then computed a drill-down window from week keys as
          if they were years — "2026-NaN-0 to 2026-NaN-N". Saying so lets the
          caller notice the mismatch instead of rendering nonsense. */
-      return { ...out, period, team, excluded };
+      /* WHEN KYLAS WAS LAST READ, on the same payload as the numbers.
+         The ladder counts stage changes, and a stage changed straight in Kylas
+         only becomes a Stage Transition when the sync sees it. Without this the
+         screen cannot distinguish "nobody worked those accounts" from "the sync
+         has not run since". Both look like a small number. */
+      const sync = await syncState();
+      return { ...out, period, team, excluded,
+               sync: sync ? { at: sync.at || "", contacts: sync.contacts ?? null,
+                              moves: sync.moves ?? null } : null };
     },
 
     /* The frozen daily numbers, for the trend chart. Read from Airtable, which
@@ -2271,6 +2279,19 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     catch (e) { return { configured: true, error: e.message.slice(0, 200) }; }
   };
 
+  /* SYNC NOW. Not run inside this request: the sync is a crawl, and a crawl
+     inside a request is the "Too many subrequests" failure this codebase has
+     already paid for once. It sets a flag that the every-minute maintenance run
+     picks up, so the wait is under a minute rather than under an hour — and a
+     second press while one is pending is a no-op rather than a second crawl. */
+  routes["/sync-now"] = async () => {
+    if (!cache) return { queued: false, why: "no shared store" };
+    const pending = await cache.get("sync-now").catch(() => null);
+    if (!pending) await cache.put("sync-now", String(Date.now()), { ttlSeconds: 900 }).catch(() => {});
+    const sync = await syncState();
+    return { queued: true, alreadyQueued: !!pending, lastSyncAt: sync?.at || null };
+  };
+
   routes["/cache-status"] = async () => ({
     mirror: mirror ? await mirror.status() : null,
     kylasCompaniesAgeSeconds: await kylasCompanies.age(),
@@ -2357,6 +2378,25 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       try { out.shadow = await shadow.tick(); }
       catch (e) { out.shadow = { error: e.message.slice(0, 160) }; log(`! shadow: ${e.message.slice(0, 120)}`); }
     }
+    /* A SYNC SOMEBODY ASKED FOR. Contacts only — the same shape the hourly
+       cron runs, for the same reason: it is the stage changes that the ladder
+       is waiting on, and the company crawl is the expensive half. Cleared
+       BEFORE the run, so a sync that throws does not re-run every minute for
+       the next quarter of an hour. */
+    if (cache && (await cache.get("sync-now").catch(() => null))) {
+      await cache.delete("sync-now").catch(() => {});
+      try {
+        const syncNow = (await import("./sync-kylas.mjs")).run;
+        out.syncNow = await syncNow({ env, log, apply: true, only: "contacts" });
+        if (mirror) await mirror.markStale(["Contacts", "Stage Transitions"]).catch(() => {});
+        await syncShared({ fresh: true }).catch(() => {});
+      } catch (e) {
+        out.syncNow = { error: e.message.slice(0, 160) };
+        log(`! sync-now: ${e.message.slice(0, 120)}`);
+      }
+      return out;                      /* one heavy piece of work per run */
+    }
+
     /* THE DAY'S WRITE-BACK EMAIL, once, after the day it reports on has
        ended. Guarded by a key in the shared store rather than by the cron's
        schedule: the maintenance job runs every minute on several instances,
