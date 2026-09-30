@@ -22,14 +22,48 @@ describe.
 | Extension | packaged by `scripts/package-extension.sh` → `dist/`. **Not published.** |
 | Chrome Web Store | listing is a *draft*. Privacy tab answers are in the session log; `docs/privacy.html` is the policy. |
 | Airtable base | **not repaired.** `repair-base.mjs` has never been run against the live base. |
-| Proxy | runs locally for development. **Nothing is deployed anywhere.** |
-| Crons | written (`scripts/cron.sh`, `install-cron.sh`). **Never installed on a real machine.** |
-| Associates using it | none |
+| Proxy | **DEPLOYED.** `enout-bd-proxy` on `bd.enout.website`, Cloudflare Workers Paid + D1. Version `1.40.0`, 2026-09-30. |
+| Crons | **six, live on the Worker** — see below. `scripts/cron.sh` / `install-cron.sh` are the laptop fallback and are still uninstalled. |
+| Writes to Kylas | **LIVE, capped.** `PUSH_APPLY = "1"`, `PUSH_LIMIT = "100"`, nightly at 02:45 IST. |
+| Associates using it | none yet |
 
-**Nothing is in production.** Every "it works" in this repo means "it works
-against the mocks, verified by a test". That is a real bar — the mocks
-reproduce Kylas' rate limiting, its result window, its 500s and Airtable's
-rejections — but it is not the same as a live account.
+### It is no longer all mocks
+
+For most of this repo's life, every "it works" meant "against the mocks,
+verified by a test" — a real bar, since the mocks reproduce Kylas' rate
+limiting, its result window, its 500s and Airtable's rejections, but not the
+same as a live account. That changed on 2026-09-30. The Worker is deployed,
+six cron triggers fire on Cloudflare's schedule, and **one of them writes back
+into the live CRM**:
+
+```
+30 20 * * *     02:00 IST daily    Kylas -> Airtable, everything
+45 18 * * *     00:15 IST daily    freeze yesterday
+40 * * * *      hourly             Kylas -> Airtable, contacts only
+0 21 * * SUN    02:30 IST Monday   roll up the call log
+15 21 * * *     02:45 IST daily    Airtable -> KYLAS. WRITES. capped at 100.
+* * * * *       every minute       D1 copies current, save queue drained,
+                                   Sync-now flag picked up
+```
+
+The every-minute one is not optional plumbing: without it Sync now silently
+does nothing (the flag is set and never read), failed saves never retry, and
+the mirror never fills. If the Accounts pane and the ladder both look frozen,
+check that trigger before anything else.
+
+**The nightly push is the one that can destroy data.** A `PUT` on the Kylas
+contacts endpoint REPLACES the record (§3 cont.), and this repo has already
+lost one contact's name, phone and email to exactly that. `PUSH_LIMIT = "100"`
+is what stands between a bad shape and the whole account, and it does not come
+off until a real night's run has been read back with `npx wrangler tail` and
+the write-back email agrees with it. Backing the whole thing out is one line —
+comment `PUSH_APPLY` in `wrangler.toml` and redeploy.
+
+`VERSION` in `wrangler.toml` must equal `extension/manifest.json`; the console
+compares them and says "restart the proxy" when they differ. It had drifted to
+1.27.1 against an extension at 1.40.0, so that warning was crying wolf for long
+enough to be ignored. Both are 1.40.0 now — which makes `/health` the honest
+answer to "did my deploy land".
 
 ---
 
