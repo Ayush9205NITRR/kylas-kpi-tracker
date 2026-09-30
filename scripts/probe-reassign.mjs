@@ -69,25 +69,65 @@ async function call(method, path, body, tries = 0) {
   return json;
 }
 const rows = (r) => r?.content || r?.data || (Array.isArray(r) ? r : []);
+
+/* THE SHAPES KYLAS ACTUALLY ACCEPTS, copied from scripts/kylas.mjs rather than
+   invented here. The first version of this probe sent {rules: []} for "give me
+   everything", which the mock tolerates and the live account refuses with
+   003008 "Group's rules can not be empty". The free-text rule with an empty
+   value is the documented floor — proven live on 2026-09-16 — and `input:
+   "select"` is not optional on a field rule however redundant it looks. */
+const everything = () => ({ condition: "AND", valid: true, rules: [
+  { id: "multi_field", field: "multi_field", type: "multi_field",
+    input: "multi_field", operator: "multi_field", value: "" }] });
+const equals = (field, value, type = "long") => ({ condition: "AND", valid: true,
+  rules: [{ id: field, field, type, input: "select", operator: "equal", value }] });
+const contactsOf = (companyId) => call("POST", "/v1/search/contact?page=0&size=100",
+  { fields: ["id"], jsonRule: equals("company", Number(companyId)) });
 const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
 
 /* ── --list ──────────────────────────────────────────────────────────── */
 if (LIST) {
   const r = await call("POST", "/v1/search/company?page=0&size=10&sort=updatedAt,desc",
-    { fields: ["id", "name", "ownerId"], jsonRule: { condition: "AND", valid: true, rules: [] } });
+    { fields: ["id", "name", "ownerId"], jsonRule: everything() });
   console.log("\nA few of your accounts, newest first:\n");
+  const ownerIds = new Set();
   for (const c of rows(r)) {
-    const people = await call("POST", "/v1/search/contact?page=0&size=100",
-      { fields: ["id"], jsonRule: { condition: "AND", valid: true,
-        rules: [{ id: "company", field: "company", type: "long", operator: "equal", value: Number(c.id) }] } })
-      .catch(() => null);
+    const people = await contactsOf(c.id).catch(() => null);
+    const owner = idOf(c.ownerId);
+    if (owner != null) ownerIds.add(String(owner));
     console.log(`  ${String(c.id).padEnd(9)} ${String(c.name || "").slice(0, 38).padEnd(40)}` +
-                `owner ${String(idOf(c.ownerId) ?? "—").padEnd(8)} ${rows(people).length} contact(s)`);
+                `owner ${String(owner ?? "—").padEnd(8)} ${rows(people).length} contact(s)`);
     await sleep(220);
   }
+
+  /* WHO YOU CAN HAND THEM TO. Kylas documents /v1/users/{id} but NOT a list
+     endpoint, so kylas.mjs tries the likely list shapes and falls back to
+     resolving the ids it already holds one at a time. Same ladder here — the
+     first version called one undocumented shape, swallowed the error, and
+     printed an empty list, which reads as "you have no colleagues". */
   console.log("\nUsers on this account:\n");
-  const us = await call("GET", "/v1/users?page=0&size=50").catch(() => null);
-  for (const u of rows(us)) console.log(`  ${String(u.id).padEnd(9)} ${[u.firstName, u.lastName].filter(Boolean).join(" ")}`);
+  let users = [];
+  for (const shape of [
+    () => call("GET", "/v1/users?page=0&size=200"),
+    () => call("GET", "/v1/users"),
+    () => call("POST", "/v1/search/user?page=0&size=200",
+      { fields: ["id", "firstName", "lastName", "email"], jsonRule: everything() }),
+  ]) {
+    try { const got = rows(await shape()); if (got.length) { users = got; break; } } catch { /* next */ }
+    await sleep(220);
+  }
+  if (!users.length) {
+    /* The documented, certain floor: resolve the owners actually seen above. */
+    for (const id of ownerIds) {
+      try { users.push(await call("GET", `/v1/users/${id}`)); } catch { /* skip */ }
+      await sleep(220);
+    }
+    if (users.length) console.log("  (no list endpoint on this account — these are the owners seen above)");
+  }
+  for (const u of users)
+    console.log(`  ${String(u.id).padEnd(9)} ${[u.firstName, u.lastName].filter(Boolean).join(" ")}` +
+                `${u.email ? `  ${u.email}` : ""}`);
+  if (!users.length) console.log("  none resolved — pass --to with a Kylas user id you know.");
   console.log("\nThen: --company <id> --to <userId>            (reads only)" +
               "\n      --company <id> --to <userId> --write    (moves it)" +
               "\n      --company <id> --restore                (puts it back)\n");
@@ -101,9 +141,7 @@ const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
 async function readAll() {
   const company = await call("GET", `/v1/companies/${CO}`);
   await sleep(220);
-  const found = await call("POST", "/v1/search/contact?page=0&size=100",
-    { fields: ["id"], jsonRule: { condition: "AND", valid: true,
-      rules: [{ id: "company", field: "company", type: "long", operator: "equal", value: Number(CO) }] } });
+  const found = await contactsOf(CO);
   const contacts = [];
   for (const p of rows(found)) { contacts.push(await call("GET", `/v1/contacts/${p.id}`)); await sleep(220); }
   return { company, contacts };
