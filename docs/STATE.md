@@ -774,6 +774,52 @@ the chrome went. The card's badge renders as an *empty* element rather than a
 missing one, so `refreshQual` stays a text swap and never inserts a node while
 somebody is typing beside it (`.qual:empty{display:none}`).
 
+## 3e · Handing accounts over, in bulk
+
+Ayush, 2026-09-30: *"I can select multiple accounts, then reassign, and when I
+reassign the associated contacts also get reassigned to that specific
+individual."* The pain behind it is accounts drifting onto the Enout super
+admin and dragging their POCs with them, so **the cascade is the point** — an
+account whose contacts stayed behind has not been handed over.
+
+`scripts/reassign.mjs` is the only file in this tree that writes a **company**.
+Until this, `test-replace` asserted that nothing did, with the note *"the day
+it stops being true is the day contacts start moving on their own."* That fence
+moved rather than came down: the save path and the nightly push — the ones that
+run unattended over every contact in the base — still may not write a company,
+and that is still asserted.
+
+Five rules, each paid for:
+
+1. **The whole record, read immediately before the write.** Both PUTs replace.
+   Not from the crawl and not from the Airtable copy — an hour-old body written
+   back over a fresh record silently reverts whatever moved in between.
+2. **Nothing is written until it is counted.** `POST /reassign` without
+   `apply` is a dry run: it reads, counts, and writes nothing. The console puts
+   *"412 accounts and 1,038 contacts"* in front of the person before anything
+   happens. Select-all on 17,925 must never be one keystroke from 17,925 writes.
+3. **`MAX_ACCOUNTS = 200`, refused not truncated.** A caller told "moved 200 of
+   500" cannot tell *which* 200.
+4. **A company that failed does not leak its contacts.** Its contacts are left
+   alone — a company on the old owner with its POCs on the new one is worse
+   than nothing having happened.
+5. **Admins only**, dry run included: the dry run alone would report how many
+   contacts sit on everybody else's accounts.
+
+**The near miss, kept as a test.** The first `companyBody` ran push-kylas'
+`idOf` over every top-level field, and `idOf` collapses anything carrying a
+`.value` — which a phone number does. `{type:"MOBILE", value:"9…",
+primary:true}` went back as `"9…"`, so a re-assignment would have quietly
+stripped the type and primary flag off every phone and email it touched. The
+rule now: only an object whose keys are *just* `id` and `name` is a lookup;
+everything else goes back exactly as Kylas served it. `idOf` still applies
+inside `customFieldValues`, where every value really is an option or a scalar.
+
+`test-reassign.mjs` is 54, `test-worker` §12 covers the HTTP edge (403 for an
+associate — with a **cold worker**, because `ADMINS` is read once when the
+module is built and passing `ADMIN_EMAILS` to a warm one changes nothing and
+passes for the wrong reason).
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current

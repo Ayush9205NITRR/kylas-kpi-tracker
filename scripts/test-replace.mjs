@@ -188,14 +188,31 @@ is("...even when Kylas sends it as an object",
 /* A contact being CREATED has no base to fall back on. */
 ok("a new contact with no owner sends none",
   !("ownerId" in toKylasContact({ ...CARD, kid: "", ownerId: "" }, { remarks: "x" })));
-/* THE THING THAT MUST NEVER HAPPEN. No payload this file builds is a company
-   payload, and nothing in the tree calls updateCompany — asserted here
-   because the day it stops being true is the day contacts start moving on
-   their own. */
+/* THE THING THAT MUST NEVER HAPPEN, NARROWED RATHER THAN DROPPED.
+   This used to assert that NOTHING in the tree called updateCompany, with the
+   note "the day it stops being true is the day contacts start moving on their
+   own". That day came on purpose: Ayush asked to select accounts, re-assign
+   them, and have their contacts follow (scripts/reassign.mjs).
+
+   So the fence moved instead of coming down. Exactly ONE file may write a
+   company, it is the one built for it and tested by test-reassign.mjs, and
+   the save and push paths — the ones that run unattended, nightly, over every
+   contact in the base — still may not. A company write appearing in those is
+   still the old catastrophe. */
 const { readFileSync } = await import("node:fs");
 const callers = ["scripts/handlers.mjs", "scripts/push-kylas.mjs", "scripts/kylas.mjs"]
   .filter((f) => /updateCompany\s*\(/.test(readFileSync(f, "utf8").replace(/updateCompany:.*/g, "")));
-is("nothing calls updateCompany", callers, []);
+is("neither the save nor the nightly push writes a company", callers, []);
+/* ...and the one file that does, does it the only safe way: the whole record,
+   read immediately before, with one field changed. If this import ever stops
+   throwing on a partial body, the rule has been lost. */
+const { companyBody } = await import("./reassign.mjs");
+ok("the one company writer refuses a body it cannot vouch for", (() => {
+  try { companyBody({ id: 1, ownerId: 2 }, 3); return false; } catch { return true; }
+})());
+is("...and carries a phone back whole, not flattened to its value",
+  companyBody({ name: "x", phoneNumbers: [{ type: "MOBILE", value: "9", primary: true }] }, 3).phoneNumbers,
+  [{ type: "MOBILE", value: "9", primary: true }]);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

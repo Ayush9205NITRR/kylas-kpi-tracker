@@ -1985,6 +1985,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return ladderData({ fresh: !!url.searchParams.get("fresh") });
     },
 
+    /* MOVING ACCOUNTS BETWEEN BDs, with the people on them.
+       POST { companies: [kylasId…], ownerId, apply: true } — without `apply`
+       it is a DRY RUN that reads and counts and writes nothing, which is what
+       the console shows before anybody agrees to it. scripts/reassign.mjs
+       holds the rules and the reasons; they are not repeated here. */
+    "/reassign": async (_url, body) => {
+      /* ADMINS ONLY, and the dry run too.
+         Handing accounts between people is a management action, not a
+         dialling one: an associate who could run this could move the team's
+         pipeline onto themselves, and the dry run alone would tell them how
+         many contacts sit on everybody else's accounts. roleOf() already
+         decides this everywhere else; it decides it here. */
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("Re-assigning accounts is an admin action."), { status: 403 });
+      const { plan, apply } = await import("./reassign.mjs");
+      const companies = Array.isArray(body?.companies) ? body.companies : [];
+      const ownerId = body?.ownerId;
+      if (!body?.apply) return { dryRun: true, ...(await plan({ kylas, companies, ownerId, log })) };
+      const out = await apply({ kylas, companies, ownerId, log });
+      /* The copy now disagrees with Kylas about who owns these, and the pane
+         reads the copy. Mark it stale rather than patching rows by hand: the
+         maintenance run is a minute away and a hand-patched mirror that drifts
+         is worse than one that is briefly behind. */
+      if (mirror) await mirror.markStale().catch((e) => log(`! mirror: ${e.message}`));
+      return out;
+    },
+
     /* A BD picking an account, or dropping it with a reason. */
     /* GET: every company's list status, { focus: { kylasId: {...} } }, for
        the console's Focus lists and the ★ on the call card. POST sets one. */

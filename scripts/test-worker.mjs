@@ -842,6 +842,56 @@ console.log('\n11. a copy that is short of the account is not the account');
 }
 
 
+/* ── §12 · handing accounts over ──────────────────────────────────────
+   The only path in this codebase that writes a COMPANY. test-replace fenced
+   that off entirely until today; these are the checks that replaced the
+   fence at the HTTP edge, where the console actually reaches it. */
+{
+  console.log('\n12. re-assigning accounts');
+  /* Kylas' mock `me` is crmadmin@enout.in, which is a default admin — so the
+     403 case has to name somebody else as the admin. */
+  /* A COLD WORKER, because ADMINS is read once when the module is built.
+     Passing ADMIN_EMAILS to the shared worker changes nothing and the check
+     passes for the wrong reason — which is exactly what it did first time. */
+  const assocEnv = { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in' };
+  const asAssociate = await (await coldWorker(921)).fetch(
+    new Request('https://bd.enout.website/reassign', { method: 'POST', headers:
+      { Origin: ORIGIN, 'content-type': 'application/json' },
+      body: JSON.stringify({ companies: ['903'], ownerId: '99999' }) }),
+    assocEnv, { waitUntil() {} });
+  check('an associate cannot re-assign anybody\'s accounts', asAssociate.status === 403,
+        `status ${asAssociate.status}`);
+  /* ...not even the dry run, which would otherwise report how many contacts
+     sit on everybody else's accounts. */
+  check('...and the reply says why, not just no',
+        /admin/i.test((await asAssociate.json()).error || ''), '');
+
+  /* 99999 owns nothing in the mock, so this is a real move rather than the
+     no-op that 74726 would be — a dry run that counts 0 proves nothing. */
+  const dry = await call('/reassign', { method: 'POST',
+    body: { companies: ['903'], ownerId: '99999' }, env: withStore(ENV) });
+  const dj = await dry.json();
+  check('an admin gets a dry run', dry.status === 200 && dj.dryRun === true,
+        `status ${dry.status} ${JSON.stringify(dj).slice(0, 120)}`);
+  check('...that counts a real move', dj.moving === 1 && dj.contacts >= 1,
+        JSON.stringify({ moving: dj.moving, contacts: dj.contacts }));
+  /* THAT IT WRITES NOTHING is asserted where it can be asserted honestly:
+     test-reassign §4 runs plan() against a Kylas that records every write and
+     checks the record is empty. Diffing the mock's write log across an HTTP
+     call here looked equivalent and was not — the probe was unauthenticated
+     and came back "Too many requests", so it compared two error messages and
+     called that proof. */
+  check('...and the company is still on its old owner afterwards',
+        dj.accounts?.[0]?.from === '74726', JSON.stringify(dj.accounts?.[0]));
+
+  const empty = await call('/reassign', { method: 'POST',
+    body: { companies: [], ownerId: '99999' }, env: withStore(ENV) });
+  check('no accounts is a 400, not a cheerful no-op', empty.status === 400, `status ${empty.status}`);
+  const noOwner = await call('/reassign', { method: 'POST',
+    body: { companies: ['903'] }, env: withStore(ENV) });
+  check('no owner is a 400 too', noOwner.status === 400, `status ${noOwner.status}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

@@ -1949,6 +1949,11 @@
                    Empty means every owner, exactly as the old "All owners"
                    option did. */
                 owners: new Set(), ownerOpen: false, ownerFind: "", ownerScroll: 0,
+                /* ACCOUNTS TICKED FOR RE-ASSIGNMENT. Kylas company ids, not row
+                   indexes: the list re-sorts and re-filters under the ticks,
+                   and an index would silently come to mean a different
+                   company. Survives a repaint for the same reason. */
+                picked: new Set(), busy: "",
                 sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
@@ -2620,6 +2625,52 @@
   /* OWNERS, as a checklist. Same control as Stage and Source of Data, so the
      toolbar reads as one thing. Counts skip the owner filter itself, or every
      unticked name would read 0 and the filter could never be widened. */
+  /* HANDING ACCOUNTS OVER, in bulk, with the people on them.
+     Ayush, 2026-09-30: "I can select multiple accounts, then reassign, and
+     when I reassign the associated contacts also get reassigned."
+
+     The bar only exists once something is ticked, because a permanently
+     visible "re-assign everything" control on a list of 17,925 is an accident
+     waiting for a slow afternoon. Admins only — the server refuses anyone
+     else, and a control that 403s is worse than no control.
+
+     "Select all" ticks THE FILTERED ROWS, never the whole account, and says
+     which it did. That distinction is the whole safety story: the person can
+     see the list they are about to move. */
+  function bulkBar(rows) {
+    if (!API.isAdmin) return "";
+    const n = ACC.picked.size;
+    const shown = rows.length;
+    const allShown = shown > 0 && rows.every((r) => ACC.picked.has(String(r.id)));
+    if (!n) return `<div class="exbulk idle">
+      <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
+      <span class="exbh">…to re-assign them to somebody else.</span></div>`;
+    return `<div class="exbulk">
+      <span class="exbn tnum">${n} selected</span>
+      <button class="gbtn sm" id="accPickAll" type="button">${
+        allShown ? "Select none" : `Select these ${shown}`}</button>
+      <label class="exbto">Re-assign to
+        <select id="accTo" aria-label="Move these accounts to">
+          <option value="">choose a person…</option>
+          ${ownerOptions().map((o) =>
+            `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
+        </select></label>
+      <button class="gbtn sm" id="accGo" type="button" disabled>Re-assign</button>
+      <button class="gbtn sm" id="accPickClear" type="button">Clear</button>
+      ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}
+      <p class="exbnote">The contacts on each account move with it. Nothing is
+        written until you have seen the count.</p>
+    </div>`;
+  }
+  /* The people an account can be handed TO. Names alone are not enough — the
+     write goes by Kylas id, and a dropdown of names that carried no ids is
+     exactly how single-contact re-assignment silently did nothing for a week. */
+  function ownerOptions() {
+    const seen = new Map();
+    for (const o of CACHE.owners || []) if (o?.id && o?.name) seen.set(String(o.id), o.name);
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   function ownerPicker(all) {
     const cnt = new Map();
     for (const c of all.filter((x) => accMatch(x, "owner"))) {
@@ -3120,6 +3171,7 @@
           <button class="gbtn sm" id="accLink" type="button"
             title="Copy a link that opens this list with these filters">Copy link</button>
           <p>${parts.length ? esc(parts.join(" · ")) + "." : (rows.length ? "" : "Nothing matches these filters.")}</p>
+          ${bulkBar(rows)}
         </div>
         <div class="extools">
           <div class="srch">
@@ -3432,8 +3484,10 @@
 
     /* One definition, used by the first paint and by every filter tick. */
     const rowHTML = (c) => `
-          <div class="vr" data-id="${esc(c.id)}">
-            <span class="c1"><b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
+          <div class="vr${ACC.picked.has(String(c.id)) ? " on" : ""}" data-id="${esc(c.id)}">
+            <span class="c1">${API.isAdmin ? `<input class="cpick" type="checkbox" data-pick="${esc(c.id)}"
+              aria-label="Select ${esc(c.name)}"${ACC.picked.has(String(c.id)) ? " checked" : ""}>` : ""
+            }<b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
             <span class="c2">${esc(label(c.stage) || "—")}</span>
             <span class="c3">${c.contacts.length}</span>
             <span class="c4${c.pocs.right.length ? "" : " no"}"${
@@ -4085,6 +4139,68 @@
     global.Focus?.load();
     on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
+    /* ── ticking accounts, and handing them over ───────────────────────── */
+    /* Delegated, because the rows are re-rendered on every keystroke in the
+       search box and per-row listeners would be rebound hundreds of times. */
+    host.querySelectorAll(".cpick").forEach((b) => {
+      b.addEventListener("click", (e) => e.stopPropagation());   /* not a row-open */
+      b.addEventListener("change", () => {
+        const id = String(b.dataset.pick);
+        if (b.checked) ACC.picked.add(id); else ACC.picked.delete(id);
+        ACC.busy = ""; redraw();
+      });
+    });
+    on("accPickAll", "click", () => {
+      /* THE ROWS IN FRONT OF THEM, never the whole account. */
+      const ids = rows.map((r) => String(r.id));
+      const allOn = ids.length && ids.every((i) => ACC.picked.has(i));
+      if (allOn) ids.forEach((i) => ACC.picked.delete(i));
+      else ids.forEach((i) => ACC.picked.add(i));
+      ACC.busy = ""; redraw();
+    });
+    on("accPickClear", "click", () => { ACC.picked.clear(); ACC.busy = ""; redraw(); });
+    on("accTo", "change", () => {
+      const go = document.getElementById("accGo");
+      if (go) go.disabled = !document.getElementById("accTo").value;
+    });
+    on("accGo", "click", async () => {
+      const sel = document.getElementById("accTo");
+      const ownerId = sel?.value;
+      if (!ownerId) return;
+      const toName = sel.options[sel.selectedIndex]?.text || "them";
+      const ids = [...ACC.picked];
+      const go = document.getElementById("accGo");
+      if (go) go.disabled = true;
+      try {
+        /* STEP ONE: COUNT, WRITING NOTHING. The number that goes in front of
+           the person comes from the same reads the write will use, not from
+           the row count on screen — an account whose contacts have changed
+           since the last sync would otherwise be agreed to on a stale figure. */
+        ACC.busy = "counting…"; redraw();
+        const p = await API.reassignPlan(ids, ownerId);
+        const bad = p.problems?.length ? `\n\n${p.problems.length} could not be read and will be skipped.` : "";
+        const same = p.already ? `\n${p.already} already belong to ${toName}.` : "";
+        if (!p.moving) { ACC.busy = `Nothing to move — all ${ids.length} already belong to ${toName}.`; redraw(); return; }
+        /* STEP TWO: THE PERSON AGREES TO THE ACTUAL NUMBERS. */
+        const yes = confirm(
+          `Move ${p.moving} account${p.moving === 1 ? "" : "s"} and ${p.contacts} ` +
+          `contact${p.contacts === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
+          `This writes to Kylas and cannot be undone from here.`);
+        if (!yes) { ACC.busy = ""; redraw(); return; }
+        ACC.busy = `moving ${p.moving} account(s)…`; redraw();
+        const r = await API.reassign(ids, ownerId);
+        const failed = r.failed?.length ? ` · ${r.failed.length} failed` : "";
+        ACC.busy = `Moved ${r.moved} account(s) and ${r.contacts} contact(s) to ${toName}${failed}.`;
+        ACC.picked.clear();
+        /* Kylas is right and the copy is not, until the sync catches up. */
+        ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
+        redraw();
+      } catch (e) {
+        ACC.busy = `Could not re-assign — ${String(e.message || e).slice(0, 160)}`;
+        redraw();
+      }
+    });
+
     on("accClear", "click", () => {
       ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear(); ACC.nextSet.clear();

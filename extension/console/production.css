@@ -487,6 +487,26 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 .exhead h2{margin:0;font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);letter-spacing:-.012em}
 .exhead .exn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
 .exhead p{flex:1 0 100%;margin:2px 0 0;font-size:var(--t-meta);color:var(--text3)}
+/* HANDING ACCOUNTS OVER. Structure, not a new hue: the bar is the same card
+   surface with a rule above it, and the one accent it uses is --blue, which
+   is the accent this console already has. */
+.exbulk{flex:1 0 100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:10px;padding:10px 12px;border-radius:var(--r);
+  background:var(--panel2);border:1px solid var(--line2)}
+/* Nothing ticked: one quiet button, so the control is discoverable without a
+   permanent "re-assign everything" sitting on a list of 17,925. */
+.exbulk.idle{background:transparent;border-style:dashed;padding:7px 12px}
+.exbulk.idle .exbh{font-size:var(--t-meta);color:var(--text3)}
+.exbulk .exbn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--blue)}
+.exbulk .exbto{display:inline-flex;align-items:center;gap:6px;
+  font-size:var(--t-meta);color:var(--text2)}
+.exbulk .exbmsg{font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-med)}
+.exbulk .exbnote{flex:1 0 100%;margin:0;font-size:var(--t-meta);color:var(--text3)}
+/* The tick sits inside the name cell rather than taking a grid column of its
+   own: the column template is built from the Columns picker, and a ninth
+   hard-coded track would fight it on every layout. */
+.vr .cpick{margin-right:9px;vertical-align:middle;accent-color:var(--blue);cursor:pointer}
+.vr.on{background:var(--blueSoft)}
 .extools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .extools select{border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
   padding:7px 10px;font-size:var(--t-label);font-weight:var(--w-med)}

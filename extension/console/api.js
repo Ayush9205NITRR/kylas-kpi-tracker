@@ -299,6 +299,16 @@
        numbers change within a minute or so. */
     syncNow: () => req("/sync-now", { method: "POST", body: {}, timeout: 20000 }),
     team: () => req("/team", { timeout: 20000 }),
+    /* MOVING ACCOUNTS BETWEEN BDs, with the contacts on them.
+       Two calls on purpose: the first reads and counts and writes NOTHING, so
+       the person sees "412 accounts and 1,038 contacts" before agreeing. Only
+       the second, with apply, writes. Generous timeouts — each account is a
+       read, a write, and a read and write per contact, at Kylas' five a
+       second, so a full batch is minutes rather than seconds. */
+    reassignPlan: (companies, ownerId) =>
+      req("/reassign", { method: "POST", body: { companies, ownerId }, timeout: 120000 }),
+    reassign: (companies, ownerId) =>
+      req("/reassign", { method: "POST", body: { companies, ownerId, apply: true }, timeout: 600000 }),
     /* Every company's focus-list status, and setting one. */
     focusAll: () => req("/focus", { timeout: 20000 }),
     setFocus: (body) => req("/focus", { method: "POST", body, timeout: 20000 }),
