@@ -351,8 +351,17 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
         ? { ...prevCompanies, skipped: "contacts-only run" }
         : { seen: co.seen, written: co.written },
       contacts: { seen: ct.seen, written: ct.written, moves: ct.moved },
-      kylas: ONLY === "contacts" && prevKylas ? prevKylas : {
-        reportedTotal: search.reportedTotal ?? null,
+      /* CARRY FORWARD A TOTAL, NOT A HOLE.
+         This used to carry `prevKylas` whenever it existed — and an object
+         holding {reportedTotal: null} is perfectly truthy, so once a single
+         run recorded a null every hourly contacts-only run faithfully copied
+         that null forward for ever. /companies compares the copy's size
+         against this number to decide whether the copy IS the account, so a
+         null here silently disables that check: the pane sat at 136 of 17,925
+         with the guard live and unable to fire.
+         Carry it forward only when it is actually a number. */
+      kylas: ONLY === "contacts" && Number(prevKylas?.reportedTotal) > 0 ? prevKylas : {
+        reportedTotal: search.reportedTotal ?? prevKylas?.reportedTotal ?? null,
         served: search.total ?? null,
         short: search.short || 0,
         truncated: !!search.truncated,

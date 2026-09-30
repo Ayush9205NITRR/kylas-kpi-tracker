@@ -1575,12 +1575,32 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
            the KPIs are joined onto it exactly as they were. A copy that is
            merely a little behind still serves — this is about a copy that is
            not the same account. */
-        const expected = Number(sync?.kylas?.reportedTotal || 0);
-        const missing = expected - (mirror?.length || 0);
-        if (mirror && expected && !STRICT_AIRTABLE
+        const reported = sync?.kylas?.reportedTotal;
+        const expected = Number.isFinite(Number(reported)) && Number(reported) > 0
+          ? Number(reported) : null;
+        const missing = expected === null ? 0 : expected - (mirror?.length || 0);
+        if (mirror && !STRICT_AIRTABLE && expected !== null
             && mirror.length < expected * MIRROR_ENOUGH && missing > MIRROR_SHORT_BY) {
           log(`! companies: the copy holds ${mirror.length} of the ${expected} Kylas reports ` +
               `— listing from Kylas until the sync has filled it.`);
+          mirror = null;
+        }
+        /* UNVERIFIABLE IS NOT VERIFIED.
+           The test above needs a total to compare against, and when the sync
+           has never recorded one it read `expected = 0` and the whole guard
+           fell through — so the copy was served as the account precisely when
+           nothing could confirm it WAS the account. That is how the pane sat
+           at 136 of 17,925 while the guard written to catch it was live: the
+           hourly contacts-only run had left reportedTotal null, so the check
+           was disabled rather than failing.
+
+           An unknown total now sends the read to Kylas instead. The crawl is
+           the ground truth, it is cached and shared, and it also establishes
+           the total for next time, so this un-sticks itself. A copy nobody can
+           vouch for is not worth more than the source it came from. */
+        if (mirror && !STRICT_AIRTABLE && expected === null) {
+          log(`! companies: the sync has never recorded how many companies Kylas holds, ` +
+              `so the ${mirror.length}-row copy cannot be checked — listing from Kylas.`);
           mirror = null;
         }
         if (mirror) {

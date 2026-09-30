@@ -796,6 +796,22 @@ console.log('\n11. a copy that is short of the account is not the account');
   const b2 = await r2.json();
   check('...while one that is a few rows behind still is',
         b2.source === 'airtable', `source=${b2.source} companies=${b2.companies?.length}`);
+
+  /* THE LIVE FAILURE, 2026-09-30. The guard above was deployed and the pane
+     still read 136 of 17,925, because the hourly contacts-only sync had left
+     reportedTotal null: `expected` came out 0 and the whole check fell
+     through, so the copy was served as the account exactly when nothing could
+     confirm it was one. A total nobody recorded must send the read to Kylas,
+     not wave the copy past. */
+  await putNote({ at: new Date().toISOString(), companies: { skipped: 'contacts-only run' },
+                  kylas: { reportedTotal: null, served: 0, short: 0, truncated: false } });
+  const r3 = await (await coldWorker(913)).fetch(
+    new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
+    { ...ENV, DB: fakeD1() }, { waitUntil() {} });
+  const b3 = await r3.json();
+  check('a copy that CANNOT be checked is not served as the account either',
+        b3.source !== 'airtable',
+        `source=${b3.source} companies=${b3.companies?.length} reported=${b3.reportedTotal}`);
   /* LAST ON PURPOSE. It rewrites the sync record and spends its share of the
      mock's five-a-second, and both leaked into whatever followed it — one
      section read /__writes and took a 429 for an answer. */
