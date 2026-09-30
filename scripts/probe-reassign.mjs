@@ -112,14 +112,18 @@ if (LIST) {
      contacts plainly name a company and the per-company search returns none
      for it, the filter is broken and the probe says so in as many words. */
   console.log("\nAccounts that have contacts on them — test the cascade on one of these:\n");
+  /* metaData carries Kylas' id -> display-name cache, which is where a
+     lookup's NAME lives; without it every row here printed a bare id. */
   const recent = await call("POST", "/v1/search/contact?page=0&size=100&sort=updatedAt,desc",
-    { fields: ["id", "firstName", "lastName", "company", "ownerId"], jsonRule: everything() })
+    { fields: ["id", "firstName", "lastName", "company", "ownerId", "metaData"], jsonRule: everything() })
     .catch((e) => { console.log(`  ! could not list contacts: ${e.message.slice(0, 140)}`); return null; });
   const byCo = new Map();
   for (const c of rows(recent)) {
     const cid = String(idOf(c.company) ?? "");
     if (!cid) continue;
-    const at = byCo.get(cid) || { id: cid, name: c.company?.name || "", n: 0 };
+    const named = c.company?.name || c.metaData?.idNameStore?.company?.[cid] || "";
+    const at = byCo.get(cid) || { id: cid, name: named, n: 0 };
+    if (!at.name && named) at.name = named;
     at.n++; byCo.set(cid, at);
   }
   const top = [...byCo.values()].sort((a, b) => b.n - a.n).slice(0, 8);
