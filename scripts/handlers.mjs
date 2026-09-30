@@ -1505,6 +1505,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const all = want === "all";
       const owner = all ? null : (want || me?.id);
 
+      /* THE HEARTBEAT BELONGS TO THE ROUTE, NOT TO ONE BRANCH OF IT.
+         This used to sit further down, inside the Kylas arm — reached only
+         once the Airtable copy had been refused. maintain() will only crawl
+         while "companies-read-at" is under two hours old, so the moment the
+         copy started answering, the heartbeat stopped being written, the crawl
+         stopped being rebuilt, and the only list the console could fall back
+         to quietly died. The base then held 136 rows and there was nothing
+         else to serve: Ayush had 17,925 the day before.
+
+         A deadlock, and a self-inflicted one — the fallback's supply depended
+         on the fallback already being in use. "Somebody is looking at the
+         companies list" is true whichever source answers it, so it is recorded
+         here, before the source is chosen. touchCompanies() rate-limits itself
+         to once a minute, so this costs nothing on a busy console. */
+      touchCompanies();
+
       /* ONE CRAWL OF THE ACCOUNT, cached, filtered per owner here.
          The cache used to be keyed on owner, which read as prudent and was the
          same mistake the console had: no shape that works on this account can
@@ -1677,7 +1693,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          over a minute on any plan. The maintenance run builds it; until it
          has, this says so rather than failing. The Refresh button asks for a
          new crawl on the next run. */
-      touchCompanies();
+      /* touchCompanies() is at the top of the route now — see there for why. */
       if (fresh && cache) inFlight(cache.put("companies-want-fresh", "1", { ttlSeconds: 3600 })).catch(() => {});
       let crawl = await kylasCompanies.peek();
       /* The local proxy has no shared store and no subrequest cap: there,

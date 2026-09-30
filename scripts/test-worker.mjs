@@ -812,6 +812,30 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('a copy that CANNOT be checked is not served as the account either',
         b3.source !== 'airtable',
         `source=${b3.source} companies=${b3.companies?.length} reported=${b3.reportedTotal}`);
+
+  /* THE DEADLOCK UNDER ALL OF IT.
+     maintain() rebuilds the Kylas crawl only while "companies-read-at" is
+     under two hours old, and that key was written inside the Kylas arm of
+     /companies — reached only once the Airtable copy had been refused. So the
+     moment the copy started answering, the heartbeat stopped, the crawl was
+     never rebuilt, and the fallback the console needs had nothing in it. The
+     fallback's supply depended on the fallback already being in use.
+
+     A read served FROM AIRTABLE must still say somebody is looking. */
+  await putNote({ at: new Date().toISOString(), companies: { seen: copyHolds, written: copyHolds },
+                  kylas: { reportedTotal: copyHolds + 3, short: 3 } });
+  const beat = fakeD1();
+  const envBeat = { ...ENV, DB: beat };
+  const r4 = await (await coldWorker(914)).fetch(
+    new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
+    envBeat, { waitUntil: (p) => p });
+  const b4 = await r4.json();
+  await new Promise((r) => setTimeout(r, 400));          /* the put is in-flight */
+  const readAt = await beat.prepare(
+    'SELECT v FROM kv WHERE k = ?').bind('companies-read-at').first().catch(() => null);
+  check('...and Airtable answering still records that somebody looked',
+        b4.source === 'airtable' && !!readAt,
+        `source=${b4.source} companies-read-at=${JSON.stringify(readAt)}`);
   /* LAST ON PURPOSE. It rewrites the sync record and spends its share of the
      mock's five-a-second, and both leaked into whatever followed it — one
      section read /__writes and took a 429 for an answer. */
