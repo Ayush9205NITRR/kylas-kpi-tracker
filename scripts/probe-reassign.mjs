@@ -348,6 +348,19 @@ const RE_EP = arg("reassign-endpoint");
 if (RE_EP) {
   const n = Number(RE_EP);
   const check = async (what, path, readPath) => {
+    /* PROVE IT CHANGED SOMETHING, NOT THAT IT ENDED UP RIGHT.
+       The first live run reported LANDED on a contact that was ALREADY owned
+       by the target: the request came back 400, nothing happened, and the
+       readback matched anyway. A test whose subject already satisfies the
+       assertion proves nothing and, worse, prints a pass. Read first, and
+       refuse to draw a conclusion from a no-op. */
+    const start = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
+    if (String(start ?? "") === String(RE_EP)) {
+      console.log(`  SKIP    ${what} ${String(readPath).padEnd(30)} is ALREADY owned by ${RE_EP} —`);
+      console.log(`          nothing to change, so this can prove nothing. Re-run with a`);
+      console.log(`          --reassign-endpoint value it is NOT already on.`);
+      return null;                       /* null = inconclusive, not false */
+    }
     let sent = "";
     /* A 429 IS NOT AN ANSWER. Kylas throttles at about five a second, and
        reading a rate limit as "this endpoint does not work" would give exactly
@@ -374,25 +387,99 @@ if (RE_EP) {
   console.log(`shape on a contact first — where we KNOW ownership is settable — then`);
   console.log(`on the company. Target owner: ${RE_EP}\n`);
 
-  const victim = before.contacts[0];
+  /* A contact that is NOT already on the target, or the control proves nothing. */
+  const victim = before.contacts.find((c) => String(idOf(c.ownerId) ?? "") !== String(RE_EP));
+  let ct = null;
+  console.log("  a contact, to prove the method works at all:");
   if (victim) {
-    console.log("  a contact, to prove the method works at all:");
-    await check("contact", `/v1/contacts/${victim.id}/owner`, `/v1/contacts/${victim.id}`);
+    ct = await check("contact", `/v1/contacts/${victim.id}/owner`, `/v1/contacts/${victim.id}`);
     await sleep(400);
-  } else console.log("  (this account has no contacts, so the method cannot be validated here)");
+  } else {
+    console.log(`  SKIP    every contact here is already owned by ${RE_EP}.`);
+    console.log(`          Re-run with an owner none of them has, or the control is`);
+    console.log(`          a no-op that reports success.`);
+  }
 
   console.log("\n  the company:");
   const co = await check("company", `/v1/companies/${CO}/owner`, `/v1/companies/${CO}`);
-  if (co) {
-    console.log(`\n  ^ THE COMPANY OWNER IS SETTABLE, through its own endpoint.`);
-    console.log(`    reassign.mjs should use PUT /v1/companies/{id}/owner and the`);
-    console.log(`    account cascade goes back in. Send this output back.\n`);
+
+  console.log("\n  ── what this does and does not show ──");
+  if (co === true) {
+    console.log(`  THE COMPANY OWNER IS SETTABLE through PUT /v1/companies/{id}/owner.`);
+    console.log(`  reassign.mjs should use it and the account cascade goes back in.`);
+  } else if (ct === true) {
+    console.log(`  The contact moved through /owner and the company did not, so the`);
+    console.log(`  METHOD is right and companies genuinely do not expose it.`);
+    console.log(`  Contacts-only is the answer. Nothing more to try.`);
+  } else if (ct === null) {
+    console.log(`  INCONCLUSIVE. The control never ran, so "the company did not move"`);
+    console.log(`  cannot be told apart from "this probe asks wrongly". Re-run with an`);
+    console.log(`  owner the contacts are not already on.`);
   } else {
-    console.log(`\n  The company did not move. If the contact above DID, then the method`);
-    console.log(`  is right and companies genuinely do not expose it — contacts-only it`);
-    console.log(`  is. If neither moved, this probe is still wrong. Send the output back.\n`);
+    console.log(`  NEITHER moved. On its own that says /owner is a LEADS endpoint —`);
+    console.log(`  which is exactly how Kylas' collection documents it — and not a`);
+    console.log(`  general one. Contacts still move the proven way, through`);
+    console.log(`  PUT /v1/contacts/{id} with ownerId, which is what the product does.`);
   }
-  process.exit(co ? 0 : 1);
+  console.log("");
+  process.exit(co === true ? 0 : 1);
+}
+
+/* ── --move-contacts <userId> · THE SHIPPED ENGINE, ON REAL DATA ───────
+   Everything above investigates Kylas. This exercises OUR code: it calls
+   reassign.mjs' own plan() and apply() through an adapter over this file's
+   HTTP client, so what runs here is exactly what the console's Re-assign
+   button runs — not a re-implementation of it that might agree with the tests
+   and disagree with production.
+
+   Snapshot first, diff after, --restore undoes it. */
+const MOVE = arg("move-contacts");
+if (MOVE) {
+  const { plan, apply } = await import("./reassign.mjs");
+  /* The five methods reassign.mjs asks for, over this probe's rate-limited,
+     429-retrying client. */
+  const adapter = {
+    company: (id) => call("GET", `/v1/companies/${id}`),
+    contactsForCompany: async (id) => rows(await contactsOf(id)),
+    contact: (id) => call("GET", `/v1/contacts/${id}`),
+    updateContact: (id, body) => call("PUT", `/v1/contacts/${id}`, body),
+    updateCompany: () => { throw new Error("the probe refuses to write a company here"); },
+  };
+  console.log(`\nrunning reassign.mjs against company ${CO}, target owner ${MOVE}\n`);
+  const p = await plan({ kylas: adapter, companies: [CO], ownerId: MOVE, log: (m) => console.log("  " + m) });
+  console.log(`  would move ${p.contacts} contact(s); ${p.already} already there` +
+              `${p.problems.length ? `; ${p.problems.length} unreadable` : ""}`);
+  console.log(`  the account's own owner: ${p.accounts[0]?.accountOwner || "(none)"} — NOT changed by this`);
+  if (!process.argv.includes("--write")) {
+    console.log("\n  READ ONLY so far. Add --write to actually move them.\n");
+    process.exit(0);
+  }
+  if (!p.contacts) { console.log("\n  Nothing to move.\n"); process.exit(0); }
+
+  writeFileSync(snapFile, JSON.stringify({ at: new Date().toISOString(), ...before }, null, 2));
+  console.log(`\n  snapshot saved to ${snapFile}\n`);
+  const r = await apply({ kylas: adapter, companies: [CO], ownerId: MOVE, log: (m) => console.log("  " + m) });
+  console.log(`  moved ${r.contacts} contact(s); ${r.failed.length} account(s) failed`);
+
+  const after = await readAll();
+  let faults = 0;
+  const ok2 = (w, c) => { if (!c) faults++; console.log(`  ${c ? "PASS" : "FAIL"}  ${w}`); };
+  console.log("\n  ── did the people move ──");
+  for (const c of after.contacts)
+    ok2(`contact ${c.id} is owned by ${MOVE}`, String(idOf(c.ownerId)) === String(MOVE));
+  console.log("\n  ── did anything else change ──");
+  for (const b of before.contacts) {
+    const a = after.contacts.find((x) => String(x.id) === String(b.id)) || {};
+    const d = diff(b, a).filter((x) => !/^ownerId/.test(x.key));
+    ok2(`contact ${b.id}: nothing but the owner changed`, d.length === 0);
+    for (const x of d) console.log(`     ! ${x.key}: ${JSON.stringify(x.before)} -> ${JSON.stringify(x.after)}`);
+  }
+  const cd = diff(before.company, after.company);
+  ok2("the company record was not touched at all", cd.length === 0);
+  for (const x of cd) console.log(`     ! ${x.key}: ${JSON.stringify(x.before)} -> ${JSON.stringify(x.after)}`);
+  console.log(`\n  ${faults ? `${faults} FAULT(S).` : "Clean. The contacts moved and nothing else changed."}`);
+  console.log(`  Undo: --company ${CO} --restore\n`);
+  process.exit(faults ? 1 : 0);
 }
 
 /* ── --owner-field · READ ONLY. IS IT WRITABLE AT ALL? ─────────────────
