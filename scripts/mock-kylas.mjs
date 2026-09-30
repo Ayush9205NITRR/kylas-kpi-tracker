@@ -225,8 +225,17 @@ createServer(async (req, res) => {
   const user = p.match(/^\/v1\/users\/(\d+)$/);
   if (user) return USERS[user[1]] ? json(res, 200, USERS[user[1]]) : json(res, 404, { message: "no such user" });
 
+  /* METHOD MATTERS HERE TOO. Without the check this branch also swallowed
+     PUT /v1/companies/{id}: the update handler further down was never reached,
+     the caller got 200 and the current record back, and the write vanished.
+     The contacts route below has carried this guard for a while; companies did
+     not, because until 2026-09-30 nothing in the tree wrote one. The first
+     thing that did — the re-assign probe — reported "company written" three
+     times against a record that never moved. A mock that reports success for a
+     write it dropped is worse than no mock. */
   const co = p.match(/^\/v1\/companies\/(\d+)$/);
-  if (co) return COMPANIES[co[1]] ? json(res, 200, COMPANIES[co[1]]) : json(res, 404, { message: "no such company" });
+  if (co && req.method === "GET")
+    return COMPANIES[co[1]] ? json(res, 200, COMPANIES[co[1]]) : json(res, 404, { message: "no such company" });
 
   const ct = p.match(/^\/v1\/contacts\/(\d+)$/);
   /* Method matters: without this check the GET branch also swallows PUTs and
