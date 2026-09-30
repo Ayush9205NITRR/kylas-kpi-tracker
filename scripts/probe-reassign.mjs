@@ -100,6 +100,47 @@ if (LIST) {
     await sleep(220);
   }
 
+  /* ACCOUNTS THAT ACTUALLY HAVE POCs, found from the OTHER SIDE.
+     The list above showed ten accounts with 0 contacts each. On a fresh batch
+     that is the truth; on a broken query it is also exactly what you see — and
+     the query in question is the one reassign.mjs uses to decide which
+     contacts follow an account. A cascade that silently moves nobody would
+     still print "clean", so this gets checked BEFORE anything is written.
+
+     Ask for recent CONTACTS, group them by the company each one names, then
+     ask for each of those companies' contacts the way reassign.mjs will. If
+     contacts plainly name a company and the per-company search returns none
+     for it, the filter is broken and the probe says so in as many words. */
+  console.log("\nAccounts that have contacts on them — test the cascade on one of these:\n");
+  const recent = await call("POST", "/v1/search/contact?page=0&size=100&sort=updatedAt,desc",
+    { fields: ["id", "firstName", "lastName", "company", "ownerId"], jsonRule: everything() })
+    .catch((e) => { console.log(`  ! could not list contacts: ${e.message.slice(0, 140)}`); return null; });
+  const byCo = new Map();
+  for (const c of rows(recent)) {
+    const cid = String(idOf(c.company) ?? "");
+    if (!cid) continue;
+    const at = byCo.get(cid) || { id: cid, name: c.company?.name || "", n: 0 };
+    at.n++; byCo.set(cid, at);
+  }
+  const top = [...byCo.values()].sort((a, b) => b.n - a.n).slice(0, 8);
+  let broken = 0;
+  for (const t of top) {
+    const back = rows(await contactsOf(t.id).catch(() => null)).length;
+    if (!back) broken++;
+    console.log(`  ${String(t.id).padEnd(9)} ${String(t.name || "").slice(0, 34).padEnd(36)}` +
+                `${back} contact(s) by company-filter, ${t.n} seen naming it` +
+                `${back ? "" : "   <-- MISMATCH"}`);
+    await sleep(220);
+  }
+  if (!top.length) console.log("  (none found in the last 100 contacts)");
+  else if (broken === top.length) {
+    console.log("\n  ! THE PER-COMPANY CONTACT FILTER IS NOT WORKING ON THIS ACCOUNT.");
+    console.log("    Contacts exist and name these companies, but asking for one company's");
+    console.log("    contacts returns none. reassign.mjs uses that same search to decide");
+    console.log("    which contacts follow an account — so the cascade would move NOBODY");
+    console.log("    and still report success. Do NOT run --write. Send this output back.");
+  }
+
   /* WHO YOU CAN HAND THEM TO. Kylas documents /v1/users/{id} but NOT a list
      endpoint, so kylas.mjs tries the likely list shapes and falls back to
      resolving the ids it already holds one at a time. Same ladder here — the
