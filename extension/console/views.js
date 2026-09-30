@@ -888,10 +888,15 @@
      Week is instant rather than a round trip each time. */
   const REP = { data: null, period: "week", owner: "", loading: false, error: "", key: "" };
 
-  function ensureReport(period, owner, onReady, from = "", to = "") {
+  /* `force` is a save that has just landed: the numbers on screen are known to
+     predate it, so the held answer is not an answer. Everything else about the
+     cache stays — what is in hand is still painted while the new one is
+     fetched, so the table does not blink back to "Loading…". */
+  function ensureReport(period, owner, onReady, from = "", to = "", force = false) {
     const key = `${period}|${owner}|${from}|${to}`;
-    if (REP.key === key && (REP.data || REP.error)) return false;
+    if (!force && REP.key === key && (REP.data || REP.error)) return false;
     if (REP.loading) return true;
+    if (force) delete DISK.report[key];
 
     /* WHAT WE ALREADY HAVE, NOW. Painted before the request is even made, so
        switching level or reopening the console is instant on anything looked at
@@ -899,7 +904,7 @@
        never withholds what is in hand. */
     const held = DISK.report[key];
     if (held) { REP.data = held.data; REP.error = ""; REP.key = key; REP.at = held.at; }
-    const stale = !held || Date.now() - (held.at || 0) > SWR_TTL;
+    const stale = force || !held || Date.now() - (held.at || 0) > SWR_TTL;
     if (!stale) return false;
 
     REP.loading = true; REP.key = key; REP.period = period; REP.owner = owner;
@@ -1255,7 +1260,8 @@
 
   function reportSection(owner) {
     const loading = ensureReport(DASH_LEVEL, owner,
-      () => dashboard(document.getElementById("vwrap")), DASH_FROM, DASH_TO);
+      () => dashboard(document.getElementById("vwrap")), DASH_FROM, DASH_TO, REPORT_FORCE);
+    REPORT_FORCE = false;                 /* one forced read per request for one */
     const r = REP.data;
 
     const crumbs = `<span class="vcrumbs">
@@ -1483,6 +1489,37 @@
 
   /* ── dashboard ─────────────────────────────────────────────────────── */
   let DASH_OWNER = "";          /* "" = me, "all" = the team */
+
+  /* A SAVE JUST LANDED. Called by console.js the moment one completes, whether
+     it was answered directly or finished as a queued job.
+
+     DEBOUNCED, and not gently: an outbox draining thirty saves calls this
+     thirty times in a second, and thirty repaints of a table nobody has
+     finished reading is worse than the stale number it replaces. One repaint,
+     a beat after the last save settles.
+
+     The dashboard only. The accounts explorer holds filter state, an open
+     picker and possibly a half-typed search, and repainting it under somebody's
+     cursor loses all three — a number going stale there costs less. */
+  let landedTimer = null;
+  /* Exported at the bottom of this file with the rest — assigning it here
+     would be wiped by that assignment, which is how a hook like this quietly
+     stops firing. */
+  const savedLanded = () => {
+    clearTimeout(landedTimer);
+    landedTimer = setTimeout(() => {
+      const wrap = document.getElementById("vwrap");
+      const port = document.getElementById("viewport");
+      if (!wrap || !port || port.hidden) return;        /* nothing open */
+      if (!/vsec|ladder/.test(wrap.innerHTML)) return;  /* not the dashboard */
+      REPORT_FORCE = true;
+      dashboard(wrap).catch(() => {});
+    }, 1200);
+  };
+
+  /* Set by savedLanded() below: the next dashboard paint must re-ask rather
+     than serve what it holds, because what it holds is older than the save. */
+  let REPORT_FORCE = false;
 
   async function dashboard(host) {
     await restore();
@@ -4107,5 +4144,5 @@
     paint();
   }
 
-  global.Views = { rollup, dashboard, companies, FILTERS };
+  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded };
 })(window);

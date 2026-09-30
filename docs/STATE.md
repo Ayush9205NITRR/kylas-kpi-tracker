@@ -96,7 +96,7 @@ node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the exi
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
-xvfb-run -a node scripts/test-ui-live.mjs     # 34 · the three things that only exist on
+xvfb-run -a node scripts/test-ui-live.mjs     # 39 · the three things that only exist on
                                               #      screen: draggable pane widths, the
                                               #      quarter→month→week picker, and the
                                               #      board's Buckets/Stages columns. Needs
@@ -618,7 +618,7 @@ numbers:
 | Kylas → Airtable (stage changes) | **once a day, 02:00 IST** | hourly at :40, contacts only |
 | Airtable → D1 copy | delta every 10 min | unchanged |
 | D1 → dashboard | memo, 60 s TTL, keyed on the copy's stamp | unchanged |
-| a save made IN the console | **~3 s** — measured, test-worker §9a2 | unchanged |
+| a save made IN the console | **~3 s** — measured, test-worker §9a2 | and the open dashboard repaints itself |
 
 So a stage changed in Kylas at 11:00 appeared on the ladder at 02:00 the next
 morning — up to **fifteen hours**, and it read as "the dashboard is slow" when

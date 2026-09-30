@@ -248,6 +248,48 @@ const owners = [...new URLSearchParams(hash.replace(/^#[^=]*=/, '')).getAll('own
 console.log(`   hash owners: ${JSON.stringify(owners)}`);
 ok('the link carries both owners', owners.length === 2, hash.slice(0, 160));
 
+/* ── a save repaints the dashboard while it is open ─────────────────────
+   The numbers reach the server in about three seconds, but a dashboard that
+   is already on screen had no reason to ask again. */
+console.log('\n6. a save repaints the open dashboard');
+await page.evaluate(() => {
+  const host = document.querySelector('#enout-console-host');
+  host?.shadowRoot?.querySelector('iframe')?.contentWindow
+      ?.postMessage({ source: 'enout-host', type: 'dashboard' }, '*');
+});
+await page.waitForTimeout(7000);
+const ladder = await f.locator('.vsec h2', { hasText: 'The ladder' }).count();
+ok('the dashboard is open', ladder >= 1, `${ladder} ladders`);
+const dials = async () => {
+  const t = await f.locator('.vsec').first().textContent().catch(() => '');
+  return t.replace(/\s+/g, ' ').slice(0, 300);
+};
+const beforeText = await dials();
+/* Land a save the way a finished job does, through the one choke point.
+   WATCHED ON API.report, not on Views.dashboard: savedLanded calls the
+   dashboard through the module's own closure, so wrapping the exported name
+   spies on something nothing calls — and the test reads as a dead hook when
+   the hook is fine. Asking the server again is also the behaviour that
+   matters: a repaint that re-rendered the held numbers would prove nothing. */
+const fired = await f.evaluate(() => {
+  if (!window.Views?.savedLanded) return 'no hook';
+  window.__asked = 0;
+  const real = API.report.bind(API);
+  API.report = (...a) => { window.__asked++; return real(...a); };
+  window.Views.savedLanded();
+  return 'called';
+});
+ok('the hook exists and is exported', fired === 'called', fired);
+await page.waitForTimeout(4000);
+const asked = await f.evaluate(() => window.__asked || 0);
+ok('...and it re-asks the server once', asked === 1, `asked ${asked}x`);
+/* An outbox draining thirty saves must not repaint thirty times. */
+await f.evaluate(() => { window.__asked = 0; for (let i = 0; i < 30; i++) window.Views.savedLanded(); });
+await page.waitForTimeout(4000);
+const many = await f.evaluate(() => window.__asked || 0);
+ok('thirty saves in a row ask once, not thirty', many === 1, `asked ${many}x`);
+ok('the dashboard is still there afterwards', (await dials()).length > 20, await dials());
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });

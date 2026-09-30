@@ -1858,6 +1858,11 @@ async function watchJobs(){
 let warnedMissing=false;
 /* What a finished save tells the record — from a direct reply, or from the
    status of a queued one. */
+/* THE ONE PLACE A SAVE IS KNOWN TO HAVE LANDED — both the direct reply and a
+   queued job finishing come through here. If the dashboard is open, it is now
+   showing numbers that predate this save, so it is told. */
+function savedLanded(){ try{ Views?.savedLanded?.(); }catch{ /* views not loaded */ } }
+
 function applySaved(a,res){
     /* ANY id coming back, not only one from a create. When the proxy recognises
        a retry of a save it already carried out, it answers with the id it made
@@ -1889,6 +1894,8 @@ function applySaved(a,res){
       toast(`Airtable is missing ${res.airtable.missing.join(", ")} — saved without it. Run repair-base.mjs.`);
     }
     if(res.created)toast(`${a.pocName} created in Kylas`);
+    /* The dashboard, if it is open, is now a save behind. */
+    savedLanded();
 }
 
 async function syncToKylas(a,call){
