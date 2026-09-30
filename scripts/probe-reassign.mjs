@@ -26,7 +26,47 @@
  * WHAT IT WILL NOT DO. It touches one company and that company's contacts, it
  * never creates anything, and without --write it reads only.
  */
-import { companyBody, contactBody } from "./reassign.mjs";
+import { contactBody } from "./reassign.mjs";
+
+/* THE COMPANY BODY LIVES HERE NOW, AND ONLY HERE.
+   reassign.mjs used to export one. It was removed the day Kylas proved a
+   company PUT carrying ownerId is accepted and silently dropped — which, on a
+   replacing PUT, erases the owner. Nothing in the product may build one again;
+   test-replace asserts it. But this file is the tool for INVESTIGATING that
+   endpoint, and it still has to be able to send a company body to find out
+   what Kylas will take. So the copy is here, in the probe, where no save, cron
+   or console request can ever reach it. */
+const SERVER_KEYS = new Set([
+  "id", "createdAt", "updatedAt", "createdBy", "updatedBy", "recordActions",
+  "entityType", "actualValue", "hasDuplicate", "converted", "convertedAt",
+  "convertedBy", "pipeline", "stageUpdatedAt", "associatedContacts",
+  "metaData", "idNameStore", "companyStage", "lastActivityAt",
+  "nextActivityAt", "score", "duplicateOf", "ownerName",
+]);
+const cfOf = (v) => (Array.isArray(v) ? v.map(cfOf)
+  : v && typeof v === "object" ? (v.id ?? v.value) : v);
+/* Only an object whose keys are JUST id and name is a lookup. A phone number
+   has a `.value` too, and collapsing on that flattened it to a bare string —
+   destroying the type and primary flag. */
+const isLookup = (v) => !!v && typeof v === "object" && !Array.isArray(v)
+  && v.id !== undefined && Object.keys(v).every((k) => k === "id" || k === "name");
+const topOf = (v) => (Array.isArray(v) ? (v.every(isLookup) ? v.map((x) => x.id) : v)
+  : isLookup(v) ? v.id : v);
+function companyBody(base, ownerId) {
+  const body = {};
+  for (const [k, v] of Object.entries(base || {})) {
+    if (SERVER_KEYS.has(k)) continue;
+    if (v === undefined || v === null) continue;
+    body[k] = k === "customFieldValues"
+      ? Object.fromEntries(Object.entries(v || {})
+          .map(([kk, raw]) => [kk, cfOf(raw)])
+          .filter(([, id]) => id !== undefined && id !== null && id !== ""))
+      : topOf(v);
+  }
+  if (!body.name) throw new Error("the company Kylas returned has no name — refusing to write it back");
+  body.ownerId = Number(ownerId);
+  return body;
+}
 
 const KEY = process.env.KYLAS_KEY;
 const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
@@ -309,9 +349,20 @@ if (RE_EP) {
   const n = Number(RE_EP);
   const check = async (what, path, readPath) => {
     let sent = "";
-    try { const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H,
-            body: JSON.stringify({ ownerId: n }) }); sent = String(r.status); }
-    catch (e) { sent = `network ${e.message.slice(0, 40)}`; }
+    /* A 429 IS NOT AN ANSWER. Kylas throttles at about five a second, and
+       reading a rate limit as "this endpoint does not work" would give exactly
+       the wrong conclusion to the one question this probe exists to settle. */
+    for (let t = 0; t < 6; t++) {
+      try {
+        const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H,
+          body: JSON.stringify({ ownerId: n }) });
+        sent = String(r.status);
+        if (r.status !== 429) break;
+        const wait = Number(r.headers.get("retry-after") || 0) * 1000 || (500 * 2 ** t);
+        console.log(`    429, waiting ${wait}ms`);
+        await sleep(wait);
+      } catch (e) { sent = `network ${e.message.slice(0, 40)}`; break; }
+    }
     await sleep(600);
     const now = await call("GET", readPath).catch(() => null);
     const got = idOf(now?.ownerId);
