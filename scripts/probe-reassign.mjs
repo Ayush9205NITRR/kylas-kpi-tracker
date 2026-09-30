@@ -258,7 +258,12 @@ function diff(before, after) {
 
 const before = await readAll();
 const heldCo = String(idOf(before.company.ownerId) ?? "");
-console.log(`\ncompany ${CO} — ${before.company.name}`);
+/* SAY WHICH MODE IS RUNNING, FIRST. Every mode prints the same account header,
+   so a pasted fragment of the output is unreadable — you cannot tell a dry run
+   from a write from a restore. One line fixes that. */
+const MODE = process.argv.slice(2).filter((a) => a.startsWith("--")).join(" ") || "(no mode)";
+console.log(`\n=== probe-reassign ${MODE} ===`);
+console.log(`company ${CO} — ${before.company.name}`);
 console.log(`  owner now      ${heldCo}${before.company.ownerId?.name ? ` (${before.company.ownerId.name})` : ""}`);
 console.log(`  contacts       ${before.contacts.length}`);
 for (const c of before.contacts)
