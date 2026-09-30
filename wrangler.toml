@@ -149,8 +149,18 @@ CRON_PUSH = "15 21 * * *"
 # shaped wrong. Leave this unset and the nightly run reports what it would
 # change (read it with `npx wrangler tail`); set it to "1" when the counts look
 # right, ideally alongside PUSH_LIMIT for the first real pass.
-# PUSH_APPLY = "1"
-# PUSH_LIMIT = "100"
+#
+# ON, AND CAPPED, from 2026-09-30 (Ayush: "isko bhi push karo"). The cap is
+# not decoration and it is not coming off on its own: a PUT REPLACES the Kylas
+# record, this repo has already lost one contact's name, phone and email to
+# exactly that, and no dry run has ever been READ against the live base. With
+# the cap a mistake is a hundred contacts found in a morning; without it, it is
+# the whole account found whenever somebody notices.
+#
+# Raise or remove PUSH_LIMIT only after a real night's run has been read back
+# with `npx wrangler tail` and the daily write-back email agrees with it.
+PUSH_APPLY = "1"
+PUSH_LIMIT = "100"
 # Every minute: keeps the D1 copy of Airtable and the Kylas company list
 # current (scripts/mirror.mjs), and retries saves. Every minute rather than
 # every five so a first build is ready in two or three minutes, not ten. Idle,
