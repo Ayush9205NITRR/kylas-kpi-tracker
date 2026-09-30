@@ -285,6 +285,60 @@ async function putCompany(base, ownerId) {
   throw last;
 }
 
+/* ── --try-owner <userId> · WHICH ENCODING DOES A COMPANY OWNER TAKE ───
+   Kylas ACCEPTED a company PUT carrying `ownerId: 74756` — 200, no complaint —
+   and left the company with no owner at all. A contact takes a bare number
+   there (test-replace pins it, and the save path has always worked); a company
+   evidently does not, and because the PUT replaces, "ignored" means "erased".
+   That is the worst possible failure mode: a success code for a field the
+   server dropped.
+
+   So: one encoding at a time, smallest body that Kylas already accepted, read
+   back after each, stop at the first that actually lands. The same "one field
+   at a time" tactic probe-write.mjs used on contacts, and for the same reason
+   — a 400 here names neither the field nor the rule, and a 200 means nothing. */
+const TRY = arg("try-owner");
+if (TRY) {
+  const snap = existsSync(snapFile) ? JSON.parse(readFileSync(snapFile, "utf8")) : null;
+  const base = snap?.company || before.company;
+  const full = companyBody(base, TRY);
+  const plain = { name: full.name,
+    ...(full.website ? { website: full.website } : {}),
+    ...(full.phoneNumbers ? { phoneNumbers: full.phoneNumbers } : {}),
+    ...(full.emails ? { emails: full.emails } : {}) };
+  const n = Number(TRY);
+  const attempts = [
+    ["PATCH, ownerId as a number", "PATCH", { ownerId: n }],
+    ["PATCH, ownerId as {id}", "PATCH", { ownerId: { id: n } }],
+    ["PUT, ownerId as {id}", "PUT", { ...plain, ownerId: { id: n } }],
+    ["PUT, ownerId as a string", "PUT", { ...plain, ownerId: String(n) }],
+    ["PUT, owner as {id}", "PUT", { ...plain, owner: { id: n } }],
+    ["PUT, ownerId as {id,name}", "PUT", { ...plain, ownerId: { id: n, name: "" } }],
+    ["PUT, ownerId as a number (the one that erased it)", "PUT", { ...plain, ownerId: n }],
+  ];
+  console.log(`\nlooking for the encoding a COMPANY owner actually takes. Target: ${TRY}\n`);
+  for (const [what, method, body] of attempts) {
+    let sent = "";
+    try { await call(method, `/v1/companies/${CO}`, body); sent = "accepted"; }
+    catch (e) { sent = `${e.status} ${String(e.message).slice(-90)}`; }
+    await sleep(300);
+    const now = await call("GET", `/v1/companies/${CO}`).catch(() => null);
+    const got = idOf(now?.ownerId);
+    const landed = String(got ?? "") === String(TRY);
+    console.log(`  ${landed ? "LANDED " : "no     "} ${what.padEnd(46)} ${sent} · owner reads ${got ?? "(none)"}`);
+    if (landed) {
+      console.log(`\n  ^ THIS is the shape. Tell Claude: "${what}".`);
+      console.log(`    reassign.mjs must send it this way before anything else moves.\n`);
+      process.exit(0);
+    }
+    await sleep(300);
+  }
+  console.log("\n  None of them set the owner. Send this whole output back —");
+  console.log("  the company owner may not be writable through this endpoint at all,");
+  console.log("  in which case the cascade has to change shape.\n");
+  process.exit(1);
+}
+
 /* ── --fix-owner <userId> · THE RECOVERY OF LAST RESORT ────────────────
    Sets the company's owner and nothing else, narrowing until Kylas accepts
    it. For the case this tool created once and must be able to undo: an
