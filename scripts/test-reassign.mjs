@@ -56,6 +56,24 @@ ok("an empty custom field is not sent", !("cfEmpty" in cb.customFieldValues));
 for (const k of ["id", "createdAt", "updatedAt", "createdBy", "updatedBy", "recordActions"])
   ok(`${k} — Kylas' own — is not sent back`, !(k in cb));
 
+/* THE ONE THAT BROKE A LIVE ACCOUNT, 2026-09-30. metaData is Kylas' internal
+   id -> display-name cache for the lookups on a record. It was NOT in
+   SERVER_KEYS, so the company PUT carried it back — and lucidity (1777441)
+   came out of that write with no owner at all, then refused every further
+   write with 02803002 "generic.error". The mock merged it without complaint,
+   which is exactly how it reached a real account. */
+{
+  const withMeta = companyBody({
+    name: "x", ownerId: { id: 1, name: "A" },
+    metaData: { idNameStore: { ownerId: { 1: "A" } } },
+    lastActivityAt: "2026-09-30T00:00:00Z", score: 12, ownerName: "A",
+  }, 2);
+  for (const k of ["metaData", "lastActivityAt", "score", "ownerName"])
+    ok(`${k} — computed by Kylas — is never sent back`, !(k in withMeta));
+  is("...and the owner still moves", withMeta.ownerId, 2);
+  is("...and the name still survives", withMeta.name, "x");
+}
+
 console.log("\n2. ...and the same for a contact");
 const pb = contactBody(PERSON, 74726);
 is("the owner moved", pb.ownerId, 74726);

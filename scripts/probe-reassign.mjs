@@ -227,12 +227,95 @@ for (const c of before.contacts)
               `phones ${(c.phoneNumbers || []).map((p) => p.value).join("/") || "—"}  ` +
               `emails ${(c.emails || []).map((e) => e.value).join("/") || "—"}`);
 
+/* ── --diff · READ ONLY. What does the record look like now, against the
+      snapshot taken before the write? Run this first when something has gone
+      wrong; it writes nothing and it is the only honest basis for deciding
+      what to put back. ───────────────────────────────────────────────── */
+if (process.argv.includes("--diff")) {
+  if (!existsSync(snapFile)) { console.error(`\nNo snapshot at ${snapFile}.`); process.exit(1); }
+  const snap = JSON.parse(readFileSync(snapFile, "utf8"));
+  console.log(`\nsnapshot taken ${snap.at}\n`);
+  const d = diff(snap.company, before.company);
+  console.log(d.length ? `company 1777441-style diff — ${d.length} field(s) differ from the snapshot:` : "company: identical to the snapshot.");
+  for (const x of d) console.log(`   ${x.key}: ${JSON.stringify(x.before)} -> ${JSON.stringify(x.after)}`);
+  for (const b of snap.contacts) {
+    const a = before.contacts.find((x) => String(x.id) === String(b.id));
+    if (!a) { console.log(`\ncontact ${b.id}: NOT FOUND ANY MORE`); continue; }
+    const cd = diff(b, a);
+    console.log(`\ncontact ${b.id} — ${cd.length ? `${cd.length} field(s) differ:` : "identical to the snapshot."}`);
+    for (const x of cd) console.log(`   ${x.key}: ${JSON.stringify(x.before)} -> ${JSON.stringify(x.after)}`);
+  }
+  console.log("\nNothing was written. --restore puts the snapshot back.\n");
+  process.exit(0);
+}
+
 /* ── --restore ───────────────────────────────────────────────────────── */
+/* NARROWING, NOT GIVING UP. The first live restore died on the company PUT
+   with 400 02803002 "generic.error" — a code that names neither the field nor
+   the rule — and left the account ownerless because the run stopped there.
+   A 400 that says nothing is not a reason to stop with the record broken: try
+   a smaller body, and another, and report which one Kylas accepted, because
+   that is the fact worth keeping. Same tactic kylas.mjs already uses to find
+   the company SEARCH shape. */
+async function putCompany(base, ownerId) {
+  const full = companyBody(base, ownerId);
+  const shapes = [
+    ["the whole record", full],
+    ["without custom fields", (({ customFieldValues, ...r }) => r)(full)],
+    ["name, owner and the plain fields", {
+      name: full.name, ownerId: full.ownerId,
+      ...(full.website ? { website: full.website } : {}),
+      ...(full.phoneNumbers ? { phoneNumbers: full.phoneNumbers } : {}),
+      ...(full.emails ? { emails: full.emails } : {}) }],
+    ["name and owner only", { name: full.name, ownerId: full.ownerId }],
+  ];
+  let last;
+  for (const [what, body] of shapes) {
+    try {
+      const r = await call("PUT", `/v1/companies/${CO}`, body);
+      console.log(`  company written — ${what}`);
+      return { ok: true, what, body, res: r };
+    } catch (e) {
+      if (e.status !== 400) throw e;
+      console.log(`  ! ${what} -> 400 ${String(e.message).slice(-120)}`);
+      last = e;
+      await sleep(400);
+    }
+  }
+  throw last;
+}
+
+/* ── --fix-owner <userId> · THE RECOVERY OF LAST RESORT ────────────────
+   Sets the company's owner and nothing else, narrowing until Kylas accepts
+   it. For the case this tool created once and must be able to undo: an
+   account left with no owner at all, where the snapshot is missing or is
+   itself ownerless. It prefers the snapshot's other fields when there is one,
+   so it is not a licence to flatten the record. */
+const FIX = arg("fix-owner");
+if (FIX) {
+  const snap = existsSync(snapFile) ? JSON.parse(readFileSync(snapFile, "utf8")) : null;
+  const base = snap?.company || before.company;
+  console.log(`\nsetting company ${CO}'s owner to ${FIX}` +
+              `${snap ? ` (other fields from the snapshot of ${snap.at})` : " (other fields as they stand now)"}`);
+  await putCompany(base, FIX);
+  await sleep(220);
+  const now = await call("GET", `/v1/companies/${CO}`);
+  const got = idOf(now.ownerId);
+  console.log(`  owner is now ${got ?? "(still none)"}`);
+  process.exit(String(got) === String(FIX) ? 0 : 1);
+}
+
 if (RESTORE) {
   if (!existsSync(snapFile)) { console.error(`\nNo snapshot at ${snapFile} — nothing to restore from.`); process.exit(1); }
   const snap = JSON.parse(readFileSync(snapFile, "utf8"));
+  const wasOwner = idOf(snap.company.ownerId);
   console.log(`\nrestoring from ${snapFile} (taken ${snap.at})`);
-  await call("PUT", `/v1/companies/${CO}`, companyBody(snap.company, idOf(snap.company.ownerId)));
+  console.log(`  the company's owner in the snapshot: ${wasOwner ?? "(none recorded)"}`);
+  if (wasOwner == null) {
+    console.error("  ! the snapshot has no owner either — pass --fix-owner <userId> to set one explicitly.");
+    process.exit(1);
+  }
+  await putCompany(snap.company, wasOwner);
   await sleep(220);
   for (const c of snap.contacts) {
     await call("PUT", `/v1/contacts/${c.id}`, contactBody(c, idOf(c.ownerId)));
@@ -262,8 +345,18 @@ if (!WRITE) {
 writeFileSync(snapFile, JSON.stringify({ at: new Date().toISOString(), ...before }, null, 2));
 console.log(`\nsnapshot saved to ${snapFile} — --restore undoes everything below.\n`);
 
-await call("PUT", `/v1/companies/${CO}`, companyBody(before.company, TO));
-console.log("  company written");
+/* If every shape is refused this THROWS before a single contact is touched —
+   rule 4, and the reason the forward write goes through the same narrowing as
+   the restore. An account left ownerless with its contacts moved on is the
+   worst state this tool can produce. */
+try {
+  await putCompany(before.company, TO);
+} catch (e) {
+  console.error(`\n! the company write was refused in every shape: ${e.message}`);
+  console.error(`  NOTHING ELSE WAS TOUCHED. The snapshot is at ${snapFile};`);
+  console.error(`  check the record with --diff before doing anything else.\n`);
+  process.exit(1);
+}
 await sleep(220);
 for (const c of before.contacts) {
   await call("PUT", `/v1/contacts/${c.id}`, contactBody(c, TO));

@@ -70,6 +70,14 @@ const SERVER_KEYS = new Set([
   "id", "createdAt", "updatedAt", "createdBy", "updatedBy", "recordActions",
   "entityType", "actualValue", "hasDuplicate", "converted", "convertedAt",
   "convertedBy", "pipeline", "stageUpdatedAt", "associatedContacts",
+  /* metaData IS NOT DATA. It is Kylas' own id -> display-name cache for the
+     lookups on the record, and it was missing from this list on the first
+     live run: the company PUT carried it back, and lucidity (1777441) came
+     out of that write with NO OWNER AT ALL and then refused every further
+     write with 02803002. The mock merged it without complaint, which is how
+     it got this far. Nothing Kylas computes for us is ours to send back. */
+  "metaData", "idNameStore", "companyStage", "lastActivityAt",
+  "nextActivityAt", "score", "duplicateOf", "ownerName",
 ]);
 
 export const MAX_ACCOUNTS = 200;
