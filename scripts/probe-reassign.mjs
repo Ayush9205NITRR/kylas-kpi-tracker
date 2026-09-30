@@ -246,6 +246,31 @@ function flat(o, prefix = "", out = {}) {
    reflected, not a second field being edited, and flagging it buries the real
    diffs under noise. */
 const IGNORE = /(^|\.)(updatedAt|updatedBy|recordActions|lastModified)|^metaData\.idNameStore\.ownerId\./;
+
+/* A SNAPSHOT A RETRY CANNOT DESTROY.
+   This used to overwrite the file on every --write. The first run on lucidity
+   erased the company's owner; the SECOND run then saved a fresh "before" over
+   the good snapshot — capturing the already-damaged record — so --restore had
+   nothing to restore TO and reported "the snapshot has no owner either". The
+   one artefact that existed to survive a mistake was destroyed by repeating
+   the mistake.
+
+   The first snapshot for an account is now kept for ever. Later runs write a
+   timestamped file beside it and say so, and --restore always reads the
+   original. */
+function saveSnapshot() {
+  const body = JSON.stringify({ at: new Date().toISOString(), ...before }, null, 2);
+  if (!existsSync(snapFile)) {
+    writeFileSync(snapFile, body);
+    console.log(`\n  snapshot saved to ${snapFile}\n`);
+    return;
+  }
+  const also = snapFile.replace(/\.json$/, `-${Date.now()}.json`);
+  writeFileSync(also, body);
+  const held = JSON.parse(readFileSync(snapFile, "utf8"));
+  console.log(`\n  KEEPING the first snapshot (${held.at}) — it is what --restore uses.`);
+  console.log(`  This run's state saved separately to ${also}\n`);
+}
 function diff(before, after) {
   const a = flat(before), b = flat(after), out = [];
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -461,8 +486,7 @@ if (MOVE) {
   }
   if (!p.contacts) { console.log("\n  Nothing to move.\n"); process.exit(0); }
 
-  writeFileSync(snapFile, JSON.stringify({ at: new Date().toISOString(), ...before }, null, 2));
-  console.log(`\n  snapshot saved to ${snapFile}\n`);
+  saveSnapshot();
   const r = await apply({ kylas: adapter, companies: [CO], ownerId: MOVE, log: (m) => console.log("  " + m) });
   console.log(`  moved ${r.contacts} contact(s); ${r.failed.length} account(s) failed`);
 
@@ -667,8 +691,7 @@ if (!WRITE) {
 }
 
 /* ── the write ───────────────────────────────────────────────────────── */
-writeFileSync(snapFile, JSON.stringify({ at: new Date().toISOString(), ...before }, null, 2));
-console.log(`\nsnapshot saved to ${snapFile} — --restore undoes everything below.\n`);
+saveSnapshot();
 
 /* If every shape is refused this THROWS before a single contact is touched —
    rule 4, and the reason the forward write goes through the same narrowing as
