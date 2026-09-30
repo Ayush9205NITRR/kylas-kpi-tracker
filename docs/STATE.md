@@ -774,51 +774,98 @@ the chrome went. The card's badge renders as an *empty* element rather than a
 missing one, so `refreshQual` stays a text swap and never inserts a node while
 somebody is typing beside it (`.qual:empty{display:none}`).
 
-## 3e · Handing accounts over, in bulk
+## 3e · Handing accounts over — what Kylas allows, and what it does not
 
 Ayush, 2026-09-30: *"I can select multiple accounts, then reassign, and when I
 reassign the associated contacts also get reassigned to that specific
-individual."* The pain behind it is accounts drifting onto the Enout super
-admin and dragging their POCs with them, so **the cascade is the point** — an
-account whose contacts stayed behind has not been handed over.
+individual."*
 
-`scripts/reassign.mjs` is the only file in this tree that writes a **company**.
-Until this, `test-replace` asserted that nothing did, with the note *"the day
-it stops being true is the day contacts start moving on their own."* That fence
-moved rather than came down: the save path and the nightly push — the ones that
-run unattended over every contact in the base — still may not write a company,
-and that is still asserted.
+**The contacts move. The account's own owner does not, and cannot.**
+
+### A company's owner is not settable through this API
+
+Found the hard way, on a live account, which is the only reason it is known:
+
+```
+PUT /v1/companies/{id}   { ..., "ownerId": 74756 }   ->  200 OK
+GET /v1/companies/{id}                               ->  ownerId: (none)
+```
+
+Kylas **accepts** the request and **silently drops** the field. Because the PUT
+replaces the record, *ignored* means **erased** — lucidity (1777441) came out of
+the first real write with no owner at all, and no API call could put one back.
+It had to be fixed in Kylas' own UI.
+
+Everything was tried before concluding this. Seven encodings: a bare number, a
+string, `{id}`, `{id,name}`, under `owner`, and PATCH twice (415, then 400).
+Nine endpoints: per-record and bulk `assign`, `/owner`, `bulk-update`,
+merge-patch, json-patch — every one 404, 400, or **200 that changed nothing**.
+
+Then Ayush supplied Kylas' own Postman collection, which settles it:
+
+- **Update Company**'s documented body contains **no `ownerId` at all**.
+- Ownership is a *separate endpoint* there — `PUT /v1/leads/{id}/owner` with
+  `{"ownerId": N}`, documented as **"Reassign Lead"** — and the collection
+  documents that flavour **only for leads**.
+
+One loose end worth chasing: the blind hunt got `PUT /companies/{id}/owner` →
+**200** while `POST` on the same path → **404**, and a path that does not exist
+answers 404 to both. `probe-reassign.mjs --reassign-endpoint <userId>` tests
+that shape on a **contact first** — where ownership is known to be settable —
+so the method is validated before companies are judged by it. If the company
+lands, the account cascade goes back in.
+
+**A 200 from the company endpoint means the request was well formed. It never
+means anything happened.** Read the record back.
+
+### So the fence went back up
+
+`test-replace` asserted that nothing in the tree called `updateCompany`, with
+the note *"the day it stops being true is the day contacts start moving on
+their own."* That fence came down for this feature and went back up the same
+day — now covering `reassign.mjs` too, since that is the file that tried. The
+note stands unamended. It cost one account its owner to prove.
+
+### What the feature actually is
+
+`scripts/reassign.mjs` moves the **contacts** on the selected accounts.
+Contacts take `ownerId` as a plain number; the save path has always done it and
+`test-replace` pins it. The console says so on the control itself and again in
+the confirm dialog — a button that quietly does less than its label is how this
+went wrong the first time.
 
 Five rules, each paid for:
 
-1. **The whole record, read immediately before the write.** Both PUTs replace.
-   Not from the crawl and not from the Airtable copy — an hour-old body written
-   back over a fresh record silently reverts whatever moved in between.
-2. **Nothing is written until it is counted.** `POST /reassign` without
-   `apply` is a dry run: it reads, counts, and writes nothing. The console puts
-   *"412 accounts and 1,038 contacts"* in front of the person before anything
-   happens. Select-all on 17,925 must never be one keystroke from 17,925 writes.
-3. **`MAX_ACCOUNTS = 200`, refused not truncated.** A caller told "moved 200 of
-   500" cannot tell *which* 200.
-4. **A company that failed does not leak its contacts.** Its contacts are left
-   alone — a company on the old owner with its POCs on the new one is worse
-   than nothing having happened.
-5. **Admins only**, dry run included: the dry run alone would report how many
-   contacts sit on everybody else's accounts.
+1. **The whole record, read immediately before the write.** The PUT replaces,
+   and nothing Kylas computes for us is sent back. `metaData` — Kylas' internal
+   id→name cache — was missing from `SERVER_KEYS` on the first live run and
+   contributed to a 400 naming neither field nor rule.
+2. **Nothing written until it is counted.** `POST /reassign` without `apply` is
+   a dry run. Select-all on 17,925 must never be one keystroke from thousands
+   of writes.
+3. **`MAX_ACCOUNTS = 200`, refused not truncated.** "Moved 200 of 500" does not
+   say which 200.
+4. **One failure never aborts the rest**, and is reported per account and per
+   contact.
+5. **Admins only**, dry run included.
 
-**The near miss, kept as a test.** The first `companyBody` ran push-kylas'
-`idOf` over every top-level field, and `idOf` collapses anything carrying a
-`.value` — which a phone number does. `{type:"MOBILE", value:"9…",
-primary:true}` went back as `"9…"`, so a re-assignment would have quietly
-stripped the type and primary flag off every phone and email it touched. The
-rule now: only an object whose keys are *just* `id` and `name` is a lookup;
-everything else goes back exactly as Kylas served it. `idOf` still applies
-inside `customFieldValues`, where every value really is an option or a scalar.
+**The near miss, kept as a test.** The first body builder ran push-kylas' `idOf`
+over every top-level field, and `idOf` collapses anything carrying a `.value` —
+which a phone number does. `{type:"MOBILE", value:"9…", primary:true}` would
+have gone back as `"9…"`, stripping the type and primary flag off every phone
+and email it touched. Only an object whose keys are *just* `id` and `name` is a
+lookup now.
 
-`test-reassign.mjs` is 54, `test-worker` §12 covers the HTTP edge (403 for an
-associate — with a **cold worker**, because `ADMINS` is read once when the
-module is built and passing `ADMIN_EMAILS` to a warm one changes nothing and
-passes for the wrong reason).
+**The mock was more permissive than Kylas, twice.** It merged whatever it was
+handed — so a bare-number `ownerId` echoed back and every test passed. It also
+swallowed `PUT /v1/companies/{id}` entirely, because the GET route matched
+first and had no method check: 200 returned, nothing written. Both fixed. A
+mock that reports success for a write it dropped is how a bulk operation ships
+"verified".
+
+`test-reassign.mjs` is 56; `test-worker` §12 covers the HTTP edge (the 403 case
+needs a **cold worker** — `ADMINS` is read once when the module is built, so
+passing `ADMIN_EMAILS` to a warm one passes for the wrong reason).
 
 ## 4 · Invariants that look arbitrary and are not
 

@@ -1,41 +1,60 @@
-/* MOVING ACCOUNTS, AND THE PEOPLE ON THEM, FROM ONE BD TO ANOTHER.
+/* MOVING THE PEOPLE ON AN ACCOUNT FROM ONE BD TO ANOTHER.
  *
  * Ayush, 2026-09-30: "I can select multiple accounts, then reassign, and when
  * I reassign the associated contacts also get reassigned to that specific
  * individual." The pain behind it is accounts drifting onto the Enout super
- * admin and taking their POCs with them, so the cascade is the whole point:
- * an account whose contacts stayed behind has not really been handed over.
+ * admin and taking their POCs with them.
  *
- * ── WHY THIS FILE IS PARANOID ──────────────────────────────────────────
+ * ── WHAT THIS DOES NOT DO, AND WHY ─────────────────────────────────────
  *
- * Until now NOTHING in this tree called kylas.updateCompany, and test-replace
- * asserted exactly that, with the note: "the day it stops being true is the
- * day contacts start moving on their own." This is that day, on purpose, so
- * the rules that note was protecting are written down here instead.
+ * IT DOES NOT SET THE COMPANY'S OWN OWNER. Kylas will not let it. Established
+ * the hard way on 2026-09-30, on a live account (lucidity, 1777441), which is
+ * the only reason it is known at all:
  *
- *   1. A PUT REPLACES THE RECORD. On contacts this repo has already deleted a
- *      real person's name, phone and email by sending a partial body. Companies
- *      are the same endpoint family and are assumed to behave the same way, so
- *      every write here is the WHOLE record, read immediately beforehand, with
- *      exactly one field changed.
+ *   PUT /v1/companies/{id} carrying ownerId is ACCEPTED — 200, no complaint —
+ *   and the field is silently DROPPED. Because the PUT replaces the record,
+ *   "ignored" means "erased": the account came out of the write with no owner
+ *   at all, and there was no way to put it back through the API.
+ *
+ *   Seven encodings were tried (number, string, {id}, {id,name}, `owner`,
+ *   PATCH twice) and nine endpoints (per-record and bulk assign, owner,
+ *   bulk-update, merge-patch, json-patch). Every one either 404'd, 400'd, or
+ *   returned 200 and changed nothing. A 200 from this endpoint means the
+ *   request was well formed, never that it did anything.
+ *
+ * So the company write is GONE from this file, not flagged off, and
+ * test-replace's original fence — "nothing calls updateCompany" — is back up
+ * exactly as it was. Its note said the day it stopped being true would be the
+ * day contacts started moving on their own. It was right, it took one
+ * afternoon, and it cost one account its owner.
+ *
+ * What remains is the part that works and is proven: the CONTACTS on the
+ * selected accounts move. Contacts take ownerId as a plain number — the save
+ * path has always done it and test-replace pins it. Account ownership itself
+ * has to be set in Kylas' own UI.
+ *
+ * ── THE RULES THAT STILL HOLD ──────────────────────────────────────────
+ *
+ *   1. A PUT REPLACES THE RECORD. This repo has already deleted a real
+ *      person's name, phone and email by sending a partial body. Every write
+ *      here is the WHOLE record, read immediately beforehand, one field
+ *      changed — and nothing Kylas computes for us is sent back.
  *
  *   2. NOTHING IS WRITTEN UNTIL IT IS COUNTED. plan() resolves what would move
  *      and writes nothing. The console shows that count and the person agrees
  *      to it before apply() sends a single request. "Select all" on a list of
- *      17,925 must never be one keystroke away from 17,925 writes.
+ *      17,925 must never be one keystroke away from thousands of writes.
  *
  *   3. A CAP THAT IS NOT A SUGGESTION. apply() refuses a batch larger than
  *      MAX_ACCOUNTS rather than truncating it silently, because a caller that
  *      asked to move 500 and was told "moved 200" cannot tell which 200.
  *
- *   4. ONE ACCOUNT AT A TIME, AND ITS CONTACTS WITH IT. If a company write
- *      fails, its contacts are left alone — a company on the old owner with
- *      its POCs on the new one is worse than nothing having happened. Failures
- *      are collected and reported per account; they never abort the rest.
+ *   4. A FAILURE ON ONE ACCOUNT NEVER ABORTS THE REST. Failures are collected
+ *      and reported per account, per contact.
  *
  *   5. IDEMPOTENT BY NATURE. Setting ownerId to the value it already holds is
- *      a no-op, so a retried batch costs requests and changes nothing. Accounts
- *      already owned by the target are skipped before they cost a write.
+ *      a no-op, so a retried batch costs requests and changes nothing.
+ *      Contacts already on the target are skipped before they cost a write.
  */
 
 /* Kylas hands lookups back as {id, name} and multi-picklists as arrays of
@@ -82,23 +101,11 @@ const SERVER_KEYS = new Set([
 
 export const MAX_ACCOUNTS = 200;
 
-/* THE WHOLE COMPANY, with one field changed.
-   Built from the record as Kylas just served it rather than from a field list
-   of our own: a field this codebase has never heard of is exactly the field a
-   hand-written body would drop, and dropping it deletes it. */
-export function companyBody(base, ownerId) {
-  const body = {};
-  for (const [k, v] of Object.entries(base || {})) {
-    if (SERVER_KEYS.has(k)) continue;
-    if (v === undefined || v === null) continue;
-    body[k] = k === "customFieldValues" ? cfv(v) : topValue(v);
-  }
-  /* Kylas rejects a company with no name, and a company that somehow has none
-     is not one this tool should be inventing a name for. */
-  if (!body.name) throw new Error("the company Kylas returned has no name — refusing to write it back");
-  body.ownerId = Number(ownerId);
-  return body;
-}
+/* There is deliberately NO companyBody() here any more. It existed, it was
+   tested, it round-tripped cleanly against the mock, and on a live account it
+   erased an owner Kylas would not then let anybody set back. The diagnostic
+   copy lives in scripts/probe-reassign.mjs, which is a tool for investigating
+   this endpoint and is never reached by a save, a cron or the console. */
 
 function cfv(v) {
   const out = {};
@@ -125,29 +132,34 @@ export async function plan({ kylas, companies = [], ownerId, log = () => {} }) {
   for (const id of ids) {
     try {
       const co = await kylas.company(id);
-      const held = String(idOf(co?.ownerId) ?? "");
       const people = await kylas.contactsForCompany(id);
-      /* Already theirs: counted, shown, and not written. */
-      const noop = held === to;
-      if (noop) already++;
-      accounts.push({ id, name: co?.name || `Company ${id}`, from: held,
-                      fromName: co?.ownerId?.name || "", contacts: people.length, noop });
-      if (!noop) contacts += people.length;
+      /* COUNTED PER CONTACT, NOT PER ACCOUNT. Whether the ACCOUNT is already
+         on the target is not the question any more — its owner is not ours to
+         change. What matters is how many of its people are not on the target
+         yet, because those are the only writes that will happen. */
+      const toMove = people.filter((p) => String(idOf(p?.ownerId) ?? "") !== to);
+      already += people.length - toMove.length;
+      contacts += toMove.length;
+      accounts.push({ id, name: co?.name || `Company ${id}`,
+                      accountOwner: String(idOf(co?.ownerId) ?? ""),
+                      accountOwnerName: co?.ownerId?.name || "",
+                      contacts: people.length, moving: toMove.length });
     } catch (e) {
       problems.push({ id, why: e.message.slice(0, 160), status: e.status || 0 });
     }
   }
-  const moving = accounts.filter((a) => !a.noop).length;
-  log(`reassign: ${moving} account(s) and ${contacts} contact(s) would move` +
+  const moving = accounts.filter((a) => a.moving > 0).length;
+  log(`reassign: ${contacts} contact(s) across ${moving} account(s) would move` +
       (already ? `, ${already} already there` : "") +
       (problems.length ? `, ${problems.length} could not be read` : ""));
-  return { accounts, moving, contacts, already, problems, ownerId: to, cap: MAX_ACCOUNTS };
+  return { accounts, moving, contacts, already, problems, ownerId: to, cap: MAX_ACCOUNTS,
+           /* So the console never again implies something it cannot do. */
+           accountOwnerMoves: false };
 }
 
-/* THE WRITE.
-   Company first, then its contacts — see rule 4. Sequential on purpose: the
-   Kylas client rate-limits at about five a second and a burst of parallel PUTs
-   buys nothing but 429s. */
+/* THE WRITE — CONTACTS ONLY.
+   Sequential on purpose: the Kylas client rate-limits at about five a second
+   and a burst of parallel PUTs buys nothing but 429s. */
 export async function apply({ kylas, companies = [], ownerId, log = () => {},
                               onProgress = () => {} }) {
   const ids = [...new Set(companies.map(String).filter(Boolean))];
@@ -165,26 +177,25 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
   let contactsMoved = 0, skipped = 0, done = 0;
   for (const id of ids) {
     try {
-      /* READ IMMEDIATELY BEFORE THE WRITE. Not from the crawl, not from the
-         Airtable copy: both can be an hour old, and an hour-old body written
-         back over a fresh record silently reverts whatever moved in between. */
+      /* The company is READ, never written — for its name, and to fail the
+         account early if Kylas cannot serve it at all. See the header for what
+         happened the day this line was a write. */
       const co = await kylas.company(id);
-      if (String(idOf(co?.ownerId) ?? "") === to) { skipped++; done++; onProgress({ done, total: ids.length }); continue; }
-      await kylas.updateCompany(id, companyBody(co, to));
-
-      /* ...AND ONLY THEN THE PEOPLE ON IT. A company that failed above never
-         reaches this line, so its contacts stay where they are. */
       const people = await kylas.contactsForCompany(id);
       const stuck = [];
+      let n = 0;
       for (const p of people) {
         try {
+          /* READ IMMEDIATELY BEFORE THE WRITE. Not from the crawl, not from the
+             Airtable copy: both can be an hour old, and an hour-old body written
+             back over a fresh record silently reverts whatever moved in between. */
           const full = await kylas.contact(p.id);
-          if (String(idOf(full?.ownerId) ?? "") === to) continue;
+          if (String(idOf(full?.ownerId) ?? "") === to) { skipped++; continue; }
           await kylas.updateContact(p.id, contactBody(full, to));
-          contactsMoved++;
+          contactsMoved++; n++;
         } catch (e) { stuck.push({ id: String(p.id), why: e.message.slice(0, 120) }); }
       }
-      moved.push({ id, name: co?.name || `Company ${id}`, contacts: people.length - stuck.length,
+      moved.push({ id, name: co?.name || `Company ${id}`, contacts: n,
                    ...(stuck.length ? { contactsFailed: stuck } : {}) });
     } catch (e) {
       failed.push({ id, why: e.message.slice(0, 160), status: e.status || 0 });
@@ -192,17 +203,18 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
     done++;
     onProgress({ done, total: ids.length });
   }
-  log(`reassign: moved ${moved.length} account(s) and ${contactsMoved} contact(s) to owner ${to}` +
+  log(`reassign: moved ${contactsMoved} contact(s) across ${moved.length} account(s) to owner ${to}` +
       (skipped ? `, ${skipped} already there` : "") +
       (failed.length ? `, ${failed.length} FAILED` : ""));
-  return { moved: moved.length, contacts: contactsMoved, skipped, failed, accounts: moved, ownerId: to };
+  return { moved: moved.length, contacts: contactsMoved, skipped, failed, accounts: moved,
+           ownerId: to, accountOwnerMoves: false };
 }
 
 /* THE WHOLE CONTACT, with one field changed.
    Deliberately not push-kylas' bodyFor(): that builds a contact from a named
    field list, which is right when the card is the source of truth and wrong
-   here, where the record is. Same rule as companyBody — carry everything, set
-   one thing. */
+   here, where the record is. Carry everything, set one thing, and send back
+   nothing Kylas computes for us. */
 export function contactBody(base, ownerId) {
   const body = {};
   for (const [k, v] of Object.entries(base || {})) {

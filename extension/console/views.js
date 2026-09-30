@@ -2649,17 +2649,24 @@
       <span class="exbn tnum">${n} selected</span>
       <button class="gbtn sm" id="accPickAll" type="button">${
         allShown ? "Select none" : `Select these ${shown}`}</button>
-      <label class="exbto">Re-assign to
-        <select id="accTo" aria-label="Move these accounts to">
+      <label class="exbto">Move their contacts to
+        <select id="accTo" aria-label="Move the contacts on these accounts to">
           <option value="">choose a person…</option>
           ${ownerOptions().map((o) =>
             `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
         </select></label>
-      <button class="gbtn sm" id="accGo" type="button" disabled>Re-assign</button>
+      <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>
       <button class="gbtn sm" id="accPickClear" type="button">Clear</button>
       ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}
-      <p class="exbnote">The contacts on each account move with it. Nothing is
-        written until you have seen the count.</p>
+      ${/* SAY WHAT IT DOES NOT DO, ON THE CONTROL ITSELF. Kylas accepts a
+           company PUT carrying ownerId and silently drops it, so the account's
+           own owner cannot be set through the API at all — an earlier version
+           of this button erased one instead of moving it. The contacts are
+           what move, and a person about to click needs to know that here,
+           not in a release note. */ ""}
+      <p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
+        not let this tool change an account's own owner — do that in Kylas.
+        Nothing is written until you have seen the count.</p>
     </div>`;
   }
   /* The people an account can be handed TO. Names alone are not enough — the
@@ -4178,19 +4185,22 @@
            since the last sync would otherwise be agreed to on a stale figure. */
         ACC.busy = "counting…"; redraw();
         const p = await API.reassignPlan(ids, ownerId);
-        const bad = p.problems?.length ? `\n\n${p.problems.length} could not be read and will be skipped.` : "";
-        const same = p.already ? `\n${p.already} already belong to ${toName}.` : "";
-        if (!p.moving) { ACC.busy = `Nothing to move — all ${ids.length} already belong to ${toName}.`; redraw(); return; }
-        /* STEP TWO: THE PERSON AGREES TO THE ACTUAL NUMBERS. */
+        const bad = p.problems?.length ? `\n\n${p.problems.length} account(s) could not be read and will be skipped.` : "";
+        const same = p.already ? `\n${p.already} contact(s) are already theirs.` : "";
+        if (!p.contacts) { ACC.busy = `Nothing to move — every contact on these ${ids.length} is already ${toName}'s.`; redraw(); return; }
+        /* STEP TWO: THE PERSON AGREES TO THE ACTUAL NUMBERS — and is told, at
+           the moment of agreeing, that the accounts themselves stay put. */
         const yes = confirm(
-          `Move ${p.moving} account${p.moving === 1 ? "" : "s"} and ${p.contacts} ` +
-          `contact${p.contacts === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
+          `Move ${p.contacts} contact${p.contacts === 1 ? "" : "s"} across ` +
+          `${p.moving} account${p.moving === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
+          `The accounts' own owner does NOT change — Kylas does not allow that ` +
+          `through the API. Set it in Kylas if you need it.\n\n` +
           `This writes to Kylas and cannot be undone from here.`);
         if (!yes) { ACC.busy = ""; redraw(); return; }
-        ACC.busy = `moving ${p.moving} account(s)…`; redraw();
+        ACC.busy = `moving ${p.contacts} contact(s)…`; redraw();
         const r = await API.reassign(ids, ownerId);
         const failed = r.failed?.length ? ` · ${r.failed.length} failed` : "";
-        ACC.busy = `Moved ${r.moved} account(s) and ${r.contacts} contact(s) to ${toName}${failed}.`;
+        ACC.busy = `Moved ${r.contacts} contact(s) across ${r.moved} account(s) to ${toName}${failed}.`;
         ACC.picked.clear();
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);

@@ -188,31 +188,32 @@ is("...even when Kylas sends it as an object",
 /* A contact being CREATED has no base to fall back on. */
 ok("a new contact with no owner sends none",
   !("ownerId" in toKylasContact({ ...CARD, kid: "", ownerId: "" }, { remarks: "x" })));
-/* THE THING THAT MUST NEVER HAPPEN, NARROWED RATHER THAN DROPPED.
-   This used to assert that NOTHING in the tree called updateCompany, with the
-   note "the day it stops being true is the day contacts start moving on their
-   own". That day came on purpose: Ayush asked to select accounts, re-assign
-   them, and have their contacts follow (scripts/reassign.mjs).
+/* THE THING THAT MUST NEVER HAPPEN — AND THE FENCE IS BACK UP.
+   This asserted that NOTHING in the tree called updateCompany, with the note
+   "the day it stops being true is the day contacts start moving on their own".
+   On 2026-09-30 it came down on purpose, for bulk re-assignment. It went back
+   up the same day, because Kylas settled the question itself:
 
-   So the fence moved instead of coming down. Exactly ONE file may write a
-   company, it is the one built for it and tested by test-reassign.mjs, and
-   the save and push paths — the ones that run unattended, nightly, over every
-   contact in the base — still may not. A company write appearing in those is
-   still the old catastrophe. */
+     PUT /v1/companies/{id} carrying ownerId is ACCEPTED — 200 — and the field
+     is silently DROPPED. The PUT replaces, so "ignored" means "erased", and
+     lucidity (1777441) came out of the first live write with no owner at all
+     and no API call that could put one back. Kylas' own documented Update
+     Company body contains no ownerId; ownership is a separate endpoint there.
+
+   So no file writes a company, the note stands unamended, and the fence covers
+   reassign.mjs too now — it is the one that tried. */
 const { readFileSync } = await import("node:fs");
-const callers = ["scripts/handlers.mjs", "scripts/push-kylas.mjs", "scripts/kylas.mjs"]
+const callers = ["scripts/handlers.mjs", "scripts/push-kylas.mjs", "scripts/kylas.mjs",
+                 "scripts/reassign.mjs"]
   .filter((f) => /updateCompany\s*\(/.test(readFileSync(f, "utf8").replace(/updateCompany:.*/g, "")));
-is("neither the save nor the nightly push writes a company", callers, []);
-/* ...and the one file that does, does it the only safe way: the whole record,
-   read immediately before, with one field changed. If this import ever stops
-   throwing on a partial body, the rule has been lost. */
-const { companyBody } = await import("./reassign.mjs");
-ok("the one company writer refuses a body it cannot vouch for", (() => {
-  try { companyBody({ id: 1, ownerId: 2 }, 3); return false; } catch { return true; }
-})());
-is("...and carries a phone back whole, not flattened to its value",
-  companyBody({ name: "x", phoneNumbers: [{ type: "MOBILE", value: "9", primary: true }] }, 3).phoneNumbers,
+is("nothing calls updateCompany", callers, []);
+/* The re-assignment path moves CONTACTS, which is the part Kylas allows and
+   this file has always pinned. */
+const { contactBody } = await import("./reassign.mjs");
+is("...and the contact re-assign carries a phone back whole",
+  contactBody({ lastName: "x", phoneNumbers: [{ type: "MOBILE", value: "9", primary: true }] }, 3).phoneNumbers,
   [{ type: "MOBILE", value: "9", primary: true }]);
+is("...with the owner actually changed", contactBody({ lastName: "x" }, 74726).ownerId, 74726);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

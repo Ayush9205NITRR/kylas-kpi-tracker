@@ -881,8 +881,13 @@ console.log('\n11. a copy that is short of the account is not the account');
      call here looked equivalent and was not — the probe was unauthenticated
      and came back "Too many requests", so it compared two error messages and
      called that proof. */
-  check('...and the company is still on its old owner afterwards',
-        dj.accounts?.[0]?.from === '74726', JSON.stringify(dj.accounts?.[0]));
+  /* The account's own owner is REPORTED and never written — Kylas accepts a
+     company PUT carrying ownerId and drops it, so an earlier version of this
+     erased one. The dry run must say whose it is and say plainly that it is
+     not going to change. */
+  check('...and reports the account owner without moving it',
+        dj.accounts?.[0]?.accountOwner === '74726' && dj.accountOwnerMoves === false,
+        JSON.stringify({ a: dj.accounts?.[0], moves: dj.accountOwnerMoves }));
 
   const empty = await call('/reassign', { method: 'POST',
     body: { companies: [], ownerId: '99999' }, env: withStore(ENV) });

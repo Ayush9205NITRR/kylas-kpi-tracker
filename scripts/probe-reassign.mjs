@@ -285,6 +285,65 @@ async function putCompany(base, ownerId) {
   throw last;
 }
 
+/* ── --reassign-endpoint <userId> · THE DOCUMENTED SHAPE ───────────────
+   Kylas' own Postman collection documents "Reassign Lead":
+
+       PUT /v1/leads/{lead_id}/owner        {"ownerId": <number>}
+
+   — a dedicated endpoint, not a field on the record. That is why every PUT to
+   /v1/companies/{id} carrying ownerId was accepted and ignored: ownership is
+   simply not part of that payload. Kylas' documented Update Company body does
+   not contain ownerId at all.
+
+   The collection only documents the lead flavour, but the blind hunt got
+   PUT /companies/{id}/owner -> 200 while POST to the same path -> 404, and a
+   path that does not exist answers 404 to both. That asymmetry says the
+   endpoint IS there.
+
+   So test the METHOD before judging companies by it: run it on a CONTACT
+   first, where ownership is known to be settable and provable, then on the
+   company. If it moves the contact and not the company, the answer is about
+   companies. If it moves neither, the answer is about this probe. */
+const RE_EP = arg("reassign-endpoint");
+if (RE_EP) {
+  const n = Number(RE_EP);
+  const check = async (what, path, readPath) => {
+    let sent = "";
+    try { const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H,
+            body: JSON.stringify({ ownerId: n }) }); sent = String(r.status); }
+    catch (e) { sent = `network ${e.message.slice(0, 40)}`; }
+    await sleep(600);
+    const now = await call("GET", readPath).catch(() => null);
+    const got = idOf(now?.ownerId);
+    const landed = String(got ?? "") === String(RE_EP);
+    console.log(`  ${landed ? "LANDED " : "no     "} PUT ${path.padEnd(38)} -> ${sent.padEnd(5)} owner reads ${got ?? "(none)"}`);
+    return landed;
+  };
+  console.log(`\nKylas documents PUT /v1/leads/{id}/owner {"ownerId": N}. Trying that`);
+  console.log(`shape on a contact first — where we KNOW ownership is settable — then`);
+  console.log(`on the company. Target owner: ${RE_EP}\n`);
+
+  const victim = before.contacts[0];
+  if (victim) {
+    console.log("  a contact, to prove the method works at all:");
+    await check("contact", `/v1/contacts/${victim.id}/owner`, `/v1/contacts/${victim.id}`);
+    await sleep(400);
+  } else console.log("  (this account has no contacts, so the method cannot be validated here)");
+
+  console.log("\n  the company:");
+  const co = await check("company", `/v1/companies/${CO}/owner`, `/v1/companies/${CO}`);
+  if (co) {
+    console.log(`\n  ^ THE COMPANY OWNER IS SETTABLE, through its own endpoint.`);
+    console.log(`    reassign.mjs should use PUT /v1/companies/{id}/owner and the`);
+    console.log(`    account cascade goes back in. Send this output back.\n`);
+  } else {
+    console.log(`\n  The company did not move. If the contact above DID, then the method`);
+    console.log(`  is right and companies genuinely do not expose it — contacts-only it`);
+    console.log(`  is. If neither moved, this probe is still wrong. Send the output back.\n`);
+  }
+  process.exit(co ? 0 : 1);
+}
+
 /* ── --owner-field · READ ONLY. IS IT WRITABLE AT ALL? ─────────────────
    Seven encodings all came back accepted and none set the owner, so the next
    question is not "which shape" but "is this field updatable by the API".
