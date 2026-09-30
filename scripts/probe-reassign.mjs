@@ -285,6 +285,75 @@ async function putCompany(base, ownerId) {
   throw last;
 }
 
+/* ── --owner-field · READ ONLY. IS IT WRITABLE AT ALL? ─────────────────
+   Seven encodings all came back accepted and none set the owner, so the next
+   question is not "which shape" but "is this field updatable by the API".
+   Kylas' own field metadata answers it — and it is a read, so it costs
+   nothing and risks nothing. Should have been the FIRST thing asked. */
+if (process.argv.includes("--owner-field")) {
+  const f = await call("GET",
+    "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200");
+  const all = rows(f);
+  const owner = all.filter((x) => /owner/i.test(x.name || "") || /owner/i.test(x.displayName || ""));
+  console.log(`\n${all.length} company fields. Anything owner-shaped:\n`);
+  for (const x of owner) console.log(JSON.stringify(x, null, 2));
+  if (!owner.length) console.log("  (none — that is itself the answer)");
+  /* What the API says it will let us change, so the next attempt is informed
+     rather than another guess. */
+  const writable = all.filter((x) => x.updatable === true || x.editable === true)
+    .map((x) => x.name).filter(Boolean);
+  console.log(`\nfields this key may update (${writable.length}):\n  ${writable.join(", ") || "(the flag is not reported)"}`);
+  console.log("\nNothing was written.\n");
+  process.exit(0);
+}
+
+/* ── --hunt-owner <userId> · IS THERE A DEDICATED ENDPOINT ─────────────
+   Ownership in a CRM is often its own action rather than a field on the
+   record — an assign endpoint, a bulk owner update, a merge-patch. PATCH came
+   back 415, which is a CONTENT TYPE complaint, not a refusal of the method,
+   so that gets another go with the right header before anything else.
+   Runs against whatever --company says, so point it at the account that is
+   already broken rather than a healthy one. */
+const HUNT = arg("hunt-owner");
+if (HUNT) {
+  const n = Number(HUNT);
+  const tries = [
+    ["PATCH + merge-patch content type", "PATCH", `/v1/companies/${CO}`, { ownerId: n },
+      { "content-type": "application/merge-patch+json" }],
+    ["PATCH + json-patch content type", "PATCH", `/v1/companies/${CO}`,
+      [{ op: "replace", path: "/ownerId", value: n }], { "content-type": "application/json-patch+json" }],
+    ["PUT  /companies/{id}/owner", "PUT", `/v1/companies/${CO}/owner`, { ownerId: n }],
+    ["POST /companies/{id}/owner", "POST", `/v1/companies/${CO}/owner`, { ownerId: n }],
+    ["PUT  /companies/{id}/assign", "PUT", `/v1/companies/${CO}/assign`, { ownerId: n }],
+    ["POST /companies/{id}/assign", "POST", `/v1/companies/${CO}/assign`, { ownerId: n }],
+    ["POST /companies/assign (bulk)", "POST", `/v1/companies/assign`, { ids: [Number(CO)], ownerId: n }],
+    ["POST /companies/bulk-update", "POST", `/v1/companies/bulk-update`,
+      { ids: [Number(CO)], fields: { ownerId: n } }],
+    ["PUT  /companies/owner (bulk)", "PUT", `/v1/companies/owner`, { ids: [Number(CO)], ownerId: n }],
+  ];
+  console.log(`\nhunting for an endpoint that sets a company's owner. Target: ${HUNT}\n`);
+  for (const [what, method, path, body, headers] of tries) {
+    let sent = "";
+    try {
+      const r = await fetch(`${BASE}${path}`, { method,
+        headers: { ...H, ...(headers || {}) }, body: JSON.stringify(body) });
+      sent = `${r.status}`;
+      if (r.status === 429) { await sleep(1200); }
+    } catch (e) { sent = `network ${e.message.slice(0, 40)}`; }
+    await sleep(300);
+    const now = await call("GET", `/v1/companies/${CO}`).catch(() => null);
+    const got = idOf(now?.ownerId);
+    const landed = String(got ?? "") === String(HUNT);
+    console.log(`  ${landed ? "LANDED " : "no     "} ${what.padEnd(36)} -> ${String(sent).padEnd(6)} owner reads ${got ?? "(none)"}`);
+    if (landed) { console.log(`\n  ^ THAT is how a company owner moves. Send this line back.\n`); process.exit(0); }
+    await sleep(300);
+  }
+  console.log("\n  Nothing set it. Send the whole output back — on this evidence the");
+  console.log("  company owner is not settable through the API at all, and the feature");
+  console.log("  has to move contacts only and leave account ownership to Kylas' UI.\n");
+  process.exit(1);
+}
+
 /* ── --try-owner <userId> · WHICH ENCODING DOES A COMPANY OWNER TAKE ───
    Kylas ACCEPTED a company PUT carrying `ownerId: 74756` — 200, no complaint —
    and left the company with no owner at all. A contact takes a bare number
