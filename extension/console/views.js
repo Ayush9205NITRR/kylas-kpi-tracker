@@ -2758,7 +2758,13 @@
             const nk = nextOf(c), d = daysSince(c.lastCalledAt);
             return `<button type="button" class="bcard" data-id="${esc(c.id)}">
               <b class="co">${focusOf(c) === "focus" ? `<i class="fstar">★</i> ` : ""}${esc(c.name)}</b>
-              <span class="bstage">${esc(label2(acctStageOf(c)))}</span>
+              ${/* THE COLUMN ALREADY SAID IT. On the Stages board every card in
+                     "Follow-up (1)" repeated "Follow-up (1)" underneath its own
+                     name — the one line on the card that carried no information,
+                     nineteen times in a column. On the Buckets board it is the
+                     opposite: the column is "CNC" and WHICH cnc rung the account
+                     sits on is exactly what the card has to say. */ ""}
+              ${ACC.bgroup === "stage" ? "" : `<span class="bstage">${esc(label2(acctStageOf(c)))}</span>`}
               <span class="bmeta">
                 ${c.nextCall ? `<i class="nc nc-${nk}">${esc(nextText(c))}</i>` : ""}
                 <i class="f-${freshOf(c)}"></i>${d === null ? "Never called" : d === 0 ? "Called today" : `${d}d ago`}

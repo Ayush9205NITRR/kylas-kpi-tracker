@@ -162,6 +162,15 @@ ok('...each naming its rung', stageHints.some((h) => /rung \d+ of 26/.test(h)), 
 const rungs = stageHints.map((h) => Number((/rung (\d+)/.exec(h) || [])[1])).filter(Number.isFinite);
 ok('...furthest first', rungs.every((r, i) => i === 0 || rungs[i - 1] >= r), JSON.stringify(rungs));
 
+/* A card must not repeat the column it is standing in. */
+const stageCards = await f.locator('.bcol .bcard .bstage').count();
+ok('on the Stages board a card does not repeat its column', stageCards === 0, `${stageCards} cards still say it`);
+await f.locator('#bgBucket').click().catch(() => {});
+await page.waitForTimeout(900);
+const bucketCards = await f.locator('.bcol .bcard .bstage').count();
+ok('...while on Buckets it still says WHICH stage, which the column does not',
+   bucketCards > 0, `${bucketCards} cards name their stage`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });
