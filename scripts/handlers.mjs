@@ -204,6 +204,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const READ_SOURCE = String(env.READ_SOURCE || (AT_PAT && AT_BASE ? "airtable" : "kylas")).toLowerCase();
   const READS_AIRTABLE = airtable && READ_SOURCE !== "kylas";
   const STRICT_AIRTABLE = airtable && READ_SOURCE === "strict";
+  /* How much of the account the Airtable copy has to hold before it is served
+     as the account. Not 1: a sync that ran an hour ago is legitimately a few
+     companies behind, and refusing the copy over three rows would put every
+     read back on Kylas for nothing. Well below 1 because the case this exists
+     for is not "a little behind" — it is 120 of 17,925. */
+  const MIRROR_ENOUGH = Number(env.MIRROR_ENOUGH || 0.9);
+  /* AND short by this many, in absolute terms. A fraction alone misjudges the
+     small end: eight of nine is 89% and plainly the same account a moment
+     behind, while 120 of 17,925 is 0.7% and plainly is not. Both tests have to
+     fail before the copy is refused, so "a bit behind" always serves and "not
+     the account" never does. */
+  const MIRROR_SHORT_BY = Number(env.MIRROR_SHORT_BY || 25);
   if (READS_AIRTABLE) log(`reads: Airtable first${STRICT_AIRTABLE ? " (STRICT — no Kylas fallback)" : ", Kylas as fallback"}`);
   else log("reads: Kylas");
 
@@ -1539,7 +1551,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       }
       if (!url.searchParams.get("keys") && (sync || STRICT_AIRTABLE)) {
         const readStarted = Date.now();
-        const mirror = await fromAirtable("companies", async () => {
+        let mirror = await fromAirtable("companies", async () => {
           const list = await readCompanies(airtable);
           return list.length ? list : null;
         });
@@ -1550,6 +1562,27 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         const airtableAnswer = mirror;
         compareRead("/companies", airtableAnswer, Date.now() - readStarted,
           () => readCompaniesSql(shadowDb), (c) => c.id);
+        /* A COPY THAT IS SHORT OF THE ACCOUNT IS NOT THE ACCOUNT.
+           "Has the sync ever run" was the whole test, and it is not enough: the
+           first run against a real account writes what it can and stops — a
+           Worker invocation cannot crawl 17,925 companies and write them all —
+           so the base held 120, the record said "synced", and the console
+           served 120 as the whole allotment. Ayush had 17,925 the day before.
+
+           The sync itself records what Kylas reported the account holds, so the
+           comparison costs nothing. Below the mark the copy is not served at
+           all: the list comes from Kylas, as it did before the first sync, and
+           the KPIs are joined onto it exactly as they were. A copy that is
+           merely a little behind still serves — this is about a copy that is
+           not the same account. */
+        const expected = Number(sync?.kylas?.reportedTotal || 0);
+        const missing = expected - (mirror?.length || 0);
+        if (mirror && expected && !STRICT_AIRTABLE
+            && mirror.length < expected * MIRROR_ENOUGH && missing > MIRROR_SHORT_BY) {
+          log(`! companies: the copy holds ${mirror.length} of the ${expected} Kylas reports ` +
+              `— listing from Kylas until the sync has filled it.`);
+          mirror = null;
+        }
         if (mirror) {
           /* Kylas' own field rides on the crawl, when there is one. */
           const crawlNow = await kylasCompanies.peek().catch(() => null);

@@ -336,6 +336,22 @@ await page.waitForTimeout(6000);
 ok('once it closes, the repaint happens',
    (await f.evaluate(() => window.__cos || 0)) >= 1, `asked ${await f.evaluate(() => window.__cos || 0)}x`);
 
+/* ── the header says what is being hidden ───────────────────────────── */
+console.log('\n8. "N of M" when a filter is narrowing the list');
+await f.locator('#accClear').click().catch(() => {});
+await page.waitForTimeout(1200);
+const unfiltered = (await f.locator('.exhead .exn').textContent()) || '';
+ok('with nothing filtered it is a plain count', !/ of /.test(unfiltered), JSON.stringify(unfiltered));
+await f.locator('#ownerBtn').click();
+await page.waitForTimeout(600);
+await f.locator('#ownerList input[data-ownerv]').first().check();
+await page.waitForTimeout(900);
+await f.locator('#ownerBtn').click();
+await page.waitForTimeout(600);
+const filtered = (await f.locator('.exhead .exn').textContent()) || '';
+console.log(`   header now: ${JSON.stringify(filtered.replace(/\s+/g, ' ').trim())}`);
+ok('with one on it says how many are hidden', / of \d+/.test(filtered), JSON.stringify(filtered));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });

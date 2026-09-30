@@ -607,6 +607,41 @@ Set `MAIL_URL`, `MAIL_KEY`, `MAIL_FROM`, `MAIL_TO` (Resend's shape, which most
 providers accept). With them unset it logs the digest and sends nothing, which
 is also what every test does — nothing here can email anybody by accident.
 
+## 3bb · "120 allotted" — a synced-but-short copy served as the whole account
+
+**The worst bug of the session, and it reached Ayush.** The day the first real
+sync ran, the console went from **17,925 allotted to 120**.
+
+`/companies` decides between Kylas and the Airtable copy on one question: *has
+the sync ever run?* That was written to stop a base nobody had synced — which
+still holds a handful of rows, because the console writes a company on the
+first save there — being served as the whole account. It does stop that. It
+does not stop the case that actually happened: the sync ran, wrote what one
+Worker invocation could of 17,925 companies, recorded the run, and from then on
+the console served the fraction. The code even said so in the log — `mirror is
+17,805 SHORT of Kylas' count` — and served it anyway.
+
+The sync records what Kylas reported the account holds, so the comparison is
+free. Since 2026-09-30 the copy is served only when it is **both** within
+`MIRROR_ENOUGH` (0.9) of that total **and** short by no more than
+`MIRROR_SHORT_BY` (25) rows. Both tests have to fail before the copy is
+refused, because a fraction alone misjudges the small end: eight of nine is 89%
+and plainly the same account a moment behind, while 120 of 17,925 is 0.7% and
+plainly is not. Below the mark the list comes from Kylas exactly as it did
+before the first sync, KPIs joined on as always.
+
+**And the hourly contacts-only sync was erasing the number the check needs.**
+`recordRun` wrote `kylas.reportedTotal: null` on every contacts-only run,
+because that run does no company search — so the guard would have been
+disabled within an hour of each nightly run. The company half of the record is
+carried forward now.
+
+`test-worker` §11 covers both directions. It must use cold-worker ids nothing
+else in the file uses: `coldWorker` memoises per query string and
+`createHandlers` memoises per module, so a reused number gets a module another
+section has already warmed — including the five-minute sync-state cache, which
+is the one thing the section is about.
+
 ## 3c · Why the dashboard was a day behind
 
 The ladder reads Airtable (through the D1 copy), and work done **straight in

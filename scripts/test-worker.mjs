@@ -719,6 +719,89 @@ await fire(MAINT, { ...ENV, ...CRONS, CRON_MAINTAIN: MAINT });
 console.log(`   worst request: ${worst.path} at ${worst.n}; one maintenance run: ${(db.queries() - q0m) + (outside - o0m)}`);
 globalThis.fetch = realFetch;
 
+/* ── 11 · a base that IS synced but holds a fraction of the account ────
+   THE ONE THAT REACHED AYUSH. "Has the sync ever run" was the whole test, so
+   the first real run — which writes what a Worker invocation can and stops —
+   flipped /companies from Kylas' 17,925 to the 120 rows the copy had managed,
+   and the console called those 120 "allotted". The copy already knew it was
+   short; it said so in the log and served them anyway. */
+console.log('\n11. a copy that is short of the account is not the account');
+{
+  /* A sync record that says Kylas holds far more than the copy does. Upserted
+     on Key, the way the sync writes it, so this works whether or not §7 has
+     already left one. */
+  const SM = 'http://127.0.0.1:9901/v0/appMOCK/Schema%20Migrations';
+  const AT_H = { Authorization: 'Bearer x', 'content-type': 'application/json' };
+  /* The mock rate-limits at five a second like the real thing, and this runs
+     straight after a section that has been writing — so wait it out rather
+     than reading a 429 as an answer. */
+  const at429 = async (fn) => {
+    for (let i = 0; i < 12; i++) {
+      const r = await fn();
+      if (r.status !== 429) return r;
+      await sleep(400);
+    }
+    throw new Error('mock airtable kept rate limiting');
+  };
+  /* Written by DELETING every last-sync row and posting one, rather than
+     upserting: readSyncState takes the FIRST match, and after §7's real sync
+     there can be more than one — an upsert that lands on the second is a note
+     nothing reads. */
+  const putNote = async (note) => {
+    const rows = (await (await at429(() => fetch(SM + '?pageSize=100', { headers: AT_H }))).json()).records || [];
+    /* Airtable deletes by query string, not by path — records[]=rec… */
+    const ids = rows.filter((x) => x.fields?.Key === 'last-sync').map((x) => x.id);
+    if (ids.length)
+      await at429(() => fetch(`${SM}?${ids.map((i) => `records[]=${i}`).join('&')}`,
+        { method: 'DELETE', headers: AT_H }));
+    return at429(() => fetch(SM, { method: 'POST', headers: AT_H, body: JSON.stringify({
+      typecast: true,
+      records: [{ fields: { Key: 'last-sync', 'Applied At': new Date().toISOString(),
+                            Note: JSON.stringify(note) } }] }) }));
+  };
+  const copyHolds = (await (await at429(() => fetch('http://127.0.0.1:9901/v0/appMOCK/Companies?pageSize=100',
+    { headers: AT_H }))).json()).records?.length || 0;
+  /* THE SYNC RECORD IS READ THROUGH shared(), WHICH KEEPS IT IN THE STORE.
+     §7's real sync left one there, and sweeping the key by name proved
+     unreliable — best-effort keys() is documented as such in store.mjs. So
+     this section gets a store of its own: everything it asks about lives in
+     Airtable, and a fresh store simply means nothing is remembered from
+     before. The journal and the queue are not involved here. */
+  const freshEnv = { ...ENV, DB: fakeD1() };
+  await putNote({ at: new Date().toISOString(), companies: { seen: copyHolds, written: copyHolds },
+                  kylas: { reportedTotal: 17925, short: 17925 - copyHolds } });
+
+  /* IDs NOT USED ANYWHERE ELSE IN THIS FILE. coldWorker memoises per query
+     string and createHandlers memoises per module, so reusing a number gets a
+     module another section has already warmed — including its five-minute
+     sync-state cache, which is the one thing this section is about. An hour
+     went into that. */
+  const r = await (await coldWorker(911)).fetch(
+    new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
+    freshEnv, { waitUntil() {} });
+  const b = await r.json();
+  check('a copy holding a fraction of the account is NOT served as the account',
+        b.source !== 'airtable',
+        `source=${b.source} companies=${b.companies?.length} reported=${b.reportedTotal}`);
+
+  /* ...and a copy that is merely a little behind still is, or every read goes
+     back to Kylas over three rows. Short by a handful, not by thousands —
+     which is the second half of the rule: the fraction AND the absolute gap
+     both have to be bad. */
+  await putNote({ at: new Date().toISOString(), companies: { seen: copyHolds, written: copyHolds },
+                  kylas: { reportedTotal: copyHolds + 3, short: 3 } });
+  const r2 = await (await coldWorker(912)).fetch(
+    new Request('https://bd.enout.website/companies?owner=all', { headers: { Origin: ORIGIN } }),
+    { ...ENV, DB: fakeD1() }, { waitUntil() {} });
+  const b2 = await r2.json();
+  check('...while one that is a few rows behind still is',
+        b2.source === 'airtable', `source=${b2.source} companies=${b2.companies?.length}`);
+  /* LAST ON PURPOSE. It rewrites the sync record and spends its share of the
+     mock's five-a-second, and both leaked into whatever followed it — one
+     section read /__writes and took a 429 for an answer. */
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

@@ -46,7 +46,7 @@ import { STAGE_RUNG } from "./stages.mjs";
    reading process.env at module scope is what welds code to one runtime. */
 export async function run({ env = {}, log = () => {}, apply = false, full = false, limit = 0,
                             since = "", only = "" } = {}) {
-  const APPLY = apply, FULL = full, LIMIT = Number(limit || 0);
+  const APPLY = apply, FULL = full, LIMIT = Number(limit || 0), ONLY = String(only || "");
   const KEY = env.KYLAS_KEY;
     const PAT = env.AIRTABLE_PAT;
     const BASE = env.AIRTABLE_BASE;
@@ -329,17 +329,35 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
      passes it to the console. */
   async function recordRun(co, ct) {
     const search = kylas.lastCompanySearch?.() || {};
+    /* A CONTACTS-ONLY RUN MUST NOT ERASE WHAT THE COMPANY RUN LEARNED.
+       The hourly sync skips the company crawl, so `search` is empty and co is
+       zeroes — and writing those over the record replaces Kylas' reported
+       total with null. /companies compares the copy's size against that total
+       to decide whether the copy IS the account, so erasing it hourly disabled
+       that check within an hour of every nightly run. Carried forward instead,
+       with the run's own timestamp. */
+    let prevKylas = null, prevCompanies = null;
+    if (ONLY === "contacts") {
+      try {
+        const held = await at.find("Schema Migrations", `{Key} = 'last-sync'`);
+        const note = held ? JSON.parse(held.fields?.Note || "{}") : null;
+        prevKylas = note?.kylas || null;
+        prevCompanies = note?.companies || null;
+      } catch { /* no record yet, or unreadable: write what this run knows */ }
+    }
     const note = {
       at: new Date().toISOString(),
-      companies: { seen: co.seen, written: co.written },
+      companies: ONLY === "contacts" && prevCompanies
+        ? { ...prevCompanies, skipped: "contacts-only run" }
+        : { seen: co.seen, written: co.written },
       contacts: { seen: ct.seen, written: ct.written, moves: ct.moved },
-      kylas: {
+      kylas: ONLY === "contacts" && prevKylas ? prevKylas : {
         reportedTotal: search.reportedTotal ?? null,
         served: search.total ?? null,
         short: search.short || 0,
         truncated: !!search.truncated,
       },
-      full: FULL, limit: LIMIT || null,
+      full: FULL, limit: LIMIT || null, only: ONLY || null,
     };
     if (!APPLY) { log(`\nwould record: ${JSON.stringify(note.kylas)}`); return; }
     try {
@@ -364,7 +382,7 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
        at 02:00. A new company still waits for the nightly full run, which is
        the right trade — a company that appeared today is rarely the thing
        moving the ladder today. */
-    const co = only === "contacts"
+    const co = ONLY === "contacts"
       ? (log("\ncompanies — skipped (contacts-only run)"), { seen: 0, written: 0 })
       : await syncCompanies();
     const ct = await syncContacts();

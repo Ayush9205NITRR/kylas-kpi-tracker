@@ -3059,7 +3059,12 @@
       <div class="card explorer">
         <div class="exhead">
           <h2>${esc(ACC.stages.size === 1 ? stageName([...ACC.stages][0]) : "All accounts")}</h2>
-          <span class="exn tnum">${rows.length} ${rows.length === 1 ? "company" : "companies"}</span>
+          ${/* HOW MANY ARE BEING HIDDEN, not just how many are left. "22
+               companies" under a heading that says All accounts reads as "you
+               have 22" — and the reason it is 22 is a filter three controls
+               away. Say the whole fraction whenever one is in play. */ ""}
+          <span class="exn tnum">${rows.length} ${rows.length === 1 ? "company" : "companies"}${
+            any && all.length > rows.length ? `<em class="exof"> of ${all.length}</em>` : ""}</span>
           ${any ? `<button class="gbtn sm" id="accClear" type="button">Clear filters</button>` : ""}
           <button class="gbtn sm" id="accLink" type="button"
             title="Copy a link that opens this list with these filters">Copy link</button>

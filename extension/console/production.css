@@ -196,6 +196,10 @@ body.framed .ovOnly{display:inline-block}
 /* How old the Kylas side of the ladder is. Neutral while it is fresh; amber —
    the flag colour, the only thing amber marks — once an hourly job has plainly
    missed a beat. */
+/* "22 of 120" — the part that says something is being hidden, quieter than
+   the count itself but on the same line, because a fraction split across two
+   places is not a fraction. */
+.exof{font-style:normal;color:var(--text3);font-weight:var(--w-med)}
 .vsync{font-size:var(--t-meta);color:var(--text3);padding:3px 8px;border-radius:var(--r);
   background:var(--panel3);white-space:nowrap}
 .vsync.old{color:var(--amber);background:var(--amberSoft)}
