@@ -171,6 +171,32 @@ const bucketCards = await f.locator('.bcol .bcard .bstage').count();
 ok('...while on Buckets it still says WHICH stage, which the column does not',
    bucketCards > 0, `${bucketCards} cards name their stage`);
 
+/* ── re-assigning the owner from the card ───────────────────────────────
+   The dropdown showed names and carried no ids, so picking a new owner
+   relabelled the record and the save sent the old ownerId. */
+console.log('\n4. re-assigning the owner');
+await page.evaluate(() => {
+  const host = document.querySelector('#enout-console-host');
+  host?.shadowRoot?.querySelector('iframe')?.contentWindow
+      ?.postMessage({ source: 'enout-host', type: 'company', kylasId: '1776620' }, '*');
+});
+await page.waitForTimeout(4000);
+for (let i = 0; i < 40; i++) {
+  if (await f.evaluate(() => Object.keys(OWNER_ID).length)) break;
+  await page.waitForTimeout(500);
+}
+const ids = await f.evaluate(() => JSON.parse(JSON.stringify(OWNER_ID)));
+ok('the owner names carry their Kylas ids', Object.keys(ids).length >= 1, JSON.stringify(ids));
+const was = await f.locator('#f-ow').inputValue();
+const pick = Object.keys(ids).find((o) => o !== was);
+if (pick) {
+  await f.locator('#f-ow').selectOption(pick);
+  await page.waitForTimeout(300);
+  const got = await f.evaluate(() => ({ owner: rec().owner, ownerId: rec().ownerId }));
+  ok('picking an owner sets the name', got.owner === pick, JSON.stringify(got));
+  ok('...and the id the save reassigns by', got.ownerId === String(ids[pick]), JSON.stringify(got));
+} else ok('an owner to switch to', false, `only ${JSON.stringify(Object.keys(ids))}`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nPAGE ERRORS:'); [...new Set(errors)].slice(0, 8).forEach((e) => console.log('  ! ' + e)); }
 await page.screenshot({ path: process.env.SHOT || '/tmp/claude-0/ui-board.png' });

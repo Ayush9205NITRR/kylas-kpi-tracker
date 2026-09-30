@@ -180,8 +180,10 @@
        three names it was born with and a fetched owner reads as "Choose". */
     adoptPicklists(res.picklists);
     if (res.owners?.length) {
-      addOwners(res.owners.map((o) => o.name));
-      Store.setSetting("owners", OWNERS.filter(Boolean));
+      /* With their ids, so the Owner dropdown can actually re-assign. */
+      adoptOwners(res.owners);
+      /* Stored WITH their ids now — a name alone cannot re-assign anything. */
+      Store.setSetting("owners", res.owners.filter((o) => o?.name));
       if (!ME && API.state.user?.name) { ME = API.state.user.name; addOwners([ME]); }
     }
 

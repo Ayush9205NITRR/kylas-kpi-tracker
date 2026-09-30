@@ -168,5 +168,34 @@ const idOf = (v) => (Array.isArray(v) ? v.map(idOf) : v && typeof v === "object"
 is("a value already correct reads as unchanged",
   JSON.stringify(idOf([{ id: 2880426 }])), JSON.stringify([2880426]));
 
+/* ── re-assigning the owner, and ONLY on the contact ────────────────────
+   Ayush, 2026-09-30: re-assigning a COMPANY in Kylas drags its contacts along
+   and they land on Enout Super Admin. The console must move one contact and
+   nothing else — which it does by never writing a company at all — and the
+   card's dropdown has to carry the owner's ID, not just the name it shows.
+   It carried only the name until now, so picking a new owner relabelled the
+   record and sent the OLD ownerId: re-assignment looked like it worked and
+   did nothing. */
+console.log("\n10. the owner moves when the card says so, and not otherwise");
+is("a new owner on the card is the one written",
+  toKylasContact({ ...CARD, ownerId: "74726" }, { remarks: "x", base: BASE }).ownerId, 74726);
+/* No opinion on the card (the queue does not always carry one) must leave the
+   contact where it is, not blank it — the payload replaces the record. */
+is("no owner on the card keeps the one Kylas has",
+  toKylasContact(CARD, { remarks: "x", base: BASE }).ownerId, 74725);
+is("...even when Kylas sends it as an object",
+  toKylasContact(CARD, { remarks: "x", base: { ...BASE, ownerId: { id: 74725, name: "X" } } }).ownerId, 74725);
+/* A contact being CREATED has no base to fall back on. */
+ok("a new contact with no owner sends none",
+  !("ownerId" in toKylasContact({ ...CARD, kid: "", ownerId: "" }, { remarks: "x" })));
+/* THE THING THAT MUST NEVER HAPPEN. No payload this file builds is a company
+   payload, and nothing in the tree calls updateCompany — asserted here
+   because the day it stops being true is the day contacts start moving on
+   their own. */
+const { readFileSync } = await import("node:fs");
+const callers = ["scripts/handlers.mjs", "scripts/push-kylas.mjs", "scripts/kylas.mjs"]
+  .filter((f) => /updateCompany\s*\(/.test(readFileSync(f, "utf8").replace(/updateCompany:.*/g, "")));
+is("nothing calls updateCompany", callers, []);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

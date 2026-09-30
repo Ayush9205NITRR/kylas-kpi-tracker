@@ -293,6 +293,10 @@ body.colresize{cursor:col-resize;user-select:none}
 .rowFlex{display:flex;gap:12px;flex-wrap:wrap}
 .f{margin-bottom:14px}.f:last-child{margin-bottom:0}
 label{display:block;font-size:var(--t-meta);color:var(--text2);margin-bottom:5px;font-weight:var(--w-med)}
+/* A field-level refusal, in the rose that marks required — the one other
+   place this colour is allowed. Shown only when the owner picked has no Kylas
+   id, because then the save would silently keep the previous owner. */
+.fwarn{margin:6px 0 0;font-size:var(--t-meta);color:var(--rose);line-height:1.45}
 .req{color:var(--rose)}
 .in,select.in,textarea.in{width:100%;border:1px solid var(--line2);background:var(--panel);
   border-radius:6px;padding:7px 10px;font-size:var(--t-body);min-height:34px;font-weight:var(--w-body)}

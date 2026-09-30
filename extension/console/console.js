@@ -27,10 +27,33 @@ const METRICS=[
    writes a value the account does not use. */
 let SOURCES=[""];
 let OWNERS=[""];
+/* NAME → KYLAS OWNER ID. The dropdown offers names because that is what a
+   person recognises, but Kylas reassigns by id — and the card carried only the
+   name, so picking a new owner changed the label and sent the OLD ownerId with
+   the save. Re-assignment looked like it worked and did nothing.
+
+   An owner whose id is not known is worse than useless here: sending no
+   ownerId leaves the contact where it was (the payload replaces the record and
+   the carry-over puts the old one back), so the UI has to refuse rather than
+   pretend. ownerIdFor returns "" and the card says so. */
+const OWNER_ID = Object.create(null);
 function addOwners(names){
   for(const n of names){ if(n&&!OWNERS.includes(n))OWNERS.push(n); }
   OWNERS=[OWNERS[0],...OWNERS.slice(1).sort((a,b)=>a.localeCompare(b))];
 }
+/* The list as the server sends it: [{ id, name }]. */
+function adoptOwners(list){
+  /* Two shapes: [{ id, name }] from the server, and the bare names an older
+     build wrote into storage. A name with no id still populates the dropdown;
+     it just cannot be re-assigned TO until the server's list arrives. */
+  const names=[];
+  for(const o of list||[]){
+    if(typeof o==="string"){ if(o)names.push(o); continue; }
+    if(o?.name){ names.push(o.name); if(o.id!=null)OWNER_ID[o.name]=String(o.id); }
+  }
+  addOwners(names);
+}
+const ownerIdFor=(name)=>OWNER_ID[name]||"";
 function adoptPicklists(picklists){
   if(!picklists)return;
   const take=(...names)=>{
@@ -933,7 +956,29 @@ function renderBasic(){
     SOURCES.filter(Boolean).length||a.source
       ? select("f-src",SOURCES,a.source,v=>a.source=v)
       : el("div","locked",`<b>waiting</b><span>Source of Data comes from Kylas — connect the proxy to load it.</span>`)));
-  grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,v=>a.owner=v)));
+  /* RE-ASSIGNING THE OWNER, and only on this contact.
+     Ayush, 2026-09-30: re-assigning a COMPANY in Kylas drags its contacts with
+     it and they land on Enout Super Admin. Nothing here writes a company —
+     updateCompany exists in the client and no code path calls it — so this
+     moves the one contact and nothing else.
+     The id travels with the name, or the save would carry the old one. */
+  grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,(v)=>{
+    a.owner=v;
+    a.ownerId=ownerIdFor(v);
+    /* Picked a name this console has no id for: say it here rather than let
+       the save quietly keep the previous owner. */
+    const warn=document.getElementById("f-ow-warn");
+    if(warn)warn.hidden=!(v&&!a.ownerId);
+    touch("record");
+  })));
+  {
+    const w=el("p","fwarn","This owner is not in the list Kylas sent, so the contact cannot be re-assigned to them. Refresh, or pick another.");
+    /* Hidden until somebody PICKS an owner we cannot resolve. On first paint
+       the ids may not have arrived yet, and a warning about the owner the
+       contact already has would be a false alarm on every open. */
+    w.id="f-ow-warn";w.hidden=true;
+    grid.lastChild.appendChild(w);
+  }
   const whoCard=group("Who you're calling",[grid]);
 
   /* Stage & follow-up */
@@ -1875,7 +1920,7 @@ async function syncToKylas(a,call){
 
 async function boot(){
   ME=(await Store.getSetting("me"))||"";
-  addOwners((await Store.getSetting("owners"))||[]);
+  adoptOwners((await Store.getSetting("owners"))||[]);
   const saved=await Store.loadContacts();
   if(saved&&saved.length)DATA=saved;
   const log=await Store.loadLog();
