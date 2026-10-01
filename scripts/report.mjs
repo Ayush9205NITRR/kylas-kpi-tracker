@@ -167,8 +167,14 @@ export const METRICS = [
      period" and the rest as "what arrived this period"; the percentage between
      rung 2 and rung 3 is not a funnel rate and the screen should not be read
      as though it were. */
-  { key: "worked", label: "Companies worked", kind: "touch" },
-  { key: "picked", label: "Companies picked", kind: "touch" },
+  /* "Worked" and "Picked", matching views.js RUNG. They said "Companies
+     worked" / "Companies picked", and the dashboard also had a CHIP reading
+     "136 companies worked" that counts something else entirely — every company
+     in the KPI store, all time, rather than the ones touched in the period.
+     One screen, one phrase, two numbers, and it read as a bug when both were
+     right. Every rung heading already says it counts companies. */
+  { key: "worked", label: "Worked", kind: "touch" },
+  { key: "picked", label: "Picked", kind: "touch" },
   /* FIRST — one per company, the period it first reached that rung. */
   { key: "right", label: "Right POC", kind: "first" },
   { key: "discovery", label: "Discovery", kind: "first" },

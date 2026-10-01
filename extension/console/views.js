@@ -45,6 +45,11 @@
      keys and chip labels, read at a glance a hundred times a day. */
   const RUNG_ORDER = ["reached", "right", "discovery", "booked", "done", "sql"];
   const RUNG = {
+    /* The ladder's bottom two. They are PER-PERIOD counts — companies touched,
+       and companies that got past a no-answer, inside the window on screen —
+       which is why they are not just "reached" under another name. */
+    worked:    { label: "Worked",     sub: "some activity this period" },
+    picked:    { label: "Picked",     sub: "got past a no-answer" },
     reached:   { label: "Reached",    sub: "at least one call logged" },
     right:     { label: "Right POC",  sub: "any of budget, timeline or pax" },
     discovery: { label: "Discovery",  sub: "one complete row" },
@@ -387,9 +392,16 @@
     const n = cos.filter((c) => c.from === "airtable").length;
     /* The dashboard counts what has been WORKED, which is what Airtable holds.
        Saying "9998 not saved yet" about companies nobody has opened is noise. */
+    /* NOT "worked". The ladder's first rung is called Worked and counts
+       companies touched IN THE PERIOD ON SCREEN; this chip counts every
+       company the KPI store holds, ever. Two different questions, and this
+       chip used the other one's word for it — so the screen could read
+       "136 companies worked" beside "Worked: 0" and look broken when both
+       numbers were right. Ayush spotted it, and it is the same fault as the
+       rung names: one phrase, two meanings. */
     if (opts?.storeIsPopulation && n)
-      return `<span class="vsrc ok" title="These are the companies somebody has saved from the console. Kylas' allotted list answers a different question — see the Companies view.">${
-        n} compan${n === 1 ? "y" : "ies"} worked · from Airtable</span>`;
+      return `<span class="vsrc ok" title="Every company anybody has saved from the console, all time. The ladder's rungs count only what happened inside the period on screen, which is why its first row can be 0 while this is not.">${
+        n} compan${n === 1 ? "y" : "ies"} saved, all time · from Airtable</span>`;
     if (CACHE.kpiSource === "airtable" && n === cos.length && cos.length)
       return `<span class="vsrc ok" title="Right POC, discovery and the three milestones are Airtable formulas — see scripts/schema.mjs">KPIs from Airtable</span>`;
     if (CACHE.kpiSource === "airtable" && n === 0 && cos.length) {
@@ -1129,15 +1141,15 @@
 
      "Picked", not "Connected" — Ayush's word, and the better one. A call is
      picked up or it is not; "connected" reads like a line status. */
-  const RUNGS = [
-    { key: "worked",    name: "Companies worked" },
-    { key: "picked",    name: "Companies picked" },
-    { key: "right",     name: "Right POC connected" },
-    { key: "discovery", name: "Successful discovery call" },
-    { key: "booked",    name: "SQL meeting booked" },
-    { key: "done",      name: "SQL meeting done" },
-    { key: "sql",       name: "SQL" },
-  ];
+  /* THE FIFTH LIST. RUNG was introduced to be the only place a rung is named,
+     and FUNNEL, BUCKETS, STEPS and REPORT_METRICS were all rebuilt from it —
+     but this one was missed, so the ladder, which is the most looked-at table
+     in the product, kept saying "Right POC connected" and "SQL meeting booked"
+     while everything else said "Right POC" and "SQL booked". Built from RUNG
+     now, like the rest. The ladder's own order, because it opens on worked and
+     picked rather than on reached. */
+  const LADDER_ORDER = ["worked", "picked", "right", "discovery", "booked", "done", "sql"];
+  const RUNGS = LADDER_ORDER.map((key) => ({ key, name: rung(key) }));
   const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "—";
   const initials = (n) => {
     const p = String(n || "?").trim().split(/\s+/);
