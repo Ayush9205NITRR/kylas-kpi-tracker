@@ -6,6 +6,66 @@ built, not after.
 
 ---
 
+## 0. What each rung counts, in one table
+
+Asked for by Ayush on 2026-10-01 and put first because it is the question
+everyone actually arrives with. Read off the code, not from memory: the
+definitions live in `scripts/report.mjs` (`METRICS`, `touchEvents`,
+`firstArrivals`), `extension/console/stages.js` (`NOT_CONNECTED`, `MILESTONE`)
+and `extension/console/views.js` (`RUNG`). The sections below this one give the
+history and the reasoning; this is the summary that must stay true.
+
+**The split that explains almost every "wrong" number: rungs 1–2 are
+PER-PERIOD activity. Rungs 3–7 are ONCE-EVER arrivals.**
+
+| # | Rung | Counted when | How often |
+|---|---|---|---|
+| 1 | **Worked** | the company got **any stage transition** in the period — including a save that changed no stage | once per company **per period** |
+| 2 | **Picked** | a transition landed on a stage that is **not** a no-answer | once per company **per period** |
+| 3 | **Right POC** | any contact has **budget OR timeline OR pax** filled on any row, past or current | once per company, **ever** |
+| 4 | **Discovery** | **one single row** carries **budget AND timeline AND pax** | once per company, **ever** |
+| 5 | **SQL booked** | a transition to **rung ≥ 23** (`ACTIVE_REQUIREMENT_CALL_BOOKED` and above) | once per company, **ever** |
+| 6 | **SQL done** | **rung ≥ 25** (`ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS`) | once per company, **ever** |
+| 7 | **SQL** | **rung ≥ 26** (`SQL_SALES_QUALIFIED_LEAD`) | once per company, **ever** |
+
+**"Not a no-answer"** for rung 2 means the stage is none of
+`YET_TO_BE_MINED`, `CNC_COULD_NOT_CONNECT`, `CNC_COULD_NOT_CONNECT_2`,
+`CNC_COULD_NOT_CONNECT_3`, `FOLLOWUP_CNC`. **`CONNECT_LATER` counts as
+Picked** — somebody answered and asked to be called back.
+
+**Reached** is not a ladder rung. It belongs to the Accounts view and the
+stacked bar, and means **at least one call logged, ever**. In the bar it is the
+bucket for "reached and got no further" (§3).
+
+### Three consequences that make correct numbers look wrong
+
+**Worked and Picked repeat; the rest do not.** An associate working the same
+four accounts today and tomorrow shows 4 on both days. If one of them reaches
+Right POC today it is counted once, and never again in any later period. This
+was deliberate: first-arrival counting made Anjali's four worked accounts read
+as one (§3a).
+
+**The step conversion from Picked → Right POC is NOT a funnel rate.** It
+divides a per-period number by a once-ever number. Read rungs 1–2 as *what we
+did this period* and rungs 3–7 as *what arrived this period*. When a rung
+exceeds the one above it the screen marks it **carried in**; that is this, not
+an error.
+
+**Rungs 5–7 are floors, and `KPI Rank` only ever rises**, so "ever reached"
+and "is at or past" are the same question. A company at SQL is counted at
+booked and done as well. The three are nested, not exclusive.
+
+### On the same screen, and not rungs
+
+- **Calls logged / Calls picked** count **calls**, one per dial. Mixing them
+  with rungs is what once let the ladder show 0 connected above 2 Right POC.
+- The header chip counts **every company in the KPI store, all time** — which
+  is why it can read "136 companies saved" while Worked reads 0. It used to say
+  "136 companies worked", one phrase for two different numbers, and read as a
+  bug when both were right.
+
+---
+
 ## 1. Airtable schema
 
 Five tables. Two are append-only logs; three are current-state.

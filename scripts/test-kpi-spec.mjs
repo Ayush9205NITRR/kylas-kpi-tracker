@@ -1,0 +1,109 @@
+/* THE SPEC HAS TO STAY TRUE.
+ *
+ *   node scripts/test-kpi-spec.mjs
+ *
+ * docs/kpi-spec.md §0 is the one table the team reads to settle "what counts
+ * as worked". A spec that drifts from the code is worse than no spec: it is
+ * read with confidence and it is wrong. So every claim §0 makes is asserted
+ * here against the source it came from — the floors, the no-answer list, which
+ * rungs repeat per period and which are once-ever, and what Right POC and
+ * Discovery actually require.
+ *
+ * If this fails, ONE of the two is wrong. Decide which, then fix that one —
+ * do not edit the test to agree with whichever you looked at last.
+ */
+import { readFileSync } from "node:fs";
+
+const stages = readFileSync("extension/console/stages.js", "utf8");
+const report = readFileSync("scripts/report.mjs", "utf8");
+const views = readFileSync("extension/console/views.js", "utf8");
+const spec = readFileSync("docs/kpi-spec.md", "utf8");
+
+let pass = 0, fail = 0;
+const ok = (what, cond, detail = "") => {
+  if (cond) pass++; else fail++;
+  console.log(`  ${cond ? "PASS" : "FAIL"}  ${what}${cond || !detail ? "" : ` — ${detail}`}`);
+};
+
+/* ── the no-answer list ─────────────────────────────────────────────── */
+console.log("\n1. what counts as a no-answer, for Picked");
+const NOT_CONNECTED = JSON.parse(stages.match(/const NOT_CONNECTED = (\[[^\]]*\])/)[1]);
+const EXPECTED = ["YET_TO_BE_MINED", "CNC_COULD_NOT_CONNECT", "CNC_COULD_NOT_CONNECT_2",
+                  "CNC_COULD_NOT_CONNECT_3", "FOLLOWUP_CNC"];
+ok("the code lists exactly the five the spec names",
+   JSON.stringify(NOT_CONNECTED) === JSON.stringify(EXPECTED), JSON.stringify(NOT_CONNECTED));
+for (const s of EXPECTED) ok(`  the spec names ${s}`, spec.includes(s));
+/* The one everybody gets wrong: somebody answered and asked to be rung back,
+   so it is a connect. */
+ok("CONNECT_LATER is NOT a no-answer, so it counts as Picked",
+   !NOT_CONNECTED.includes("CONNECT_LATER"));
+ok("...and the spec says so in as many words",
+   /CONNECT_LATER.*counts as\s*\*?\*?Picked/s.test(spec));
+
+/* ── the SQL floors ─────────────────────────────────────────────────── */
+console.log("\n2. the three SQL floors");
+const floors = {};
+for (const [, k, f] of stages.matchAll(/(\w+):\s*\{ floor: (\d+)/g)) floors[k] = Number(f);
+for (const [name, key, want] of [
+  ["SQL booked", "sqlMeetingBooked", 23],
+  ["SQL done", "sqlMeetingDone", 25],
+  ["SQL", "sql", 26],
+]) {
+  ok(`${name} is rung >= ${want} in the code`, floors[key] === want, String(floors[key]));
+  ok(`...and the spec says >= ${want}`, new RegExp(`rung ≥ ${want}`).test(spec));
+}
+
+/* ── per-period vs once-ever ────────────────────────────────────────── */
+console.log("\n3. which rungs repeat, and which arrive once");
+const kind = {};
+for (const [, k, , kd] of report.matchAll(/\{ key: "(\w+)", label: "([^"]*)", kind: "(\w+)" \}/g)) kind[k] = kd;
+/* THE SPLIT THAT EXPLAINS ALMOST EVERY "WRONG" NUMBER. */
+ok("Worked is a per-period touch", kind.worked === "touch", kind.worked);
+ok("Picked is a per-period touch", kind.picked === "touch", kind.picked);
+for (const k of ["right", "discovery", "booked", "done", "sql"])
+  ok(`${k} is a once-ever first arrival`, kind[k] === "first", kind[k]);
+ok("Calls logged and Calls picked are flows, not rungs",
+   kind.calls === "flow" && kind.connects === "flow");
+ok("the spec draws the per-period / once-ever line",
+   /PER-PERIOD activity.*ONCE-EVER arrivals/s.test(spec));
+
+/* ── what the two data rungs require ────────────────────────────────── */
+console.log("\n4. Right POC and Discovery");
+ok("Right POC is budget OR timeline OR pax",
+   /filled\(r\.budget\) \|\| filled\(r\.timeline\) \|\| filled\(r\.pax\)/.test(views));
+ok("Discovery is budget AND timeline AND pax, on ONE row",
+   /filled\(r\.budget\) && filled\(r\.timeline\) && filled\(r\.pax\)/.test(views));
+ok("the spec says OR for Right POC", /budget \*\*OR\*\* timeline|\*\*budget OR timeline OR pax\*\*/.test(spec));
+ok("the spec says AND for Discovery, on one row",
+   /\*\*budget AND timeline AND pax\*\*/.test(spec) && /one single row/.test(spec));
+
+/* ── how worked and picked are emitted ──────────────────────────────── */
+console.log("\n5. what fires each of the bottom two");
+ok("Worked fires on ANY transition", /out\.push\(\{ metric: "worked"/.test(report));
+ok("Picked fires only when the stage landed on is not a no-answer",
+   /if \(!NOT_CONNECTED\.includes\(t\.to\)\)/.test(report));
+
+/* ── Reached is not a ladder rung ───────────────────────────────────── */
+console.log("\n6. Reached");
+ok("Reached means at least one call logged",
+   /reached:\s*\{ label: "Reached",\s*sub: "at least one call logged"/.test(views));
+ok("the spec says it is not a ladder rung",
+   /\*\*Reached\*\* is not a ladder rung/.test(spec));
+
+/* ── one name per rung, still ───────────────────────────────────────── */
+console.log("\n7. no rung is named two things");
+const RUNG = {};
+for (const [, k, v] of views.match(/const RUNG = \{[\s\S]*?\n  \};/)[0]
+  .matchAll(/(\w+):\s*\{ label: "([^"]*)"/g)) RUNG[k] = v;
+const byLabel = {};
+for (const [k, v] of Object.entries(RUNG)) (byLabel[v] = byLabel[v] || []).push(k);
+const dupes = Object.entries(byLabel).filter(([, ks]) => ks.length > 1);
+ok("no two rungs share a label", dupes.length === 0, JSON.stringify(dupes));
+/* The ladder, the funnel, the buckets and the email all read from RUNG. The
+   ladder's own list was missed the first time and kept the long old names. */
+ok("the ladder builds its rows from RUNG", /const RUNGS = LADDER_ORDER\.map/.test(views));
+ok("the report's labels match RUNG's",
+   /{ key: "worked", label: "Worked"/.test(report) && /{ key: "booked", label: "SQL booked"/.test(report));
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

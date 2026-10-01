@@ -107,6 +107,9 @@ node scripts/test-days.mjs               # 43 · where one day ends. Every case 
                                          #      the old code got wrong
 node scripts/test-buckets.mjs            # 38 · the six call buckets, and the stages that
                                          #      are easy to file by rung and should not be
+node scripts/test-kpi-spec.mjs           # 34 · docs/kpi-spec.md §0 — the table the team reads
+                                         #      to settle "what counts as worked" — asserted
+                                         #      against the code it describes, both ways
 node scripts/test-kpi-data.mjs           # 37 · the values check: a dead rollup, drift, and a
                                          #      formula reading the wrong field
 node scripts/test-offsite.mjs            # 45 · Offsite Timeline out of event-row text, and the
