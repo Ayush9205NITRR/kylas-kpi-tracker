@@ -105,5 +105,48 @@ ok("the ladder builds its rows from RUNG", /const RUNGS = LADDER_ORDER\.map/.tes
 ok("the report's labels match RUNG's",
    /{ key: "worked", label: "Worked"/.test(report) && /{ key: "booked", label: "SQL booked"/.test(report));
 
+/* ── the stages themselves ──────────────────────────────────────────── */
+/* Ayush, 2026-10-04: "check for pipeline stages, check also for all the
+   ambiguity which I asked — there should not be any alteration." These were
+   run by hand once; run by hand once is how the ladder kept its long names
+   for a week after they were supposedly fixed. */
+console.log("\n8. the pipeline stages");
+const label = {};
+for (const [, k, v] of stages.matchAll(/^  "?([A-Z0-9_–]+)"?:\s+"([^"]*)",$/gm)) label[k] = v;
+const byStageLabel = {};
+for (const [k, v] of Object.entries(label)) (byStageLabel[v] = byStageLabel[v] || []).push(k);
+const stageDupes = Object.entries(byStageLabel).filter(([, ks]) => ks.length > 1);
+ok(`${Object.keys(label).length} stages, no two sharing a display name`,
+   stageDupes.length === 0, JSON.stringify(stageDupes));
+
+const families = JSON.parse(stages.match(/const STAGE_FAMILIES = (\[.*?\]);/s)[1]);
+const homes = {};
+for (const f of families) for (const s of f.stages) (homes[s] = homes[s] || []).push(f.key);
+ok("no stage sits in two families",
+   Object.entries(homes).filter(([, k]) => k.length > 1).length === 0,
+   JSON.stringify(Object.entries(homes).filter(([, k]) => k.length > 1)));
+const famNames = families.map((f) => f.label);
+ok("no two families share a name", new Set(famNames).size === famNames.length, famNames.join(" | "));
+for (const s of Object.keys(homes))
+  ok(`  ${s} has a display name`, !!label[s]);
+
+console.log("\n9. the long names are gone, and stay gone");
+/* Each of these was a second name for a state that already had one. They were
+   removed on 2026-09-30, and the ladder's copy survived until 10-01 because
+   nothing asserted their absence. */
+for (const old of ["Right POC connected", "Successful discovery call",
+                   "SQL meeting booked", "SQL meeting done", "Reached only",
+                   "Companies worked", "Companies picked"])
+  ok(`"${old}" appears in no live label`,
+     !new RegExp(`name: "${old}"|label: "${old}"`).test(views + report));
+
+console.log("\n10. every derived list is built from RUNG, not written out again");
+for (const [what, re] of [
+  ["FUNNEL", /const FUNNEL = RUNG_ORDER\.map/],
+  ["BUCKETS", /const BUCKETS = \[\.\.\.RUNG_ORDER\]/],
+  ["STEPS", /const STEPS = RUNG_ORDER\.slice/],
+  ["RUNGS, the ladder's own", /const RUNGS = LADDER_ORDER\.map/],
+]) ok(`${what} is built from RUNG`, re.test(views));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

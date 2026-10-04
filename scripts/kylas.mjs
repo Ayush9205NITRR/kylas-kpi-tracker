@@ -2,6 +2,7 @@
    and the console's. Shared by the proxy and any script that needs it. */
 import { STAGE_ID } from "./stages.mjs";
 import { splitPhone, ISO_OF, checkEmail, splitName, e164 } from "./fields.mjs";
+import { nextCallFrom } from "./kylas-write-map.mjs";
 
 /* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK — and the
    fallback is written defensively because `process` does not exist in every
@@ -853,7 +854,13 @@ export function stageCode(v) {
   return CODE_BY_ID[s] || s;
 }
 
-export function toConsoleContact(c, { ownerName, company } = {}) {
+/* `writeMap` is the SAME resolved map the save uses (scripts/kylas-write-map.mjs).
+   Passing it in is what lets the read side find the call-back field, which has
+   no fixed key — it is discovered per account by label. Without it this mapper
+   has no way to know which custom field is the call-back, which is why it used
+   to return an empty one. Optional, so a caller that has not resolved the map
+   still gets every other field. */
+export function toConsoleContact(c, { ownerName, company, writeMap, tzMin = 330 } = {}) {
   const cf = c.customFieldValues || {};
   const companyId = pick(idOf(c.company), company?.id, "");
   const ownerId = pick(c.ownerId, "");
@@ -886,7 +893,16 @@ export function toConsoleContact(c, { ownerName, company } = {}) {
     stage: stageCode(pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)),
     stageLabel: lookupName(c, "cfPipelineStageBd", pick(cf.cfPipelineStageBd, c.cfPipelineStageBd)) || "",
     source: stageCode(pick(cf.cfSourceOfData, c.cfSourceOfData)),
-    nextCallDate: "", nextCallTime: "",
+    /* READ BACK OUT OF KYLAS, not left blank. These were hardcoded "" — the
+       console wrote the call-back to Kylas on every save and never read it
+       again, so a contact served from Kylas instead of the Airtable copy asked
+       the associate to set a promise they had already made. */
+    ...(() => {
+      const f = writeMap?.nextCall;
+      if (!f) return { nextCallDate: "", nextCallTime: "" };
+      const got = nextCallFrom(f, pick(cf[f.name], c[f.name]), tzMin);
+      return { nextCallDate: got.date, nextCallTime: got.time };
+    })(),
     remarks: pick(c.remarks, "") || "",
     offsiteTimeline: "",
     owner: pick(lookupName(c, "ownerId", ownerId), ownerName, c.ownerName, "") || "",

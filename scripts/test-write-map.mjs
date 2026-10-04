@@ -116,5 +116,49 @@ ok("both named", describeWriteMap(map).every((l) => /cf/.test(l)), describeWrite
 ok("and says so when there is nothing",
   describeWriteMap(none).every((l) => /no field on this account/.test(l)));
 
+/* ── READING IT BACK ───────────────────────────────────────────────────
+   Ayush, 2026-10-04: "next call date is getting wiped — if I set it, the next
+   time it does not pull up, rather asks me to assign it again."
+
+   It was never wiped. The save wrote it to Kylas on every save, and the
+   Kylas -> console mapper hardcoded `nextCallDate: ""`, so a contact served
+   from Kylas instead of the Airtable copy came back with no promise on it.
+   The data was there the whole time; nothing read it. */
+console.log("\n9. the call-back, read back out of Kylas");
+const { nextCallFrom } = await import("./kylas-write-map.mjs");
+const DT = { name: "cfNextCall", type: "DATETIME_PICKER" };
+const D = { name: "cfNextCall", type: "DATE_PICKER" };
+
+/* THE ROUND TRIP IS THE REAL TEST. 10:00 promised in Delhi is stored 04:30Z;
+   reading the UTC clock straight off would show 04:30 and move every call-back
+   five and a half hours earlier. */
+for (const [date, time] of [["2026-10-02", "16:00"], ["2026-10-02", "09:00"],
+                            ["2026-01-01", "00:30"], ["2026-12-31", "23:45"]]) {
+  const stored = nextCallValue(DT, date, time, 330);
+  is(`${date} ${time} survives the round trip`, nextCallFrom(DT, stored, 330), { date, time });
+}
+/* The midnight-crossing pair, which is where a wrong sign shows up. */
+is("00:30 IST is stored the previous day in UTC",
+  nextCallValue(DT, "2026-01-01", "00:30", 330), "2025-12-31T19:00:00.000Z");
+is("...and still reads back as 1 Jan",
+  nextCallFrom(DT, "2025-12-31T19:00:00.000Z", 330), { date: "2026-01-01", time: "00:30" });
+
+console.log("\n9b. a date-only field keeps the day it was given");
+is("the day round-trips", nextCallFrom(D, nextCallValue(D, "2026-10-02", "16:00", 330), 330),
+  { date: "2026-10-02", time: "" });
+/* Kylas can hand midnight UTC back for a day. Shifting THAT into IST would
+   move it to the next day, so a date-only field never gets the shift. */
+is("midnight UTC on a date-only field is not nudged into the next day",
+  nextCallFrom(D, "2026-10-02T00:00:00.000Z", 330), { date: "2026-10-02", time: "" });
+
+console.log("\n9c. nothing to read is not a crash");
+for (const [what, v] of [["empty", ""], ["null", null], ["undefined", undefined],
+                         ["nonsense", "not a date"], ["an object with no value", {}]])
+  is(`${what} reads as no call-back`, nextCallFrom(DT, v, 330), { date: "", time: "" });
+is("no field at all reads as no call-back", nextCallFrom(null, "2026-10-02", 330), { date: "2026-10-02", time: "" });
+/* Kylas wraps some values as {value} or {id}. */
+is("a wrapped value is unwrapped", nextCallFrom(D, { value: "2026-10-02" }, 330),
+  { date: "2026-10-02", time: "" });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

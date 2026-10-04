@@ -505,6 +505,19 @@ createServer(async (req, res) => {
   if (p === "/__refuse") { refuseName = url.searchParams.get("name") || ""; return json(res, 200, { refuseName }); }
   if (p === "/__hang") { hangCreate = url.searchParams.get("on") === "1"; return json(res, 200, { hangCreate }); }
   if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }
+  /* Set one custom field on a contact, so a test can arrange the state a save
+     or the nightly push would have left — a call-back sitting in Kylas — and
+     then read it back through the console's own path. Added for the bug where
+     the mapper returned a hardcoded empty call-back: every test passed because
+     none could put a value there to miss. */
+  if (p === "/__setcf") {
+    const at = CONTACTS.findIndex((c) => String(c.id) === url.searchParams.get("id"));
+    if (at < 0) return json(res, 404, { message: "no such contact" });
+    const key = url.searchParams.get("key"), value = url.searchParams.get("value");
+    CONTACTS[at] = { ...CONTACTS[at],
+      customFieldValues: { ...(CONTACTS[at].customFieldValues || {}), [key]: value } };
+    return json(res, 200, { id: CONTACTS[at].id, customFieldValues: CONTACTS[at].customFieldValues });
+  }
   /* POST /__company?id=&name=&owner= adds a company to the account, the way a
      BD adding one in Kylas would. There was no way to do that here, so
      anything that had to prove it NOTICES a new company — the conditional

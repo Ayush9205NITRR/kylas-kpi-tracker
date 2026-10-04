@@ -870,6 +870,44 @@ mock that reports success for a write it dropped is how a bulk operation ships
 needs a **cold worker** — `ADMINS` is read once when the module is built, so
 passing `ADMIN_EMAILS` to a warm one passes for the wrong reason).
 
+## 3f · The call-back that "got wiped" was never written to the screen
+
+Ayush, 2026-10-04: *"next call date is getting wiped — if I set it, the next
+time it does not pull up, rather asks me to assign it again."*
+
+Nothing was wiped. The save wrote the call-back into Kylas on **every** save —
+`cfNextCallDate`, resolved per account by label — and `toConsoleContact`, the
+Kylas → console mapper, returned a **hardcoded** `nextCallDate: ""`. A contact
+served from the Airtable copy carried its promise; the same contact served
+from **Kylas** arrived blank, and the associate was asked for a date they had
+already given. Write-only, for as long as the field has existed.
+
+The fix is `nextCallFrom()` in `kylas-write-map.mjs` — `nextCallValue()` read
+backwards, undoing the same timezone shift. 10:00 promised in Delhi is stored
+`04:30Z`; reading the UTC clock straight off would show every call-back five
+and a half hours early, and a date-only field must NOT be shifted at all or
+midnight UTC lands on the previous day. Both directions are round-tripped in
+`test-write-map` (44), including the midnight crossing.
+
+The mapper needs the resolved write map passed in, because the field has no
+fixed key — it is discovered per account by label. Both `/companies` and
+`/contact` now pass it, and a failure to resolve it costs the call-back and
+nothing else.
+
+**Why every test passed while this was broken.** None read a contact back
+through the Kylas path *with a call-back set* — there was no value to miss.
+`test-worker` §13 does, and it needs three things to be honest, each learned
+by getting it wrong: `READ_SOURCE=kylas` (the Airtable copy answers otherwise
+and the mapper under test is never reached), a **cold** worker to carry that
+env, and a **429 retry on the setup call** — the mock throttles the test's own
+arrange step, and the first run blamed the mapper for a field that had never
+been set. Verified by reverting the fix: `nextCallDate=""`, one failure.
+
+**The same shape is still open.** `offsiteTimeline: ""` is hardcoded in the
+same mapper (REQ-04). The company-level offsite read covers the console today,
+so this is not the same live fault — but it is the same class, and it is the
+next place to look if a quarter ever "disappears".
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current

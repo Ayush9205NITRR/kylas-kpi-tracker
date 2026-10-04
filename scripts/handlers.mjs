@@ -722,10 +722,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     }
 
     const out = [];
+    /* THE SAME MAP THE SAVE USES, so the read can find the call-back field.
+       It has no fixed key — it is discovered per account by label — so without
+       this the mapper cannot know which custom field holds the promise, and
+       it returned an empty one. Resolved once for the whole list, and a
+       failure to resolve it must not cost the list: everything else still
+       maps, exactly as it did before. */
+    const wmap = await writeMap().catch((e) => {
+      log(`! could not resolve the write map, so call-backs will read blank — ${e.message.slice(0, 80)}`);
+      return null;
+    });
     for (const c of raw) {
       const known = lookupName(c, "ownerId", c.ownerId);
       if (known && c.ownerId) owners.set(String(c.ownerId), known);
-      const mapped = toConsoleContact(c, { ownerName: known || (await ownerName(c.ownerId)), company });
+      const mapped = toConsoleContact(c, { ownerName: known || (await ownerName(c.ownerId)),
+                                           company, writeMap: wmap, tzMin: TZ_MIN });
       /* The name may still be missing — fetch it rather than let the console
          render an id where a human expects a company. */
       if (mapped.companyId && !mapped.company) mapped.company = await companyName(mapped.companyId);
@@ -2352,7 +2363,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (held) { log(`contact ${id} from Airtable`); return { contact: held, source: "airtable" }; }
       const c = await kylas.contact(id);
       log(`contact ${id} from Kylas`);
-      return { contact: toConsoleContact(c, { ownerName: await ownerName(c?.ownerId) }),
+      return { contact: toConsoleContact(c, { ownerName: await ownerName(c?.ownerId),
+                 writeMap: await writeMap().catch(() => null), tzMin: TZ_MIN }),
                raw: c, source: "kylas" };
     },
   };

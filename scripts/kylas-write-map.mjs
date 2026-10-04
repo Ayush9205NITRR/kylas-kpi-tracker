@@ -92,6 +92,37 @@ export function nextCallValue(field, date, time, tzMin = 330) {
   return new Date(localMs - tzMin * 60000).toISOString();
 }
 
+/* ── AND BACK AGAIN ────────────────────────────────────────────────────
+   The console WROTE the call-back into Kylas and never read it out. The
+   Kylas -> console mapper hardcoded `nextCallDate: ""`, so a contact served
+   from Kylas rather than from the Airtable copy came back with no call-back
+   at all — the associate set one, came back to the contact, and was asked for
+   it again. The promise was in Kylas the whole time.
+
+   This is nextCallValue read backwards, and it has to undo the same timezone
+   shift: 10:00 promised in Delhi was stored as 04:30Z, and reading the UTC
+   clock straight off would show 04:30. */
+export function nextCallFrom(field, raw, tzMin = 330) {
+  const v = raw && typeof raw === "object" ? (raw.value ?? raw.id ?? "") : raw;
+  const s = String(v ?? "").trim();
+  if (!s) return { date: "", time: "" };
+  /* A date-only field, or a date-time one that happens to hold a bare day. */
+  const plain = s.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (plain) return { date: plain[1], time: "" };
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms)) return { date: "", time: "" };
+  /* No TIME in the field type means the instant is incidental — Kylas may hand
+     back midnight UTC for a day, and shifting that into IST would move it to
+     the previous day. Take the calendar date as stored. */
+  if (field && !/TIME/.test(field.type || "")) {
+    const d = new Date(ms);
+    return { date: d.toISOString().slice(0, 10), time: "" };
+  }
+  const local = new Date(ms + tzMin * 60000);
+  return { date: local.toISOString().slice(0, 10),
+           time: local.toISOString().slice(11, 16) };
+}
+
 /* Which option of the picklist means this quarter. The option is READ with the
    same parser the console reads free text with, so the spelling does not
    matter — only what it means. */

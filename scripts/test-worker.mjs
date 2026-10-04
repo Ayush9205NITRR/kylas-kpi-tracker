@@ -897,6 +897,52 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('no owner is a 400 too', noOwner.status === 400, `status ${noOwner.status}`);
 }
 
+/* ── §13 · the call-back survives a round trip through Kylas ──────────
+   Ayush, 2026-10-04: "next call date is getting wiped — if I set it, the next
+   time it does not pull up, rather asks me to assign it again."
+
+   It was never wiped. The save wrote it to Kylas every time, and the
+   Kylas -> console mapper returned a hardcoded `nextCallDate: ""`, so a
+   contact served from KYLAS rather than from the Airtable copy arrived with
+   no promise on it. Every test passed because none of them read the contact
+   back through that path with a call-back set. This one does. */
+{
+  console.log('\n13. the call-back comes back');
+  /* Put one on the contact in Kylas directly — the state after a save, or
+     after the nightly push, without depending on either. */
+  /* RETRY THE 429. The mock throttles at about five a second exactly as Kylas
+     does, and it throttles the test's own setup calls too — this one came back
+     "Too many requests", the field was never set, and the mapper took the
+     blame for it. Third time a 429 has misled this session. */
+  let put = null;
+  for (let t = 0; t < 8; t++) {
+    const x = await fetch('http://127.0.0.1:9900/__setcf?id=112936&key=cfNextCallDate&value=2026-10-09',
+      { headers: { 'api-key': 'x' } }).catch(() => null);
+    if (x && x.status !== 429) { put = await x.json().catch(() => null); break; }
+    await new Promise((r) => setTimeout(r, 400 * (t + 1)));
+  }
+  /* ARRANGE, ASSERTED. The first version swallowed this with .catch(() => null)
+     and then spent a while blaming the mapper for a call-back that had never
+     been set. A test's setup is as able to be wrong as the code it tests. */
+  check('the call-back is in Kylas to begin with',
+        put?.customFieldValues?.cfNextCallDate === '2026-10-09', JSON.stringify(put).slice(0, 120));
+  /* READ_SOURCE=kylas, and a COLD worker to carry it — the Airtable copy
+     answers this id otherwise and the Kylas mapper, which is the thing under
+     test, is never reached. The first version of this test passed through
+     Airtable and proved nothing. */
+  const kylasOnly = { ...ENV, DB: fakeD1(), READ_SOURCE: 'kylas' };
+  const r = await (await coldWorker(931)).fetch(
+    new Request('https://bd.enout.website/contact?id=112936', { headers: { Origin: ORIGIN } }),
+    kylasOnly, { waitUntil() {} });
+  const b = await r.json();
+  check('the contact is served from Kylas', r.status === 200 && b.source === 'kylas',
+        `status ${r.status} source=${b.source}`);
+  /* The assertion that was missing. It reads "" without the fix. */
+  check('...carrying the call-back Kylas holds, not a blank',
+        b.contact?.nextCallDate === '2026-10-09',
+        `nextCallDate=${JSON.stringify(b.contact?.nextCallDate)}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);
