@@ -320,7 +320,12 @@
     /* A connected-but-stale proxy outranks "on": the link is up, and that is
        exactly what makes it misleading. Every answer on screen is being served
        by code that is not the code in front of you. */
-    const k = kind === "on" && API.staleProxy ? "stale" : kind;
+    /* A console older than its server outranks "on" for the same reason a
+       stale server does: the link is up, and that is exactly what makes a
+       stale SCREEN misleading. It ranks below a stale server, because a
+       server that cannot answer is the worse of the two. */
+    const k = kind === "on" && API.staleProxy ? "stale"
+      : kind === "on" && API.oldConsole ? "oldui" : kind;
     linkEl.className = "link " + k;
     /* SAY WHICH BUILD, NOT JUST "BEHIND". The two version numbers were in the
        tooltip, so answering "why is this showing" needed a hover nobody does —
@@ -331,9 +336,11 @@
     linkEl.textContent = k === "on" ? "Kylas"
       : k === "stale" ? (/^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(API.base || "")
           ? `old proxy · ${theirs}` : `server ${theirs}`)
+      : k === "oldui" ? "reload me"
       : k === "signin" ? "sign in"
       : k === "busy" ? "…" : "offline";
-    linkEl.title = k === "stale" ? API.staleNote : (title || "");
+    linkEl.title = k === "stale" ? API.staleNote
+      : k === "oldui" ? API.oldConsoleNote : (title || "");
   }
   /* The state the badge should show for whatever API.state says now. Not
      signed in is its own state, not a kind of offline: the server is fine and

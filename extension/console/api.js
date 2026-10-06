@@ -227,8 +227,27 @@
         };
         const local = isLocal();
         const stale = mine ? (!theirs || (theirs !== "unknown" && cmp(theirs, mine) < 0)) : false;
+        /* AND THE OTHER DIRECTION, WHICH WAS INVISIBLE AND COST A WEEK.
+           This only ever warned when the SERVER was behind, on the reasoning
+           that a server ahead is the normal state of a release in store
+           review. True for the team — and it meant the one person pulling and
+           deploying every hour had NOTHING on screen telling him his own
+           console was the old half. Deploying made the badge go quiet while
+           the UI stayed stale, so three fixes in a row looked like they had
+           not shipped: the Progress columns, the notes preview, the whole of
+           1.45 and 1.46.
+
+           A console behind its server is not an error — its routes still
+           answer — so this is said quietly and separately, never as "offline".
+           Reloading the extension is the fix, and the badge now says so. */
+        const behind = mine && theirs && theirs !== "unknown" && cmp(mine, theirs) < 0;
         state = { online: true, reason: "", user: r.user || null, role: r.role || "admin",
-                  version: theirs, staleProxy: stale,
+                  version: theirs, mine, oldConsole: !!behind,
+                  oldConsoleNote: !behind ? ""
+                    : `This console is build ${mine}; the server is already on ${theirs}. ` +
+                      `Reload the extension — chrome://extensions, then the reload arrow on ` +
+                      `Enout BD Call Console. Until then you are looking at the older screen.`,
+                  staleProxy: stale,
                   staleNote: !stale ? ""
                     : local
                       ? (theirs
@@ -266,6 +285,11 @@
     get isAdmin() { return (state.role || "admin") === "admin"; },
     get staleProxy() { return !!state.staleProxy; },
     get staleNote() { return state.staleNote || ""; },
+    /* The console is older than the server it is talking to. Not an error —
+       the routes answer — but the screen is the old one, which is invisible
+       without being told. */
+    get oldConsole() { return !!state.oldConsole; },
+    get oldConsoleNote() { return state.oldConsoleNote || ""; },
 
     company: (id) => req(`/company?id=${encodeURIComponent(id)}`),
     queue: (owner) => req(`/queue${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),

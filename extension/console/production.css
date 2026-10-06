@@ -40,6 +40,12 @@ body.framed .ovOnly{display:inline-block}
    the same class of fact as offline — what is on screen cannot be trusted —
    and not a style choice. Reads as its own state, never as "on". */
 .link.stale{background:var(--amberSoft);border-color:var(--amber);color:var(--amber)}
+/* The CONSOLE is the old half. Amber is for flags and a stale server already
+   owns it, so this takes the accent instead: it is an instruction ("reload
+   me"), not a fault, and the accent is what the console uses for a thing to
+   act on. */
+.link.oldui{background:var(--blueSoft);border-color:var(--blueLine);color:var(--blue);
+  font-weight:var(--w-strong)}
 
 /* ── company / session switch ────────────────────────────────────────── */
 .qmode{display:flex;gap:4px;padding:8px 8px 0}

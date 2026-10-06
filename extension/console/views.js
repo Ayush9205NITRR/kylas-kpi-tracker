@@ -1317,10 +1317,29 @@
                 <i class="step r${Math.min(i, 5)}">${i + 1}</i>${esc(rg.name)}</span></td>
               <td class="teamcol"><b class="tnum">${cur[rg.key] || 0}</b>${
                 prev ? deltaHTML(cur.delta ? cur.delta[rg.key] : null) : ""}</td>
-              <td class="conv">${i === 0 ? "—"
-                : `<b class="tnum">${pc(cur[rg.key] || 0, cur[RUNGS[i - 1].key] || 0)}</b>
-                   <span>of ${esc(RUNGS[i - 1].name)}</span>${
-                     over ? ` <i class="carry" title="More companies reached this rung than reached the one above it inside this period. They were worked earlier and moved up now \u2014 it is not a miscount.">carried in</i>` : ""}`}</td>
+              ${/* A RATE OVER 100% IS NOT A RATE, so it is no longer printed.
+                    Ayush, 2026-10-06: "SQL booked is a higher state \u2014 by
+                    definition it is now a smaller subset, hence it should not
+                    be [bigger]."
+
+                    The COUNTS are right: on the live base 7 companies are at
+                    SQL booked, 6 at SQL done, 6 at SQL, nested exactly as they
+                    must be. What was wrong was calling the ratio a conversion.
+                    These rungs count FIRST ARRIVALS INSIDE THE PERIOD, so a
+                    company that booked in September and qualified in October
+                    is counted in different months under different rungs \u2014
+                    the two numbers are not the same set of companies. "133% of
+                    SQL booked" asserts a conversion that never happened. When
+                    the rung above is a different cohort there is no rate to
+                    give, so the cell says that instead of inventing one. */ ""}
+              <td class="conv">${i === 0 ? "\u2014"
+                : over
+                  ? `<i class="carry" title="${esc(String(cur[rg.key] || 0))} compan${
+                      (cur[rg.key] || 0) === 1 ? "y" : "ies"} reached ${esc(rg.name)} inside this period, and ${
+                      esc(String(cur[RUNGS[i - 1].key] || 0))} reached ${esc(RUNGS[i - 1].name)}. The others got to ${
+                      esc(RUNGS[i - 1].name)} in an earlier period and moved up in this one, so these are different sets of companies and there is no conversion between them.">carried in \u2014 no rate</i>`
+                  : `<b class="tnum">${pc(cur[rg.key] || 0, cur[RUNGS[i - 1].key] || 0)}</b>
+                     <span>of ${esc(RUNGS[i - 1].name)}</span>`}</td>
               ${people.map((p) => {
                 const v = p[rg.key] || 0;
                 return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
@@ -1373,10 +1392,17 @@
     const level = r.period || DASH_LEVEL;
     const stale = level !== DASH_LEVEL;
     const canDrill = !stale && !!INTO[level];
+    /* THE SAME RULE AS THE LADDER. A rung counts first arrivals INSIDE the
+       period, so when more companies reached this rung than the one above it,
+       the rest got to that one earlier and moved up now — different sets of
+       companies, and no conversion between them. Printing 133% asserts a
+       conversion that never happened, so the cell says "carried in" instead. */
     const rate = (p, c) => {
       const d = p[c.of] || 0;
+      const n = p[c.key] || 0;
       if (!d) return "—";
-      return Math.round(((p[c.key] || 0) / d) * 100) + "%";
+      if (n > d) return `<i class="carry">carried in</i>`;
+      return Math.round((n / d) * 100) + "%";
     };
 
     const rows = [...r.periods].reverse().map((p) => `
