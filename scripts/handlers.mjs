@@ -1275,7 +1275,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
            fails fails the save, and the queue retries it. */
         let base = null;
         if (c.kid) base = await kylas.contact(c.kid);
-        const remarks = mergeRemarks(base?.remarks || "", renderRemarks(c, { stageLabel }));
+        /* WHAT THE ASSOCIATE TYPED IS THE HUMAN SECTION, not whatever Kylas
+           already held. This read `base?.remarks` only, so "Notes from the
+           call" was written to Airtable and NEVER into Kylas: the note existed
+           for contacts the mirror holds and vanished for every other one —
+           the same split that made the call-back look wiped, and it would have
+           made "Said before" blank on exactly the contacts that need it.
+
+           mergeRemarks keeps only the text above its marker, so passing the
+           card's value is safe whichever console sent it: a build that still
+           sends the whole field, auto block and all, has the block stripped
+           here anyway. A cleared box clears the section, which is what
+           clearing it means. */
+        const typed = typeof c.remarks === "string" ? c.remarks : null;
+        const remarks = mergeRemarks(typed === null ? (base?.remarks || "") : typed,
+                                     renderRemarks(c, { stageLabel }));
         /* THE CALL-BACK AND THE OFFSITE QUARTER, WRITTEN BACK (Ayush,
            2026-09-29). Both were on the card and in Airtable and reached Kylas
            only as a line of remarks text nothing can filter on. The field

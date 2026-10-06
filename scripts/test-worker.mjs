@@ -195,6 +195,11 @@ const contact = {
   stage: 'MQL_MARKETING_QUALIFIED_LEAD', past: [],
   nextCallDate: '2026-10-02', nextCallTime: '16:00',
   current: [{ rowKey: 'wk-row-1', eventType: 'Offsite', budget: '8L', timeline: 'Aug, week 2', pax: '40', remarks: '' }],
+  /* WHAT THE ASSOCIATE TYPED INTO "Notes from the call". It used to reach
+     Airtable and never Kylas — the save took the human half of the remarks
+     from the Kylas record it had just read, so the note existed only for
+     contacts the mirror holds and vanished for every other one. */
+  remarks: 'Wants Goa in March, budget approx 8L.',
 };
 const call1 = { at: '2026-09-23T10:00:00.000Z', outcome: 'Connected', duration: 40, durationSource: 'dialed', createdHere: true };
 const s1 = await call('/save', { method: 'POST', body: { contact, call: call1 } });
@@ -230,6 +235,15 @@ check('the call-back date was written back to Kylas', cfSent.cfNextCallDate === 
 check('and the offsite quarter, as the picklist id for Jul-Sep',
       JSON.stringify(cfSent.cfOffsiteTimelineBdNew) === '[9103]', JSON.stringify(cfSent));
 check('the stage still goes with them', !!cfSent.cfPipelineStageBd, JSON.stringify(cfSent));
+/* THE NOTE REACHES KYLAS, above the auto block. Below it is a machine summary
+   the save rewrites every time; a note written there would be destroyed on the
+   next save, and a note written nowhere is what used to happen. */
+const sentRemarks = String(madeContact?.body?.remarks || '');
+check('the typed note reaches Kylas, not just Airtable',
+      sentRemarks.includes('Wants Goa in March'), JSON.stringify(sentRemarks).slice(0, 160));
+check('...ABOVE the auto block, where the next save will not overwrite it',
+      sentRemarks.indexOf('Wants Goa in March') < sentRemarks.indexOf('BD CONSOLE (auto'),
+      JSON.stringify(sentRemarks).slice(0, 200));
 
 /* ── 5 · the errors a shell is responsible for ───────────────────────── */
 console.log('\n5. errors');
