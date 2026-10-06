@@ -450,6 +450,12 @@ table.ladder td.conv b{font-size:var(--t-label);color:var(--text)}
 i.carry{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);
   background:var(--amberSoft);border-radius:4px;padding:1px 6px;margin-left:4px;white-space:nowrap;cursor:help}
 table.ladder tr.carried td.conv{color:var(--text2)}
+/* Progress has no room for the "carried in" tag the ladder shows, so a rate
+   over 100% is marked on the figure itself — amber, which is this console's
+   flag colour, and the title explains it. The NUMBER is still printed: one
+   table must not withhold a percentage the other gives. */
+.rt .over{color:var(--amber);font-weight:var(--w-strong);cursor:help;
+  text-decoration:underline dotted;text-underline-offset:3px}
 table.ladder .lbar{height:3px;border-radius:2px;background:var(--panel3);margin-top:5px;overflow:hidden}
 table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 
