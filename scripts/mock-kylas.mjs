@@ -514,8 +514,13 @@ createServer(async (req, res) => {
     const at = CONTACTS.findIndex((c) => String(c.id) === url.searchParams.get("id"));
     if (at < 0) return json(res, 404, { message: "no such contact" });
     const key = url.searchParams.get("key"), value = url.searchParams.get("value");
+    /* A multi-picklist holds a LIST, so `value=["9103","9104"]` sets one. A
+       query string can only carry text, and a one-quarter string where the
+       field really holds two is the shape the read side drops a quarter on. */
+    let v = value;
+    if (typeof v === "string" && /^\s*\[/.test(v)) { try { v = JSON.parse(v); } catch { /* leave it as text */ } }
     CONTACTS[at] = { ...CONTACTS[at],
-      customFieldValues: { ...(CONTACTS[at].customFieldValues || {}), [key]: value } };
+      customFieldValues: { ...(CONTACTS[at].customFieldValues || {}), [key]: v } };
     return json(res, 200, { id: CONTACTS[at].id, customFieldValues: CONTACTS[at].customFieldValues });
   }
   /* POST /__company?id=&name=&owner= adds a company to the account, the way a

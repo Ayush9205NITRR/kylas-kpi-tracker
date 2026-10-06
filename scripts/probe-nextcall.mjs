@@ -20,7 +20,11 @@
  * to learn that the last time.
  */
 import { toConsoleContact } from "./kylas.mjs";
-import { resolveWriteFields, nextCallFrom, describeWriteMap } from "./kylas-write-map.mjs";
+import { resolveWriteFields, nextCallFrom, offsiteFrom, describeWriteMap } from "./kylas-write-map.mjs";
+/* The same options reader the Worker and the push use. The offsite quarter is
+   a PICKLIST, so without its options there is nothing to decode an id against
+   and the read side looks broken when only the probe was. */
+import { findOptions } from "./push-kylas.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
@@ -51,27 +55,41 @@ const everything = () => ({ condition: "AND", valid: true, rules: [
    way to know which custom field holds the promise. */
 const fields = rows(await call("GET",
   "/v1/entities/contact/fields?entityType=contact&custom-only=false&page=0&size=200"));
-const map = resolveWriteFields(fields, {});
-console.log("\nthe field this account keeps the call-back in:");
+const picklists = {};
+for (const f of fields) { const o = findOptions(f); if (o && (f.name || f.displayName)) picklists[f.name || f.displayName] = o; }
+const map = resolveWriteFields(fields, picklists);
+console.log("\nthe fields this account keeps them in:");
 describeWriteMap(map).forEach((l) => console.log("  " + l));
-if (!map.nextCall) {
-  console.log("\n  ! No call-back field resolved on this account. Nothing can read or write one.\n");
+if (map.offsite?.options?.length)
+  console.log(`    quarters offered: ${map.offsite.options.map((o) => `${o.id}=${o.label || o.code}`).join(" · ")}`);
+if (!map.nextCall && !map.offsite) {
+  console.log("\n  ! Neither field resolved on this account. Nothing can read or write one.\n");
   process.exit(1);
 }
 
 if (FIND) {
   const recent = rows(await call("POST", "/v1/search/contact?page=0&size=100&sort=updatedAt,desc",
     { fields: ["id", "firstName", "lastName", "customFieldValues", "updatedAt"], jsonRule: everything() }));
-  const withOne = recent.filter((c) => {
-    const v = (c.customFieldValues || {})[map.nextCall.name];
-    return v !== undefined && v !== null && v !== "";
-  });
-  console.log(`\n${withOne.length} of the last ${recent.length} contacts have a call-back set in Kylas:\n`);
+  /* A contact is worth checking if it has EITHER a call-back or an offsite
+     quarter, because both were write-only and both are read here. */
+  const held = (c, f) => {
+    if (!f) return undefined;
+    const v = (c.customFieldValues || {})[f.name];
+    if (v === undefined || v === null || v === "") return undefined;
+    if (Array.isArray(v) && !v.length) return undefined;
+    return v;
+  };
+  const withOne = recent.filter((c) => held(c, map.nextCall) !== undefined ||
+                                       held(c, map.offsite) !== undefined);
+  console.log(`\n${withOne.length} of the last ${recent.length} contacts have a call-back or an offsite quarter set in Kylas:\n`);
   for (const c of withOne.slice(0, 15)) {
-    const raw = (c.customFieldValues || {})[map.nextCall.name];
-    const got = nextCallFrom(map.nextCall, raw, TZ);
+    const nc = held(c, map.nextCall);
+    const off = held(c, map.offsite);
+    const got = nc === undefined ? { date: "", time: "" } : nextCallFrom(map.nextCall, nc, TZ);
+    const qs = off === undefined ? [] : offsiteFrom(map.offsite, off);
     console.log(`  ${String(c.id).padEnd(10)} ${[c.firstName, c.lastName].filter(Boolean).join(" ").slice(0, 26).padEnd(28)}` +
-                `Kylas holds ${String(JSON.stringify(raw)).padEnd(26)} -> console shows ${got.date}${got.time ? " " + got.time : ""}`);
+                `call-back ${(got.date ? got.date + (got.time ? " " + got.time : "") : "—").padEnd(18)}` +
+                `offsite ${qs.join(", ") || "—"}`);
   }
   if (!withOne.length) {
     console.log("  (none — set one in the console, save, then run this again)");
@@ -84,30 +102,65 @@ if (FIND) {
 
 /* ── one contact, through the real mapper ───────────────────────────── */
 const c = await call("GET", `/v1/contacts/${ID}`);
-const raw = (c.customFieldValues || {})[map.nextCall.name];
+const raw = map.nextCall ? (c.customFieldValues || {})[map.nextCall.name] : undefined;
 const mapped = toConsoleContact(c, { writeMap: map, tzMin: TZ });
 
 console.log(`\ncontact ${ID} — ${[c.firstName, c.lastName].filter(Boolean).join(" ")}`);
-console.log(`  Kylas holds        ${JSON.stringify(raw ?? null)}   (${map.nextCall.name}, ${map.nextCall.type})`);
-console.log(`  the console shows  date ${JSON.stringify(mapped.nextCallDate)}  time ${JSON.stringify(mapped.nextCallTime)}`);
+if (map.nextCall) {
+  console.log(`  call-back in Kylas ${JSON.stringify(raw ?? null)}   (${map.nextCall.name}, ${map.nextCall.type})`);
+  console.log(`  the console shows  date ${JSON.stringify(mapped.nextCallDate)}  time ${JSON.stringify(mapped.nextCallTime)}`);
+}
 
-const had = raw !== undefined && raw !== null && raw !== "";
+/* ── REQ-04 · THE OFFSITE QUARTER, same question ────────────────────
+   It was write-only for exactly the same reason the call-back was, so it is
+   checked in the same breath rather than in a probe of its own. The quarter
+   is DERIVED from the timeline text as well, so a blank here is only a fault
+   when Kylas actually holds one. */
+const offRaw = map.offsite ? (c.customFieldValues || {})[map.offsite.name] : undefined;
+const offHad = offRaw !== undefined && offRaw !== null && offRaw !== "" &&
+               !(Array.isArray(offRaw) && !offRaw.length);
+if (map.offsite) {
+  console.log(`  offsite in Kylas   ${JSON.stringify(offRaw ?? null)}   (${map.offsite.name}, ${map.offsite.type})`);
+  console.log(`  the console shows  ${JSON.stringify(mapped.offsiteTimeline)}${
+    mapped.offsiteTimelineAll?.length > 1
+      ? `   (all of them: ${JSON.stringify(mapped.offsiteTimelineAll)})` : ""}`);
+}
+
+const had = !!map.nextCall && raw !== undefined && raw !== null && raw !== "";
 let bad = 0;
 const ok = (w, c2) => { if (!c2) bad++; console.log(`  ${c2 ? "PASS" : "FAIL"}  ${w}`); };
 console.log("");
-if (!had) {
-  console.log("  This contact has NO call-back in Kylas, so a blank is correct and this");
-  console.log("  proves nothing. Run --find to pick one that has one.\n");
+if (!had && !offHad) {
+  console.log("  This contact has NEITHER a call-back nor an offsite quarter in Kylas, so");
+  console.log("  two blanks are correct and this proves nothing. Run --find to pick one");
+  console.log("  that has something to read.\n");
   process.exit(1);
 }
-ok("the call-back reaches the console instead of coming back blank", !!mapped.nextCallDate);
-ok("...as a real date", /^\d{4}-\d{2}-\d{2}$/.test(mapped.nextCallDate || ""));
+if (had) {
+  ok("the call-back reaches the console instead of coming back blank", !!mapped.nextCallDate);
+  ok("...as a real date", /^\d{4}-\d{2}-\d{2}$/.test(mapped.nextCallDate || ""));
+} else console.log("  SKIP  no call-back on this contact, so there is nothing to check");
 /* The timezone is the part that fails silently: 10:00 promised in Delhi is
    stored 04:30Z, and reading the UTC clock straight off shows 04:30. */
-if (/TIME/.test(map.nextCall.type))
+if (had && /TIME/.test(map.nextCall.type))
   ok("...and the time is the local one promised, not the UTC instant",
      !!mapped.nextCallTime && mapped.nextCallTime === nextCallFrom(map.nextCall, raw, TZ).time);
 
+if (offHad) {
+  /* The quarter Kylas holds, decoded independently of the mapper, so the two
+     are compared rather than the mapper being asked to mark its own work. */
+  const want = offsiteFrom(map.offsite, offRaw);
+  ok("the offsite quarter reaches the console instead of coming back blank",
+     !!mapped.offsiteTimeline);
+  ok(`...and it is the one Kylas holds (${want.join(", ") || "none"})`,
+     mapped.offsiteTimeline === (want[0] || ""));
+  if (want.length > 1)
+    ok(`...with the other ${want.length - 1} kept, not dropped`,
+       (mapped.offsiteTimelineAll || []).length === want.length);
+} else if (map.offsite) {
+  console.log("  SKIP  no offsite quarter on this contact, so there is nothing to check");
+}
+
 console.log(`\n${bad ? `${bad} FAULT(S) — send this output back.`
-  : "Clean. The call-back survives the round trip; the console will show it."}\n`);
+  : "Clean. What Kylas holds is what the console will show."}\n`);
 process.exit(bad ? 1 : 0);

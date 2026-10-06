@@ -957,6 +957,52 @@ console.log('\n11. a copy that is short of the account is not the account');
         `nextCallDate=${JSON.stringify(b.contact?.nextCallDate)}`);
 }
 
+/* ── 14 · REQ-04 · AND SO DOES THE OFFSITE QUARTER ────────────────────
+   The same one-way street, found the same way: `offsiteTimeline: ""` was
+   hardcoded in the Kylas mapper, so a quarter somebody set in KYLAS — working
+   there rather than in the console — never reached the console. It matters
+   less than the call-back did, because the console recomputes the quarter from
+   the timeline text and that text round-trips through Airtable; nobody lost
+   work. What was invisible was a quarter the console never typed.
+
+   The field is a MULTI picklist, so this sets TWO, which is the shape the read
+   side drops one on, and checks the order is the console's rather than the one
+   Kylas happened to store them in. */
+{
+  console.log('\n14. the offsite quarter comes back, both of them');
+  let put = null;
+  for (let t = 0; t < 8; t++) {
+    const u = new URL('http://127.0.0.1:9900/__setcf');
+    u.searchParams.set('id', '112936');
+    u.searchParams.set('key', 'cfOffsiteTimelineBdNew');
+    u.searchParams.set('value', JSON.stringify(['9104', '9103']));   /* Oct-Dec, Jul-Sep */
+    const x = await fetch(u, { headers: { 'api-key': 'x' } }).catch(() => null);
+    if (x && x.status !== 429) { put = await x.json().catch(() => null); break; }
+    await new Promise((r) => setTimeout(r, 400 * (t + 1)));
+  }
+  /* Arrange, asserted — a swallowed 429 here would blame the mapper again. */
+  check('the two quarters are in Kylas to begin with',
+        Array.isArray(put?.customFieldValues?.cfOffsiteTimelineBdNew) &&
+        put.customFieldValues.cfOffsiteTimelineBdNew.length === 2,
+        JSON.stringify(put?.customFieldValues?.cfOffsiteTimelineBdNew));
+  const kylasOnly = { ...ENV, DB: fakeD1(), READ_SOURCE: 'kylas' };
+  const r = await (await coldWorker(932)).fetch(
+    new Request('https://bd.enout.website/contact?id=112936', { headers: { Origin: ORIGIN } }),
+    kylasOnly, { waitUntil() {} });
+  const b = await r.json();
+  check('the contact is served from Kylas', r.status === 200 && b.source === 'kylas',
+        `status ${r.status} source=${b.source}`);
+  /* Reads "" without the fix. */
+  check('...carrying the quarter Kylas holds, not a blank',
+        b.contact?.offsiteTimeline === 'JUL_SEP',
+        `offsiteTimeline=${JSON.stringify(b.contact?.offsiteTimeline)}`);
+  /* The card holds one quarter; the second is carried beside it rather than
+     thrown away, so the UI half of REQ-04 has something to render. */
+  check('...with the second kept, in the console\'s order',
+        JSON.stringify(b.contact?.offsiteTimelineAll) === JSON.stringify(['JUL_SEP', 'OCT_DEC']),
+        `offsiteTimelineAll=${JSON.stringify(b.contact?.offsiteTimelineAll)}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);
