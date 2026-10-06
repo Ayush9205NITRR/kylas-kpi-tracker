@@ -428,10 +428,16 @@ function prevNotes(a){
   }
   if(!bits.length)return null;
   const box=el("div","pnote");
+  /* WHEN, NOT JUST WHAT. "Wants a Goa venue" means one thing said last week
+     and another said in March, and the associate is deciding in the second
+     before the ringing starts. The contact's last call is the only date the
+     record actually carries for a note, so it labels the whole strip rather
+     than pretending each line has its own. */
+  const when=a.lastCallAt?since(a.lastCallAt):"";
   const full=bits.map(b=>(b.from?b.from+": ":"")+b.text).join("  ·  ");
   const one=full.length>150?full.slice(0,150).replace(/\s+\S*$/,"")+"…":full;
   box.innerHTML=`<button type="button" class="pnx" aria-expanded="false">
-      <em>Said before</em><span class="pns">${esc(one)}</span>
+      <em>Said before${when?` · ${esc(when)}`:""}</em><span class="pns">${esc(one)}</span>
       ${full.length>150?'<i class="pnmore">more</i>':""}</button>
     <div class="pnall" hidden>${bits.map(b=>`<p>${
       b.from?`<em>${esc(b.from)}</em>`:""}${esc(b.text)}</p>`).join("")}</div>`;

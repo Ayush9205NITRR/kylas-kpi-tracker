@@ -322,8 +322,15 @@
        by code that is not the code in front of you. */
     const k = kind === "on" && API.staleProxy ? "stale" : kind;
     linkEl.className = "link " + k;
+    /* SAY WHICH BUILD, NOT JUST "BEHIND". The two version numbers were in the
+       tooltip, so answering "why is this showing" needed a hover nobody does —
+       and the question came back twice. The badge is narrow, so it carries the
+       number that is actually in doubt: the server's. The console's own build
+       and the full instruction stay in the title. */
+    const theirs = API.state?.version || "none";
     linkEl.textContent = k === "on" ? "Kylas"
-      : k === "stale" ? (/^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(API.base || "") ? "old proxy" : "server behind")
+      : k === "stale" ? (/^https?:\/\/(127\.0\.0\.1|localhost)\b/i.test(API.base || "")
+          ? `old proxy · ${theirs}` : `server ${theirs}`)
       : k === "signin" ? "sign in"
       : k === "busy" ? "…" : "offline";
     linkEl.title = k === "stale" ? API.staleNote : (title || "");
