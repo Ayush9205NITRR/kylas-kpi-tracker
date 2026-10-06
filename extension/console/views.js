@@ -58,6 +58,12 @@
     sql:       { label: "SQL",        sub: "qualified" },
   };
   const rung = (k) => (RUNG[k] || {}).label || k;
+  /* The ladder's order, and Progress'. It opens on worked and picked — the
+     per-period pair — rather than on `reached`. Declared HERE, beside RUNG,
+     because both the ladder and the Progress table build their columns from
+     it and Progress is rendered earlier in this file: left where the ladder
+     used it, every list above it was a dead reference at load. */
+  const LADDER_ORDER = ["worked", "picked", "right", "discovery", "booked", "done", "sql"];
 
   /* ── the five benchmark conversions ────────────────────────────────── */
   /* Each is a STEP between adjacent rungs — the drop-off that is actually
@@ -1069,20 +1075,23 @@
      period. Calls stays as the first column because "how many dials went out"
      is a real question and the only one here that is not a company count; it
      sits outside the conversion band for that reason. */
-  const COUNT_COLS = [
-    { key: "calls", label: "Calls" },
-    { key: "worked", label: "Worked" },
-    { key: "picked", label: "Picked" },
-    { key: "right", label: "Right POC" },
-    { key: "discovery", label: "Discovery" },
-    { key: "booked", label: "SQL booked" },
-  ];
-  const RATE_COLS = [
-    { key: "picked", of: "worked", label: "→ Picked" },
-    { key: "right", of: "picked", label: "→ Right POC" },
-    { key: "discovery", of: "right", label: "→ Discovery" },
-    { key: "booked", of: "discovery", label: "→ Booked" },
-  ];
+  /* THE WHOLE LADDER, NOT FIVE SEVENTHS OF IT.
+     Ayush, 2026-10-06: "console ke Progress bar mein SQL vale parameter miss
+     out ho gaye hai kya" — yes. This list stopped at SQL booked, so the two
+     rungs the whole funnel exists to reach, SQL done and SQL, were on the
+     ladder and absent from Progress. A table that shows five of seven rungs
+     reads as the funnel and is not.
+
+     And it was a SIXTH hand-written copy of the rung names. FUNNEL, BUCKETS,
+     STEPS and the ladder's RUNGS were all rebuilt from RUNG; this one was
+     missed, which is how it kept "→ Booked" while everything else said
+     "SQL booked". Built from RUNG now, and test-kpi-spec asserts it. */
+  const COUNT_COLS = [{ key: "calls", label: "Calls" },
+    ...LADDER_ORDER.map((key) => ({ key, label: rung(key) }))];
+  /* Each rate is this rung out of the one above it, so the pairs follow the
+     ladder's own order rather than being listed by hand. */
+  const RATE_COLS = LADDER_ORDER.slice(1).map((key, i) => ({
+    key, of: LADDER_ORDER[i], label: `→ ${rung(key)}` }));
 
   /* Where the report is pointed: which level, and the window a drill-down has
      narrowed it to. The trail is what "back" means. */
@@ -1148,7 +1157,6 @@
      while everything else said "Right POC" and "SQL booked". Built from RUNG
      now, like the rest. The ladder's own order, because it opens on worked and
      picked rather than on reached. */
-  const LADDER_ORDER = ["worked", "picked", "right", "discovery", "booked", "done", "sql"];
   const RUNGS = LADDER_ORDER.map((key) => ({ key, name: rung(key) }));
   const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "—";
   const initials = (n) => {

@@ -392,11 +392,56 @@ function renderCallbar(){
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
+  const pn=prevNotes(a);
+  if(pn)C.appendChild(pn);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
   btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
   C.appendChild(nb);
 }
+/* WHAT WAS SAID LAST TIME, BEFORE THE DIAL TONE.
+   Ayush, 2026-10-06: "I also want to fetch remarks (as previous notes) — chota
+   sa preview dikhana." The notes were already on the record and the only place
+   they appeared was the "Notes from the call" textarea, three blocks down and
+   below the fold — so the one thing worth knowing before the call was the one
+   thing nobody saw until after it.
+
+   Collapsed to a line, because this sits in the 85% path: a no-answer must not
+   pay for it. Click to open the whole thing.
+
+   THE AUTO BLOCK IS NOT A NOTE. Kylas' remarks field carries a machine-written
+   summary under "--- BD CONSOLE (auto, do not edit below) ---" that the save
+   rewrites every time. Showing it back would fill the preview with the stage
+   and owner the screen already states, and push the human sentence out of
+   view. Only what a person typed is shown. */
+const MARK_AUTO="--- BD CONSOLE (auto";
+const humanNote=s=>String(s||"").split(MARK_AUTO)[0].replace(/\s+$/,"").trim();
+function prevNotes(a){
+  const bits=[];
+  const own=humanNote(a.remarks);
+  if(own)bits.push({from:"",text:own});
+  /* Event rows carry their own line each. Past first, then current, because
+     that is the order the conversation happened in. */
+  for(const r of [...(a.past||[]),...(a.current||[])]){
+    const t=humanNote(r.remarks);
+    if(t)bits.push({from:[r.eventType,r.period==="past"?"past":""].filter(Boolean).join(" · "),text:t});
+  }
+  if(!bits.length)return null;
+  const box=el("div","pnote");
+  const full=bits.map(b=>(b.from?b.from+": ":"")+b.text).join("  ·  ");
+  const one=full.length>150?full.slice(0,150).replace(/\s+\S*$/,"")+"…":full;
+  box.innerHTML=`<button type="button" class="pnx" aria-expanded="false">
+      <em>Said before</em><span class="pns">${esc(one)}</span>
+      ${full.length>150?'<i class="pnmore">more</i>':""}</button>
+    <div class="pnall" hidden>${bits.map(b=>`<p>${
+      b.from?`<em>${esc(b.from)}</em>`:""}${esc(b.text)}</p>`).join("")}</div>`;
+  const btn=box.querySelector(".pnx"),all=box.querySelector(".pnall");
+  btn.onclick=()=>{const open=all.hidden;all.hidden=!open;
+    btn.setAttribute("aria-expanded",String(open));
+    box.classList.toggle("open",open);};
+  return box;
+}
+
 const fmtSecs=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
 function startTimer(mode){
   if(timer)clearInterval(timer);
@@ -1025,7 +1070,13 @@ function renderBasic(){
   sRow.appendChild(ncd);
 
   const rRow=el("div","g2");
-  rRow.appendChild(field("Notes from the call","f-rm",false,textarea("f-rm",a.remarks,"Whatever they said",v=>a.remarks=v)));
+  /* humanNote, not a.remarks: Kylas' field carries a machine-written summary
+     under the auto marker, and it was being handed to the associate to edit —
+     stage, owner and call-back restated inside the box meant for what the
+     prospect said. The save rewrites that block from the record anyway, so
+     nothing is lost by never showing it. */
+  rRow.appendChild(field("Notes from the call","f-rm",false,
+    textarea("f-rm",humanNote(a.remarks),"Whatever they said",v=>a.remarks=v)));
   /* Offsite timeline moved to "Before you hang up" on the right. It is not
      where the account STANDS — it is something the prospect tells you, like
      who handles this for them today and whether the pitch got in, and those

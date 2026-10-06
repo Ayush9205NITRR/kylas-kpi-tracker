@@ -146,7 +146,25 @@ for (const [what, re] of [
   ["BUCKETS", /const BUCKETS = \[\.\.\.RUNG_ORDER\]/],
   ["STEPS", /const STEPS = RUNG_ORDER\.slice/],
   ["RUNGS, the ladder's own", /const RUNGS = LADDER_ORDER\.map/],
+  /* The sixth list. Progress stopped at SQL booked, so the two rungs the
+     funnel exists to reach were on the ladder and missing from the table
+     beside it — and it kept "→ Booked" while everything else said
+     "SQL booked", because nothing checked this one either. */
+  ["COUNT_COLS, the Progress table", /const COUNT_COLS = \[\{ key: "calls".*\n\s*\.\.\.LADDER_ORDER\.map/],
+  ["RATE_COLS, its conversions", /const RATE_COLS = LADDER_ORDER\.slice\(1\)/],
 ]) ok(`${what} is built from RUNG`, re.test(views));
+
+console.log("\n11. Progress shows the WHOLE ladder");
+/* LADDER_ORDER must be declared before every list that reads it — left where
+   the ladder used it, Progress was a dead reference at module load. */
+ok("LADDER_ORDER is declared before the lists that use it",
+   views.indexOf("const LADDER_ORDER") < views.indexOf("const COUNT_COLS") &&
+   views.indexOf("const LADDER_ORDER") < views.indexOf("const RUNGS"));
+const ladder = JSON.parse((views.match(/const LADDER_ORDER = (\[[^\]]*\])/) || [])[1]
+  .replace(/'/g, '"'));
+for (const k of ["worked", "picked", "right", "discovery", "booked", "done", "sql"])
+  ok(`  ${k} is on the ladder, so it is in Progress too`, ladder.includes(k));
+ok("seven rungs, no more and no fewer", ladder.length === 7, String(ladder.length));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
