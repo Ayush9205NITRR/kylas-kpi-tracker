@@ -160,5 +160,34 @@ is("no field at all reads as no call-back", nextCallFrom(null, "2026-10-02", 330
 is("a wrapped value is unwrapped", nextCallFrom(D, { value: "2026-10-02" }, 330),
   { date: "2026-10-02", time: "" });
 
+/* ── REQ-04 · THE OFFSITE QUARTER, READ BACK ───────────────────────────
+   The console SET this on Kylas from the first release and never read it, so
+   `offsiteTimeline` arrived hardcoded "". Less costly than the call-back was,
+   because the quarter is DERIVED — recomputed from the timeline text, which
+   round-trips through Airtable — so no associate lost work. What had no way
+   in was a quarter set in KYLAS directly. */
+console.log("\n10. the offsite quarter, read back out of Kylas");
+const { offsiteFrom } = await import("./kylas-write-map.mjs");
+/* The live account's field, as resolved on 2026-09-29. */
+const OFF = { name: "cfOffsiteTimelineBdNew", type: "MULTI_PICKLIST", multi: true, options: [
+  { id: 2880424, label: "Jan - Mar" }, { id: 2880425, label: "Apr - Jun" },
+  { id: 2880426, label: "Jul - Sep" }, { id: 2880427, label: "Oct - Dec" }] };
+for (const q of ["JAN_MAR", "APR_JUN", "JUL_SEP", "OCT_DEC"])
+  is(`${q} survives the round trip`, offsiteFrom(OFF, offsiteValue(OFF, [q])), [q]);
+is("two quarters come back as both",
+  offsiteFrom(OFF, offsiteValue(OFF, ["JAN_MAR", "JUL_SEP"])), ["JAN_MAR", "JUL_SEP"]);
+/* Order is the console's, never the order Kylas happened to store them in, so
+   two contacts holding the same pair read identically. */
+is("...in the console's order, not Kylas' storage order",
+  offsiteFrom(OFF, [2880427, 2880424]), ["JAN_MAR", "OCT_DEC"]);
+is("a value Kylas wrapped as {id} is unwrapped", offsiteFrom(OFF, [{ id: 2880426 }]), ["JUL_SEP"]);
+/* An account whose field holds one option at a time stores a bare id. */
+is("a single-select account round-trips too",
+  offsiteFrom({ ...OFF, multi: false }, offsiteValue({ ...OFF, multi: false }, ["OCT_DEC"])), ["OCT_DEC"]);
+for (const [what, v] of [["empty", ""], ["null", null], ["undefined", undefined],
+                         ["an empty array", []], ["an id nothing matches", [99999]]])
+  is(`${what} reads as no quarter`, offsiteFrom(OFF, v), []);
+is("no field on the account reads as no quarter", offsiteFrom(null, [2880424]), []);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

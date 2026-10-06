@@ -138,6 +138,40 @@ export function optionForQuarter(options, quarter) {
 /* What to send for a set of quarters. An option Kylas does not offer is left
    out rather than sent as text: a picklist takes ids, and a value it does not
    know fails the whole contact write, not just this field. */
+/* ── AND BACK AGAIN — REQ-04, the read side ────────────────────────────
+   offsiteValue written backwards. The console has always SET the offsite
+   quarter on Kylas and never read it, so `offsiteTimeline` arrived as a
+   hardcoded "" — the same one-way street the call-back was on.
+
+   It matters less than that one did, because the quarter is DERIVED: the
+   console recomputes it from the timeline text the associate typed ("Aug,
+   week 2" -> Jul-Sep), and that text round-trips through Airtable, so nobody
+   loses work. What was lost is a quarter set in KYLAS directly, by somebody
+   working there rather than in the console. This brings that back.
+
+   Inverted through the option's own label, not through a remembered id, for
+   the same reason optionForQuarter matches that way: the ids differ per
+   account and the spelling of "Jan - Mar" is nobody's to standardise. */
+export function offsiteFrom(field, raw) {
+  if (!field || raw === undefined || raw === null || raw === "") return [];
+  const ids = (Array.isArray(raw) ? raw : [raw])
+    .map((v) => (v && typeof v === "object" ? (v.id ?? v.value) : v))
+    .filter((v) => v !== undefined && v !== null && v !== "");
+  const out = [];
+  for (const id of ids) {
+    for (const q of OFFSITE_QUARTERS) {
+      const o = optionForQuarter(field.options, q);
+      if (!o) continue;
+      if (String(o.id ?? o.code ?? o.label) !== String(id)) continue;
+      if (!out.includes(q)) out.push(q);
+      break;
+    }
+  }
+  /* The console's order, never the order Kylas happened to store them in, so
+     two contacts with the same two quarters read the same. */
+  return OFFSITE_QUARTERS.filter((q) => out.includes(q));
+}
+
 export function offsiteValue(field, quarters) {
   if (!field || !quarters?.length) return undefined;
   const picked = [];

@@ -2,7 +2,7 @@
    and the console's. Shared by the proxy and any script that needs it. */
 import { STAGE_ID } from "./stages.mjs";
 import { splitPhone, ISO_OF, checkEmail, splitName, e164 } from "./fields.mjs";
-import { nextCallFrom } from "./kylas-write-map.mjs";
+import { nextCallFrom, offsiteFrom } from "./kylas-write-map.mjs";
 
 /* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK — and the
    fallback is written defensively because `process` does not exist in every
@@ -904,7 +904,21 @@ export function toConsoleContact(c, { ownerName, company, writeMap, tzMin = 330 
       return { nextCallDate: got.date, nextCallTime: got.time };
     })(),
     remarks: pick(c.remarks, "") || "",
-    offsiteTimeline: "",
+    /* REQ-04, the read side. Hardcoded "" until now: the console wrote the
+       offsite quarter to Kylas on every save and never read it back. The
+       console recomputes it from the timeline text anyway, so nothing was
+       lost — EXCEPT a quarter set in Kylas directly, which had no way in.
+
+       A STRING, because that is what the card and the Airtable column hold.
+       Kylas' field is a multi-picklist, so more than one can come back; the
+       rest are kept rather than dropped silently, and reading the full list
+       is what the remainder of REQ-04 is for. */
+    ...(() => {
+      const f = writeMap?.offsite;
+      if (!f) return { offsiteTimeline: "" };
+      const qs = offsiteFrom(f, pick(cf[f.name], c[f.name]));
+      return { offsiteTimeline: qs[0] || "", offsiteTimelineAll: qs };
+    })(),
     owner: pick(lookupName(c, "ownerId", ownerId), ownerName, c.ownerName, "") || "",
     ownerId: String(ownerId ?? ""),
 

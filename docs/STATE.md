@@ -908,6 +908,37 @@ same mapper (REQ-04). The company-level offsite read covers the console today,
 so this is not the same live fault — but it is the same class, and it is the
 next place to look if a quarter ever "disappears".
 
+## 3g · REQ-04, the interim half: the offsite quarter reads back
+
+The console SET the offsite quarter on Kylas from the first release that had
+it, and never read it: `toConsoleContact` returned a hardcoded
+`offsiteTimeline: ""`. The same one-way street the call-back was on (§3f).
+
+**It cost far less, and that was worth establishing before fixing it.** The
+quarter is DERIVED, not stored: `offsiteOf()` recomputes it from the timeline
+text the associate typed — "Aug, week 2" → Jul–Sep — and that text round-trips
+properly through Airtable's Event Rows. So nobody lost work, which is why this
+sat open while the call-back did not. What had no way in was a quarter set in
+**Kylas directly**, by somebody working there rather than in the console.
+
+`offsiteFrom()` is `offsiteValue()` inverted. It matches through the option's
+own LABEL rather than a remembered id, for the same reason `optionForQuarter`
+does: the ids differ per account, and the spelling of "Jan - Mar" is nobody's
+to standardise. Quarters come back in the console's order, never the order
+Kylas happened to store them in, so two contacts holding the same pair read
+identically.
+
+**What is still open.** The card and the Airtable column hold ONE quarter, so
+the mapper returns the first and keeps the rest on `offsiteTimelineAll`.
+Showing and editing more than one — the multi-value UI — is the remainder of
+REQ-04. The data now survives the trip either way, which is the half that
+could not be added later without a migration.
+
+`test-write-map` is 58: every quarter round-trips, two quarters come back as
+both and in the console's order, a `{id}` wrapper is unwrapped, a
+single-select account works, and five kinds of nothing read as no quarter
+rather than throwing.
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current
