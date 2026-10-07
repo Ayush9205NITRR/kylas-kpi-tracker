@@ -320,7 +320,61 @@ async function buckets() {
 }
 
 const what = process.argv[2] || "all";
-const JOBS = { companies, rca, history, callbacks, buckets };
+/* ── MEETINGS BOOKED IN ONE PERIOD AND HELD IN ANOTHER ────────────────
+   The case the "SQL booked → held" column exists for, and the one nothing
+   seeded. history() writes its transitions with NO Contact link, so every one
+   of them collapses onto the same blank company in firstArrivals() — fine for
+   counting rows, useless for a cohort, and the reason the whole fixture showed
+   a single booked company in a single month.
+
+   Here each transition hangs off a real contact on a real company, and the
+   bookings are deliberately spread so the lag is visible:
+     - booked in month -3, held in month -2   (a past row that rose later)
+     - booked in month -2, held in month -1
+     - booked in month -2, never held         (so the rate is not a flat 100%)
+     - booked in month -1, held the same week (the fast one)
+     - booked last week, not yet held         (the recent cohort, still open)
+   Read that as: month -2 booked two and held one = 50%. Under the old
+   same-period ratio month -2 would have read "done 1 ÷ booked 2" by accident
+   and month -1 "done 1 ÷ booked 1" = 100%, neither about its own bookings. */
+async function meetings() {
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  const PLAN = [
+    { who: "Lag A", booked: 95, held: 70 },
+    { who: "Lag B", booked: 65, held: 35 },
+    { who: "Lag C", booked: 62, held: null },
+    { who: "Lag D", booked: 33, held: 30 },
+    { who: "Lag E", booked: 6, held: null },
+  ];
+  const cos = await postBack("Companies", PLAN.map((p, i) => ({
+    "Kylas Company ID": String(73100 + i), Name: `meet-co-${i + 1}`,
+    Owner: "Enout Super Admin", "Kylas Owner ID": "74725", "KPI Rank": 23,
+  })));
+  const people = await postBack("Contacts", PLAN.map((p, i) => ({
+    Name: `${p.who} Contact`, "Kylas Contact ID": String(73100 + i),
+    Owner: "Enout Super Admin",
+    "Current Stage": p.held ? "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"
+                            : "ACTIVE_REQUIREMENT_CALL_BOOKED",
+    "KPI Rank": p.held ? 25 : 23,
+    Company: cos[i] ? [cos[i].id] : undefined,
+  })));
+  const trans = [];
+  PLAN.forEach((p, i) => {
+    const contact = people[i] ? [people[i].id] : undefined;
+    trans.push({ Key: `mt-b-${i}`, "To Stage": "ACTIVE_REQUIREMENT_CALL_BOOKED",
+      "From Stage": "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+      "Changed At": ago(p.booked), Owner: "Enout Super Admin", Source: "Console", Contact: contact });
+    if (p.held != null)
+      trans.push({ Key: `mt-h-${i}`, "To Stage": "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS",
+        "From Stage": "ACTIVE_REQUIREMENT_CALL_BOOKED",
+        "Changed At": ago(p.held), Owner: "Enout Super Admin", Source: "Console", Contact: contact });
+  });
+  await post("Stage Transitions", trans);
+  const held = PLAN.filter((p) => p.held != null).length;
+  console.log(`meetings   ${PLAN.length} booked, ${held} later held — the booked -> held cohort`);
+}
+
+const JOBS = { companies, rca, history, callbacks, buckets, meetings };
 if (what === "all") { for (const fn of Object.values(JOBS)) await fn(); }
 else if (JOBS[what]) await JOBS[what]();
-else { console.error(`usage: node scripts/dev-seed.mjs companies|rca|history|all`); process.exit(2); }
+else { console.error(`usage: node scripts/dev-seed.mjs companies|rca|history|callbacks|buckets|meetings|all`); process.exit(2); }

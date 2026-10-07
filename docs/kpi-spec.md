@@ -55,6 +55,34 @@ an error.
 and "is at or past" are the same question. A company at SQL is counted at
 booked and done as well. The three are nested, not exclusive.
 
+### The one conversion that is not a step in the chain
+
+Every rate on the Progress table divides this period by this period, which
+works because each rung is reached by *doing something now*. **SQL done is not
+like that**: a meeting is booked on one day and held on another. A same-period
+ratio therefore reads 0% on the day of the booking and over 100% on the day of
+the meeting. On a real Day view (Ayush, 2026-10-07) that left ten rows holding
+six `—`, two `0%` and one `133%` — not one usable number, and not noise: the
+lag guarantees it.
+
+So that column is a **cohort**, labelled **SQL booked → held**:
+
+> of the companies whose meeting was **booked in this period**, how many have
+> **since had it held** — whenever it was held.
+
+Consequences, all deliberate:
+
+- It **cannot exceed 100%**, because the numerator is a subset of its own
+  denominator. The "carried in" marking does not apply to it.
+- A **past row can rise** as meetings land. September's row counts a September
+  booking that was held in November. That is what a cohort is, and it is why
+  the column is named differently from the rest of the chain.
+- It is `bookedHeld ÷ booked`. **`bookedHeld` is not a rung** — it adds no
+  column to the table and no line to the email; it exists only as that
+  numerator (`report.mjs`, and `views.js` `RATE_COLS`).
+- `→ SQL` (SQL ÷ SQL done) still divides period by period and carries the same
+  lag. It is left alone for now.
+
 ### On the same screen, and not rungs
 
 - **Calls logged / Calls picked** count **calls**, one per dial. Mixing them

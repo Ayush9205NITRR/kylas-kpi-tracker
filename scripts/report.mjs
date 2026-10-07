@@ -188,7 +188,11 @@ export const METRICS = [
   { key: "sql", label: "SQL", kind: "first" },
 ];
 
-const blank = () => Object.fromEntries(METRICS.map((m) => [m.key, 0]));
+/* `bookedHeld` is NOT a rung and deliberately not in METRICS: it adds no
+   column to the table and no line to the email. It is the numerator of one
+   rate — see the cohort block in report() — and it rides on the row so the
+   console can divide without a second request. */
+const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0 });
 
 /* ── the aggregation ───────────────────────────────────────────────── */
 /* calls:        [{ at, owner, outcome }]
@@ -369,9 +373,42 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
      answer as DATES rather than as counts, and deriving it twice is the bug
      this codebase has paid for more than once. */
   const TOUCH = new Set(METRICS.filter((m) => m.kind === "touch").map((m) => m.key));
-  for (const a of firstArrivals({ transitions, signals })) {
+  const arrivals = firstArrivals({ transitions, signals });
+  for (const a of arrivals) {
     if (TOUCH.has(a.metric)) continue;          /* counted per period, below */
     if (inWindow(a.at)) bump(key(a.at), a.owner, a.metric);
+  }
+
+  /* ── DID THE BOOKED MEETINGS ACTUALLY HAPPEN? ───────────────────────
+     Ayush, 2026-10-07: "SQL done ka jo percentage hai usko modify kar do."
+
+     Every other rate on that table divides this period by this period, which
+     works because each rung is reached by doing something now. SQL done is not
+     like that: a meeting is BOOKED on one day and HELD on another, so a
+     same-period ratio reads 0% on the day of the booking and over 100% on the
+     day of the meeting. On his Day view that left ten rows holding six "—",
+     two "0%" and one "133%" — not one usable number, and not noise: the lag
+     guarantees it.
+
+     So this one is a COHORT. Of the companies whose meeting was booked in this
+     period, how many have since had it held? That is the question the column
+     was always trying to ask, it cannot exceed 100%, and it does not care how
+     long the period is.
+
+     DONE IS COUNTED AT ANY TIME, including after the window. "Booked in
+     September, held in November" is a September booking that happened, and
+     reading the September row should say so. The consequence is that a past
+     row can rise as meetings land — which is what a cohort is, and is why the
+     column is labelled as one rather than as another step in the chain.
+
+     Rungs are floors and KPI Rank only rises, so a company's `done` arrival is
+     never earlier than its `booked` one — a single jump from nothing to SQL
+     marks booked, done and sql at the same instant. There is no need to
+     compare the two dates. */
+  const heldEver = new Set(arrivals.filter((a) => a.metric === "done").map((a) => a.company));
+  for (const a of arrivals) {
+    if (a.metric !== "booked" || !inWindow(a.at) || !heldEver.has(a.company)) continue;
+    bump(key(a.at), a.owner, "bookedHeld");
   }
 
   /* ONE PER COMPANY PER PERIOD, and separately one per company per owner per
@@ -401,6 +438,7 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
   const periods = keys.map((k) => rows.get(k));
   const totals = periods.reduce((acc, r) => {
     for (const m of METRICS) acc[m.key] += r[m.key];
+    acc.bookedHeld += r.bookedHeld;    /* not a METRIC, so not in that loop */
     return acc;
   }, blank());
 

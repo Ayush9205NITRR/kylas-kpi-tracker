@@ -166,5 +166,21 @@ for (const k of ["worked", "picked", "right", "discovery", "booked", "done", "sq
   ok(`  ${k} is on the ladder, so it is in Progress too`, ladder.includes(k));
 ok("seven rungs, no more and no fewer", ladder.length === 7, String(ladder.length));
 
+console.log("\n12. SQL done's rate is a cohort, not a same-period ratio");
+/* The obvious ratio is done-this-period over booked-this-period, and it is
+   wrong for this one rung because the meeting happens after the booking. It
+   would be an easy thing to "simplify" back, so it is asserted both ways. */
+ok("RATE_COLS gives the done column its own numerator",
+   /key === "done"[\s\S]{0,160}num: "bookedHeld"/.test(views));
+ok("...and marks it a cohort, so rate() does not treat it as carried in",
+   /key === "done"[\s\S]{0,200}cohort: true/.test(views));
+ok("rate() reads that numerator rather than the rung's own count",
+   /const n = p\[c\.num \|\| c\.key\]/.test(views));
+ok("report.mjs counts the cohort off first arrivals",
+   /heldEver[\s\S]{0,200}bump\(key\(a\.at\), a\.owner, "bookedHeld"\)/.test(report));
+ok("...and bookedHeld is NOT a rung, so it adds no column or email line",
+   !/\{ key: "bookedHeld"/.test(report));
+ok("the spec says the same", /SQL booked → held/.test(spec) && /cohort/i.test(spec));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

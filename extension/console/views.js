@@ -1089,9 +1089,22 @@
   const COUNT_COLS = [{ key: "calls", label: "Calls" },
     ...LADDER_ORDER.map((key) => ({ key, label: rung(key) }))];
   /* Each rate is this rung out of the one above it, so the pairs follow the
-     ladder's own order rather than being listed by hand. */
-  const RATE_COLS = LADDER_ORDER.slice(1).map((key, i) => ({
-    key, of: LADDER_ORDER[i], label: `→ ${rung(key)}` }));
+     ladder's own order rather than being listed by hand.
+
+     EXCEPT SQL DONE, WHICH IS A COHORT. A meeting is booked on one day and
+     held on another, so "done this period ÷ booked this period" reads 0% on
+     the day of the booking and over 100% on the day of the meeting — see the
+     block in report.mjs that computes bookedHeld. This column instead asks:
+     of the meetings booked in this period, how many have since happened. The
+     label says "held" rather than "→ SQL done" because it is a different
+     question from the rest of the chain and must not read as another step in
+     it. The rung name still comes from RUNG. */
+  const RATE_COLS = LADDER_ORDER.slice(1).map((key, i) => {
+    const col = { key, of: LADDER_ORDER[i], label: `→ ${rung(key)}` };
+    return key === "done"
+      ? { ...col, num: "bookedHeld", label: `${rung("booked")} → held`, cohort: true }
+      : col;
+  });
 
   /* Where the report is pointed: which level, and the window a drill-down has
      narrowed it to. The trail is what "back" means. */
@@ -1398,9 +1411,14 @@
        a title saying so rather than the figure being quietly dropped. */
     const rate = (p, c) => {
       const d = p[c.of] || 0;
-      const n = p[c.key] || 0;
+      const n = p[c.num || c.key] || 0;
       if (!d) return "—";
       const v = Math.round((n / d) * 100) + "%";
+      /* A cohort is a subset of its own denominator, so it cannot carry in and
+         the "over" note below would never be right for it. */
+      if (c.cohort) return `<span title="${n} of the ${d} ${
+        d === 1 ? "meeting" : "meetings"} booked in this period ${
+        n === 1 ? "has" : "have"} since been held. Counted whenever the meeting happened, so this row can rise later — a booking made this period that happens next month belongs to this period's bookings.">${v}</span>`;
       if (n <= d) return v;
       return `<span class="over" title="${n} companies reached this rung inside this period and ${d
         } reached the one before it. The others got there in an earlier period and moved up in this one, so the two are not the same set of companies.">${v}</span>`;
@@ -1442,7 +1460,11 @@
            opens into ${esc(INTO[DASH_LEVEL])}s. `
         : ""}Counted from the call log and the stage history, so every level is the same rows cut a
         different way and they always agree. A company is counted on the period it FIRST reached a
-        rung — moving on, or back and forth, never counts twice.</p>`;
+        rung — moving on, or back and forth, never counts twice.
+        <b>${esc(rung("booked"))} → held</b> is the one column that is not a step in that chain:
+        a meeting is booked on one day and happens on another, so it counts the meetings
+        <i>booked in this period</i> that have since taken place, whenever they took place.
+        That is why it never passes 100%, and why a past row can rise.</p>`;
   }
 
   /* ── RCA: why an account stopped moving ────────────────────────────────

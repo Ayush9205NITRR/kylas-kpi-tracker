@@ -305,5 +305,63 @@ console.log("\na save that changed no stage still counts as worked");
   eq("...and not picked, because nothing says it was", r.totals.picked, 0);
 }
 
+/* ── the booked → held cohort ─────────────────────────────────────────
+   The rate the Progress table shows for SQL done. Every number below is worked
+   out by hand first, because the whole point of the column is that the obvious
+   same-period ratio gives the wrong answer. */
+console.log("\nbooked -> held, as a cohort rather than a same-period ratio");
+const BOOK = "ACTIVE_REQUIREMENT_CALL_BOOKED";
+const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
+{
+  /* Three booked on the 14th. Two of them held — one the next day, one three
+     weeks later. The third never. So the 14th's cohort is 2 of 3. */
+  const r = report("day", { transitions: [
+    { at: "2026-09-14T09:00:00Z", owner: "A", company: "c1", to: BOOK },
+    { at: "2026-09-14T09:10:00Z", owner: "A", company: "c2", to: BOOK },
+    { at: "2026-09-14T09:20:00Z", owner: "A", company: "c3", to: BOOK },
+    { at: "2026-09-15T09:00:00Z", owner: "A", company: "c1", to: HELD },
+    { at: "2026-10-05T09:00:00Z", owner: "A", company: "c2", to: HELD },
+  ] }, { from: "2026-09-14", to: "2026-10-05" });
+  const day = (k) => r.periods.find((p) => p.key === k);
+  eq("three booked on the 14th", day("2026-09-14").booked, 3);
+  eq("two of them have since been held", day("2026-09-14").bookedHeld, 2);
+  /* THE POINT. The old rate was done-this-period over booked-this-period: on
+     the 14th that is 0/3 = 0%, and on the 15th 1/0 = undefined. Neither says
+     anything about whether the bookings happened. */
+  eq("...while the 14th's own `done` count is still 0 — the lag that broke it",
+     day("2026-09-14").done, 0);
+  eq("the meeting itself lands on the day it happened", day("2026-09-15").done, 1);
+  eq("...and that day booked nothing, so it has no cohort",
+     day("2026-09-15").bookedHeld, 0);
+  /* A cohort is a subset of its denominator, so this can never exceed it —
+     which is the property the 133% cell lacked. */
+  ok("held never exceeds booked, in any period",
+     r.periods.every((p) => p.bookedHeld <= p.booked));
+  eq("the window totals agree", r.totals.bookedHeld, 2);
+}
+{
+  /* HELD AFTER THE WINDOW STILL COUNTS. A September booking held in November
+     is a September booking that happened, and the September row has to say so
+     or the column quietly punishes recent periods. */
+  const r = report("month", { transitions: [
+    { at: "2026-09-10T09:00:00Z", owner: "A", company: "c1", to: BOOK },
+    { at: "2026-11-20T09:00:00Z", owner: "A", company: "c1", to: HELD },
+  ] }, { from: "2026-09-01", to: "2026-09-30" });
+  const sep = r.periods.find((p) => p.key === "2026-09");
+  eq("booked in September", sep.booked, 1);
+  eq("...held in November, and September is still credited", sep.bookedHeld, 1);
+  eq("...while November's meeting is outside the window and counts nowhere here",
+     r.totals.done, 0);
+}
+{
+  /* One jump from nothing to SQL marks booked, done and sql at the same
+     instant — the floors are nested. The cohort must read 1 of 1, not 0. */
+  const r = report("day", { transitions: [
+    { at: "2026-09-14T09:00:00Z", owner: "A", company: "c1", to: "SQL_SALES_QUALIFIED_LEAD" },
+  ] }, { from: "2026-09-14", to: "2026-09-14" });
+  eq("a straight jump to SQL counts as booked", r.totals.booked, 1);
+  eq("...and as held, in the same period", r.totals.bookedHeld, 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
