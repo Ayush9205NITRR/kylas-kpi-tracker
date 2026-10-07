@@ -67,35 +67,58 @@ if (!map.nextCall && !map.offsite) {
   process.exit(1);
 }
 
-if (FIND) {
+/* Does this contact actually hold one? An empty array counts as nothing — a
+   cleared multi-picklist comes back `[]`, not absent. */
+const held = (c, f) => {
+  if (!f) return undefined;
+  const v = (c.customFieldValues || {})[f.name];
+  if (v === undefined || v === null || v === "") return undefined;
+  if (Array.isArray(v) && !v.length) return undefined;
+  return v;
+};
+
+/* The recent contacts that have EITHER field set, because both were write-only
+   and both are read here. Shared by --find and by the dead end a --contact with
+   nothing on it reaches, so picking a usable id never needs a second run. */
+async function findCandidates() {
   const recent = rows(await call("POST", "/v1/search/contact?page=0&size=100&sort=updatedAt,desc",
     { fields: ["id", "firstName", "lastName", "customFieldValues", "updatedAt"], jsonRule: everything() }));
-  /* A contact is worth checking if it has EITHER a call-back or an offsite
-     quarter, because both were write-only and both are read here. */
-  const held = (c, f) => {
-    if (!f) return undefined;
-    const v = (c.customFieldValues || {})[f.name];
-    if (v === undefined || v === null || v === "") return undefined;
-    if (Array.isArray(v) && !v.length) return undefined;
-    return v;
-  };
-  const withOne = recent.filter((c) => held(c, map.nextCall) !== undefined ||
-                                       held(c, map.offsite) !== undefined);
-  console.log(`\n${withOne.length} of the last ${recent.length} contacts have a call-back or an offsite quarter set in Kylas:\n`);
-  for (const c of withOne.slice(0, 15)) {
+  const rowsOut = [];
+  for (const c of recent) {
     const nc = held(c, map.nextCall);
     const off = held(c, map.offsite);
-    const got = nc === undefined ? { date: "", time: "" } : nextCallFrom(map.nextCall, nc, TZ);
-    const qs = off === undefined ? [] : offsiteFrom(map.offsite, off);
-    console.log(`  ${String(c.id).padEnd(10)} ${[c.firstName, c.lastName].filter(Boolean).join(" ").slice(0, 26).padEnd(28)}` +
-                `call-back ${(got.date ? got.date + (got.time ? " " + got.time : "") : "—").padEnd(18)}` +
-                `offsite ${qs.join(", ") || "—"}`);
+    if (nc === undefined && off === undefined) continue;
+    rowsOut.push({ id: c.id,
+      who: [c.firstName, c.lastName].filter(Boolean).join(" ") || "(no name)",
+      call: nc === undefined ? null : nextCallFrom(map.nextCall, nc, TZ),
+      quarters: off === undefined ? [] : offsiteFrom(map.offsite, off) });
   }
-  if (!withOne.length) {
+  return { seen: recent.length, rows: rowsOut };
+}
+
+const line = (r) => `  ${String(r.id).padEnd(10)} ${r.who.slice(0, 26).padEnd(28)}` +
+  `call-back ${(r.call?.date ? r.call.date + (r.call.time ? " " + r.call.time : "") : "—").padEnd(18)}` +
+  `offsite ${r.quarters.join(", ") || "—"}`;
+
+if (FIND) {
+  const { seen, rows: hits } = await findCandidates();
+  const withOffsite = hits.filter((r) => r.quarters.length);
+  console.log(`\n${hits.length} of the last ${seen} contacts have a call-back or an offsite quarter set in Kylas:\n`);
+  hits.slice(0, 15).forEach((r) => console.log(line(r)));
+  if (!hits.length) {
     console.log("  (none — set one in the console, save, then run this again)");
     console.log("  Without one there is nothing for the read side to get wrong.\n");
     process.exit(1);
   }
+  /* THE PART THAT IS EASY TO MISS. A hundred call-backs and no quarter means
+     the offsite read side cannot be confirmed from existing data at all — not
+     that it is broken. Saying which it is costs one line. */
+  if (!withOffsite.length)
+    console.log(`\n  ! None of these ${hits.length} has an offsite quarter, so nothing here can confirm` +
+                `\n    the offsite read side. Set one on a contact in Kylas directly, then re-run.`);
+  else
+    console.log(`\n  ${withOffsite.length} of them ${withOffsite.length === 1 ? "has" : "have"} a quarter` +
+                ` — use one of those to check the offsite side:\n    --contact ${withOffsite[0].id}`);
   console.log(`\nThen: --contact <id> to see the whole record as the console will.\n`);
   process.exit(0);
 }
@@ -132,8 +155,21 @@ const ok = (w, c2) => { if (!c2) bad++; console.log(`  ${c2 ? "PASS" : "FAIL"}  
 console.log("");
 if (!had && !offHad) {
   console.log("  This contact has NEITHER a call-back nor an offsite quarter in Kylas, so");
-  console.log("  two blanks are correct and this proves nothing. Run --find to pick one");
-  console.log("  that has something to read.\n");
+  console.log("  two blanks are correct and this proves nothing.");
+  /* Telling someone to go and run --find costs them a round trip, and the id
+     they reach for is usually the one they just used. The search is two seconds
+     — do it here and hand over ids that will actually prove something. */
+  const { rows: hits } = await findCandidates().catch(() => ({ rows: [] }));
+  const withOffsite = hits.filter((r) => r.quarters.length);
+  const pick = (withOffsite.length ? withOffsite : hits).slice(0, 5);
+  if (pick.length) {
+    console.log(`\n  Try one of these instead${withOffsite.length
+      ? " — these have an offsite quarter, which is the side still unproven" : ""}:\n`);
+    pick.forEach((r) => console.log(line(r)));
+    console.log(`\n    node --env-file=.env.local scripts/probe-nextcall.mjs --contact ${pick[0].id}\n`);
+  } else {
+    console.log("  No recent contact has either field set. Run --find for the full picture.\n");
+  }
   process.exit(1);
 }
 if (had) {
