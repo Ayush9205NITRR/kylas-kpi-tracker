@@ -225,9 +225,29 @@ async function callbacks() {
     Owner: "Enout Super Admin", "Kylas Owner ID": "74725",
     "Source of Data": SRC[i % SRC.length], "KPI Rank": 6,
   })));
+  /* REMARKS, so the "Said before" preview has something to preview. It shipped
+     with no fixture at all behind it, which is exactly why nobody saw what it
+     looked like until it was in front of an associate. Three shapes, because
+     they lay out differently and only one of them was ever imagined:
+       0  a short note, the common case
+       1  a long one, which must truncate to a line and offer "more"
+       2  a human note ABOVE the machine block — the auto summary must be
+          stripped, not shown back
+     The third is left blank: no note is also a state. */
+  const NOTE = [
+    "Wants a Goa venue, 2 nights.",
+    "Budget approx 8L but not signed off — finance review is on the 20th, and she " +
+    "asked us to come back after that with two options, one in Goa and one closer " +
+    "to Pune, because half the team is travelling from there and last year's offsite " +
+    "lost a day to the drive.",
+    "Prefers WhatsApp over calls.\n--- BD CONSOLE (auto, do not edit below) ---\n" +
+    "Stage: MQL · Owner: Enout Super Admin · written by the console",
+    "",
+  ];
   const people = PLAN.map(([, d], i) => ({
     Name: `Callback Contact ${i + 1}`, "Kylas Contact ID": String(72000 + i),
     Owner: i % 2 ? "Priya Deshmukh" : "Enout Super Admin",
+    Remarks: NOTE[i] || undefined,
     /* NOT an exit stage: progress.mjs drops a call-back promised to somebody
        who has since said no, which is right, and which also means seeding one
        there would silently seed nothing. */

@@ -1103,7 +1103,31 @@ body.colresize .cgrip{border-right-color:var(--blue)}
 
 .rgood{margin:12px 0 0;font-size:var(--t-label);color:var(--text2)}
 .rgood b{color:var(--blue);font-weight:var(--w-strong)}
-.rtable{margin-top:14px}
+/* FIFTEEN COLUMNS, AND THE LAST TWO WERE CUT OFF. Ayush, 2026-10-07:
+   "SQL done ka percentage nahi hai". It was computed and rendered the whole
+   time — .vsteps sets overflow:clip, so the table simply ended at the pane's
+   edge and the last conversions went with it. Measured in a real Chrome:
+   1,225px of table in a 1,138px box, with the clipped 87px holding exactly
+   "→ SQL done" and "→ SQL".
+   So let the columns scroll, and pin the period so you can still tell which
+   row you are reading once they do. overflow-y stays clipped, which keeps the
+   card's rounded corners. The fade on the right edge is the cue that there is
+   more: it is painted with --panel and background-attachment:local, so it
+   appears only while there is somewhere left to scroll. */
+.rtable{margin-top:14px;overflow-x:auto;overflow-y:clip;
+  background:linear-gradient(to left,var(--panel),rgba(0,0,0,0)) right center/26px 100% no-repeat local,
+             var(--panel)}
+.rtable table{min-width:max-content}
+/* The pinned period. Both header cells are sticky in two directions at once,
+   so the corner one has to sit above the row beneath it and the column beside
+   it — hence the third z-index. */
+.rtable th:first-child,.rtable td.pl{position:sticky;left:0;z-index:1;
+  background:var(--panel);border-right:1px solid var(--line)}
+.rtable thead th:first-child{z-index:3;background:var(--panel2)}
+/* A sticky cell paints its own background, so the row colours have to be
+   repeated on it or the pinned column stays pale while its row is lit. */
+.rtable tbody tr.now td.pl{background:var(--blueSoft)}
+.onegrid tbody tr[data-into]:hover td.pl{background:var(--panel3)}
 .rtable tbody tr.now td{background:var(--blueSoft);font-weight:var(--w-strong)}
 .rtable td .d{margin-left:6px}
 

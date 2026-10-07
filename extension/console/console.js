@@ -441,10 +441,14 @@ function prevNotes(a){
       ${full.length>150?'<i class="pnmore">more</i>':""}</button>
     <div class="pnall" hidden>${bits.map(b=>`<p>${
       b.from?`<em>${esc(b.from)}</em>`:""}${esc(b.text)}</p>`).join("")}</div>`;
-  const btn=box.querySelector(".pnx"),all=box.querySelector(".pnall");
+  const btn=box.querySelector(".pnx"),all=box.querySelector(".pnall"),
+        mo=box.querySelector(".pnmore");
   btn.onclick=()=>{const open=all.hidden;all.hidden=!open;
     btn.setAttribute("aria-expanded",String(open));
-    box.classList.toggle("open",open);};
+    box.classList.toggle("open",open);
+    /* It read "more" while already open, which is the one thing the word
+       cannot mean there. */
+    if(mo)mo.textContent=open?"less":"more";};
   return box;
 }
 

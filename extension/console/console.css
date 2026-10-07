@@ -185,11 +185,25 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 /* WHAT WAS SAID LAST TIME. One line in the call bar, because it sits in the
    85% path and a no-answer must not pay for it. Structure, not a new hue: the
    same surface as the rest of the bar, with the label doing the separating. */
-.pnote{flex:1 1 100%;min-width:0;order:9;border-top:1px solid var(--line)}
+/* IT WAS STYLED AS A STRIP AND RENDERED AS A STRAY LINE. Ayush, 2026-10-07:
+   "preview bhi kharab hai". Screenshotted in a real Chrome, three things were
+   wrong and all three came from the strip sitting INSIDE .callbar's padding
+   rather than spanning it:
+     - .cbIn's 20px gap opened a hole between the contact name and the note
+     - border-top stopped 18px short at each end, so the rule read as a stray
+       line instead of a divider
+     - .callbar's 18px padding plus .pnx's own 18px put the text at 36px, out
+       of line with the company and the name above it
+   So the strip is pulled full-bleed: the negative margins cancel the bar's
+   padding and most of the flex gap, which lets .pnx's own padding land the
+   text at 18px — aligned with everything above — and lets the rule span the
+   whole bar. It then reads as the bar's footer band, which is what it is. */
+.pnote{flex:1 1 100%;min-width:0;order:9;margin:-11px -18px -9px;
+  background:var(--panel2);border-top:1px solid var(--line)}
 .pnote .pnx{display:flex;align-items:baseline;gap:9px;width:100%;min-width:0;
-  background:transparent;border:0;padding:5px 18px;text-align:left;cursor:pointer;
+  background:transparent;border:0;padding:6px 18px;text-align:left;cursor:pointer;
   font:inherit;color:var(--text2)}
-.pnote .pnx:hover{background:var(--panel2)}
+.pnote .pnx:hover{background:var(--panel3)}
 .pnote .pnx em{font-style:normal;font-size:var(--t-meta);color:var(--text3);
   font-weight:var(--w-med);text-transform:uppercase;letter-spacing:.06em;flex:none}
 .pnote .pns{font-size:var(--t-label);min-width:0;overflow:hidden;
