@@ -287,6 +287,38 @@ If the list ever does need to get smaller than 255KB, the options in order are:
 send only the columns the table has switched on, page it, or filter
 server-side — the last only possible once the data is in SQL.
 
+## When this stops being optional
+
+Asked by Ayush, 2026-10-07: how soon does Airtable have to go?
+
+```sh
+node scripts/capacity.mjs                    # the model, with its assumptions
+node --env-file=.env.local scripts/capacity.mjs --measure   # ask Kylas for the real counts
+```
+
+**The answer is two answers**, and they fall due at different times:
+
+- **Records per base** is reached by the *backfill*, not by use. 17,925
+  companies plus their contacts is about **53,800 records before anybody calls
+  anyone** — already past Team's 50,000. It does not matter how many
+  associates there are. The gate is the day task 7 (fill the base from the
+  17,925) finishes, and today the base holds 40 companies only because that
+  sync has never completed. **Finishing that sync on a Team plan is what
+  breaks it**, which makes the order of those two jobs the decision.
+- **API calls per month** is reached by *use*. Team allows 100,000; a save is
+  five requests, so about **4 associates at 150 calls a day spends the whole
+  budget**. Over it, every request is throttled to 2/second until the 1st —
+  not an error, just a console that has quietly become slow.
+
+Business (125,000 records, no published monthly cap) buys room on both but
+still fills: the 90-day raw Call Log alone is 108,000 rows at eight
+associates, which is why `rollup-calls.mjs` exists and why its retention is a
+flag.
+
+The per-second ceiling is **5/s on every plan** and no upgrade moves it. Eight
+associates saving in the same second want 40 requests. That one is not a
+capacity problem that money fixes.
+
 ## Still to build
 
 1. **The Kylas write-back** — Gate 4. Waiting on the field list.
