@@ -119,15 +119,20 @@ export const STAGE_LABEL = {
   YET_TO_BE_MINED:                               "LinkedIn Outreach Initiated",
 };
 
-/* [rung, label] lowest first, for the Airtable ladder formula. */
 /* RUNG → STAGE, the ladder read the other way. STAGE_RUNG answers "how far is
    this stage"; this answers "what stage is this far", which is what anything
    holding a rank rather than a code needs — KPI Rank is a number and the name
    beside it has to be the name of THAT rung. Built from STAGE_RUNG so the two
-   can never disagree. */
+   can never disagree.
+
+   IT LIVES IN THE GENERATOR because it was once hand-added to the generated
+   file instead, and progress.mjs imports it: the next person to run this
+   script deleted it and broke the Today pane at import. A generated file is
+   only as complete as its template. */
 export const STAGE_AT_RUNG = Object.fromEntries(
   Object.entries(STAGE_RUNG).map(([code, rung]) => [rung, code]));
 
+/* [rung, label] lowest first, for the Airtable ladder formula. */
 export const LADDER = [
   [1, "01 · LinkedIn Outreach Initiated"],
   [2, "02 · POC - Organization - Changed"],
@@ -159,7 +164,7 @@ export const LADDER = [
 
 export const CNC_LADDER = ["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC"];
 export const EXIT_STAGES = ["CLOSING_LOOPS_LOW_VALUE","GHOSTED","NOT_INTERESTED","INVALID_CONTACT","DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"];
-export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_NO_SHOW","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS","ACTIVATION","SQL_SALES_QUALIFIED_LEAD"];
+export const MEETING_STAGES = ["DISCOVERY_CALL_BOOKED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","GHOSTED","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_NO_SHOW","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"];
 export const UNTOUCHED = ["YET_TO_BE_MINED"];
 
 export const STAGE_FAMILIES = [{"key":"new","label":"Not started","hint":"never called","stages":["YET_TO_BE_MINED"]},{"key":"cnc","label":"CNC","hint":"dialled, nobody picked up — or asked to be called later","stages":["CNC_COULD_NOT_CONNECT","CNC_COULD_NOT_CONNECT_2","CNC_COULD_NOT_CONNECT_3","FOLLOWUP_CNC","CONNECT_LATER"]},{"key":"active","label":"Activation and above","hint":"a real conversation is running","stages":["ACTIVATION","MQL_MARKETING_QUALIFIED_LEAD","FOLLOW_UP_1","FOLLOW_UP_2","FOLLOW_UP_3","OFFSITE_DELAYED","OFFSITE_DONE_LATE_REACHOUT","SQL_SALES_QUALIFIED_LEAD"]},{"key":"meeting","label":"Meeting in play","hint":"a meeting is booked, held or to be re-booked","stages":["DISCOVERY_CALL_BOOKED","GHOSTED","DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS","ACTIVE_REQUIREMENT_CALL_BOOKED","ACTIVE_REQUIREMENT_CALL_NO_SHOW","ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"]},{"key":"newpoc","label":"Needs a new POC","hint":"the account is open, the person is wrong","stages":["DISQUALIFIED_WRONG_POC","NOT_A_DECISION_MAKER_NDM","POC_ORGANIZATION_CHANGED"]},{"key":"closed","label":"Closed","hint":"no call to make","stages":["NOT_INTERESTED","INVALID_CONTACT","CLOSING_LOOPS_LOW_VALUE"]}];

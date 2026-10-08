@@ -414,8 +414,26 @@ function renderCallbar(){
    rewrites every time. Showing it back would fill the preview with the stage
    and owner the screen already states, and push the human sentence out of
    view. Only what a person typed is shown. */
-const MARK_AUTO="--- BD CONSOLE (auto";
-const humanNote=s=>String(s||"").split(MARK_AUTO)[0].replace(/\s+$/,"").trim();
+/* THE NOTE MAY BE UNDER THE BLOCK, NOT ONLY OVER IT. Ayush, 2026-10-08:
+   "notes for a number of companies are not showing up." The block is written
+   at the top of a field that starts empty, so somebody typing in Kylas puts
+   their note at the END — and splitting on the opening marker threw away
+   everything from there on, which is to say their note. The block is cut out
+   between its two markers now and both sides are kept.
+   This mirrors stripAuto() in scripts/kylas.mjs, which the save uses; the two
+   must agree, and test-remarks checks that they do. */
+const MARK_AUTO="--- BD CONSOLE (auto, do not edit below) ---";
+const MARK_END="--- END ---";
+const humanNote=s=>{
+  const t=String(s||"");
+  const i=t.indexOf(MARK_AUTO);
+  if(i<0)return t.trim();
+  /* No closing marker means a truncated or pre-marker block: there is no way
+     to know where it ended, so everything after it goes, as it always did. */
+  const b=t.indexOf(MARK_END,i+MARK_AUTO.length);
+  const tail=b<0?"":t.slice(b+MARK_END.length);
+  return `${t.slice(0,i)}\n${tail}`.replace(/\n{3,}/g,"\n\n").trim();
+};
 function prevNotes(a){
   const bits=[];
   const own=humanNote(a.remarks);

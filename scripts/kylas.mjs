@@ -675,10 +675,44 @@ export function createClient(key, {
 export const MARK_A = "--- BD CONSOLE (auto, do not edit below) ---";
 export const MARK_B = "--- END ---";
 
-/* Rewrite only between the markers. Anything a human typed above them is
-   theirs and must survive, so the block is replaced rather than the field. */
+/* EVERYTHING OUTSIDE THE BLOCK IS A HUMAN'S, ABOVE IT OR BELOW IT.
+   Ayush, 2026-10-08: "notes for a number of companies are not showing up."
+
+   This used to keep `existing.split(MARK_A)[0]` — only the text ABOVE the
+   block. But the block is written at the TOP of a field that is usually empty,
+   so a BD person opening the contact in Kylas finds machine text at the top
+   and types their note at the END, under it. That note was then:
+
+     invisible  the console's preview strips from MARK_A to the end of the
+                field, so it showed nothing and the contact looked noteless
+     destroyed  the next save kept only the text above the marker, so the
+                note was dropped from Kylas on the next touch
+
+   The second is why this is a data bug and not a display one. So the block is
+   now cut OUT of the field — from MARK_A through MARK_B — and whatever sits on
+   either side is kept and rejoined. A note written underneath is preserved and
+   moves above the block on the next save, where it will stay.
+
+   MARK_B missing means a truncated or pre-marker block, and then there is no
+   way to tell where it ended: everything after MARK_A is dropped, which is
+   exactly what this did before. Same behaviour for the old shape, the note
+   kept for the current one.
+
+   The console's preview does the same thing in console.js `humanNote`, and
+   test-remarks asserts the two agree. */
+export function stripAuto(s) {
+  const t = String(s || "");
+  const i = t.indexOf(MARK_A);
+  if (i < 0) return t.trim();
+  const b = t.indexOf(MARK_B, i + MARK_A.length);
+  const tail = b < 0 ? "" : t.slice(b + MARK_B.length);
+  return `${t.slice(0, i)}\n${tail}`.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/* Rewrite only the block. Anything a human typed outside it is theirs and
+   must survive. */
 export function mergeRemarks(existing, block) {
-  const before = String(existing || "").split(MARK_A)[0].replace(/\s+$/, "");
+  const before = stripAuto(existing);
   if (!block) return before;
   return `${before}${before ? "\n\n" : ""}${MARK_A}\n${block}\n${MARK_B}`;
 }

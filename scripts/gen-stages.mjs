@@ -26,6 +26,18 @@ for (const list of ["cncLadder", "exitStages", "meetingStages", "untouched"])
   for (const code of src[list])
     if (!S.some((s) => s.code === code)) throw new Error(`${list} names an unknown stage: ${code}`);
 
+/* MEETING STAGES ARE THE MEETING FAMILY, AND NOTHING ELSE.
+   Ayush, 2026-10-08: "an activation cannot be marked unless a meeting has
+   already been booked... was not a part of my requirement." MEETING_STAGES is
+   the single thing that makes the card demand a meeting date and a mode of
+   meeting (console.js `required()`), and it had ACTIVATION and
+   SQL_SALES_QUALIFIED_LEAD in it — neither of which is a meeting. Picking
+   Activation therefore asked for the details of a meeting nobody had booked.
+
+   The families already say which stages are meetings, so the list is checked
+   against them rather than being a second hand-written copy that can drift.
+   Checked after the families are validated, below — this is where it reads. */
+
 /* FAMILIES MUST COVER EVERY STAGE, EXACTLY ONCE.
    The design this came from sorted stages into families with regular expressions
    over the stage NAME, which is right for sample data and wrong for a known
@@ -47,6 +59,15 @@ for (const f of FAMS) {
 }
 const unplaced = S.filter((s) => !placed.has(s.code)).map((s) => s.code);
 if (unplaced.length) throw new Error(`stages in no family: ${unplaced.join(", ")}`);
+
+/* The check promised above, now that `placed` knows every stage's family. */
+{
+  const strays = (src.meetingStages || []).filter((c) => placed.get(c) !== "meeting");
+  if (strays.length) throw new Error(
+    `meetingStages holds stages that are not in the "meeting" family: ${strays.join(", ")}.\n` +
+    `  They would make the card demand a meeting date and a mode of meeting on a stage\n` +
+    `  where no meeting exists. Put them in the meeting family, or take them off this list.`);
+}
 
 /* A milestone is a floor, so it must name a real stage. Emitting a rung of
    `undefined` would make every comparison false and read as "nobody ever got
@@ -219,6 +240,19 @@ ${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.rung},`).join("\n")}
 export const STAGE_LABEL = {
 ${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${q(s.label)},`).join("\n")}
 };
+
+/* RUNG → STAGE, the ladder read the other way. STAGE_RUNG answers "how far is
+   this stage"; this answers "what stage is this far", which is what anything
+   holding a rank rather than a code needs — KPI Rank is a number and the name
+   beside it has to be the name of THAT rung. Built from STAGE_RUNG so the two
+   can never disagree.
+
+   IT LIVES IN THE GENERATOR because it was once hand-added to the generated
+   file instead, and progress.mjs imports it: the next person to run this
+   script deleted it and broke the Today pane at import. A generated file is
+   only as complete as its template. */
+export const STAGE_AT_RUNG = Object.fromEntries(
+  Object.entries(STAGE_RUNG).map(([code, rung]) => [rung, code]));
 
 /* [rung, label] lowest first, for the Airtable ladder formula. */
 export const LADDER = [
