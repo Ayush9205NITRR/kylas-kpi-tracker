@@ -319,6 +319,49 @@ The per-second ceiling is **5/s on every plan** and no upgrade moves it. Eight
 associates saving in the same second want 40 requests. That one is not a
 capacity problem that money fixes.
 
+### Measured, not modelled — and it breaks before the caps do
+
+```sh
+node scripts/test-scale-airtable.mjs          # 17,925 companies, 90 days of calls
+node scripts/test-scale-airtable.mjs --quick  # 2,000, for a fast check
+```
+
+The mock is filled to this account's real size and the **real client** is
+pointed at it. The result is worse than the plan caps, because it arrives
+without an error:
+
+> asked for every contact with `maxPages: 200` — the base holds **35,850**,
+> the read returned **20,000**, in 43.8s. A 200. No warning.
+
+`listAll` returns a **prefix** when it runs out of pages unless the caller
+passes `throwIfMore`, and most callers do not. **Six of twelve ceilings sit
+below the table they read** at this size:
+
+| read | ceiling | table holds | lost |
+|---|---|---|---|
+| `scanContacts` | 20,000 | 35,850 | 15,850 |
+| contacts, for the board | 20,000 | 35,850 | 15,850 |
+| `handlers.mjs` owners | 20,000 | 35,850 | 15,850 |
+| `sync-kylas` watermark | 20,000 | 35,850 | 15,850 |
+| `eventsFor` (scans all, filters after) | 6,000 | 8,963 | 2,963 |
+| **`rollup-calls` raw log** | 40,000 | 108,000 | **68,000** |
+
+The last one is the one to read twice. `rollup-calls.mjs` is the job that
+keeps the base under the record cap, and at this size it can only see the
+first 40,000 of 108,000 call rows — **the compaction cannot keep up with the
+growth it exists to control.**
+
+Records at this size total **181,493**, which is over Free, Team *and*
+Business; only Enterprise Scale fits. And rebuilding the mirror alone, at
+1,817 requests a lap every ~26h, is **50,876 requests a month** — half of
+Team's entire budget before a single save.
+
+So the answer to "will this work fine": no, and it will not say so. Raising
+the ceilings stops the silent part but makes every read slower and more
+expensive, and does nothing about either cap. The ceilings are worth raising
+anyway, as a guard for the time before the migration lands — a wrong number
+nobody can see is the worst state of the three.
+
 ## Still to build
 
 1. **The Kylas write-back** — Gate 4. Waiting on the field list.

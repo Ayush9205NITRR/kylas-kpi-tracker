@@ -90,10 +90,19 @@ createServer(async (req, res) => {
   if (process.env.MOCK_TRACE) console.log(`${Date.now()} ${req.method} ${decodeURIComponent(req.url).slice(0, 90)}`);
   if (LATENCY) await new Promise((r) => setTimeout(r, LATENCY));
   const url = new URL(req.url, `http://${req.headers.host}`);
+  /* THE CEILING IS AIRTABLE'S SURFACE, NOT THE TEST HARNESS'S. /__ endpoints
+     are this mock's own — seeding, counters, reset — and throttling them only
+     throttles the arrangement: a scale test seeding five tables tripped its
+     own limiter and filled nothing, then reported "no read truncates" over an
+     empty base, which is the worst kind of green. The reads under test still
+     pay the ceiling, which is the part that is real. */
+  const isHook = url.pathname.startsWith("/__");
   const now = Date.now();
-  recent = recent.filter((t) => now - t < 1000);
-  recent.push(now);
-  if (recent.length > 5) return json(res, 429, { error: { type: "RATE_LIMIT_REACHED" } });
+  if (!isHook) {
+    recent = recent.filter((t) => now - t < 1000);
+    recent.push(now);
+    if (recent.length > 5) return json(res, 429, { error: { type: "RATE_LIMIT_REACHED" } });
+  }
 
   if (!/^Bearer /.test(req.headers.authorization || "")) return json(res, 401, { error: "unauthorized" });
 
@@ -123,6 +132,32 @@ createServer(async (req, res) => {
     if (url.pathname === "/__reads") return json(res, 200, { reads: READS });
     if (url.pathname === "/__writes") return json(res, 200, { writes: WRITES, tables: TABLES });
     if (url.pathname === "/__reset") { WRITES.length = 0; for (const k of Object.keys(TABLES)) delete TABLES[k]; return json(res, 200, { ok: true }); }
+    /* POST /__bulk {table, count, fields} — fill a table with `count` rows
+       WITHOUT paying the rate limit, so a scale test can stand up an account's
+       worth of data in seconds instead of the twenty minutes 50,000 records
+       cost at ten per request behind a five-a-second ceiling.
+       `fields` is a template; "#" in any value is replaced by the row number.
+       Seeding only — the reads under test still go through the real paths and
+       the real ceiling. */
+    if (url.pathname === "/__bulk" && req.method === "POST") {
+      const body = await text(req).then((s) => JSON.parse(s)).catch(() => null);
+      if (!body?.table || !body?.count) return json(res, 400, { error: "table and count required" });
+      TABLES[body.table] = TABLES[body.table] || [];
+      const t = TABLES[body.table];
+      const base = t.length;
+      for (let i = 0; i < body.count; i++) {
+        const n = base + i;
+        const fields = {};
+        for (const [k, v] of Object.entries(body.fields || {}))
+          fields[k] = typeof v === "string" ? v.replace(/#/g, String(n)) : v;
+        t.push({ id: `rec${body.table.slice(0, 3)}${n}`, fields,
+                 createdTime: new Date().toISOString() });
+      }
+      return json(res, 200, { table: body.table, rows: t.length });
+    }
+    if (url.pathname === "/__count")
+      return json(res, 200, Object.fromEntries(
+        Object.entries(TABLES).map(([k, v]) => [k, v.length])));
     return json(res, 404, { error: "not found" });
   }
   const name = decodeURIComponent(parts.slice(1).join("/"));
