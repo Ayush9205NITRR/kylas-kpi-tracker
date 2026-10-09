@@ -114,20 +114,55 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
        as listAll, that 422 killed the whole run, every night, on exactly the
        base most likely to be behind. A missing watermark is not an error: it
        means "we have nothing yet", which is a full pull. */
+    /* ONE ROW, NEWEST FIRST. This used to read the whole column and take the
+       maximum, capped at 200 pages — 20,000 rows. Contacts passed 37,000 on
+       2026-10-09, so the maximum was taken over a prefix, and whichever rows
+       were past it did not count. Asking Airtable for the newest is one
+       request at any size. */
     let rows;
     try {
-      rows = await at.listAll(table, { fields: [field], pageSize: 100, maxPages: 200 });
+      rows = await at.listAll(table, { fields: [field], formula: `NOT({${field}} = '')`,
+                                       sort: [{ field, direction: "desc" }], pageSize: 1, maxPages: 1 });
     } catch (e) {
       if (!/UNKNOWN_FIELD_NAME|INVALID_FILTER|422/i.test(e.message)) throw e;
       log(`  ! ${table} has no "${field}" — treating this as a full pull. Run repair-base.mjs.`);
       return "";
     }
-    let newest = "";
-    for (const r of rows) {
-      const v = iso(r.fields?.[field]);
-      if (v && v > newest) newest = v;
+    return iso(rows[0]?.fields?.[field]);
+  }
+
+  /* ── whole-table reads that cannot come back short ──────────────────────
+     listAll returns what it got when it runs out of pages, without saying so.
+     200,000 rows is ten times today's base; past that this throws, and a sync
+     that stops is better than one that writes against half a table. */
+  async function readAll(table, fields) {
+    try {
+      return await at.listAll(table, { fields, pageSize: 100, maxPages: 2000, throwIfMore: true });
+    } catch (e) {
+      if (e.building) throw new Error(`${table} has more than 200,000 rows — the sync will not ` +
+        `work from part of it. Raise the ceiling in sync-kylas.mjs once that is expected.`);
+      throw e;
     }
-    return newest;
+  }
+
+  /* What Airtable holds for these Kylas contact ids. By id, 40 to a request,
+     when the batch is small — the hourly run is a few dozen contacts, and
+     reading 37,000 rows to look up 30 is 370 requests for nothing. A batch
+     past BY_ID_MAX costs more by id than whole, so it reads whole. */
+  const BY_ID_MAX = Number(env.SYNC_BY_ID_MAX ?? 2000), BY_ID_CHUNK = 40;
+  async function heldContacts(ids) {
+    const FIELDS = ["Kylas Contact ID", "Current Stage", "KPI Rank"];
+    const held = new Map();
+    const keep = (r) => held.set(String(r.fields?.["Kylas Contact ID"] || ""), r.fields || {});
+    const uniq = [...new Set(ids)];
+    if (uniq.length > BY_ID_MAX) { (await readAll("Contacts", FIELDS)).forEach(keep); return held; }
+    for (let i = 0; i < uniq.length; i += BY_ID_CHUNK) {
+      const terms = uniq.slice(i, i + BY_ID_CHUNK)
+        .map((id) => `{Kylas Contact ID} = '${id.replace(/'/g, "\\'")}'`);
+      (await at.listAll("Contacts", { fields: FIELDS, formula: `OR(${terms.join(", ")})`,
+                                      pageSize: 100, maxPages: 50, throwIfMore: true })).forEach(keep);
+    }
+    return held;
   }
 
   /* ── companies ─────────────────────────────────────────────────────────── */
@@ -198,17 +233,21 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
     /* What Airtable already holds for these, so the ladder can only rise and a
        stage move can be told from a stage restated. One read of the whole table
        beats one lookup per contact: 5,000 finds at the rate-limit gap is half an
-       hour, the full read is a few seconds. */
-    const held = new Map();
-    for (const r of await at.listAll("Contacts",
-          { fields: ["Kylas Contact ID", "Current Stage", "KPI Rank"], pageSize: 100, maxPages: 200 }))
-      held.set(String(r.fields?.["Kylas Contact ID"] || ""), r.fields || {});
+       hour, the full read is a few seconds.
+
+       NEVER A PREFIX. This read was capped at 20,000 rows and the table passed
+       37,000 — so every contact past row 20,000 came back as "never seen":
+       previous rank 0, previous stage blank. Its KPI Rank could be written
+       DOWN, and a stage moved in Kylas was never logged as a move, which is
+       the one thing this read exists to get right. A small hourly batch now
+       asks for exactly the contacts it holds; a big one reads the whole table
+       and fails rather than take a prefix. */
+    const held = await heldContacts(want.map((c) => String(c.id ?? "")).filter(Boolean));
 
     /* Company links are by Airtable record id, so the ids have to be resolved
        before the contacts are written. */
     const coRec = new Map();
-    for (const r of await at.listAll("Companies",
-          { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 200 }))
+    for (const r of await readAll("Companies", ["Kylas Company ID"]))
       coRec.set(String(r.fields?.["Kylas Company ID"] || ""), r.id);
 
     const rows = [];

@@ -260,6 +260,21 @@ numbers were silently the first 4,000 calls. The same cap applied to the
 company KPIs. Found only because the D1 copy, which reads whole tables,
 disagreed with the direct path. Any whole-table read must pass `maxPages`.
 
+It came back on 2026-10-09 with a bigger number. `sync-kylas.mjs` read Contacts
+with `maxPages: 200`, which is 20,000 rows, and the live base held 37,249. A
+contact past row 20,000 read as never seen, so its KPI Rank could be written
+DOWN, and a stage moved in Kylas was not logged as a move. The console's new
+contacts are appended at the end of the table, which is exactly the part that
+was cut off. Fixed in Worker 1.56.1:
+
+- the watermark is now one sorted row;
+- the previous-stage read looks contacts up by id, or reads the whole table
+  with `throwIfMore`.
+
+`test-sync-scale.mjs` runs the real job over 25,001 rows. So a ceiling needs
+`throwIfMore` as well as a `maxPages`: a prefix that does not throw is not a
+read of the table.
+
 These are not hypothetical. Each one shipped, was found by a test, and cost
 real time. They recur because the codebase has three runtimes that must agree.
 

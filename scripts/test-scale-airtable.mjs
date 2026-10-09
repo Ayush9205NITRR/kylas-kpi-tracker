@@ -141,7 +141,11 @@ const CEILINGS = [
   ["airtable.mjs  eventsFor (scans all, filters after)", "Event Rows", 60, "table"],
   ["handlers.mjs  the report's four tables", "Call Log", 2000, "table"],
   ["handlers.mjs  owners", "Contacts", 200, "table"],
-  ["sync-kylas.mjs  the watermark reads", "Contacts", 200, "table"],
+  /* Was 200 pages here, read whole, for the watermark AND the previous stage —
+     the second of which wrote KPI Rank down for contacts past row 20,000. The
+     watermark is now one sorted row; the previous stage reads by id or reads
+     the whole table with throwIfMore. test-sync-scale.mjs runs both. */
+  ["sync-kylas.mjs  previous stage, whole table", "Contacts", 2000, "table"],
   ["rollup-calls.mjs  the raw call log", "Call Log", 400, "table"],
   ["mirror.mjs  a table build", "Contacts", 2000, "table"],
 ];

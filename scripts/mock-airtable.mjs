@@ -65,6 +65,25 @@ function matches(row, formula, all) {
     return v !== "" && v.slice(0, 10) > when.slice(0, 10);
   }
 
+  /* OR(a, b, ...) of the simple shapes below — a batch of keys looked up in
+     one request. Split at top-level commas only, so a quoted value with a
+     comma in it stays one term. */
+  const or = formula.match(/^OR\((.*)\)$/is);
+  if (or) {
+    const terms = [];
+    let depth = 0, quote = false, cur = "";
+    for (let i = 0; i < or[1].length; i++) {
+      const ch = or[1][i];
+      if (ch === "'" && or[1][i - 1] !== "\\") quote = !quote;
+      if (!quote && ch === "(") depth++;
+      if (!quote && ch === ")") depth--;
+      if (!quote && !depth && ch === ",") { terms.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) terms.push(cur.trim());
+    return terms.some((t) => matches(row, t, all));
+  }
+
   /* NOT({Field} = '') — "is filled", as Airtable reads it. */
   const filled = formula.match(/^NOT\(\{([^}]+)\}\s*=\s*''\)$/i);
   if (filled) { const v = row.fields[filled[1]]; return v != null && v !== "" && !(Array.isArray(v) && !v.length); }
@@ -223,7 +242,22 @@ createServer(async (req, res) => {
       if (lk) return json(res, 422, { error: { type: "INVALID_FILTER_BY_FORMULA",
         message: `Unknown field names: ${lk}` } });
     }
-    const hits = formula ? rows.filter((r) => matches(r, formula, all)) : rows;
+    let hits = formula ? rows.filter((r) => matches(r, formula, all)) : rows;
+    /* sort[0][field] / sort[0][direction] — one key is all a caller sends.
+       Empty sorts as smallest, as on Airtable: first ascending, last
+       descending. */
+    const sortField = url.searchParams.get("sort[0][field]");
+    if (sortField) {
+      const dir = url.searchParams.get("sort[0][direction]") === "desc" ? -1 : 1;
+      const val = (r) => String(r.fields[sortField] ?? "");
+      hits = [...hits].sort((a, b) => {
+        const x = val(a), y = val(b);
+        if (x === y) return 0;
+        if (!x) return -dir;
+        if (!y) return dir;
+        return x < y ? -dir : dir;
+      });
+    }
 
     /* HONOUR pageSize AND offset. Returning everything in one response left the
        client's pagination loop untested — the same way this mock once ignored

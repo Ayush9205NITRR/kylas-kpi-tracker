@@ -144,13 +144,17 @@ export function createAirtable(pat, baseId, {
     /* `throwIfMore`: past maxPages, fail rather than return a prefix. For a
        caller that must not read a big table page by page (a request on a
        hosted runtime, before the D1 copy exists) and would rather say so. */
-    async listAll(table, { formula = "", fields = [], pageSize = 100, maxPages = 40, throwIfMore = false } = {}) {
+    /* `sort`: [{field, direction}] — so "the newest X" is one request, not a
+       read of the whole table to find its maximum. */
+    async listAll(table, { formula = "", fields = [], sort = [], pageSize = 100, maxPages = 40, throwIfMore = false } = {}) {
       const out = [];
       let offset = "";
       for (let p = 0; p < maxPages; p++) {
         const q = [`pageSize=${pageSize}`,
                    formula ? `filterByFormula=${encodeURIComponent(formula)}` : "",
                    ...fields.map((f) => `fields[]=${encodeURIComponent(f)}`),
+                   ...sort.flatMap((s, i) => [`sort[${i}][field]=${encodeURIComponent(s.field)}`,
+                                              `sort[${i}][direction]=${s.direction === "desc" ? "desc" : "asc"}`]),
                    offset ? `offset=${encodeURIComponent(offset)}` : ""].filter(Boolean).join("&");
         const r = await call("GET", `${t(table)}?${q}`);
         (r?.records || []).forEach((x) => out.push(x));
