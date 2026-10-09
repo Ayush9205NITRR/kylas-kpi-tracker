@@ -470,6 +470,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const csStore = cache ? kept(cache, "contact-stage-index") : null;
   let csIndex = null, csReadAt = 0;
   let csMemo = { key: "", map: new Map() };
+  const CS_FIELDS = ["id", "company", "customFieldValues", "updatedAt"];
   const CS_DELTA_MS = Number(env.CONTACT_STAGES_DELTA_MS || 10 * 60 * 1000);
   const CS_FULL_MS = Number(env.CONTACT_STAGES_FULL_MS || 24 * 3600 * 1000);
   /* HOW LONG AN INSTANCE MAY TRUST ITS OWN COPY, for READING. Cloudflare runs
@@ -510,7 +511,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const doFull = full || !had || Date.now() - Number(had.builtAt || 0) > CS_FULL_MS;
     const since = doFull ? "" : new Date(Date.parse(had.watermark || 0) - 120_000).toISOString();
     const started = Date.now();
-    const got = await kylas.contactsChangedSince(since);
+    /* LEAN: four values per contact, not the whole record. A full crawl holds
+       every row in memory until it ends, and a real Kylas contact — emails,
+       phones, remarks, metaData — is several times the size of these four. */
+    const got = await kylas.contactsChangedSince(since, { fields: CS_FIELDS });
     /* The crawl takes a while. Saves noted by other isolates DURING it are in
        the store now and not in `had`, so a delta merges onto a fresh read
        rather than onto the copy it started from. A full rebuild replaces the

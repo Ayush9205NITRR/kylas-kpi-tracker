@@ -495,7 +495,11 @@ export function createClient(key, {
        The FIRST run has no watermark and therefore pages the lot, which does
        meet the window — so it continues by timestamp exactly as the company
        crawl does. Same code, different entity. */
-    async contactsChangedSince(sinceISO, { onPage = () => {} } = {}) {
+    /* `fields` narrows what each row carries. The nightly sync wants the whole
+       contact; the account-stage index wants four values out of it, and on a
+       full crawl of tens of thousands of contacts the difference is whether
+       the Worker stays inside its memory or not. */
+    async contactsChangedSince(sinceISO, { onPage = () => {}, fields = CONTACT_FIELDS } = {}) {
       const sinceMs = sinceISO ? Date.parse(sinceISO) : 0;
       const all = [];
       const seen = new Set();
@@ -513,7 +517,7 @@ export function createClient(key, {
       let sorted = true, prevStamp = Infinity;
       for (let p = 0; full && p < MAX_PAGES && !reachedWatermark; p++) {
         const body = await call("POST", page(p, "contact"),
-                                { fields: CONTACT_FIELDS, jsonRule: freeText("") });
+                                { fields, jsonRule: freeText("") });
         const got = rows(body);
         if (p === 0) {
           const t = Number(body?.totalElements ?? body?.total ?? NaN);
@@ -563,7 +567,7 @@ export function createClient(key, {
         if (oldest) {
           log(`contact search: ${reportedTotal - all.length} short — continuing by updatedAt`);
           const r = await crawlOlderThan(new Date(oldest).toISOString(), null,
-                                         CONTACT_FIELDS, seen, "contact");
+                                         fields, seen, "contact");
           /* A window may reach past the watermark; the caller asked for a
              delta, so honour it here too. */
           for (const c of r.extra) if (!older(c)) all.push(c);
