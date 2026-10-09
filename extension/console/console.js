@@ -707,11 +707,104 @@ function renderAccount(){
       `<span class="kpi${counts[i]?" hit":""}"><b>${counts[i]}</b>${esc(m.label)}</span>`).join("")}</span>
     <span class="of">${peers.length} contact${peers.length===1?"":"s"}</span>`;
 }
+/* CALLS TODAY, THE SAME NUMBER THE PROGRESS TABLE SHOWS.
+   Ayush, 2026-10-09: "The calling count is different in both the tab pane" —
+   the header read "Calls 6" while Progress read 17 for the same day, same
+   associate. They were counting different things:
+
+     header    contacts in THIS browser's queue marked done today — one per
+               CONTACT (two calls to one person counted once), only what this
+               browser saved (a second laptop, or a profile that was reset,
+               invisible), and keyed by Kylas id at boot, so a contact CREATED
+               today had no id when its call was logged and dropped out of the
+               count on the next reload
+     Progress  every call row the server holds for this associate, today
+
+   The header now shows the server's count for today — /report for "me", the
+   same rows the Progress table's Day view is cut from — so the two cannot
+   disagree once the server has caught up. Between refreshes this browser's
+   own saves are the floor: max, never the sum, because every one of them is
+   also in the server's number once it lands, and adding them would count it
+   twice. */
+/* THE SERVER'S NUMBER, PLUS EVERY SAVE IT CANNOT HAVE SEEN YET.
+   A plain max(server, this browser's saves) was tried first and failed in the
+   browser: with five calls on the server and one saved here, max read 5 — the
+   associate pressed Save and the counter did not move. So each save made here
+   is an entry that counts on top of the server's number until a refresh that
+   STARTED after that save landed has brought the server's number back. Before
+   then the server cannot include it; after, it must, and counting it again
+   would show one call twice. */
+const PACE={server:null,day:"",local:0,pend:[]};
+function paceCount(){
+  const t=today();
+  if(PACE.day!==t){PACE.day=t;PACE.server=null;PACE.local=0;PACE.pend=[];}
+  return PACE.server==null?PACE.local:PACE.server+PACE.pend.length;
+}
+/* A save made here: counted at once. `need` is the server count at which this
+   save is certainly inside the server's number — what the server said when it
+   was made, plus the saves ahead of it still on their way, plus itself. A
+   "done" job is NOT enough on its own: the report reads a copy of the call
+   log that trails a save by up to a minute, and retiring a save on the first
+   answer after it landed made the header read 7, 6, 7. */
+function paceSaved(a){
+  paceCount();PACE.local++;
+  /* WHOSE CALL. The server credits a call to the CONTACT'S owner (the Call
+     Log row is written with c.owner), not to whoever pressed Save — so a call
+     made on a colleague's contact is in THEIR number, and counting it on top
+     of mine here put the header one ahead of the Progress table for two
+     minutes, until it gave up waiting. Only a save the server will credit to
+     me is counted ahead of it. Unknown either way, it is counted. */
+  if(ME&&a?.owner&&String(a.owner).trim().toLowerCase()!==String(ME).trim().toLowerCase()){renderPace();return {job:"",doneAt:0,need:null,notMine:true};}
+  const e={job:"",doneAt:0,need:PACE.server==null?null:PACE.server+PACE.pend.length+1};
+  PACE.pend.push(e);renderPace();return e;
+}
+/* The oldest save not yet tied to anything — saves leave in the order made,
+   which is the order the outbox drains them in. */
+const paceLoose=()=>PACE.pend.find(e=>!e.job&&!e.doneAt);
+const paceLanded=(e)=>{if(e&&!e.doneAt)e.doneAt=Date.now();};
+const paceJob=(id)=>PACE.pend.find(e=>e.job===id);
+/* NOT DROPPED ON A REFUSAL, because a refusal does not mean the server did
+   not count it. A save that Kylas refuses still writes its call row to the KPI
+   base first — performSave lets Airtable finish before it reports the failure
+   — and the Progress table counts that row. Taking it off the header made the
+   two disagree in exactly the way this exists to stop. So a refused or dead
+   save is treated as landed, and the server's count decides: it retires when
+   the count reaches it, or, if the server never wrote it, once it has had
+   longer than the call-log copy takes to catch up. */
+const PACE_SETTLE_MS=2*60*1000;
 function renderPace(){
-  const logged=DATA.filter(a=>a.done);
-  document.getElementById("pcount").textContent=logged.length;
+  const n=paceCount();
+  document.getElementById("pcount").textContent=n;
   document.getElementById("ptarget").textContent="/ "+target;
-  document.getElementById("pbar").style.width=Math.min(100,logged.length/target*100)+"%";
+  document.getElementById("pbar").style.width=Math.min(100,n/target*100)+"%";
+}
+let paceBusy=false;
+async function refreshPace(){
+  if(paceBusy||typeof API==="undefined"||!API.report)return;
+  paceBusy=true;
+  const t=today();
+  const asked=Date.now();
+  try{
+    const r=await API.report("day","",t,t);
+    const row=(r?.periods||[]).find(p=>p.key===t);
+    if(row&&today()===t){
+      const n=Number(row.calls)||0;
+      if(PACE.server==null){
+        /* The first answer of the day: a save that had already landed when
+           it was asked is inside it; the rest are given their mark now. */
+        PACE.pend=PACE.pend.filter(e=>!(e.doneAt&&e.doneAt<asked));
+        PACE.pend.forEach((e,i)=>{if(e.need==null)e.need=n+i+1;});
+      }else{
+        /* Retired only once LANDED and once the server's count has reached
+           the mark — never on "done" alone. */
+        PACE.pend=PACE.pend.filter(e=>!(e.doneAt&&e.doneAt<asked&&
+          ((e.need!=null&&n>=e.need)||asked-e.doneAt>PACE_SETTLE_MS)));
+      }
+      PACE.day=t;PACE.server=n;
+      renderPace();
+    }
+  }catch{/* offline: what this browser counted stands */}
+  finally{paceBusy=false;}
 }
 
 /* ── form ────────────────────────────────── */
@@ -1782,6 +1875,7 @@ function saveNext(){
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
+
   /* This save becomes a call log; the next time this contact is opened its
      history has to be asked for again, not served from before the call. */
   if(a.kid)HIST.delete(String(a.kid));
@@ -1926,7 +2020,9 @@ async function flushOutbox(){
   const n=await API.drain(
     (job,res)=>{
       const a=find(job);if(!a)return;
-      if(res?.queued){a.syncError=null;a.syncedAt=new Date().toISOString();trackJob(a,res);return;}
+      if(res?.queued){a.syncError=null;a.syncedAt=new Date().toISOString();trackJob(a,res);
+        const e=paceLoose();if(e)e.job=res.job||"";return;}
+      paceLanded(paceLoose());
       if(res?.kid&&!a.kid){a.kid=String(res.kid);a.pendingCreate=false;}
       a.syncError=res?.rejected
         ?"rejected: "+((res.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||res.error)
@@ -1979,7 +2075,11 @@ async function watchJobs(){
         if(st.state==="done"){
           if(a)applySaved(a,st.result||{});
           delete JOBS[id];changed=true;
+          /* The call is on the server now; its count can be asked for. */
+          paceLanded(paceJob(id));
+          setTimeout(refreshPace,1500);
         }else if(st.state==="dead"){
+          paceLanded(paceJob(id));
           const e=st.error||{};
           const why=(e.problems||[]).filter(p=>p.blocking!==false).map(p=>p.why).join(" · ")||e.message||"Kylas refused it";
           if(a)a.syncError=(e.status>=400&&e.status<500?"rejected: ":"not saved to Kylas: ")+why;
@@ -2042,6 +2142,9 @@ function applySaved(a,res){
 }
 
 async function syncToKylas(a,call){
+  /* Counted the moment Save is pressed — the header is the associate's pace,
+     and a counter that waits on the network reads as a missed call. */
+  const pe=paceSaved(a);
   a.syncing=true;renderQueue();
   await flushOutbox().catch(()=>{});
   const res=await API.queueSave(a,call);
@@ -2051,9 +2154,14 @@ async function syncToKylas(a,call){
        outcome follows in a few seconds; watchJobs() writes it onto the row. */
     a.syncedAt=new Date().toISOString();a.syncError=null;
     trackJob(a,res);
+    pe.job=res.job||"";
   }else if(res.ok){
     applySaved(a,res);
+    paceLanded(pe);setTimeout(refreshPace,1500);
   }else{
+    /* Refused outright: that call will never be on the server, so it does not
+       count. An outage leaves it counted — the outbox sends it later. */
+    if(res.rejected){paceLanded(pe);setTimeout(refreshPace,1500);}
     a.syncError=res.error||"not sent";
   }
   persist();renderQueue();
@@ -2080,6 +2188,10 @@ async function boot(){
   const t=today();
   const loggedToday=new Set(log.filter(e=>Day.dayOf(e.at)===t).map(e=>e.kid));
   DATA.forEach(a=>{a.done=loggedToday.has(a.kid);});
+  /* Every call logged in this browser today — entries, not distinct contacts,
+     and not looked up by Kylas id, which a contact created today did not have
+     when its call was logged. */
+  PACE.day=t;PACE.local=log.filter(e=>Day.dayOf(e.at)===t).length;
   addOwners(DATA.map(a=>a.owner));
   renderFilters();render();
   /* Yesterday's outage is this morning's queue. Draining on boot is what makes
@@ -2090,6 +2202,12 @@ async function boot(){
   JOBS=(await Store.getSetting("saveJobs"))||{};
   watchJobs();
   wirePanes(await Store.getSetting("panes"));
+  renderPace();
+  refreshPace();
+  /* Other devices and the day's earlier sessions arrive this way. Two minutes
+     is often enough to feel current and rare enough to cost nothing: the
+     report is held for a minute on the server and dropped on every save. */
+  setInterval(refreshPace,2*60*1000);
 }
 boot();
 
