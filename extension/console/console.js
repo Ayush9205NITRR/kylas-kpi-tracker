@@ -392,8 +392,9 @@ function renderCallbar(){
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
-  const pn=prevNotes(a);
+  const pn=prevNotes(a,HIST.get(String(a.kid||""))||[]);
   if(pn)C.appendChild(pn);
+  loadHistory(a);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
   btn.type="button";btn.onclick=saveNext;nb.appendChild(btn);
@@ -434,16 +435,61 @@ const humanNote=s=>{
   const tail=b<0?"":t.slice(b+MARK_END.length);
   return `${t.slice(0,i)}\n${tail}`.replace(/\n{3,}/g,"\n\n").trim();
 };
-function prevNotes(a){
-  const bits=[];
+/* THE CALLS THEMSELVES ARE WHERE THE NOTES ARE. Ayush, 2026-10-09: "Previous
+   remarks fetch nahi ho rahe hai." This strip read the contact's remarks
+   field and the event rows — but an associate's update after a call is typed
+   on the CALL, in Kylas' dialler or in this console (which puts it on the
+   Kylas call log too). So the server reads every call log on the contact
+   (/history) and the strip leads with the newest of those.
+
+   Fetched after the contact is painted, never before: the 85% path is open,
+   no answer, next, and it must not wait on a second request. When the notes
+   arrive the strip is swapped in place, and only if the same contact is still
+   on screen. */
+const HIST=new Map(), HIST_WAIT=new Set();
+function loadHistory(a){
+  const kid=String(a?.kid||"");
+  if(!kid||HIST.has(kid)||HIST_WAIT.has(kid)||typeof API==="undefined"||!API.history)return;
+  HIST_WAIT.add(kid);
+  API.history(kid).then(r=>HIST.set(kid,Array.isArray(r?.items)?r.items:[]))
+    .catch(()=>HIST.set(kid,[]))
+    .finally(()=>{
+      HIST_WAIT.delete(kid);
+      const cur=rec();
+      if(String(cur?.kid||"")!==kid||!(HIST.get(kid)||[]).length)return;
+      const C=document.getElementById("callbar");if(!C)return;
+      const box=prevNotes(cur,HIST.get(kid));if(!box)return;
+      const old=C.querySelector(".pnote");
+      if(old)old.replaceWith(box);else C.appendChild(box);
+    });
+}
+/* One text, said twice, is read once. The console writes a call's note into
+   the event rows AND onto the Kylas call log, so the same sentence arrives
+   from both — compared without case or spacing, and a call note made only of
+   pieces already shown (it joins the rows' remarks with " · ") is dropped. */
+const normNote=s=>String(s||"").toLowerCase().replace(/\s+/g," ").trim();
+function prevNotes(a,hist=[]){
+  const bits=[],seen=new Set();
+  /* Earlier calls first, newest at the top: the last thing said is the one
+     the associate needs before the ringing starts. */
+  const owns=[];
   const own=humanNote(a.remarks);
-  if(own)bits.push({from:"",text:own});
-  /* Event rows carry their own line each. Past first, then current, because
-     that is the order the conversation happened in. */
+  const rows=[];
   for(const r of [...(a.past||[]),...(a.current||[])]){
     const t=humanNote(r.remarks);
-    if(t)bits.push({from:[r.eventType,r.period==="past"?"past":""].filter(Boolean).join(" · "),text:t});
+    if(t)rows.push([[r.eventType,r.period==="past"?"past":""].filter(Boolean).join(" · "),t]);
   }
+  /* Rows and remarks are claimed before the calls so a call note repeating
+     them is the one dropped, not the labelled original. */
+  if(own)owns.push(["",own]);
+  for(const [f,t] of [...owns,...rows])seen.add(normNote(t));
+  for(const h of hist.slice(0,5)){
+    const n=normNote(h.text);
+    if(!n||(n.includes(" · ")?n.split(" · ").every(p=>seen.has(p.trim())):seen.has(n)))continue;
+    seen.add(n);
+    bits.push({from:[h.at?since(h.at):"",h.outcome&&h.outcome!=="connected"?h.outcome:"",h.by].filter(Boolean).join(" · "),text:h.text});
+  }
+  for(const [f,t] of [...owns,...rows])bits.push({from:f,text:t});
   if(!bits.length)return null;
   const box=el("div","pnote");
   /* WHEN, NOT JUST WHAT. "Wants a Goa venue" means one thing said last week
@@ -451,7 +497,10 @@ function prevNotes(a){
      before the ringing starts. The contact's last call is the only date the
      record actually carries for a note, so it labels the whole strip rather
      than pretending each line has its own. */
-  const when=a.lastCallAt?since(a.lastCallAt):"";
+  /* The newest dated thing on the strip: a call log's own time when there is
+     one, the contact's last call otherwise. */
+  const newest=[hist[0]?.at,a.lastCallAt].filter(Boolean).sort().pop();
+  const when=newest?since(newest):"";
   const full=bits.map(b=>(b.from?b.from+": ":"")+b.text).join("  ·  ");
   const one=full.length>150?full.slice(0,150).replace(/\s+\S*$/,"")+"…":full;
   box.innerHTML=`<button type="button" class="pnx" aria-expanded="false">
@@ -1733,6 +1782,9 @@ function saveNext(){
   }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
   persist();
   if(a.kid)Store.clearDraft(a.kid);
+  /* This save becomes a call log; the next time this contact is opened its
+     history has to be asked for again, not served from before the call. */
+  if(a.kid)HIST.delete(String(a.kid));
   /* durationSource AND createdHere travel too. They were logged to the local
      store above and then dropped from the payload that actually leaves the
      browser, so Airtable received undefined for both on every save:

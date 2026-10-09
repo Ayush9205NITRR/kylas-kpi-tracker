@@ -26,7 +26,7 @@
  * the other is the bug this guards.
  */
 import { readFileSync } from "node:fs";
-import { mergeRemarks, stripAuto, MARK_A, MARK_B } from "./kylas.mjs";
+import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes } from "./kylas.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -102,6 +102,40 @@ console.log("\nand the save keeps what the strip keeps");
 {
   eq("no block means the field is just the note", mergeRemarks("Note.", ""), "Note.");
   eq("nothing at all stays nothing", mergeRemarks("", ""), "");
+}
+
+/* ── the notes on earlier calls ──────────────────────────────────────
+   Ayush, 2026-10-09: "Previous remarks fetch nahi ho rahe hai." The update an
+   associate types after a call lives on the CALL LOG in Kylas, not in the
+   contact's remarks field, so the strip now reads call logs too. Kylas'
+   collection documents the request but shows no response, so the reader is
+   held to every shape it might plausibly be. */
+console.log("\nnotes on earlier calls, from Kylas call logs");
+{
+  const log = (at, notes, extra = {}) => ({ startTime: at, outcome: "connected", notes, ...extra });
+  const shapes = {
+    "a bare array": [log("2026-10-01T10:00:00Z", [{ description: "One" }])],
+    "content": { content: [log("2026-10-01T10:00:00Z", [{ description: "One" }])] },
+    "data": { data: [log("2026-10-01T10:00:00Z", [{ description: "One" }])] },
+    "records": { records: [log("2026-10-01T10:00:00Z", [{ description: "One" }])] },
+  };
+  for (const [name, body] of Object.entries(shapes))
+    eq(`read from ${name}`, callNotes(body).map((x) => x.text).join(), "One");
+  eq("an unknown shape is no history, not a crash", callNotes({ weird: true }).length, 0);
+  eq("nothing at all is no history", callNotes(null).length, 0);
+
+  const got = callNotes({ content: [
+    log("2026-09-01T10:00:00Z", [{ description: "<div>Wants Goa,&nbsp;2 nights</div><p>Call after Diwali</p>" }],
+        { owner: { id: 7, name: "Muskan Rajpoot" } }),
+    log("2026-10-05T10:00:00Z", []),                                     /* a no-answer, nothing typed */
+    log("2026-10-07T10:00:00Z", ["typed as a plain string"], { outcome: "LEFT_MESSAGE" }),
+  ] });
+  eq("a call with nothing typed is left out", got.length, 2);
+  eq("newest first", got.map((x) => x.at).join(" "), "2026-10-07T10:00:00Z 2026-09-01T10:00:00Z");
+  eq("Kylas' rich-text HTML reads as text", got[1].text, "Wants Goa, 2 nights\nCall after Diwali");
+  eq("...and says who typed it", got[1].by, "Muskan Rajpoot");
+  eq("a plain-string note is kept", got[0].text, "typed as a plain string");
+  eq("the outcome reads as words", got[0].outcome, "left message");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

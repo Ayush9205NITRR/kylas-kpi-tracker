@@ -1119,6 +1119,41 @@ console.log('\n11. a copy that is short of the account is not the account');
         end === start + 2, `${start} -> ${end}`);
 }
 
+/* ── 17 · WHAT WAS SAID ON EARLIER CALLS ─────────────────────────────
+   Ayush, 2026-10-09: "Previous remarks fetch nahi ho rahe hai." The update
+   after a call is typed on the call log, in Kylas' dialler or in this console,
+   and the strip only ever read the contact's remarks field. /history reads the
+   call logs. The fixture has one earlier call on Hema (112936), typed in Kylas
+   as HTML. */
+{
+  console.log('\n17. previous call notes come back from the Kylas call logs');
+  const h1 = await get(await coldWorker(1701), '/history?id=112936');
+  const items = h1.body.items || [];
+  check('/history answers', h1.status === 200, `status ${h1.status} ${h1.body.error || ''}`);
+  check('...with the note typed on the earlier call, as text', items.some((x) => /Goa, 2 nights/.test(x.text) && !/<div>/.test(x.text)),
+        JSON.stringify(items[0]?.text || null).slice(0, 90));
+  check('...dated, so the strip can say when it was said', !!items[0]?.at, items[0]?.at);
+
+  /* A save writes a new call log with its note; the next /history on the SAME
+     instance must include it, not serve the copy cached before the call. */
+  const w = await coldWorker(1702);
+  await get(w, '/history?id=112936');                         /* cache it */
+  const sv = await post(w, '/save', { contact: { ...contact, kid: '112936', lid: 'wk-hist',
+    pocName: 'Hema Bharathi', current: [{ rowKey: 'wk-h-row', eventType: 'Offsite', budget: '', timeline: '',
+      pax: '', remarks: 'Asked for two venue options' }] },
+    call: { ...call1, at: new Date().toISOString(), note: 'Asked for two venue options' } });
+  await sv.settle();
+  const h2 = await get(w, '/history?id=112936');
+  check('a call saved just now is in the next look, not hidden behind the cache',
+        (h2.body.items || []).some((x) => /two venue options/.test(x.text)),
+        (h2.body.items || []).map((x) => x.text.slice(0, 30)).join(' | '));
+  check('...newest first', /two venue options/.test(h2.body.items?.[0]?.text || ''), h2.body.items?.[0]?.text);
+  /* A Kylas failure is an empty history, never a failed request. */
+  const bad = await get(await coldWorker(1703), '/history?id=999999999');
+  check('a contact with no calls is an empty history, not an error', bad.status === 200 && Array.isArray(bad.body.items),
+        `status ${bad.status}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

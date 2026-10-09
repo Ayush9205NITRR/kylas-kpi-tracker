@@ -191,7 +191,16 @@ if (process.env.MOCK_CONTACTS) {
 
 let nextId = 900001;
 const WRITES = [];
-const CALL_LOGS = [];
+/* One earlier call already on the books for Hema (112936), typed in Kylas'
+   own dialler — the shape a "Said before" strip has to find. HTML, because
+   that is what Kylas' notes box stores. */
+const CALL_LOGS = [{
+  id: 880001, outcome: "connected", callType: "outgoing", duration: "210",
+  startTime: "2026-09-30T06:15:00.000Z", phoneNumber: "+919876501234",
+  owner: { id: 74725, name: "Enout Super Admin" },
+  notes: [{ description: "<div>Spoke to Hema — offsite is <b>Goa, 2 nights</b>, ~60 pax.</div><div>Finance signs off after the 20th; call back then.</div>" }],
+  relatedTo: { entity: "contact", id: 112936 },
+}];
 let recent = [];
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -492,6 +501,18 @@ createServer(async (req, res) => {
     return json(res, 200, CONTACTS[at]);
   }
 
+  /* GET /v1/call-logs/<contactId>?relatedToType=contact — "Fetch Call logs
+     on Contact" in Kylas' own collection. The collection has no example
+     response, so this answers in the paginated `content` shape the search
+     endpoints use; the reader accepts a bare array and `data` too. */
+  {
+    const m = /^\/v1\/call-logs\/(\d+)$/.exec(p);
+    if (m && req.method === "GET") {
+      const rows = CALL_LOGS.filter((l) => String(l.relatedTo?.id) === m[1])
+        .sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));
+      return json(res, 200, { content: rows, totalElements: rows.length, page: 0, size: rows.length });
+    }
+  }
   if (p === "/v1/call-logs/" && req.method === "POST") {
     const body = JSON.parse(await text(req));
     const made = { id: nextId++, ...body };

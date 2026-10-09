@@ -26,7 +26,7 @@
  * it is exactly the part that differs: Node gives a stream, fetch gives a
  * Request. A handler that does not need one simply ignores it.
  */
-import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode,
+import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
@@ -471,6 +471,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   let csIndex = null, csReadAt = 0;
   let csMemo = { key: "", map: new Map() };
   const CS_FIELDS = ["id", "company", "customFieldValues", "updatedAt"];
+  const historyCache = new Map();
+  const HISTORY_TTL = Number(env.HISTORY_TTL_MS || 5 * 60 * 1000);
   const CS_DELTA_MS = Number(env.CONTACT_STAGES_DELTA_MS || 10 * 60 * 1000);
   const CS_FULL_MS = Number(env.CONTACT_STAGES_FULL_MS || 24 * 3600 * 1000);
   /* HOW LONG AN INSTANCE MAY TRUST ITS OWN COPY, for READING. Cloudflare runs
@@ -1488,6 +1490,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          ten saves onto one company and found four with an empty c.kid, which
          were exactly the ones that had just been created. */
       const savedKid = result.kid || c.kid;
+      /* This save just wrote a call log; the next look at this contact's
+         history must include it. */
+      if (savedKid) historyCache.delete(String(savedKid));
       if (savedKid && c.companyId) {
         try {
           const ix = (await csLoad({ fresh: true })) || null;
@@ -2495,6 +2500,32 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     /* Whether each half of the write is configured, so the console can say so
        rather than looking like it saved everywhere. */
     "/targets": async () => ({ kylas: true, airtable: !!airtable, base: AT_BASE || null }),
+
+    /* WHAT WAS SAID ON EARLIER CALLS — the notes on every Kylas call log for
+       this contact, newest first. Ayush, 2026-10-09: "Previous remarks fetch
+       nahi ho rahe hai." The "Said before" strip only ever read the contact's
+       remarks field; the notes associates actually type, in Kylas' dialler or
+       in this console, are on the call logs.
+
+       Asked for separately, after the contact is on screen, so the 85% path —
+       open, no answer, next — never waits on it. Held five minutes per contact
+       and dropped when that contact is saved. A Kylas failure is an empty
+       history with the reason, never a failed request. */
+    "/history": async (url) => {
+      const id = url.searchParams.get("id");
+      if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+      const hit = historyCache.get(id);
+      if (hit && Date.now() - hit.at < HISTORY_TTL) return { items: hit.items, cached: true };
+      try {
+        const items = callNotes(await kylas.callLogs(id)).slice(0, 10);
+        historyCache.set(id, { at: Date.now(), items });
+        if (historyCache.size > 2000) historyCache.delete(historyCache.keys().next().value);
+        return { items };
+      } catch (e) {
+        log(`! history ${id}: ${e.message.slice(0, 160)}`);
+        return { items: [], error: e.message.slice(0, 200) };
+      }
+    },
 
     "/contact": async (url) => {
       const id = url.searchParams.get("id");

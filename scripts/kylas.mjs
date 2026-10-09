@@ -671,7 +671,43 @@ export function createClient(key, {
     companyFields: () => call("GET",
       "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200"),
     createCallLog: (body) => call("POST", "/v1/call-logs/", body),
+    /* EVERY CALL LOGGED AGAINST A CONTACT, with the notes typed on each — the
+       documented "Fetch Call logs on Contact" in Kylas' own Postman
+       collection. This is where a previous call's update actually lives:
+       Kylas' dialler writes it there, and so does this console (toKylasCallLog
+       puts the call's note on the log). The contact's `remarks` field, which
+       was the only thing the "Said before" strip read, is a different place,
+       and mostly empty. */
+    callLogs: (contactId) => call("GET",
+      `/v1/call-logs/${encodeURIComponent(contactId)}?relatedToType=contact`),
   };
+}
+
+/* A call log's notes as text, newest call first. The response shape is not in
+   the collection (it has no example), so every likely container is accepted —
+   an array, `content`, `data`, `records` — and a note may be a string, an
+   object with `description`, or HTML from Kylas' rich-text box. A shape this
+   does not recognise reads as no history, not a crash. */
+const stripHtml = (s) => String(s || "")
+  .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n").replace(/<[^>]+>/g, "")
+  .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+  .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+export function callNotes(body) {
+  const logs = Array.isArray(body) ? body : body?.content || body?.data || body?.records || [];
+  const out = [];
+  for (const l of logs) {
+    const notes = Array.isArray(l?.notes) ? l.notes : l?.notes ? [l.notes] : [];
+    const text = notes.map((n) => stripHtml(typeof n === "string" ? n : n?.description ?? n?.text ?? ""))
+      .filter(Boolean).join("\n");
+    if (!text) continue;
+    out.push({
+      at: l.startTime || l.createdAt || l.updatedAt || "",
+      outcome: String(l.outcome || "").replace(/_/g, " ").toLowerCase(),
+      by: nameOf(l.owner) || nameOf(l.createdBy) || lookupName(l, "ownerId", l.ownerId) || "",
+      text,
+    });
+  }
+  return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
 /* ── writing ───────────────────────────────────────────────────────── */

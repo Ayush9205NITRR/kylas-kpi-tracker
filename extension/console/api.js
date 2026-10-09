@@ -312,6 +312,8 @@
     /* Frozen daily rows from Airtable, for the trend chart. */
     snapshots: (days = 60) => req(`/snapshots?days=${encodeURIComponent(days)}`, { timeout: 20000 }),
     contact: (id) => req(`/contact?id=${encodeURIComponent(id)}`),
+    /* The notes on this contact's earlier Kylas call logs, newest first. */
+    history: (id) => req(`/history?id=${encodeURIComponent(id)}`, { timeout: 15000 }),
     /* Which accounts owe an explanation, and the reasons on offer. The proxy
        decides both — the rule is a management policy and the console is told
        what it is, so six browsers cannot hold six versions of it. */
