@@ -1003,6 +1003,122 @@ console.log('\n11. a copy that is short of the account is not the account');
         `offsiteTimelineAll=${JSON.stringify(b.contact?.offsiteTimelineAll)}`);
 }
 
+/* ── 15 · THE ACCOUNT STAGE COMES FROM ITS CONTACTS ────────────────────
+   Ayush, 2026-10-09: "Account stage galat hai... har account ke contact mein
+   aao aur usme joh higher status hai usko pick karo... Not Interested vale
+   CNC mein dale hue hai."
+
+   The fixture holds his case exactly. Company 1776620's OWN record in Kylas
+   says CNC (Could Not Connect), rung 6. Its two contacts are at MQL (rung 14,
+   stored as a picklist id) and Discovery Call Booked (rung 19, stored as the
+   code — both shapes turn up in the wild). The highest is 19. The board used
+   to file it by the company record whenever no contact had been saved through
+   the console — which was almost every account. */
+{
+  console.log('\n15. the account stage comes from the contacts, not the company record');
+  /* ARRANGE, ASSERTED: the disagreement has to be IN the fixture, or every
+     check below passes for the wrong reason. The first draft of this looked
+     at 903, whose company record holds no stage at all. */
+  const coRec = await fetch('http://127.0.0.1:9900/v1/companies/1776620', { headers: { 'api-key': 'x' } })
+    .then((r) => r.json()).catch(() => null);
+  const coOwn = coRec?.customFieldValues?.cfPipelineStageBd;
+  const { stageCode: decode } = await import('./kylas.mjs');
+  check('the company record itself says CNC', decode(coOwn) === 'CNC_COULD_NOT_CONNECT',
+        `company field = ${JSON.stringify(coOwn)} -> ${decode(coOwn)}`);
+
+  /* The index may already exist — the maintenance runs in section 7 build it
+     on the first run that does no other big work. So ask the server whether
+     it is built, and only fire the cron if it is not. Looking for a log line
+     was the first draft, and it missed an index built two sections earlier. */
+  const status = async () => (await get(await coldWorker(1500 + Math.random()), '/cache-status',
+    { RESEARCH_BASE: 'appRESEARCH' })).body.contactStages;
+  let cs = await status();
+  for (let i = 0; i < 12 && !cs; i++) { await fire(MAINT, MAINT_ENV); cs = await status(); }
+  check('the contact index is built', !!cs, JSON.stringify(cs));
+  check('...from every Kylas contact', cs?.contacts > 0, `${cs?.contacts} contacts, ${cs?.accounts} accounts`);
+
+  const r = await get(await coldWorker(1501), '/companies?owner=all', { RESEARCH_BASE: 'appRESEARCH' });
+  const list = r.body.companies || [];
+  const seats = list.find((c) => String(c.id) === '1776620');
+  check('1776620 is on the list', !!seats);
+  /* THE ASSERTION. Without the index this reads the company record's CNC. */
+  check('1776620 is NOT filed under the company record\'s CNC',
+        seats?.acctStage && !/^CNC/.test(seats.acctStage), `acctStage=${JSON.stringify(seats?.acctStage)}`);
+  check('...it is the highest of its contacts: Discovery Call Booked, rung 19',
+        seats?.acctRung >= 19, `acctStage=${seats?.acctStage} rung=${seats?.acctRung}`);
+  /* Counted from the mock rather than written in: earlier sections SAVE
+     contacts onto this company, so "two" was true of the fixture and false
+     of the suite by the time it gets here. */
+  /* RETRY THE 429, and assert the read worked. The first version of this
+     took a throttled reply as "Kylas holds 0" — the fourth time a swallowed
+     429 has dressed itself up as a finding in this suite. */
+  let all = null;
+  for (let t = 0; t < 8 && !all; t++) {
+    const x = await fetch('http://127.0.0.1:9900/v1/search/contact?page=0&size=200', {
+      method: 'POST', headers: { 'api-key': 'x', 'content-type': 'application/json' },
+      body: JSON.stringify({ fields: ['id', 'company'], jsonRule: { condition: 'AND', valid: true, rules: [
+        { id: 'multi_field', field: 'multi_field', type: 'multi_field', input: 'multi_field', operator: 'multi_field', value: '' }] } }),
+    }).catch(() => null);
+    if (x && x.ok) all = await x.json().catch(() => null);
+    else await new Promise((r) => setTimeout(r, 400 * (t + 1)));
+  }
+  check('the mock\'s contact list could be read to count against', Array.isArray(all?.content),
+        all ? `${all.content?.length} rows` : 'every attempt failed');
+  const coOf = (c) => String(c?.company?.id ?? c?.company ?? '');
+  const want = (all?.content || []).filter((c) => coOf(c) === '1776620').length;
+  check('...worked out from every one of its contacts', want > 0 && seats?.acctN === want,
+        `acctN=${seats?.acctN}, Kylas holds ${want}`);
+
+  /* SQL is rung 26. The company-field fallback drew a column reading "SQL
+     ... rung 0 of 26" because the company picklist's ids are not the
+     contacts'. From the contact, it is 26. */
+  const co903 = list.find((c) => String(c.id) === '903');
+  check('903, whose contact is SQL, is SQL at rung 26 — not rung 0',
+        co903?.acctStage === 'SQL_SALES_QUALIFIED_LEAD' && co903?.acctRung === 26,
+        `acctStage=${co903?.acctStage} rung=${co903?.acctRung}`);
+
+  /* An account with no contacts at all gets NO stage — not the company
+     record's, which is the fallback that put Not Interested accounts in CNC. */
+  const bare = list.filter((c) => c.acctN === 0);
+  check('accounts with no contacts are marked as such', bare.length > 0, `${bare.length} of ${list.length}`);
+  check('...and none of them is handed a stage', bare.every((c) => !c.acctStage),
+        bare.filter((c) => c.acctStage).slice(0, 3).map((c) => `${c.id}=${c.acctStage}`).join(', '));
+  /* acctN on every row is the console's cue to stop falling back to the
+     company field. */
+  check('every row carries acctN', list.length > 0 && list.every((c) => c.acctN != null),
+        `${list.filter((c) => c.acctN == null).length} without`);
+}
+
+/* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────
+   Cloudflare runs several isolates, each with its own memory. If a save is
+   noted onto the copy an isolate happened to be holding, an isolate that
+   loaded the index earlier writes its OLD copy back over every save the
+   others noted since. Here: isolate A reads the index, B notes a new contact,
+   then A notes another. Both must survive. */
+{
+  console.log('\n16. two isolates noting saves into one index do not erase each other');
+  const A = await coldWorker(1601), B = await coldWorker(1602);
+  const countNow = async () => (await get(await coldWorker(1600 + Math.random()), '/companies?owner=all',
+    { RESEARCH_BASE: 'appRESEARCH' })).body.companies?.find((c) => String(c.id) === '1776620')?.acctN;
+  /* A takes its copy into memory. */
+  await get(A, '/companies?owner=all', { RESEARCH_BASE: 'appRESEARCH' });
+  const start = await countNow();
+  const saveOn = async (w, lid, name, phone) => {
+    const r = await post(w, '/save', { contact: { ...contact, kid: '', lid, pocName: name,
+      phones: [{ type: 'MOBILE', cc: '+91', value: phone, primary: true }] } });
+    await r.settle();
+    return r.status;
+  };
+  const sb = await saveOn(B, 'wk-iso-b', 'Isolate Bee', '9800007701');
+  const sa = await saveOn(A, 'wk-iso-a', 'Isolate Ay', '9800007702');
+  check('both saves went through', sb === 200 && sa === 200, `B ${sb}, A ${sa}`);
+  const end = await countNow();
+  /* Without the fresh read, A writes back the copy it loaded before B's save
+     and the count rises by one, not two. */
+  check('the account gained BOTH new contacts, not just the last isolate\'s',
+        end === start + 2, `${start} -> ${end}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

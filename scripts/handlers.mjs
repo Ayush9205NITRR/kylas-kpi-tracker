@@ -26,8 +26,10 @@
  * it is exactly the part that differs: Node gives a stream, fetch gives a
  * Request. A handler that does not need one simply ignores it.
  */
-import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf,
+import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
+import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
+         higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
@@ -453,6 +455,106 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           (offKeys.size ? ` (field ${[...offKeys].join(", ")})` : " — no company field labelled Offsite was found"));
       return { companies: list, search: kylas.lastCompanySearch?.() || {} };
     });
+
+  /* ── EVERY CONTACT'S STAGE, FOR EVERY ACCOUNT (scripts/contact-stages.mjs)
+     The account stage is the highest stage among the account's contacts. It
+     used to come from the contacts in the KPI base — a few hundred accounts —
+     and fall back to the company record's own stale stage field for the other
+     seventeen thousand. This keeps an index of every Kylas contact instead.
+
+     Built once in full, then kept current by deltas on the maintenance run,
+     and written through on every console save so the board moves when the
+     associate saves rather than at the next crawl. Stored the same way the
+     company crawl is: gzipped, in pieces, in the shared store, so every
+     instance reads one copy and a cold one does not re-crawl Kylas. */
+  const csStore = cache ? kept(cache, "contact-stage-index") : null;
+  let csIndex = null, csReadAt = 0;
+  let csMemo = { key: "", map: new Map() };
+  const CS_DELTA_MS = Number(env.CONTACT_STAGES_DELTA_MS || 10 * 60 * 1000);
+  const CS_FULL_MS = Number(env.CONTACT_STAGES_FULL_MS || 24 * 3600 * 1000);
+  /* HOW LONG AN INSTANCE MAY TRUST ITS OWN COPY, for READING. Cloudflare runs
+     several isolates, each with its own memory; a copy held for the life of
+     the isolate drifts from what the others have written. Thirty seconds
+     keeps /companies from re-reading a megabyte per request while bounding
+     how stale any one instance can be. */
+  const CS_MEMORY_MS = Number(env.CONTACT_STAGES_MEMORY_MS || 30 * 1000);
+  /* `fresh` is for WRITING. A write must start from the store, never from
+     memory: an isolate that loaded the index an hour ago and then noted one
+     save would write its hour-old copy back over every save the other
+     isolates noted in between. test-worker caught exactly that — three
+     contacts saved after the index was built, gone from it. */
+  const csLoad = async ({ fresh = false } = {}) => {
+    if (!fresh && csIndex && Date.now() - csReadAt < CS_MEMORY_MS) return csIndex;
+    const held = csStore ? await csStore.get().catch(() => null) : null;
+    csIndex = held && held.v === 1 && held.contacts ? held : null;
+    csReadAt = Date.now();
+    return csIndex;
+  };
+  const csSave = async () => {
+    if (csStore && csIndex) await csStore.put(csIndex, 30 * 86400).catch((e) =>
+      log(`! contact stages: could not keep the index — ${e.message.slice(0, 120)}`));
+  };
+  /* How a Kylas contact names its company and its stage. The stage is the
+     CONTACT picklist, whose ids stageCode() knows — the company picklist's do
+     not match it, which is half of why the old fallback read rung 0. */
+  const csRead = {
+    companyOf: (c) => idOf(c.company) ?? c.companyId ?? "",
+    stageOf: (c) => stageCode((c.customFieldValues || {}).cfPipelineStageBd ?? c.cfPipelineStageBd),
+    stampOf: (c) => Date.parse(c.updatedAt || 0) || 0,
+  };
+  /* Full when there is no index or it is a day old; a delta otherwise, from
+     two minutes before the watermark so a row stamped in the gap is not
+     missed. The overlap costs a re-read; applyContacts ignores what it has. */
+  async function refreshContactStages({ full = false } = {}) {
+    const had = await csLoad({ fresh: true });
+    const doFull = full || !had || Date.now() - Number(had.builtAt || 0) > CS_FULL_MS;
+    const since = doFull ? "" : new Date(Date.parse(had.watermark || 0) - 120_000).toISOString();
+    const started = Date.now();
+    const got = await kylas.contactsChangedSince(since);
+    /* The crawl takes a while. Saves noted by other isolates DURING it are in
+       the store now and not in `had`, so a delta merges onto a fresh read
+       rather than onto the copy it started from. A full rebuild replaces the
+       lot, and anything noted during it is in Kylas and in this crawl. */
+    const base = doFull ? null : (await csLoad({ fresh: true })) || had;
+    /* A FULL READ THAT CAME BACK SHORT IS NOT A REPLACEMENT. Swapping a whole
+       index for a prefix would drop the accounts beyond it back to "no
+       stage" — the exact silent-truncation shape test-scale-airtable exists
+       to catch. Keep the old one, merge what did arrive, and say so. */
+    const short = doFull && got.reportedTotal != null && got.contacts.length < got.reportedTotal;
+    const next = doFull && !short ? emptyIndex() : (base || had || emptyIndex());
+    const changed = applyContacts(next, got.contacts, csRead);
+    if (doFull && !short) next.builtAt = Date.now();
+    else if (!next.builtAt) next.builtAt = Date.now();
+    csIndex = next;
+    await csSave();
+    const n = Object.keys(next.contacts).length;
+    log(`contact stages: ${doFull ? "full" : "delta"} — ${got.contacts.length} read, ${changed} changed, ` +
+        `${n} held, ${Date.now() - started}ms` + (short ? ` · SHORT: ${got.contacts.length} of ${got.reportedTotal}, kept the old index` : ""));
+    return { mode: doFull ? "full" : "delta", read: got.contacts.length, changed, held: n, short };
+  }
+  /* Company id -> { stage, rung, n }, memoised on the index's own state so
+     /companies does not re-walk thirty-odd thousand contacts per request. */
+  async function contactStagesByCompany() {
+    const ix = await csLoad();
+    if (!ix) return null;
+    const key = `${ix.builtAt}|${ix.watermark}|${Object.keys(ix.contacts).length}`;
+    if (csMemo.key !== key) csMemo = { key, map: stagesByCompany(ix) };
+    return csMemo.map;
+  }
+  /* The one place an account's stage is decided for /companies: the index's
+     answer and the KPI base's, higher wins. `acctN` is how many contacts the
+     account has in Kylas — present only when the index exists, and the
+     console's signal that this answer is from contacts and must not be
+     replaced by the company record's field. */
+  const acctFields = (coId, prog, idx) => {
+    const p = prog?.get(String(coId));
+    const k = idx?.get(String(coId));
+    const best = higherStage(k, p?.stage ? { stage: p.stage, rung: p.rung } : null);
+    return {
+      ...(best ? { acctStage: best.stage, acctRung: best.rung } : {}),
+      ...(idx ? { acctN: k?.n || 0 } : {}),
+    };
+  };
 
   /* OFFSITE TIMELINE, DERIVED — per company, the quarters its contacts'
      offsite rows name in their Timeline, Past and Now (scripts/offsite.mjs).
@@ -1370,6 +1472,24 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (atP) await atP;
         throw e;
       }
+      /* THE BOARD MOVES ON SAVE, NOT AT THE NEXT CRAWL. Kylas has accepted the
+         stage, so the account's index entry is updated now; the next delta
+         brings back the same thing. Never fatal — the save already happened. */
+      /* Not gated on a stage: a contact saved with none is still one of the
+         account's contacts, and the count is part of the answer.
+
+         RESULT.KID, NOT C.KID. A contact this save CREATED has its new Kylas
+         id on `result` only — the create path never copies it back onto `c`.
+         Reading c.kid skipped every new contact, silently: test-worker traced
+         ten saves onto one company and found four with an empty c.kid, which
+         were exactly the ones that had just been created. */
+      const savedKid = result.kid || c.kid;
+      if (savedKid && c.companyId) {
+        try {
+          const ix = (await csLoad({ fresh: true })) || null;
+          if (ix && noteSaved(ix, { id: String(savedKid), companyId: String(c.companyId), stage: c.stage || "" })) await csSave();
+        } catch (e) { log(`! contact stages: save not noted — ${e.message.slice(0, 120)}`); }
+      }
       atP ||= airtableLeg();
       await Promise.all([atP, callLogLeg()]);
       return result;
@@ -1650,6 +1770,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           const [offsite, fromKylas, fromList, enrich] = await Promise.all([
             offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite(), enrichByCompany()]);
           const { byCompany: prog } = await progress();
+          const csIdx = await contactStagesByCompany().catch(() => null);
           for (const co of mirror) {
             /* Only where there is something: a key on every one of six
                thousand rows, holding nine nulls, is the reply's biggest
@@ -1659,8 +1780,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
             const p = prog.get(String(co.id));
             co.nextCall = p?.nextCall || null;
-            /* THE ACCOUNT'S OWN STAGE, CALCULATED. See acctStage below. */
-            if (p?.stage) { co.acctStage = p.stage; co.acctRung = p.rung || 0; }
+            /* THE ACCOUNT'S OWN STAGE, CALCULATED: the highest stage among
+               ALL its Kylas contacts, or the KPI base's floor if that is
+               higher. See acctFields. */
+            Object.assign(co, acctFields(co.id, prog, csIdx));
           }
           for (const co of mirror) {
             if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
@@ -1741,8 +1864,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const [offsite, fromKylas, fromList, enrich, { byCompany: prog }] = await Promise.all([
-        offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), enrichByCompany(), progress()]);
+      const [offsite, fromKylas, fromList, enrich, { byCompany: prog }, csIdx] = await Promise.all([
+        offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), enrichByCompany(), progress(),
+        contactStagesByCompany().catch(() => null)]);
       const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
         offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
         /* Only where there is something — see the Airtable path. */
@@ -1766,9 +1890,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
            nextCall it derived was ever sent. It is computed from the contacts
            in the KPI base, so an account nobody has saved a contact for has
            none — which is honest, and is what the Unknown chip counts. */
-        ...(prog.get(String(co.id))?.stage
-          ? { acctStage: prog.get(String(co.id)).stage, acctRung: prog.get(String(co.id)).rung || 0 }
-          : {}) }));
+        ...acctFields(co.id, prog, csIdx) }));
       /* AIRTABLE IS THE DEFINITION OF THE KPIs. The dashboard used to recompute
          Right POC, Successful Discovery and the three milestones in the browser
          from Kylas data, which meant the same rules lived twice and only the
@@ -2420,6 +2542,19 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     kylasCompaniesAgeSeconds: await kylasCompanies.age(),
     syncedAt: (await syncState())?.at || null,
     saves: saves ? await saves.backlog() : null,
+    /* Where every account's stage comes from (scripts/contact-stages.mjs).
+       null until the first maintenance run builds it — and until then the
+       console falls back to the company record's field, which is the stale
+       answer this replaced. If the board still files accounts by the company
+       record, this is the first thing to look at. */
+    contactStages: await (async () => {
+      const ix = await csLoad().catch(() => null);
+      if (!ix) return null;
+      const m = await contactStagesByCompany().catch(() => null);
+      return { contacts: Object.keys(ix.contacts).length, accounts: m?.size ?? null,
+               builtAt: ix.builtAt ? new Date(ix.builtAt).toISOString() : null,
+               watermark: ix.watermark || null };
+    })(),
     /* Why the Accounts view's offsite filter is empty, when it is: which
        Kylas company fields look like it, and whether the crawl carries them. */
     offsite: await (async () => {
@@ -2500,6 +2635,28 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     if (shadow && !built) {
       try { out.shadow = await shadow.tick(); }
       catch (e) { out.shadow = { error: e.message.slice(0, 160) }; log(`! shadow: ${e.message.slice(0, 120)}`); }
+    }
+    /* EVERY ACCOUNT'S STAGE, FROM ITS CONTACTS. A delta every ten minutes and
+       a full rebuild once a day (refreshContactStages decides which). ONE BIG
+       PIECE OF WORK PER RUN: not on a run that already built a mirror table or
+       crawled the companies — the next minute's run picks it up. Leased like
+       the company crawl, because a full contact crawl can outlast a minute and
+       a second one beside it doubles the load on Kylas for the same answer. */
+    if (!built && !out.kylasCompanies && cache) {
+      try {
+        const last = Number((await cache.get("contact-stages-at").catch(() => null)) || 0);
+        const due = !(await csLoad()) || Date.now() - last >= CS_DELTA_MS;
+        if (due && !(await cache.get("contact-stages-lease").catch(() => null))) {
+          await cache.put("contact-stages-lease", String(Date.now()), { ttlSeconds: 600 }).catch(() => {});
+          try {
+            out.contactStages = await refreshContactStages();
+            await cache.put("contact-stages-at", String(Date.now()), { ttlSeconds: 7 * 86400 }).catch(() => {});
+          } finally { await cache.delete("contact-stages-lease").catch(() => {}); }
+        }
+      } catch (e) {
+        out.contactStages = { error: e.message.slice(0, 160) };
+        log(`! contact stages: ${e.message.slice(0, 160)}`);
+      }
     }
     /* A SYNC SOMEBODY ASKED FOR. Contacts only — the same shape the hourly
        cron runs, for the same reason: it is the stage changes that the ladder

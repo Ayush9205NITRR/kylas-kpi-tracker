@@ -63,13 +63,39 @@ they do, somebody has worked the account somewhere the other two cannot see.
 | column | what it is |
 |---|---|
 | **Pipeline stage** | the company's own `Pipeline Stage - BD` in Kylas. One value, typed on the company record, stale the moment a POC moves |
-| **Account stage** | **calculated**: the furthest of its contacts' stages, by the 26-rung order in `docs/stages.json`. Never typed. Blank means no contact of that account has been saved yet — not "nothing is happening" |
+| **Account stage** | **calculated**: the highest stage among **all** the account's Kylas contacts, by the 26-rung order in `docs/stages.json`. Never typed. Blank means the account has no contact in Kylas, or none has been staged — never the company record's field |
 | **Demand team stage** | Company List's `Account Pipeline Stage`, a reference column the demand team keeps by hand |
 
-The calculated one is computed server-side in `scripts/progress.mjs` from the
-contacts in the KPI base, and recomputed in the browser over any contacts the
-open card has that the base has not seen yet — whichever is further along
-wins, so a stage moved thirty seconds ago already counts.
+The calculated one comes from **every contact in Kylas**, not only those the
+console has saved (Ayush, 2026-10-09: "har account ke contact mein aao aur usme
+joh higher status hai usko pick karo"). `scripts/contact-stages.mjs` keeps an
+index of every Kylas contact — company and stage — in the Worker's shared
+store: built in full once a day, kept current by a delta every ten minutes,
+and written through on every console save so the board moves when the
+associate saves. Three answers are then combined and **the highest wins**:
+
+1. the index — where each contact is **now**, for all 17,925 accounts;
+2. the KPI base (`scripts/progress.mjs`) — the furthest a contact **ever**
+   reached, by KPI Rank, which only rises (the 2026-09-29 rule: a POC who
+   reached Discovery and was re-dialled to a no-answer has still been to
+   Discovery). Only console-worked accounts have one;
+3. the browser — any contact the open card holds that neither has seen yet.
+
+**Before 2026-10-09 this was wrong for almost every account.** Only the few
+hundred accounts with a contact in the KPI base had a calculated stage; the
+other ~17,800 fell back to the company record's own field, so the board filed
+most of the account by a stale, hand-typed value — Not Interested accounts
+sat in CNC because the company record still said CNC. That field is also a
+**different picklist** from the contacts', whose ids `stageCode()` does not
+know, so a company marked SQL arrived as a bare number and drew a column
+reading "SQL … rung 0 of 26". The fallback is gone once the index exists:
+`/companies` sends `acctN`, the account's contact count, and the console
+never replaces a contacts answer with the company field.
+
+`curl …/cache-status` shows the index (`contactStages`: contacts held,
+accounts, when it was built). `null` means it has not been built yet — the
+first maintenance run after a deploy builds it, and until then the console
+keeps the old fallback rather than blanking every row.
 
 ### Three fields that are not columns
 

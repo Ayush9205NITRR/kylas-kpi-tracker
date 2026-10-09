@@ -185,6 +185,10 @@
       if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch",
                                  "health", "lastCalledAt", "kylasStage", "acctStage"])
         if (!co[k] && seed[k]) co[k] = seed[k];
+      /* acctN is a COUNT and 0 is an answer ("this account has no contacts in
+         Kylas"), so it cannot ride the truthiness loop above, which would drop
+         exactly the rows it exists to describe. */
+      if (seed && seed.acctN != null && co.acctN == null) co.acctN = seed.acctN;
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
       if (seed?.nextCall && (!co.nextCall || seed.nextCall < co.nextCall)) co.nextCall = seed.nextCall;
@@ -207,7 +211,11 @@
                            offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich,
                            /* The server's calculated account stage — the furthest
                               rung any of this account's contacts has reached. */
-                           acctStage: co.acctStage });
+                           acctStage: co.acctStage,
+                           /* How many contacts the account has in Kylas. Present
+                              only once the server's contact index exists — and
+                              then the stage above is from contacts, full stop. */
+                           acctN: co.acctN });
     }
 
     for (const c of data) {
@@ -3004,7 +3012,10 @@
          is dimmed and says so on hover — it is the same column, but it is not
          the same claim. */
       cell: (c) => { const v = acctStageOf(c);
-        if (!v) return "—";
+        /* No contact at all is a different fact from contacts nobody has
+           staged, and the associate acts on them differently: one needs a POC
+           found, the other needs a call. */
+        if (!v) return c.acctN === 0 ? `<span class="acctown">No contacts</span>` : "—";
         return acctStageFrom(c) === "company"
           ? `<span class="acctown" title="From the company's own Pipeline Stage - BD in Kylas — no contact of this account has been saved here yet, so there is nothing to calculate from.">${esc(label(v) || v)}</span>`
           : esc(label(v) || v); } },
@@ -3136,7 +3147,19 @@
     };
     return `<div class="board">
       ${lanes.map((l) => col(l.key, l.label, l.hint, l.list)).join("")}
-      ${unplaced.length ? col("none", "No contacts yet", "nobody has been saved against these", unplaced) : ""}
+      ${unplaced.length ? (() => {
+        /* Two different reasons land an account here, and they need different
+           work: no POC at all means one has to be found, a POC with no stage
+           means somebody has to call them. The old hint, "nobody has been
+           saved against these", stopped being true once the stage came from
+           every Kylas contact rather than from what the console had saved. */
+        const none = unplaced.filter((c) => c.acctN === 0).length;
+        const unstaged = unplaced.filter((c) => c.acctN > 0).length;
+        const why = [none ? `${none} with no contact in Kylas` : "",
+                     unstaged ? `${unstaged} with contacts nobody has staged` : ""].filter(Boolean).join(" · ")
+          || "no contact has a stage yet";
+        return col("none", "No stage yet", why, unplaced);
+      })() : ""}
     </div>`;
   }
   /* One cap for every column. A pile of nine thousand untouched accounts is
@@ -3333,17 +3356,35 @@
   const acctStageOf = (co) => {
     const a = co.acctStage || "", b = co.stage || "";
     const best = !a ? b : !b ? a : (STAGE_RUNG[b] || 0) > (STAGE_RUNG[a] || 0) ? b : a;
-    /* LAST RESORT: the company's OWN Pipeline Stage - BD in Kylas. It is not a
-       calculation — somebody typed it on the company record and it goes stale
-       the moment a POC moves — so it never beats a contact-derived stage. But
-       17,827 of the 17,925 allotted companies have no contact saved here yet,
-       and for every one of them the column read "Unknown", which is the whole
-       list. A stale answer that says which account this is beats no answer on
-       every row. acctStageFrom() says which of the two a row got. */
+    /* FROM CONTACTS, AND ONLY FROM CONTACTS, once the server can say so.
+       Ayush, 2026-10-09: "Account stage galat hai... har account ke contact
+       mein aao aur usme joh higher status hai usko pick karo."
+
+       This used to fall back to the company record's own Pipeline Stage - BD
+       whenever no contact had been saved through the console — which was
+       17,827 of 17,925 accounts. That field is typed by hand and nobody keeps
+       it current, so the board filed most of the account by a stale guess:
+       Not Interested accounts sat in CNC because the company record still
+       said CNC. It was also a different picklist from the contacts', whose
+       ids stageCode() does not know, so a company marked SQL arrived as a bare
+       number and drew a column "rung 0 of 26".
+
+       The server now indexes every Kylas contact (scripts/contact-stages.mjs)
+       and sends `acctN`, the account's contact count, alongside the stage.
+       Where acctN is present the answer is from contacts, and an account
+       with none has NO stage — it is not handed the company field instead.
+
+       Where acctN is absent the server's index has not been built yet (the
+       first minutes after a deploy, or an older server): the old fallback
+       stays for that window rather than every row going blank. */
+    if (co.acctN != null) return best;
     return best || co.kylasStage || "";
   };
   const acctStageFrom = (co) =>
-    (co.acctStage || co.stage) ? "contacts" : co.kylasStage ? "company" : "";
+    (co.acctStage || co.stage) ? "contacts"
+      : co.acctN === 0 ? "none"
+      : co.acctN != null ? "contacts"
+      : co.kylasStage ? "company" : "";
   /* A stage's name for a chip. The blank one is a real answer — thousands of
      allotted companies have never been given a stage in Kylas — so it is
      named rather than left as an empty chip. */
