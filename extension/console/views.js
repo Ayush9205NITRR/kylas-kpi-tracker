@@ -1137,7 +1137,17 @@
      STEPS and the ladder's RUNGS were all rebuilt from RUNG; this one was
      missed, which is how it kept "→ Booked" while everything else said
      "SQL booked". Built from RUNG now, and test-kpi-spec asserts it. */
+  /* TALK TIME beside Calls — Ayush, 2026-10-10: "dashboard mein daily talk
+     time ka option add karo". The calls' durations summed for the period (and
+     the rolled-up days' totals), so every level — day, week, month — has it.
+     Shown as time, not seconds; a duration is not a count, so no delta. */
+  const fmtTalk = (s) => {
+    const m = Math.round((Number(s) || 0) / 60);
+    if (!m) return Number(s) > 0 ? "<1m" : "—";
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  };
   const COUNT_COLS = [{ key: "calls", label: "Calls" },
+    { key: "talkSeconds", label: "Talk time", fmt: fmtTalk, noDelta: true },
     ...LADDER_ORDER.map((key) => ({ key, label: rung(key) }))];
   /* Each rate is this rung out of the one above it, so the pairs follow the
      ladder's own order rather than being listed by hand.
@@ -1487,7 +1497,7 @@
       <tr${p.key === cur.key ? ' class="now"' : ""}${
         canDrill ? ` data-into="${esc(p.key)}" tabindex="0" role="button"` : ""}>
         <td class="pl">${esc(p.label)}${canDrill ? `<i class="into">\u203a</i>` : ""}</td>
-        ${COUNT_COLS.map((c) => `<td class="tnum">${p[c.key] || 0}${
+        ${COUNT_COLS.map((c) => `<td class="tnum">${c.fmt ? c.fmt(p[c.key]) : p[c.key] || 0}${c.noDelta ? "" : 
           p.delta && p.delta[c.key] ? ` ${deltaHTML(p.delta[c.key])}` : ""}</td>`).join("")}
         ${RATE_COLS.map((c) => `<td class="tnum rt">${rate(p, c)}</td>`).join("")}
       </tr>`).join("");
@@ -1567,6 +1577,7 @@
     const held = DISK.rca[owner];
     if (held && RCA.owner !== owner) {
       RCA.due = held.data.due || []; RCA.gates = held.data.gates || [];
+      RCA.watching = held.data.watching || 0; RCA.next = held.data.next || null;
       RCA.error = ""; RCA.at = held.at; RCA.owner = owner;
       if (Date.now() - (held.at || 0) <= SWR_TTL) return false;
     }
@@ -1575,7 +1586,9 @@
     API.rca(owner)
       .then((r) => {
         RCA.due = r.due || []; RCA.gates = r.gates || []; RCA.error = "";
-        DISK.rca[owner] = { at: Date.now(), data: { due: RCA.due, gates: RCA.gates } };
+        RCA.watching = r.watching || 0; RCA.next = r.next || null;
+        DISK.rca[owner] = { at: Date.now(), data: { due: RCA.due, gates: RCA.gates,
+                                                   watching: RCA.watching, next: RCA.next } };
         persist("rca");
       })
       /* A failure here must not take the view with it. The dashboard's job is
@@ -1589,9 +1602,22 @@
   const rcaGate = (key) => RCA.gates.find((g) => g.key === key) || null;
 
   function rcaStrip() {
-    if (RCA.error) return "";
+    /* NEVER SILENT. It used to return nothing on an error and nothing at
+       zero, so "no stalls yet", "could not read" and "broken" all looked the
+       same — and Ayush, 2026-10-10, read it as broken: "RCA ke cases visible
+       nahi hai". Nothing was due: the gates are 30, 21 and 14 days, and the
+       console was twelve days old. Each state now says which it is. */
+    if (RCA.error) return `<div class="vrca calm"><span>Stalled contacts (RCA) could not be read — ${
+      esc(String(RCA.error).slice(0, 120))}</span></div>`;
     const n = RCA.due.length;
-    if (!n) return "";
+    if (!n) {
+      if (!RCA.at) return "";
+      const nx = RCA.next, g = nx ? rcaGate(nx.gate) : null;
+      return `<div class="vrca calm"><span><b>RCA</b> · no contact has stalled long enough to need a reason yet${
+        RCA.watching ? ` — watching ${RCA.watching}` : ""}${
+        nx ? `. First due: <b>${esc(nx.name)}</b> in ${nx.days} day${nx.days === 1 ? "" : "s"}${
+          g ? ` (${esc(g.title)}, after ${g.days} days)` : ""}` : ""}.</span></div>`;
+    }
     /* One line. The count is the message; the detail is one click away, because
        a strip that lists nine of them is a view, and this sits on top of one.
 

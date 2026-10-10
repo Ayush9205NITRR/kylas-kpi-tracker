@@ -8,7 +8,7 @@
  * base, and a save touches up to five tables.
  */
 import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED, MILESTONE } from "./stages.mjs";
-import { gateFor } from "./rca.mjs";
+import { gateFor, RCA_GATES } from "./rca.mjs";
 
 /* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK, and the
    fallback is guarded because `process` does not exist in every runtime this
@@ -907,7 +907,12 @@ export const RCA_READ_FIELDS = [
   "Has Signal", "Has Complete Row", "Current Stage", "Company",
 ];
 
-export async function readRcaDue(at, { owner = "", now = Date.now(), log = () => {} } = {}) {
+/* `watch`, when an object is passed: filled with what is NOT yet due — how
+   many contacts sit at a gate inside its allowance, and which comes due
+   first. Ayush, 2026-10-10: "RCA ke cases visible nahi hai". Nothing was
+   due — the console had been in use twelve days and the shortest gate is
+   fourteen — and a strip that hides itself at zero cannot say so. */
+export async function readRcaDue(at, { owner = "", now = Date.now(), log = () => {}, watch = null } = {}) {
   const [contacts, asked] = await Promise.all([
     listTolerant(at, "Contacts", { fields: RCA_READ_FIELDS, pageSize: 100, maxPages: 400 }),
     listTolerant(at, "RCA", { fields: ["Key", "Gate", "Reason", "Answered At"],
@@ -938,7 +943,28 @@ export async function readRcaDue(at, { owner = "", now = Date.now(), log = () =>
       reached: rank > 0,
       picked: rank > 0,
     }, now);
-    if (!hit) continue;
+    if (!hit) {
+      if (watch) {
+        const w = gateFor({
+          rankAt: f["KPI Rank At"] || "",
+          right: Number(f["Has Signal"] || 0) === 1,
+          discovery: Number(f["Has Complete Row"] || 0) === 1,
+          booked: rank >= MILESTONE.sqlMeetingBooked.floor,
+          done: rank >= MILESTONE.sqlMeetingDone.floor,
+          sql: rank >= MILESTONE.sql.floor,
+          reached: rank > 0, picked: rank > 0,
+        }, now + 365 * 86400000);
+        if (w) {
+          const g = RCA_GATES.find((x) => x.key === w.gate);
+          const dueAt = Date.parse(w.since) + g.days * 86400000;
+          watch.watching = (watch.watching || 0) + 1;
+          if (!watch.next || dueAt < Date.parse(watch.next.dueOn))
+            watch.next = { name: f.Name || kid, gate: w.gate, dueOn: new Date(dueAt).toISOString(),
+                           days: Math.max(0, Math.ceil((dueAt - now) / 86400000)) };
+        }
+      }
+      continue;
+    }
     const key = `${kid}|${hit.gate}`;
     if (answered.has(key)) continue;
     out.push({ key, kid, recordId: r.id, name: f.Name || kid, owner: f.Owner || "",

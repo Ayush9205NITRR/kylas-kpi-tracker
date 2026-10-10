@@ -81,5 +81,28 @@ eq("booked floors on the Active Requirement call, not the discovery call",
 console.log("\nthe gates are addressable by key");
 eq("RCA_GATE is keyed", RCA_GATE.doneNoSql?.to, "sql");
 
+/* ── what is coming, not just what is due (2026-10-10) ─────────────────
+   "RCA ke cases visible nahi hai": twelve days into using the console nothing
+   had crossed a gate, and the strip hid itself. readRcaDue now also says how
+   many sit inside their allowance and which comes due first. */
+{
+  const { readRcaDue } = await import("./airtable.mjs");
+  const DAY = 86400000, now = Date.parse("2026-10-10T12:00:00Z");
+  const row = (id, name, daysAgo, f) => ({ id: "rec" + id, fields: { "Kylas Contact ID": String(id), Name: name,
+    Owner: "Anjali Athya", "KPI Rank": 14, "KPI Rank At": new Date(now - daysAgo * DAY).toISOString(), ...f } });
+  const tables = {
+    Contacts: [row(1, "Harita Kale", 12, { "Has Signal": 1 }),        /* right POC 12 days: due in 18 */
+               row(2, "Old Stall", 40, { "Has Signal": 1 }),          /* right POC 40 days: due now */
+               row(3, "Nobody", 5, {})],                               /* at no gate at all */
+    RCA: [],
+  };
+  const at = { log: () => {}, listAll: async (t) => tables[t] || [] };
+  const watch = {};
+  const due = await readRcaDue(at, { now, watch });
+  ok("the 40-day stall is due", due.length === 1 && due[0].name === "Old Stall");
+  ok("the 12-day one is watched, not due", watch.watching === 1);
+  ok("...and named as the next to come due, in 18 days", watch.next?.name === "Harita Kale" && watch.next?.days === 18);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

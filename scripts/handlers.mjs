@@ -1160,14 +1160,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        D1 copy, which reads whole tables, disagreed with this path. */
     const ALL = { pageSize: 100, maxPages: 2000 };
     const [callRows, rolledRows, transRows, contactRows, team] = await Promise.all([
-      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome"], ...ALL }),
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
          six weeks at this call volume. Missing this read would make every month
          older than the window read zero — history silently deleted rather than
          compacted. Tolerated when absent so a base without the table still
          reports, just without the old days. */
-      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls"], ...ALL })
+      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls", "Talk Seconds"], ...ALL })
         .catch(() => []),
       listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"], ...ALL }),
       /* Right POC and discovery are DATA becoming true, not a stage move, so
@@ -1186,10 +1186,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     ]);
 
     const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
-                                       outcome: r.fields.Outcome }));
+                                       outcome: r.fields.Outcome,
+                                       secs: Number(r.fields.Duration || 0) }));
     const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
                                             outcome: r.fields.Outcome,
-                                            n: Number(r.fields.Calls || 0) }));
+                                            n: Number(r.fields.Calls || 0),
+                                            secs: Number(r.fields["Talk Seconds"] || 0) }));
     /* A day can briefly exist in both tables — the rollup writes before it
        deletes. mergeCalls prefers the raw rows for any such day, so an
        interrupted rollup reads correctly instead of double. */
@@ -2436,8 +2438,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/rca": async (url) => {
       if (!airtable) return { due: [], gates: RCA_GATES, configured: false };
       const owner = url.searchParams.get("owner") || "";
-      const due = await readRcaDue(airtable, { owner, log });
-      return { due, gates: RCA_GATES, configured: true, owner };
+      const watch = {};
+      const due = await readRcaDue(airtable, { owner, log, watch });
+      return { due, gates: RCA_GATES, configured: true, owner,
+               watching: watch.watching || 0, next: watch.next || null };
     },
 
     "/rca-answer": async (url, body) => {
@@ -2721,6 +2725,28 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        refresh, comes first: without it the console has nothing to show,
        whereas a table not yet copied is still read straight from Airtable. */
     if (wantCrawl && (age === null || wantFresh)) { await crawl(); return out; }
+    /* A TABLE WHOSE COLUMN LIST CHANGED IS REBUILT. The copy keeps the fields
+       it was built with, and a delta only brings rows that CHANGED — so a
+       column added to MIRROR_TABLES (Duration, for the dashboard's talk time,
+       2026-10-10) stayed missing on every row copied before, for good. The
+       list is fingerprinted per table; a different fingerprint marks that one
+       table stale, and the runs below rebuild it while the old copy serves. */
+    if (mirror && cache) {
+      try {
+        const { MIRROR_TABLES } = await import("./mirror.mjs");
+        for (const [t, fields] of Object.entries(MIRROR_TABLES)) {
+          const sig = [...fields].sort().join("|");
+          const was = await cache.get(`mirror-spec:${t}`).catch(() => null);
+          if (was === sig) continue;
+          /* No fingerprint yet is "unknown", and counts as changed: the copy
+             in hand may well predate a column. One rebuild each, which the
+             26-hourly full rebuild does anyway. */
+          await mirror.markStale([t]).catch(() => {});
+          log(`mirror: ${t} ${was ? "gained or lost a column" : "has no recorded column list"} — rebuilding it`);
+          await cache.put(`mirror-spec:${t}`, sig, { ttlSeconds: 365 * 86400 }).catch(() => {});
+        }
+      } catch (e) { log(`! mirror spec check: ${e.message.slice(0, 120)}`); }
+    }
     if (mirror && rawAirtable) out.mirror = await mirror.maintain(rawAirtable, { only, maxBuilds: 1 });
     const built = (out.mirror || []).some((r) => r.rows !== undefined);
     if (wantCrawl && !built) await crawl();

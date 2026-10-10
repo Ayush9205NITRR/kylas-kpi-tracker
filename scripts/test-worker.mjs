@@ -1169,6 +1169,19 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('bulk is for adding only — dropping is one at a time, with a reason', depri.status === 400, `${depri.status}`);
 }
 
+/* ── 15e · RCA SAYS WHAT IS COMING, NOT JUST WHAT IS DUE ────────────────
+   Ayush, 2026-10-10: "RCA ke cases visible nahi hai". Nothing was due yet,
+   and an empty answer was indistinguishable from a broken one. */
+{
+  console.log('\n15e. RCA reports what it is watching');
+  const r = await get(await coldWorker(1590), '/rca?owner=', { RESEARCH_BASE: 'appRESEARCH' });
+  check('/rca answers with a count of contacts being watched', r.status === 200 && typeof r.body.watching === 'number',
+        `status ${r.status} watching=${r.body.watching} due=${(r.body.due || []).length}`);
+  check('...and, when any are, which comes due first and when',
+        !r.body.watching || (r.body.next && r.body.next.name && Number.isFinite(r.body.next.days)),
+        JSON.stringify(r.body.next));
+}
+
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────
    Cloudflare runs several isolates, each with its own memory. If a save is
    noted onto the copy an isolate happened to be holding, an isolate that

@@ -530,6 +530,8 @@ createServer(async (req, res) => {
     }
     if (p === "/v1/call-logs" && req.method === "GET") {
       if (callLogs404) return json(res, 404, { errorCode: "02002001" });
+      /* ...and, like the live account, 404 the moment page or size is added. */
+      if (url.searchParams.has("page") || url.searchParams.has("size")) return json(res, 404, {});
       const who = url.searchParams.get("relatedToId") || "";
       const rows = CALL_LOGS.filter((l) => callLogsUnfiltered || String(l.relatedTo?.id) === who)
         .sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));

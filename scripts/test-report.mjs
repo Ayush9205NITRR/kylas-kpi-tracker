@@ -394,6 +394,22 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   ] }, { from: "2026-10-01", to: "2026-10-31" });
   eq("held in October, SQL in November: October still credited", r.periods[0].doneSql, 1);
 }
+{
+  /* DAILY TALK TIME (2026-10-10). The calls' durations summed per day, raw
+     rows and rolled-up days alike, per owner too. */
+  const r = report("day", { calls: [
+    { at: "2026-10-06T09:00:00Z", owner: "A", outcome: "Right POC", secs: 300 },
+    { at: "2026-10-06T10:00:00Z", owner: "A", outcome: "No answer", secs: 20 },
+    { at: "2026-10-06T11:00:00Z", owner: "B", outcome: "Discovery", secs: 900 },
+    { at: "2026-10-05", owner: "A", outcome: "Right POC", n: 12, secs: 1800 },   /* a rolled-up day */
+    { at: "2026-10-06T12:00:00Z", owner: "B", outcome: "No answer" },            /* no duration */
+  ] }, { from: "2026-10-05", to: "2026-10-06" });
+  const day = (k) => r.periods.find((p) => p.key === k);
+  eq("talk time for the 6th is every call's seconds", day("2026-10-06").talkSeconds, 1220);
+  eq("a rolled-up day carries its total", day("2026-10-05").talkSeconds, 1800);
+  eq("the window total", r.totals.talkSeconds, 3020);
+  eq("per owner too", (r.byOwner || []).find((o) => o.owner === "B")?.talkSeconds, 900);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

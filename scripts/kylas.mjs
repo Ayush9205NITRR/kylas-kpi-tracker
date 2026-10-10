@@ -699,11 +699,15 @@ export function createClient(key, {
     callLogs: async (contactId) => {
       const id = String(contactId);
       const q = (who) => call("GET",
-        `/v1/call-logs?relatedToType=contact&relatedToId=${encodeURIComponent(who)}&page=0&size=20`);
+        /* NO page/size: with them this read answers 404 on the live account
+           (probe, 2026-10-10); without them it answers. */
+        `/v1/call-logs?relatedToType=contact&relatedToId=${encodeURIComponent(who)}`);
       const got = await q(id);
       const logs = Array.isArray(got) ? got : got?.content || got?.data || got?.records || [];
       if (logs.length && callLogFilterHonoured === null) {
-        const ctl = await q("1").catch(() => null);
+        /* A 404 for the control id is an answer too: nothing for nobody. */
+        const ctl = await q("1").catch((e) => (/-> 404/.test(e.message) ? { content: [] } : null));
+        if (ctl === null) return { content: logs.filter((l) => logIsAbout(l, id)) };   /* ask again next time */
         const other = Array.isArray(ctl) ? ctl : ctl?.content || ctl?.data || ctl?.records || [];
         callLogFilterHonoured = !(other.length && other.map((x) => x.id).join() === logs.map((x) => x.id).join());
         if (!callLogFilterHonoured) log("! call logs: Kylas ignores relatedToId — earlier call notes are switched off");

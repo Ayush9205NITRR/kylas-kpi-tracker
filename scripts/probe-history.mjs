@@ -121,13 +121,13 @@ for (const [m, p, b] of callTries) {
 console.log(`\n2c · THE WORKING CALL-LOG READ, TAKEN APART`);
 {
   const listOf = (j) => (Array.isArray(j) ? j : j?.content || j?.data || j?.records || []);
-  const mine = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=${ID}&page=0&size=20`);
-  const other = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=1&page=0&size=20`);
+  const mine = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=${ID}`);
+  const other = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=1`);
   const a = listOf(mine.json), b = listOf(other.json);
   const ids = (l) => l.map((x) => x.id).join(",");
   console.log(`  this contact: ${mine.status}, ${a.length} log(s)   ·   a contact id nobody has (1): ${other.status}, ${b.length} log(s)`);
-  console.log(a.length && ids(a) === ids(b)
-    ? "  ! SAME LOGS FOR BOTH — Kylas is ignoring relatedToId; these are not this contact's calls"
+  console.log(!a.length ? "  cannot tell — this contact's read returned nothing"
+    : ids(a) === ids(b) ? "  ! SAME LOGS FOR BOTH — Kylas is ignoring relatedToId; these are not this contact's calls"
     : "  filtered: the two answers differ, so relatedToId is honoured");
   if (a.length) {
     const first = a[0];
@@ -149,37 +149,10 @@ console.log(`\n2c · THE WORKING CALL-LOG READ, TAKEN APART`);
   }
 }
 
-/* 3 · the Notes tab — undocumented, so ask the way it is most likely asked */
-console.log(`\n3 · NOTES TAB — not read by the console yet; trying the likely ways to read it`);
-const tries = [
-  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT&page=0&size=10`,
-  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT&page=0&size=10&sort=createdAt,desc`,
-  `/v1/notes/relation?entityId=${ID}&entityType=CONTACT&page=0&size=10`,
-  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT`,
-  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=contact`,
-  `/v1/notes?targetEntityId=${ID}&targetEntityType=CONTACT`,
-  `/v1/notes?entityType=contact&entityId=${ID}`,
-  `/v1/contacts/${ID}/notes`,
-];
-let found = "";
-for (const p of tries) {
-  const r = await raw(p);
-  const list = Array.isArray(r.json) ? r.json : r.json?.content || r.json?.data || r.json?.records || null;
-  const n = Array.isArray(list) ? list.length : null;
-  console.log(`  ${String(r.status).padEnd(4)} ${p}${n != null ? `   -> ${n} note(s)` : ""}${
-    r.status >= 400 ? `\n         ${clip(r.text, 200)}` : ""}`);
-  if (r.status === 200 && n) {
-    found ||= p;
-    for (const x of list.slice(0, 3))
-      console.log(`         "${clip(String(x.description ?? x.sourceEntity?.description ?? x.text ?? JSON.stringify(x)).replace(/<[^>]+>/g, " "))}"`);
-  }
-}
+/* 3 · THE NOTES TAB is not probed any more: Ayush, 2026-10-10, "notes nahi,
+   cfRemarks karke field hai" — what the team writes lives in cfRemarks (1b). */
+const found = "";
 console.log(`\n${"=".repeat(72)}`);
 if (callFound) console.log(`Call logs answer at:\n  ${callFound}\n`);
-console.log(found
-  ? `The Notes tab answers at:\n  ${found}\nSend this output back — that is the shape to add to the strip.`
-  : `No Notes read answered with notes. If the remarks you see in Kylas are in 1 or 2
-above, the strip (1.55) already shows them. If they are on the Notes tab and
-nothing above found them, send this output back anyway — the statuses say
-which way the endpoint refuses.`);
+console.log(kr ? "The Remarks field (1b) is what \"Said before\" shows first." : "This contact has no Remarks (1b).");
 console.log("");
