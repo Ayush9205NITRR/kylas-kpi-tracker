@@ -1243,6 +1243,14 @@ console.log('\n11. a copy that is short of the account is not the account');
         `status ${h404.status} items ${(h404.body.items || []).length}`);
   check('...and the Remarks field still comes through', /budget sits with the CFO/.test(h404.body.remarks || ''),
         JSON.stringify(h404.body.remarks || null).slice(0, 80));
+  /* A KYLAS THAT IGNORES relatedToId must show nothing, never somebody
+     else's calls. Fresh instance, so the client's one-time check runs. */
+  await fetch('http://127.0.0.1:9900/__calllogsunfiltered?on=1', { headers: { 'api-key': 'x' } });
+  const hAll = await get(await coldWorker(1705), '/history?id=38470');
+  await fetch('http://127.0.0.1:9900/__calllogsunfiltered?on=0', { headers: { 'api-key': 'x' } });
+  check('a Kylas that ignores the contact filter shows no call notes, not the wrong ones',
+        hAll.status === 200 && (hAll.body.items || []).length === 0,
+        `items ${(hAll.body.items || []).map((x) => x.text.slice(0, 20)).join(' | ')}`);
   /* A Kylas failure is an empty history, never a failed request. */
   const bad = await get(await coldWorker(1703), '/history?id=999999999');
   check('a contact with no calls is an empty history, not an error', bad.status === 200 && Array.isArray(bad.body.items),

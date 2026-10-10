@@ -26,7 +26,7 @@
  * the other is the bug this guards.
  */
 import { readFileSync } from "node:fs";
-import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes, kylasRemarksOf, toConsoleContact } from "./kylas.mjs";
+import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes, kylasRemarksOf, toConsoleContact, logIsAbout } from "./kylas.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -159,6 +159,17 @@ console.log("\nthe Remarks custom field (cfRemarks)");
   eq("the console's contact carries it as kylasRemarks",
      toConsoleContact({ id: 9, customFieldValues: { cfRemarks: "Prefers WhatsApp" } }, {}).kylasRemarks,
      "Prefers WhatsApp");
+}
+
+console.log("\nwhich call logs belong to the contact");
+{
+  eq("relatedTo naming this contact", logIsAbout({ relatedTo: { entity: "contact", id: 5815757 } }, "5815757"), true);
+  eq("relatedTo naming another contact", logIsAbout({ relatedTo: { id: 1 } }, "5815757"), false);
+  eq("a list of relations, this contact among them", logIsAbout({ relatedTo: [{ id: 9 }, { id: "5815757" }] }, "5815757"), true);
+  eq("a bare id", logIsAbout({ relatedTo: 5815757 }, "5815757"), true);
+  eq("saying nothing is accepted — there is no way to tell", logIsAbout({ id: 1 }, "5815757"), true);
+  eq("a note under `note` is read", callNotes([{ startTime: "2026-10-06T09:40:40Z", note: "Call after Diwali" }])[0]?.text,
+     "Call after Diwali");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -39,7 +39,7 @@ const NO_CO_NAMES = process.env.MOCK_NO_COMPANY_NAMES === "1";
 /* Mutable, because POST /__hang toggles it without a restart — a restart would
    throw away the contacts the test needs the recovery path to find. */
 let hangCreate = process.env.MOCK_HANG_CREATE === "1";
-let callLogs404 = false;
+let callLogs404 = false, callLogsUnfiltered = false;
 /* POST /__refuse?name=<substring> makes Kylas turn down a create by name. The
    phone rules below cannot express this: the console normalises every number
    before it gets here, so nothing that reaches Kylas fails them, and the branch
@@ -515,12 +515,23 @@ createServer(async (req, res) => {
      response, so this answers in the paginated `content` shape the search
      endpoints use; the reader accepts a bare array and `data` too. */
   {
+    /* AS AYUSH'S LIVE ACCOUNT ANSWERS (probe, 2026-10-10): the documented
+       GET /v1/call-logs/<contact_id>?relatedToType=contact is 404
+       {"errorCode":"02002001"} — the id is read as a call log's — and the
+       query form GET /v1/call-logs?relatedToType=contact&relatedToId=<id>
+       is what answers.
+         /__calllogs404?on=1        the query form refuses too
+         /__calllogsunfiltered?on=1 the query form ignores relatedToId and
+                                    hands back everybody's latest calls */
     const m = /^\/v1\/call-logs\/(\d+)$/.exec(p);
-    /* /__calllogs404?on=1 answers as Ayush's live account did on 2026-10-10:
-       404 {"errorCode":"02002001"} for the documented read. */
-    if (m && req.method === "GET" && callLogs404) return json(res, 404, { errorCode: "02002001" });
     if (m && req.method === "GET") {
-      const rows = CALL_LOGS.filter((l) => String(l.relatedTo?.id) === m[1])
+      const one = CALL_LOGS.find((l) => String(l.id) === m[1]);
+      return one ? json(res, 200, one) : json(res, 404, { errorCode: "02002001" });
+    }
+    if (p === "/v1/call-logs" && req.method === "GET") {
+      if (callLogs404) return json(res, 404, { errorCode: "02002001" });
+      const who = url.searchParams.get("relatedToId") || "";
+      const rows = CALL_LOGS.filter((l) => callLogsUnfiltered || String(l.relatedTo?.id) === who)
         .sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));
       return json(res, 200, { content: rows, totalElements: rows.length, page: 0, size: rows.length });
     }
@@ -536,6 +547,7 @@ createServer(async (req, res) => {
   /* Test hook: what has actually been written, so a test can assert on it. */
   if (p === "/__writes") return json(res, 200, { writes: WRITES, callLogs: CALL_LOGS });
   if (p === "/__refuse") { refuseName = url.searchParams.get("name") || ""; return json(res, 200, { refuseName }); }
+  if (p === "/__calllogsunfiltered") { callLogsUnfiltered = url.searchParams.get("on") === "1"; return json(res, 200, { callLogsUnfiltered }); }
   if (p === "/__calllogs404") { callLogs404 = url.searchParams.get("on") === "1"; return json(res, 200, { callLogs404 }); }
   if (p === "/__hang") { hangCreate = url.searchParams.get("on") === "1"; return json(res, 200, { hangCreate }); }
   if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }

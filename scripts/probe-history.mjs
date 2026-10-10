@@ -112,6 +112,43 @@ for (const [m, p, b] of callTries) {
   }
 }
 
+/* 2c · THE READ THAT ANSWERED, TAKEN APART. Two things decide whether the
+   console can use it, and a "10 logs" line answers neither:
+     - does Kylas FILTER by relatedToId, or hand back the account's latest
+       ten whoever they were about? Asked again with an id nobody has.
+     - where is the note? The list may leave it out (a single-log read often
+       carries what a list does not), or call it something else. */
+console.log(`\n2c · THE WORKING CALL-LOG READ, TAKEN APART`);
+{
+  const listOf = (j) => (Array.isArray(j) ? j : j?.content || j?.data || j?.records || []);
+  const mine = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=${ID}&page=0&size=20`);
+  const other = await raw(`/v1/call-logs?relatedToType=contact&relatedToId=1&page=0&size=20`);
+  const a = listOf(mine.json), b = listOf(other.json);
+  const ids = (l) => l.map((x) => x.id).join(",");
+  console.log(`  this contact: ${mine.status}, ${a.length} log(s)   ·   a contact id nobody has (1): ${other.status}, ${b.length} log(s)`);
+  console.log(a.length && ids(a) === ids(b)
+    ? "  ! SAME LOGS FOR BOTH — Kylas is ignoring relatedToId; these are not this contact's calls"
+    : "  filtered: the two answers differ, so relatedToId is honoured");
+  if (a.length) {
+    const first = a[0];
+    console.log(`  keys on a listed log: ${Object.keys(first).join(", ")}`);
+    const rel = (x) => JSON.stringify(x.relatedTo ?? x.related ?? x.associatedContacts ?? x.entity ?? null);
+    console.log(`  what each says it is about: ${a.slice(0, 5).map(rel).join("  |  ").slice(0, 400)}`);
+    const noteish = Object.entries(first).filter(([k, v]) => /note|summary|remark|desc|comment/i.test(k) && v != null && v !== "");
+    console.log(noteish.length ? `  note-like fields on the list: ${clip(JSON.stringify(Object.fromEntries(noteish)), 300)}`
+      : "  no note-like field on the listed log");
+    const one = await raw(`/v1/call-logs/${first.id}`);
+    console.log(`  the same log read alone (GET /v1/call-logs/${first.id}): ${one.status}`);
+    if (one.json) {
+      console.log(`  keys when read alone: ${Object.keys(one.json).join(", ")}`);
+      const n2 = Object.entries(one.json).filter(([k, v]) => /note|summary|remark|desc|comment/i.test(k) && v != null && v !== "");
+      console.log(n2.length ? `  note-like fields when read alone: ${clip(JSON.stringify(Object.fromEntries(n2)), 300)}` : "  no note-like field there either");
+    }
+    const withNotes = a.filter((x) => callNotes([x]).length).length;
+    console.log(`  logs the console's reader finds a note on: ${withNotes} of ${a.length}`);
+  }
+}
+
 /* 3 · the Notes tab — undocumented, so ask the way it is most likely asked */
 console.log(`\n3 · NOTES TAB — not read by the console yet; trying the likely ways to read it`);
 const tries = [

@@ -169,6 +169,8 @@ export function createClient(key, {
      an error — it is a correct prefix of a wrong length — so it travels
      alongside the rows rather than as an exception. */
   let lastSearch = { pages: 0, total: 0, truncated: false };
+  /* null = not yet checked; see callLogs. */
+  let callLogFilterHonoured = null;
 
   /* ── past the result window, by updatedAt ──────────────────────────────
      Offset paging cannot reach beyond the endpoint's result window: ask for
@@ -685,8 +687,30 @@ export function createClient(key, {
        puts the call's note on the log). The contact's `remarks` field, which
        was the only thing the "Said before" strip read, is a different place,
        and mostly empty. */
-    callLogs: (contactId) => call("GET",
-      `/v1/call-logs/${encodeURIComponent(contactId)}?relatedToType=contact`),
+    /* NOT THE DOCUMENTED PATH. GET /v1/call-logs/<contact_id>?relatedToType=
+       contact answers 404 {"errorCode":"02002001"} on Ayush's account — it
+       reads the id as a CALL LOG's. probe-history found the query form
+       answering (2026-10-10). Two guards, because a strip showing someone
+       else's call is worse than an empty one:
+         - once per client, the same question about an id nobody has. The
+           same logs back means the filter is being ignored, and from then on
+           this answers nothing rather than the account's latest calls;
+         - a log that says which contact it is about must name this one. */
+    callLogs: async (contactId) => {
+      const id = String(contactId);
+      const q = (who) => call("GET",
+        `/v1/call-logs?relatedToType=contact&relatedToId=${encodeURIComponent(who)}&page=0&size=20`);
+      const got = await q(id);
+      const logs = Array.isArray(got) ? got : got?.content || got?.data || got?.records || [];
+      if (logs.length && callLogFilterHonoured === null) {
+        const ctl = await q("1").catch(() => null);
+        const other = Array.isArray(ctl) ? ctl : ctl?.content || ctl?.data || ctl?.records || [];
+        callLogFilterHonoured = !(other.length && other.map((x) => x.id).join() === logs.map((x) => x.id).join());
+        if (!callLogFilterHonoured) log("! call logs: Kylas ignores relatedToId — earlier call notes are switched off");
+      }
+      if (callLogFilterHonoured === false) return { content: [] };
+      return { content: logs.filter((l) => logIsAbout(l, id)) };
+    },
   };
 }
 
@@ -716,11 +740,24 @@ export function kylasRemarksOf(c) {
   return stripHtml(text);
 }
 
+/* Whether a call log says it is about this contact — or says nothing either
+   way, which has to be accepted or nothing ever shows. Kylas has sent the
+   relation as an object, a list of them, and a bare id in different places. */
+export function logIsAbout(l, contactId) {
+  const rel = l?.relatedTo ?? l?.related ?? l?.associatedContacts ?? null;
+  if (rel == null) return true;
+  const list = Array.isArray(rel) ? rel : [rel];
+  const ids = list.map((r) => String(r && typeof r === "object" ? (r.id ?? r.entityId ?? "") : r)).filter(Boolean);
+  return !ids.length || ids.includes(String(contactId));
+}
+
 export function callNotes(body) {
   const logs = Array.isArray(body) ? body : body?.content || body?.data || body?.records || [];
   const out = [];
   for (const l of logs) {
-    const notes = Array.isArray(l?.notes) ? l.notes : l?.notes ? [l.notes] : [];
+    /* `notes` is what this console writes; a list read may name it otherwise. */
+    const raw = l?.notes ?? l?.note ?? l?.callNotes ?? null;
+    const notes = Array.isArray(raw) ? raw : raw ? [raw] : [];
     const text = notes.map((n) => stripHtml(typeof n === "string" ? n : n?.description ?? n?.text ?? ""))
       .filter(Boolean).join("\n");
     if (!text) continue;
