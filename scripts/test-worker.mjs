@@ -1233,6 +1233,16 @@ console.log('\n11. a copy that is short of the account is not the account');
         (h2.body.items || []).some((x) => /two venue options/.test(x.text)),
         (h2.body.items || []).map((x) => x.text.slice(0, 30)).join(' | '));
   check('...newest first', /two venue options/.test(h2.body.items?.[0]?.text || ''), h2.body.items?.[0]?.text);
+  /* AS AYUSH'S ACCOUNT ANSWERED, 2026-10-10: the documented call-log read
+     404s. The Remarks field must still come through — it used to be thrown
+     away with the refused call logs. */
+  await fetch('http://127.0.0.1:9900/__calllogs404?on=1', { headers: { 'api-key': 'x' } });
+  const h404 = await get(await coldWorker(1704), '/history?id=112936');
+  await fetch('http://127.0.0.1:9900/__calllogs404?on=0', { headers: { 'api-key': 'x' } });
+  check('call logs refused (404): still answers, with no call notes', h404.status === 200 && (h404.body.items || []).length === 0,
+        `status ${h404.status} items ${(h404.body.items || []).length}`);
+  check('...and the Remarks field still comes through', /budget sits with the CFO/.test(h404.body.remarks || ''),
+        JSON.stringify(h404.body.remarks || null).slice(0, 80));
   /* A Kylas failure is an empty history, never a failed request. */
   const bad = await get(await coldWorker(1703), '/history?id=999999999');
   check('a contact with no calls is an empty history, not an error', bad.status === 200 && Array.isArray(bad.body.items),

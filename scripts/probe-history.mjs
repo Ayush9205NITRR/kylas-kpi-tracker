@@ -32,9 +32,11 @@ if (!ID) { console.error("Pass --contact <Kylas contact id> — one whose previo
 const kylas = createClient(KEY, { log: () => {}, ...(process.env.KYLAS_BASE ? { base: BASE } : {}) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* A 429 is a wait, not an answer — it has misled this repo four times. */
-async function raw(path, t = 0) {
-  const r = await fetch(`${BASE}${path}`, { headers: { "api-key": KEY } });
-  if (r.status === 429 && t < 6) { await sleep(500 * 2 ** t); return raw(path, t + 1); }
+async function raw(path, t = 0, body = null) {
+  const r = await fetch(`${BASE}${path}`, body
+    ? { method: "POST", headers: { "api-key": KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    : { headers: { "api-key": KEY } });
+  if (r.status === 429 && t < 6) { await sleep(500 * 2 ** t); return raw(path, t + 1, body); }
   const text = await r.text();
   let json = null; try { json = JSON.parse(text); } catch { /* not JSON */ }
   return { status: r.status, json, text };
@@ -77,9 +79,45 @@ if (logs) {
     console.log(`  (reply keys: ${Object.keys(logs).join(", ") || "none"})`);
 }
 
+/* 2b · OTHER WAYS TO ASK FOR A CONTACT'S CALL LOGS. The documented GET
+   answered 404 02002001 on Ayush's account (2026-10-10) — which reads like
+   "no call log with that id": the path may be taken as a CALL LOG id, not a
+   contact's. So the likely alternatives are asked too, and every refusal's
+   BODY is printed, because Kylas says which parameter it wanted there. */
+console.log(`\n2b · OTHER WAYS TO READ THIS CONTACT'S CALL LOGS`);
+const rule = (field, type = "long") => ({ fields: ["id", "outcome", "notes", "startTime", "createdAt", "owner", "relatedTo"],
+  jsonRule: { condition: "AND", valid: true, rules: [{ id: field, field, type, input: "text", operator: "equal", value: String(ID) }] } });
+const callTries = [
+  ["GET", `/v1/call-logs/${ID}?relatedToType=contact`],
+  ["GET", `/v1/call-logs?relatedToType=contact&relatedToId=${ID}`],
+  ["GET", `/v1/call-logs?entityType=contact&entityId=${ID}`],
+  ["GET", `/v1/call-logs/contact/${ID}`],
+  ["GET", `/v1/contacts/${ID}/call-logs`],
+  ["POST", `/v1/call-logs/search?page=0&size=10`, rule("relatedTo")],
+  ["POST", `/v1/call-logs/search?page=0&size=10`, rule("associatedContacts")],
+  ["POST", `/v1/search/call-log?page=0&size=10`, rule("relatedTo")],
+];
+let callFound = "";
+for (const [m, p, b] of callTries) {
+  const r = await raw(p, 0, m === "POST" ? b : null);
+  const list = Array.isArray(r.json) ? r.json : r.json?.content || r.json?.data || r.json?.records || null;
+  const n = Array.isArray(list) ? list.length : null;
+  const why = r.status >= 400 ? `   ${clip(r.text, 160)}` : "";
+  console.log(`  ${String(r.status).padEnd(4)} ${m.padEnd(4)} ${p}${b ? "  {" + b.jsonRule.rules[0].field + "}" : ""}${n != null ? `   -> ${n} log(s)` : ""}${why}`);
+  if (r.status === 200 && n) {
+    callFound ||= `${m} ${p}`;
+    const notes = callNotes(r.json);
+    for (const x of notes.slice(0, 2)) console.log(`         "${clip(x.text)}"`);
+    if (!notes.length) console.log(`         first, raw: ${clip(JSON.stringify(list[0]), 300)}`);
+  }
+}
+
 /* 3 · the Notes tab — undocumented, so ask the way it is most likely asked */
 console.log(`\n3 · NOTES TAB — not read by the console yet; trying the likely ways to read it`);
 const tries = [
+  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT&page=0&size=10`,
+  `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT&page=0&size=10&sort=createdAt,desc`,
+  `/v1/notes/relation?entityId=${ID}&entityType=CONTACT&page=0&size=10`,
   `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=CONTACT`,
   `/v1/notes/relation?targetEntityId=${ID}&targetEntityType=contact`,
   `/v1/notes?targetEntityId=${ID}&targetEntityType=CONTACT`,
@@ -91,7 +129,8 @@ for (const p of tries) {
   const r = await raw(p);
   const list = Array.isArray(r.json) ? r.json : r.json?.content || r.json?.data || r.json?.records || null;
   const n = Array.isArray(list) ? list.length : null;
-  console.log(`  ${String(r.status).padEnd(4)} ${p}${n != null ? `   -> ${n} note(s)` : ""}`);
+  console.log(`  ${String(r.status).padEnd(4)} ${p}${n != null ? `   -> ${n} note(s)` : ""}${
+    r.status >= 400 ? `\n         ${clip(r.text, 200)}` : ""}`);
   if (r.status === 200 && n) {
     found ||= p;
     for (const x of list.slice(0, 3))
@@ -99,6 +138,7 @@ for (const p of tries) {
   }
 }
 console.log(`\n${"=".repeat(72)}`);
+if (callFound) console.log(`Call logs answer at:\n  ${callFound}\n`);
 console.log(found
   ? `The Notes tab answers at:\n  ${found}\nSend this output back — that is the shape to add to the strip.`
   : `No Notes read answered with notes. If the remarks you see in Kylas are in 1 or 2

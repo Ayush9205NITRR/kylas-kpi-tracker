@@ -2562,13 +2562,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         /* The contact too, for its Remarks custom field (cfRemarks): the card
            is usually served from the Airtable copy, which has never held it.
            One more Kylas read per contact opened, cached with the notes. */
+        /* EACH ON ITS OWN. On Ayush's account the call-log read answers 404
+           (02002001, 2026-10-10) — and joined to it, that refusal threw away
+           the Remarks field read beside it, so neither reached the strip. A
+           404 there is "no call logs this way", not a failed request. */
+        let logErr = "";
         const [logs, contact] = await Promise.all([
-          kylas.callLogs(id), kylas.contact(id).catch(() => null)]);
+          kylas.callLogs(id).catch((e) => { logErr = e.message; return null; }),
+          kylas.contact(id).catch(() => null)]);
+        if (logErr && !/-> 404/.test(logErr)) log(`! history ${id}: call logs — ${logErr.slice(0, 160)}`);
         const items = callNotes(logs).slice(0, 10);
         const remarks = kylasRemarksOf(contact);
         historyCache.set(id, { at: Date.now(), items, remarks });
         if (historyCache.size > 2000) historyCache.delete(historyCache.keys().next().value);
-        return { items, remarks };
+        return { items, remarks, ...(logErr ? { callLogError: logErr.slice(0, 200) } : {}) };
       } catch (e) {
         log(`! history ${id}: ${e.message.slice(0, 160)}`);
         return { items: [], error: e.message.slice(0, 200) };

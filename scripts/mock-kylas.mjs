@@ -39,6 +39,7 @@ const NO_CO_NAMES = process.env.MOCK_NO_COMPANY_NAMES === "1";
 /* Mutable, because POST /__hang toggles it without a restart — a restart would
    throw away the contacts the test needs the recovery path to find. */
 let hangCreate = process.env.MOCK_HANG_CREATE === "1";
+let callLogs404 = false;
 /* POST /__refuse?name=<substring> makes Kylas turn down a create by name. The
    phone rules below cannot express this: the console normalises every number
    before it gets here, so nothing that reaches Kylas fails them, and the branch
@@ -515,6 +516,9 @@ createServer(async (req, res) => {
      endpoints use; the reader accepts a bare array and `data` too. */
   {
     const m = /^\/v1\/call-logs\/(\d+)$/.exec(p);
+    /* /__calllogs404?on=1 answers as Ayush's live account did on 2026-10-10:
+       404 {"errorCode":"02002001"} for the documented read. */
+    if (m && req.method === "GET" && callLogs404) return json(res, 404, { errorCode: "02002001" });
     if (m && req.method === "GET") {
       const rows = CALL_LOGS.filter((l) => String(l.relatedTo?.id) === m[1])
         .sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));
@@ -532,6 +536,7 @@ createServer(async (req, res) => {
   /* Test hook: what has actually been written, so a test can assert on it. */
   if (p === "/__writes") return json(res, 200, { writes: WRITES, callLogs: CALL_LOGS });
   if (p === "/__refuse") { refuseName = url.searchParams.get("name") || ""; return json(res, 200, { refuseName }); }
+  if (p === "/__calllogs404") { callLogs404 = url.searchParams.get("on") === "1"; return json(res, 200, { callLogs404 }); }
   if (p === "/__hang") { hangCreate = url.searchParams.get("on") === "1"; return json(res, 200, { hangCreate }); }
   if (p === "/__reset") { WRITES.length = 0; CALL_LOGS.length = 0; return json(res, 200, { ok: true }); }
   /* Set one custom field on a contact, so a test can arrange the state a save
