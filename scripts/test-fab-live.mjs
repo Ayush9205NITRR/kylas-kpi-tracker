@@ -46,7 +46,10 @@ const ok = (w, c, d='') => { if (!c) fails++; console.log(`  ${c?'PASS':'FAIL'} 
 
 const a = await fab();
 console.log('at rest:', JSON.stringify(a));
-ok('sits bottom-right by default', a.x > 1200 && a.y > 800 && !a.cls.includes('free'));
+/* The RIGHT edge, not the left: the label changes width (since 1.57 it says
+   why the console just closed), and a wider label moves the left edge while
+   the button is still in the corner. */
+ok('sits bottom-right by default', a.x + a.w > 1350 && a.y > 800 && !a.cls.includes('free'), JSON.stringify(a));
 ok('says it can be moved', /Drag to move/.test(a.title), a.title);
 
 /* ── a plain click still opens the console ── */
@@ -86,7 +89,7 @@ const e = await fab();
 ok('dropping it in the corner resets it', !e.cls.includes('free'), JSON.stringify(e));
 await page.reload(); await page.waitForTimeout(2500); await shut();
 const f = await fab();
-ok('...and it stays reset', !f.cls.includes('free') && f.x > 1200, JSON.stringify(f));
+ok('...and it stays reset', !f.cls.includes('free') && f.x + f.w > 1350, JSON.stringify(f));
 
 /* ── a narrow window cannot strand it ── */
 await page.mouse.move(f.x + f.w/2, f.y + f.h/2); await page.mouse.down();

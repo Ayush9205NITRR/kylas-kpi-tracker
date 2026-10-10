@@ -28,6 +28,9 @@
         box-shadow:0 4px 14px rgba(43,108,246,.32);
       }
       .fab:hover{filter:brightness(1.08)}
+      /* Saying why it just closed: same button, darker, so it reads as a
+         message and not as a second, different control. */
+      .fab.why{background:#1F2A37;box-shadow:0 4px 14px rgba(31,42,55,.32)}
       /* MOVED BY HAND. Anchored bottom-right until it is dragged, then it is a
          point and both anchors have to go — leaving the right offset set would
          fight the left offset being written, and the button would not move. */
@@ -287,7 +290,29 @@
     frame.contentWindow.postMessage({ source: "enout-host", type, ...payload }, "*");
   }
 
-  function setOpen(next, mode) {
+  /* WHY IT CLOSED, said on the launcher. Ayush, 2026-10-10: "once I save,
+     the console disappears, had to click it again". It closes four ways —
+     the Close button, Esc with no field focused, a click outside it, and
+     Alt+Shift+E / the toolbar icon — and none of them was reproducible from
+     here. So any close the person did not make with the Close button says
+     which one it was, for a few seconds, where they will be looking: the
+     button they are about to press to get it back. */
+  let closedNoteTimer = null;
+  function sayWhyClosed(why) {
+    clearTimeout(closedNoteTimer);
+    /* Closed on purpose: no note, and none left over from an earlier close. */
+    if (!why) { closedNoteTimer = null; fab.classList.remove("why"); return; }
+    fabLabel.textContent = `Closed — ${why}. Click to reopen`;
+    fab.classList.add("why");
+    closedNoteTimer = setTimeout(() => { fab.classList.remove("why"); closedNoteTimer = null; }, 6000);
+  }
+
+  function setOpen(next, mode, why = "") {
+    if (!next && open) sayWhyClosed(why);
+    /* Already open and only changing shape (Dock / Expand): the console is
+       already on the right record and may be showing the accounts view — a
+       handoff would retarget it and throw the person out of their search. */
+    const wasOpen = open;
     if (!next && open) {
       const rec = currentRecord();
       dismissedFor = rec ? `${rec.kind}:${rec.id}` : null;
@@ -335,7 +360,7 @@
         loaded = true;
         handoff();
       }, { once: true });
-    } else {
+    } else if (!wasOpen) {
       handoff();
     }
   }
@@ -447,7 +472,7 @@
     if (fabMoved) { fabMoved = false; return; }
     setOpen(true);
   });
-  scrim.addEventListener("click", () => setOpen(false));
+  scrim.addEventListener("click", () => setOpen(false, undefined, "a click outside it"));
 
   /* messages back from the console */
   window.addEventListener("message", (e) => {
@@ -455,7 +480,7 @@
     const m = e.data;
     if (!m || m.source !== "enout") return;
     if (m.type === "ready") { ready = true; clearTimeout(deadline); }
-    if (m.type === "close") setOpen(false);
+    if (m.type === "close") setOpen(false, undefined, m.why === "button" ? "" : (m.why || ""));
     if (m.type === "mode") setOpen(true, m.mode);
     if (m.type === "dial") dial(String(m.number || ""));
     /* The grab point arrives in the IFRAME's coordinates. The iframe fills
@@ -530,7 +555,7 @@
 
   /* toolbar button and Alt+Shift+E, relayed by the service worker */
   chrome.runtime.onMessage.addListener((m) => {
-    if (m && m.source === "enout-bg" && m.type === "toggle") setOpen(!open);
+    if (m && m.source === "enout-bg" && m.type === "toggle") setOpen(!open, undefined, "the toolbar icon or Alt+Shift+E");
   });
 
   /* Alt+Shift+E again while the host page has focus. The same chord inside the
@@ -538,7 +563,7 @@
   window.addEventListener("keydown", (e) => {
     if (e.altKey && e.shiftKey && e.code === "KeyE") {
       e.preventDefault();
-      setOpen(!open);
+      setOpen(!open, undefined, "Alt+Shift+E");
     }
   });
 
@@ -558,6 +583,7 @@
 
   /* keep the launcher honest about what it will do */
   setInterval(() => {
+    if (closedNoteTimer) return;          /* the "why it closed" note is showing */
     const rec = currentRecord();
     fabLabel.textContent =
       !rec ? "Call console" :

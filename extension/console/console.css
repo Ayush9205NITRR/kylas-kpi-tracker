@@ -347,6 +347,7 @@ select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%
   background-size:6px 6px,6px 6px;background-repeat:no-repeat;padding-right:40px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .g2>.f{min-width:0;margin-bottom:0}
+.g2>.f.wide{grid-column:1/-1}
 @media(max-width:640px){.g2{grid-template-columns:1fr}}
 @container (max-width:540px){.g2{grid-template-columns:1fr}}
 .fhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
@@ -363,12 +364,15 @@ select.mini:hover{border-color:var(--blue);color:var(--blue)}
   border-radius:6px;background:var(--blueSoft);color:var(--blue);display:grid;place-items:center;
   font-size:var(--t-meta);font-weight:var(--w-strong);pointer-events:none}
 .withIcon .in{padding-left:46px}
-.entry{display:flex;gap:10px;align-items:center}
+/* The NUMBER is what the row is for, so it is the last thing to give up
+   width: type and country code shrink first, and below that the row wraps
+   rather than squeezing the number to nothing (it was 25px wide). */
+.entry{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .entry+.entry{margin-top:10px}
 .entry input[type=radio]{accent-color:var(--blue);flex:none;width:18px;height:18px;margin:0}
-.entry .cc{flex:0 0 80px;min-width:0;text-align:center;padding-inline:6px}
-.entry .ty2{flex:0 0 120px;min-width:0}
-.entry .vl2{flex:1 1 60px;min-width:0}
+.entry .cc{flex:0 1 64px;min-width:52px;text-align:center;padding-inline:6px}
+.entry .ty2{flex:0 1 120px;min-width:84px}
+.entry .vl2{flex:1 1 130px;min-width:130px}
 .mrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .mrow .dt{flex:1 1 136px;min-width:136px;width:auto}
 .del{flex:none;background:transparent;border:1px solid transparent;border-radius:7px;

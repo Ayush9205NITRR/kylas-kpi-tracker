@@ -143,17 +143,26 @@ disabled while the list is non-empty.
 | Stage | Also required |
 |---|---|
 | any | Name, one phone number, Owner |
-| Could Not Connect | a day to call back |
+| the 14 stages in `nextCallStages` (docs/stages.json) | a next call date — asked for as **meeting date** on a meeting stage |
 | Qualifying / Discovery / SQL | one event, with budget, timeline or pax on it |
 | Discovery Call Done / SQL | who handles their events |
-| **SQL — Meeting Booked** | **meeting date + mode of meeting** |
+| a meeting stage | mode of meeting |
+
+**The next call date, since 2026-10-10 (Ayush):** required on Active Requirement Call No-Show and
+Booked, Discovery Call Done, Discovery Call No-Show, Discovery Call Booked, Follow-up 1/2/3,
+Followup - CNC, MQL, Activation, Connect Later, CNC 2 and CNC 1 — the stages where somebody has to
+call again. Not on SQL, Active Requirement Call Done, CNC 3, or any exit or dead end. One list in
+`stages.json`, one rule in `missing()`; it replaced three rules that between them asked for a date
+on SQL and CNC 3 and not on Connect Later.
 
 `MQL → Right POC` is derived from the same signal and shown as a live badge beside the name:
 any of budget \| timeline \| pax filled on any row, past or current.
 
 **One entry vs many.** Email and phone render as a bare input when there is one of them (type
 selector moves up into the label row). A second entry switches both to full rows with a primary
-radio and delete. This is what makes the two-column grid fit.
+radio and delete. This is what makes the two-column grid fit — and why a field with two or more
+entries spans both columns: the full row is ~400px and a column is ~230, so it used to squeeze the
+number to nothing and slide the dial button under LinkedIn (2026-10-10).
 
 **The right pane is written as a conversation, not a schema.** This is deliberate and is the part
 most likely to get "cleaned up" back into a normal form during a rewrite. Do not.

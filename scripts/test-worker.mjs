@@ -344,13 +344,16 @@ console.log('\n7. the scheduled jobs');
 const CRONS = { CRON_SYNC: '30 20 * * *', CRON_SNAPSHOT: '45 18 * * *', CRON_ROLLUP: '0 21 * * 0' };
 const lines = [];
 const origLog = console.log;
-const fire = async (cron, env = { ...ENV, ...CRONS }) => {
+/* `on`: a worker other than the shared one. The handlers are built once per
+   isolate from the env they first saw, so a run that needs different settings
+   needs a cold one (coldWorker). */
+const fire = async (cron, env = { ...ENV, ...CRONS }, on = worker) => {
   lines.length = 0;
   const waits = [];
   console.log = (...a) => lines.push(a.join(' '));
   try {
-    await worker.scheduled({ cron, scheduledTime: Date.now() }, withStore(env),
-                            { waitUntil: (p) => waits.push(p) });
+    await on.scheduled({ cron, scheduledTime: Date.now() }, withStore(env),
+                       { waitUntil: (p) => waits.push(p) });
     await Promise.allSettled(waits);
   } finally { console.log = origLog; }
   return lines.join('\n');
@@ -1087,6 +1090,63 @@ console.log('\n11. a copy that is short of the account is not the account');
      company field. */
   check('every row carries acctN', list.length > 0 && list.every((c) => c.acctN != null),
         `${list.filter((c) => c.acctN == null).length} without`);
+}
+
+/* ── 15b · THE DAILY FULL CRAWL WAITS FOR THE EVENING ──────────────────
+   Ayush, 2026-10-10: "API rate limits are getting hit... (8 users)". The full
+   rebuild reads every Kylas contact back to back, and "a day since the last"
+   put it in the calling day. It is held to the quiet hours; a stale index in
+   the day gets a delta instead. Both windows are set relative to NOW, so the
+   test means the same thing whatever hour it runs at. */
+{
+  console.log('\n15b. the full contact crawl keeps out of calling hours');
+  const h = Math.floor((((Date.now() / 60000 + 330) % 1440) + 1440) % 1440 / 60);
+  const runWith = async (from, to) => {
+    const env = { ...MAINT_ENV, CONTACT_STAGES_FULL_MS: '1', CONTACT_STAGES_DELTA_MS: '0',
+                  CONTACT_STAGES_QUIET_FROM: String(from), CONTACT_STAGES_QUIET_TO: String(to) };
+    const w = await coldWorker(1520 + Math.random());
+    for (let i = 0; i < 6; i++) {
+      const out = await fire(MAINT, env, w);
+      const m = out.match(/contact stages: (full|delta)/);
+      if (m) return m[1];
+    }
+    return 'never ran';
+  };
+  const day = await runWith((h + 2) % 24, (h + 3) % 24);
+  check('a day-old index in calling hours gets a delta, not a full crawl', day === 'delta', day);
+  const night = await runWith(h, (h + 1) % 24);
+  check('...and the full crawl runs once it is quiet', night === 'full', night);
+}
+
+/* ── 15c · "FRESH" CANNOT ASK FOR A CRAWL A MINUTE ─────────────────────
+   Consoles before 1.57 sent ?fresh=1 on every save made with the accounts
+   view open, and each one queued a crawl of every company in Kylas for the
+   next minute's run. With eight people saving, that was a crawl a minute
+   while they called. The server now redoes it at most every ten minutes. */
+{
+  console.log('\n15c. a burst of "fresh" asks does not crawl Kylas every minute');
+  const crawled = (out) => /companies crawl:/.test(out);
+  /* LIVE, the list is served from Kylas — the Airtable copy holds 298 of
+     17,925 companies, too short to be the account — and that is what keeps
+     the crawl going. Here the copy serves, so the store is told what live
+     looks like: somebody read the list from Kylas a moment ago, and asked
+     for it fresh — which on that path is what ?fresh=1 records. */
+  const asLive = async () => {
+    await store.put('companies-read-at', String(Date.now()), { ttlSeconds: 3600 });
+    await store.put('companies-want-fresh', '1', { ttlSeconds: 3600 });
+  };
+  await asLive();
+  let first = '';
+  const w0 = await coldWorker(1560);
+  for (let i = 0; i < 4 && !crawled(first); i++) first = await fire(MAINT, { ...MAINT_ENV, COMPANY_FRESH_FLOOR_MS: '0' }, w0);
+  check('Refresh still crawls when the list is old enough', crawled(first),
+        first.split('\n').filter((l) => /compan/.test(l)).slice(0, 2).join(' | '));
+  let again = 0;
+  for (let i = 0; i < 3; i++) {
+    await asLive();
+    if (crawled(await fire(MAINT, MAINT_ENV, await coldWorker(1570 + i)))) again++;
+  }
+  check('...but three more asks inside ten minutes crawl nothing', again === 0, `${again} crawl(s)`);
 }
 
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────

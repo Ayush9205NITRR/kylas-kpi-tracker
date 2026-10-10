@@ -16,6 +16,8 @@
 
   /* Kept so the clipboard fallback knows which number failed. */
   let lastDialled = "";
+  /* The last record the host page pointed at, "company:903" — see below. */
+  let lastHanded = "";
   window.requestDial = (number) => {
     lastDialled = number;
     if (!framed) { copyNumber(number); return; }   /* open in a tab, no host page */
@@ -37,7 +39,19 @@
       return;
     }
 
-    if (m.type === "dashboard" || m.type === "companies") { showView(m.type); return; }
+    if (m.type === "dashboard" || m.type === "companies") { lastHanded = m.type; showView(m.type); return; }
+
+    /* THE SAME RECORD AGAIN IS NOT A NAVIGATION. The host page says which
+       record it is on every time the console is opened, not only when the
+       page changes — so closing the console from the accounts view and opening
+       it again on the same Kylas page dropped the view, the search and the
+       scroll, and put the person back on the call form. A view stays open
+       until Kylas actually moves to another record. */
+    const key = `${m.type}:${m.kylasId || ""}`;
+    const same = key === lastHanded;
+    if (m.type === "company" || m.type === "contact") lastHanded = key;
+    if (same && view && (m.type === "company" || m.type === "contact")) return;
+
     if (m.type === "company" && m.kylasId) {
       showView(null);
       openCompany(String(m.kylasId), m.label);
@@ -217,7 +231,13 @@
 
     persist();
     setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
-    render(); resetScroll();
+    /* Back to the top only if the card now shows a different record. The
+       roster was painted from what was held before the fetch, and somebody
+       reading it — or already typing — when Kylas answered was put back at the
+       top of both panes. */
+    const now = DATA[cur];
+    const same = now === before || (!!before?.kid && String(now?.kid) === String(before.kid));
+    render(); if (!same) resetScroll();
   }
 
   /* ── loading one contact ─────────────────── */
@@ -310,7 +330,9 @@
 
     persist();
     setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
-    renderFilters(); render(); resetScroll();
+    /* Already on screen from what was held: Kylas answering is a refresh, not
+       a new record, and must not move the panes. */
+    renderFilters(); render(); if (!had) resetScroll();
   }
 
   /* ── proxy link indicator ────────────────── */
@@ -410,7 +432,7 @@
   })();
 
   /* ── console → host page ─────────────────── */
-  document.getElementById("closeBtn").onclick = () => post("close");
+  document.getElementById("closeBtn").onclick = () => post("close", { why: "button" });
 
   /* `pane`, NOT `mode`. console.js has a script-scope `mode` — "company" or
      "session", which queue the associate is looking at — and a `let mode` in
@@ -470,7 +492,7 @@
     if (e.key !== "Escape" || !framed) return;
     if (document.querySelector(".scrim")) return;
     if (document.activeElement && document.activeElement.matches("input,textarea,select")) return;
-    post("close");
+    post("close", { why: "Esc was pressed" });
   }, true);
 
   /* ── data sheet ──────────────────────────── */

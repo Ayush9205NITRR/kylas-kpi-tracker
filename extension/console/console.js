@@ -628,6 +628,12 @@ function visible(){
   return mode==="session"?rows.sort(byRecentCall):rows;
 }
 function renderQueue(){
+  /* Repainted on its own whenever a save job moves, every few seconds while
+     one is in flight — the list must stay where it was scrolled to. */
+  const Q=document.querySelector(".queue"),qTop=Q?Q.scrollTop:0;
+  try{paintQueue();}finally{if(Q)Q.scrollTop=qTop;}
+}
+function paintQueue(){
   renderMode();renderScope();renderFocusPane();renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
@@ -941,8 +947,34 @@ function renderScope(){
   w.appendChild(x);
 }
 
+/* A REPAINT KEEPS THE PLACE; MOVING TO ANOTHER RECORD RESETS IT.
+   render() rebuilds both panes from scratch, and it runs for reasons the
+   associate did not cause — a company's contacts arriving from Kylas, a save
+   job finishing, the notes of earlier calls landing. Each one put the panes
+   back at the top and took the caret out of the field being typed in (Ayush,
+   2026-10-10: "scroll baar baar vapas chale jaate hai"). So the scroll and the
+   focused field come back after every paint, and the places that really do
+   change record call resetScroll() after render(), as they always did. */
+const SCROLLERS=["scrollL","scrollR","scrollX"];
+function placeOf(){
+  const q=document.querySelector(".queue");
+  const act=document.activeElement,id=act&&act.id&&act!==document.body?act.id:"";
+  let sel=null;try{if(id)sel=[act.selectionStart,act.selectionEnd];}catch{/* not a text box */}
+  return{tops:SCROLLERS.map(i=>document.getElementById(i)?.scrollTop||0),q:q?q.scrollTop:0,id,sel};
+}
+function putPlace(p){
+  SCROLLERS.forEach((i,n)=>{const e=document.getElementById(i);if(e)e.scrollTop=p.tops[n];});
+  const q=document.querySelector(".queue");if(q)q.scrollTop=p.q;
+  if(!p.id)return;
+  const back=document.getElementById(p.id);
+  if(!back||document.activeElement===back)return;
+  back.focus({preventScroll:true});
+  try{if(p.sel&&p.sel[0]!=null)back.setSelectionRange(p.sel[0],p.sel[1]);}catch{/* not a text box */}
+}
 function render(){
+  const p=placeOf();
   renderCallbar();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
+  putPlace(p);
 }
 /* Research has its own pane to the right of the events when the screen is
    wide enough (or as the third tab when it is narrow); in between it sits at
@@ -976,7 +1008,12 @@ function mini(list,val,on){
 function contactField(a,kind){
   const isPh=kind==="phones", list=a[kind];
   const TYPES=isPh?PHONE_TYPES:EMAIL_TYPES;
-  const f=el("div","f");
+  /* TWO OR MORE TAKE THE CARD'S FULL WIDTH. A multi-entry row is radio, type,
+     code, number, dial and remove — about 400px — and a column of the two-up
+     grid is about 230. The row ran out of its column: the number box shrank to
+     nothing and the dial button slid under the LinkedIn field beside it
+     (Ayush's screenshot, 2026-10-10). One entry still fits in a column. */
+  const f=el("div",list.length>1?"f wide":"f");
   const head=el("div","fhead");
   head.innerHTML=`<label>${isPh?'Phone number <span class="req">*</span>':"Email"}</label>`;
   f.appendChild(head);
@@ -1752,7 +1789,16 @@ function missing(){
   /* a.stage is a CODE (DISCOVERY_CALL_BOOKED), not a label. Three rules here
      used to match labels against it with regexes and a string equality, so
      none of them ever fired and nothing was actually being enforced. */
-  need(CNC_LADDER.includes(a.stage)&&!a.nextCallDate,"A day to call back","f-next");
+  /* THE NEXT CALL DATE, ONE RULE. Ayush, 2026-10-10: required on the stages
+     where the account is still moving — NEXT_CALL_STAGES, from stages.json —
+     and on nothing else. It used to be three rules (the CNC ladder, the meeting
+     stages, and everything from Activation up) which between them demanded a
+     date on SQL and Active Requirement Call Done, where nobody calls again,
+     and on CNC 3, where the ladder ends; and did not ask for one on Connect
+     Later, which is a promise to call. On a meeting stage the date IS the
+     meeting, so it is asked for by that name. */
+  need(NEXT_CALL_STAGES.includes(a.stage)&&!a.nextCallDate,
+       MEETING_STAGES.includes(a.stage)?"Meeting date":"A day to call back","f-next");
 
   /* Claiming a booked meeting or better means claiming you learned something. */
   if(rung(a)>=MILESTONE.sqlMeetingBooked.floor){
@@ -1770,26 +1816,11 @@ function missing(){
     need(!a.modeOfMeeting,"Mode of meeting","f-mm");
   }
 
-  if(MEETING_STAGES.includes(a.stage)){
-    need(!a.nextCallDate,"Meeting date","f-next");
-    need(!a.modeOfMeeting,"Mode of meeting","f-mm");
-  }
+  if(MEETING_STAGES.includes(a.stage))need(!a.modeOfMeeting,"Mode of meeting","f-mm");
 
-  /* ONCE THE ACCOUNT IS LIVE, THE FOLLOW-UP IS NOT OPTIONAL.
-     Ayush, 2026-09-19: "whenever someone selects a stage at or above
-     Activation, Next Call Date must be filled... otherwise we cannot properly
-     fix the next follow-up." The offsite timeline used to be required here
-     too; since 2026-09-24 it is not on the card at all — it is derived from
-     the event rows and Kylas' company field, so there is nothing to type.
-
-     EXIT STAGES ARE EXCLUDED even though they sit above the floor. Closing
-     Loops - Low Value is rung 21 and Not Interested is a dead end; demanding a
-     call-back date to record that somebody said no would make the gate
-     something to be worked around, and a gate people work around stops
-     collecting anything. */
-  if (rung(a) >= MILESTONE.engaged.floor && !EXIT_STAGES.includes(a.stage)) {
-    need(!a.nextCallDate, "A day to call back", "f-next");
-  }
+  /* "Once the account is live the follow-up is not optional" (2026-09-19) is
+     kept by NEXT_CALL_STAGES above: Activation and everything that still moves
+     from there is on it. */
   return m;
 }
 /* ADVICE, not a gate. Things worth fixing that Kylas would accept anyway, so
@@ -1956,6 +1987,13 @@ document.addEventListener("keydown",e=>{
     if(typing){e.target.blur();return;}
   }
   if(typing&&!(e.key==="Enter"&&(e.metaKey||e.ctrlKey)))return;
+  /* NOT WHILE A VIEW COVERS THE CARD. The accounts view and the dashboard sit
+     over the call form, and every key below acts on the record underneath it:
+     Enter SAVED a contact nobody was looking at, 1-4 set its stage, C dialled
+     it. A keystroke meant for the search box that landed a moment after a
+     repaint took its focus did exactly that. */
+  const vp=document.getElementById("viewport");
+  if(vp&&!vp.hidden)return;
   if(e.key==="Enter"){e.preventDefault();saveNext();return;}
   /* EVERY SHORTCUT BELOW IS A BARE KEY. Cmd, Ctrl and Alt belong to the
      browser, and outside a field this handler was reading them as its own:

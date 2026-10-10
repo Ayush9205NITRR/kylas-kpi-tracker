@@ -203,6 +203,23 @@
     "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
     "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS"
   ],
+  "nextCallNote": "Ayush, 2026-10-10: the stages on which a next call date is REQUIRED to save — the ones where the account is still moving and somebody has to call again. Every other stage saves without one: SQL and Active Requirement Call Done (handed on), CNC 3 (the ladder ends), the exits and the dead ends. On a meeting stage the same field is asked for as the meeting date.",
+  "nextCallStages": [
+    "ACTIVE_REQUIREMENT_CALL_NO_SHOW",
+    "ACTIVE_REQUIREMENT_CALL_BOOKED",
+    "DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS",
+    "GHOSTED",
+    "DISCOVERY_CALL_BOOKED",
+    "FOLLOW_UP_1",
+    "FOLLOW_UP_2",
+    "FOLLOW_UP_3",
+    "FOLLOWUP_CNC",
+    "MQL_MARKETING_QUALIFIED_LEAD",
+    "ACTIVATION",
+    "CONNECT_LATER",
+    "CNC_COULD_NOT_CONNECT_2",
+    "CNC_COULD_NOT_CONNECT"
+  ],
   "untouched": [
     "YET_TO_BE_MINED"
   ],

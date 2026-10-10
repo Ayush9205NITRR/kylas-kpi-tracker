@@ -164,6 +164,32 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A save made with the accounts view open asked Kylas for every company.**
+`savedLanded()` re-read the list with `force`, which sends `?fresh=1`, which
+sets `companies-want-fresh`, which makes the next minute's `maintain()` crawl
+all ~17,925 companies — and while the Airtable copy is short (298, 2026-10-09)
+the list is served from Kylas, so the crawl stays switched on all day. Eight
+people saving meant a full crawl roughly every minute, sharing Kylas' rate
+limit with their own saves and opens: Ayush's "rate limits are getting hit,
+server crashes" (2026-10-10). Fixed in 1.57 at both ends: the console never
+sends fresh from a save, and the server will not honour fresh more often than
+`COMPANY_FRESH_FLOOR_MS` (10 min) — the floor is what protects against
+consoles not yet updated. `test-worker` §15c fails without it (3 crawls).
+
+**The same view had a loop with no save at all.** Every paint called
+`ensureCompanies`, whose callback paints. With a stale list held and the
+fetch failing (a 429), that was paint → fetch → fail → paint as fast as the
+server could refuse. A failed fetch now waits 30s, doubling to 5 min.
+
+**`redraw()` is async; focusing after it focused the old element.** The search
+box's debounce did `redraw(); box.focus()`, and the rebuild happened after a
+few awaits — so the caret left the search after every pause in typing, and the
+next keys went to the console's shortcuts: Enter SAVED the hidden record, 1–4
+set its stage, C dialled it. `keepPlace()` awaits the paint and restores focus,
+caret and scroll; the shortcuts are ignored while a view is open; the full
+daily contact crawl keeps to 20:00–08:00. `test-console-ux-live.mjs` drives
+all of it in Chrome.
+
 **A stale dev stack did not fail the tests, it BECAME their fixture.** The
 mocks are spawned with `stdio:'ignore'`, so a mock that died on EADDRINUSE
 said nothing — and every request then went to the mock already running on that

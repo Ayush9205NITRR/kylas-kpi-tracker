@@ -22,7 +22,7 @@ for (const key of ["code", "id", "label"]) {
   const dupe = seen.find((v, i) => seen.indexOf(v) !== i);
   if (dupe !== undefined) throw new Error(`duplicate ${key}: ${dupe}`);
 }
-for (const list of ["cncLadder", "exitStages", "meetingStages", "untouched"])
+for (const list of ["cncLadder", "exitStages", "meetingStages", "nextCallStages", "untouched"])
   for (const code of src[list])
     if (!S.some((s) => s.code === code)) throw new Error(`${list} names an unknown stage: ${code}`);
 
@@ -192,6 +192,8 @@ ${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${q(s.label)},`).join("\n")
 const CNC_LADDER = ${q(src.cncLadder)};
 const EXIT_STAGES = ${q(src.exitStages)};
 const MEETING_STAGES = ${q(src.meetingStages)};
+/* The stages a save needs a next call date on. See nextCallNote. */
+const NEXT_CALL_STAGES = ${q(src.nextCallStages)};
 const UNTOUCHED = ${q(src.untouched)};
 
 /* Pipeline families: how the Accounts view groups the stage tiles. Ordered as
@@ -262,6 +264,7 @@ ${byRung.map((s) => `  [${s.rung}, ${q(String(s.rung).padStart(2, "0") + " · " 
 export const CNC_LADDER = ${q(src.cncLadder)};
 export const EXIT_STAGES = ${q(src.exitStages)};
 export const MEETING_STAGES = ${q(src.meetingStages)};
+export const NEXT_CALL_STAGES = ${q(src.nextCallStages)};
 export const UNTOUCHED = ${q(src.untouched)};
 
 export const STAGE_FAMILIES = ${q(FAMS.map((f) => ({ key: f.key, label: f.label, hint: f.hint, stages: f.stages })))};

@@ -422,6 +422,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   const companyCache = new Map();
   const COMPANY_TTL = Number(env.COMPANY_TTL_MS || 5 * 60 * 1000);
+  /* The shortest gap between two crawls that Refresh can force. */
+  const COMPANY_FRESH_FLOOR_MS = Number(env.COMPANY_FRESH_FLOOR_MS || 10 * 60 * 1000);
 
   /* THE WHOLE ACCOUNT'S COMPANIES FROM KYLAS, crawled once and shared. Dozens
      of rate-limited pages, so it is never refreshed behind a reply — the
@@ -475,6 +477,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const HISTORY_TTL = Number(env.HISTORY_TTL_MS || 5 * 60 * 1000);
   const CS_DELTA_MS = Number(env.CONTACT_STAGES_DELTA_MS || 10 * 60 * 1000);
   const CS_FULL_MS = Number(env.CONTACT_STAGES_FULL_MS || 24 * 3600 * 1000);
+  /* Local hours the daily full crawl may run in: 20:00 to 08:00. */
+  const CS_QUIET_FROM = Number(env.CONTACT_STAGES_QUIET_FROM ?? 20);
+  const CS_QUIET_TO = Number(env.CONTACT_STAGES_QUIET_TO ?? 8);
+  /* ...unless the quiet hours have been missed for this long (nobody's
+     maintenance ran overnight for three days): then it runs anyway. */
+  const CS_FULL_OVERDUE_MS = Number(env.CONTACT_STAGES_OVERDUE_MS || 3 * 24 * 3600 * 1000);
   /* HOW LONG AN INSTANCE MAY TRUST ITS OWN COPY, for READING. Cloudflare runs
      several isolates, each with its own memory; a copy held for the life of
      the isolate drifts from what the others have written. Thirty seconds
@@ -510,7 +518,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      missed. The overlap costs a re-read; applyContacts ignores what it has. */
   async function refreshContactStages({ full = false } = {}) {
     const had = await csLoad({ fresh: true });
-    const doFull = full || !had || Date.now() - Number(had.builtAt || 0) > CS_FULL_MS;
+    /* THE DAILY FULL CRAWL WAITS FOR THE EVENING. It reads every Kylas
+       contact — 37,000 and rising, a couple of hundred pages back to back —
+       and "a day since the last one" landed it in the middle of the calling
+       day, sharing Kylas' rate limit with eight people saving calls. A day-old
+       index is still right: the ten-minute deltas keep it current, and the
+       full pass only catches what a delta cannot (deletions, a merge). Outside
+       CS_QUIET_FROM..CS_QUIET_TO local it runs as before; with no index at all
+       it runs whenever, because nothing can be shown without one. */
+    const localHour = Math.floor((((Date.now() / 60000 + TZ_MIN) % 1440) + 1440) % 1440 / 60);
+    const quiet = CS_QUIET_FROM <= CS_QUIET_TO
+      ? localHour >= CS_QUIET_FROM && localHour < CS_QUIET_TO
+      : localHour >= CS_QUIET_FROM || localHour < CS_QUIET_TO;
+    const stale = had && Date.now() - Number(had.builtAt || 0) > CS_FULL_MS;
+    const overdue = had && Date.now() - Number(had.builtAt || 0) > CS_FULL_OVERDUE_MS;
+    const doFull = full || !had || (stale && (quiet || overdue));
     const since = doFull ? "" : new Date(Date.parse(had.watermark || 0) - 120_000).toISOString();
     const started = Date.now();
     /* LEAN: four values per contact, not the whole record. A full crawl holds
@@ -2630,7 +2652,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     }
     const age = await kylasCompanies.age();
     const readAt = Number((cache && (await cache.get("companies-read-at").catch(() => null))) || 0);
-    const wantFresh = !!(cache && (await cache.get("companies-want-fresh").catch(() => null)));
+    /* "Fresh" is somebody pressing Refresh — or, from consoles before 1.57,
+       every save made with the accounts view open, which asked for a whole
+       Kylas crawl a minute while eight people were calling. However many ask,
+       the crawl is not redone more often than this; the flag waits. */
+    const freshAsked = !!(cache && (await cache.get("companies-want-fresh").catch(() => null)));
+    const wantFresh = freshAsked && (age === null || age * 1000 >= COMPANY_FRESH_FLOOR_MS);
     /* Only while the list is being served FROM Kylas — once the base is
        synced the list comes from the D1 copy and this crawl would be waste. */
     const wantCrawl = Date.now() - readAt < 2 * 3600 * 1000 &&

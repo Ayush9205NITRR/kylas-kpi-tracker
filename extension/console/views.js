@@ -368,6 +368,15 @@
                   readSource: "", syncedAt: "" };
   const FRESH_MS = 5 * 60 * 1000;       /* older than this and we revalidate */
   let inflight = false;
+  /* A FAILED FETCH WAITS BEFORE THE NEXT ONE. Every paint of the accounts
+     view calls ensureCompanies, and its callback paints — so with a stale list
+     held and the server answering 429, paint -> fetch -> fail -> paint ran as
+     fast as the server could refuse, for as long as the view was open: the
+     search box lost the caret on every lap (Ayush, 2026-10-10: "search pane se
+     bahar nikal ja rahe hoon baar baar") and eight people doing it at once was
+     its own share of the load that tripped the limit. Doubles from 30s to 5
+     minutes; a success clears it; Refresh (force) still asks at once. */
+  let retryAt = 0, retryGap = 0;
   let restored = false;
 
   /* The proxy already works out why the join is empty — /kpi-debug compares
@@ -603,10 +612,37 @@
 
   /* Returns true while a fetch is outstanding. `force` is the Refresh button —
      the answer to "the cache is too old" is a control, not a shorter timer. */
+  /* A PAINT THE PERSON DID NOT ASK FOR KEEPS THEIR PLACE. The list arriving,
+     a background refresh, a save landing — each repaints the whole view, and a
+     repaint builds new elements: the search box being typed into is replaced
+     by a fresh one with no focus, and the scroller goes back to the top. So
+     whatever had the focus gets it back, caret and all, and the scroll is put
+     back where it was. Paints from the person's own clicks do their own
+     focusing and do not come through here. */
+  async function keepPlace(paint) {
+    const wrap = document.getElementById("vwrap");
+    const scroller = wrap && (wrap.closest(".viewport") || wrap.parentElement);
+    const top = scroller ? scroller.scrollTop : 0;
+    const side = [...(wrap?.querySelectorAll(".rtable") || [])].map((n) => n.scrollLeft);
+    const act = document.activeElement;
+    const id = act && act.id && wrap && wrap.contains(act) ? act.id : "";
+    let sel = null;
+    try { if (id) sel = [act.selectionStart, act.selectionEnd]; } catch { /* not a text box */ }
+    await paint();
+    if (scroller) scroller.scrollTop = top;
+    wrap?.querySelectorAll(".rtable").forEach((n, i) => { if (side[i] != null) n.scrollLeft = side[i]; });
+    if (!id) return;
+    const back = document.getElementById(id);
+    if (!back || document.activeElement === back) return;
+    back.focus({ preventScroll: true });
+    try { if (sel && sel[0] != null) back.setSelectionRange(sel[0], sel[1]); } catch { /* not a text box */ }
+  }
+
   function ensureCompanies(_owner, onReady, force) {
     if (inflight) return true;
     const fresh = CACHE.at && Date.now() - CACHE.at < FRESH_MS;
     if (!force && fresh) return false;
+    if (!force && Date.now() < retryAt) return false;
     /* Nothing held and a previous attempt failed: do not loop. */
     if (!force && CACHE.error && !CACHE.companies.length && CACHE.at) return false;
 
@@ -630,6 +666,7 @@
           return;
         }
         CACHE.building = false;
+        retryAt = 0; retryGap = 0;
         CACHE.companies = r.companies || [];
         CACHE.owners = r.owners || [];
         CACHE.error = "";
@@ -661,6 +698,8 @@
         /* Keep whatever is held. A failed refresh must not empty the view. */
         CACHE.error = e.message;
         if (!CACHE.at) CACHE.at = Date.now();
+        retryGap = Math.min(retryGap ? retryGap * 2 : 30e3, FRESH_MS);
+        retryAt = Date.now() + retryGap;
       })
       .finally(() => { inflight = false; CACHE.loading = false; onReady(); });
     return true;
@@ -1691,18 +1730,24 @@
         return;
       }
       landedTries = 0;
-      /* WHERE THEY HAD SCROLLED TO. A redraw puts the list back at the top,
-         and an associate who was halfway down a board of nine thousand
-         accounts does not want to be. */
-      const scroller = wrap.closest(".viewport") || wrap.parentElement;
-      const top = scroller ? scroller.scrollTop : 0;
+      /* WHERE THEY HAD SCROLLED TO is kept by keepPlace(): a redraw puts the
+         list back at the top, and an associate halfway down a board of nine
+         thousand accounts does not want to be. */
       /* The rows themselves have to be re-read: a save changes a stage and a
          call-back, and both live in the /companies payload. */
       const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
-      ensureCompanies(who, () => {
-        companies(wrap).then(() => { if (scroller) scroller.scrollTop = top; }).catch(() => {});
-      }, true);
-      companies(wrap).then(() => { if (scroller) scroller.scrollTop = top; }).catch(() => {});
+      /* RE-READ, NEVER "FRESH". This passed force, which sends ?fresh=1, which
+         tells the server to RE-CRAWL EVERY COMPANY FROM KYLAS on its next
+         minute — so every save by anybody with this view open queued a crawl
+         of the whole account, and with eight people saving that was a crawl a
+         minute eating the Kylas rate limit their saves and opens needed
+         (Ayush, 2026-10-10: "API rate limits are getting hit... server gets
+         crashed"). The save's own change reaches the list through the
+         server's per-request join, so an ordinary re-read shows it: one per
+         burst of saves (savedLanded debounces), and never fresh. */
+      CACHE.at = 0;
+      ensureCompanies(who, () => keepPlace(() => companies(wrap)).catch(() => {}));
+      keepPlace(() => companies(wrap)).catch(() => {});
       return;
     }
     if (!/vsec|ladder/.test(wrap.innerHTML)) return;    /* some other view */
@@ -1726,7 +1771,7 @@
     /* The dashboard is prose and stat tiles — it keeps the reading measure the
        accounts view above drops. */
     host.closest(".vwrap")?.classList.remove("wide", "board");
-    const loading = ensureCompanies(DASH_OWNER, () => dashboard(host));
+    const loading = ensureCompanies(DASH_OWNER, () => keepPlace(() => dashboard(host)));
     const dbase = companiesNow(DASH_OWNER);
     /* Airtable's own rows are the population when it has any. Falling back to
        the Kylas crawl keeps the view alive before the first save and when the
@@ -3547,7 +3592,7 @@
     await restoreViewMode();
     await loadAccPrefs();
     const who = FILTERS.owner === "all" ? "all" : FILTERS.owner;
-    const loading = ensureCompanies(who, () => companies(host));
+    const loading = ensureCompanies(who, () => keepPlace(() => companies(host)));
     /* An owner is selected unless the filter is cleared, and "all" is still a
        server-side answer — so in both cases the fetched list is authoritative.
        Only with no list at all (offline) do contact rows stand in. */
@@ -3926,15 +3971,13 @@
       ACC.q = e.target.value;
       ACC.limit = 100;
       clearTimeout(qTimer);
-      qTimer = setTimeout(() => {
-        const at = document.activeElement?.id;
-        redraw();
-        if (at !== "accQ") return;
-        const box = document.getElementById("accQ");
-        if (!box) return;
-        box.focus({ preventScroll: true });
-        try { box.setSelectionRange(box.value.length, box.value.length); } catch { /* not a text box */ }
-      }, 200);
+      /* AWAITED. redraw() is async — the view rebuilds after a few awaits — so
+         focusing "the box" straight after it focused the OLD box, which the
+         rebuild then threw away: the caret left the search after every pause
+         in typing, and the next letters went nowhere (Ayush, 2026-10-10:
+         "search pane se bahar nikal ja rahe hoon"). keepPlace waits for the
+         paint and then puts the caret and the scroll back. */
+      qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 200);
     });
     on("accQ", "keydown", (e) => {
       if (e.key !== "Escape") return;
@@ -3999,8 +4042,7 @@
       /* Redrawn on a delay so typing "12" does not filter on "1" first and
          throw the cursor out of the box it is in. */
       clearTimeout(priTimer);
-      priTimer = setTimeout(() => { const at = document.activeElement?.id; redraw();
-        if (at === "accPri") document.getElementById("accPri")?.focus(); }, 350);
+      priTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 350);
     });
     /* ── the condition builder ── */
     /* A path is "2" for a top-level row or "1.0" for one inside a group, so
@@ -4080,9 +4122,9 @@
       c.v[Number(box.dataset.i)] = box.value;
       ACC.limit = 100;
       clearTimeout(fbTimer);
-      fbTimer = setTimeout(() => {
+      fbTimer = setTimeout(async () => {
         const path = box.dataset.fbv, i = box.dataset.i;
-        redraw();
+        await redraw();
         const again = document.querySelector(`[data-fbv="${path}"][data-i="${i}"]`);
         if (again) { again.focus({ preventScroll: true });
           try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* ignore */ } }
@@ -4205,7 +4247,7 @@
     on("srcText", "input", (e) => {
       ACC.srcText = e.target.value;
       clearTimeout(srcTimer);
-      srcTimer = setTimeout(() => { ACC.limit = 100; redraw(); }, 250);
+      srcTimer = setTimeout(() => { ACC.limit = 100; keepPlace(redraw).catch(() => {}); }, 250);
     });
     /* Enter applies it now and closes, as Airtable does; Escape closes too.
        Either way the text typed is kept. */
