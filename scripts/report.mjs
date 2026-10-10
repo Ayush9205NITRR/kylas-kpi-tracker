@@ -192,7 +192,9 @@ export const METRICS = [
    column to the table and no line to the email. It is the numerator of one
    rate — see the cohort block in report() — and it rides on the row so the
    console can divide without a second request. */
-const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0 });
+/* `doneSql` is the same kind of thing for the next step: of the companies
+   whose SQL done was counted in a period, how many have reached SQL. */
+const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0, doneSql: 0 });
 
 /* ── the aggregation ───────────────────────────────────────────────── */
 /* calls:        [{ at, owner, outcome }]
@@ -411,6 +413,20 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
     bump(key(a.at), a.owner, "bookedHeld");
   }
 
+  /* THE SAME, ONE STEP ON: SQL done -> SQL. Ayush, 2026-10-10, on the Day
+     view: "SQL done to SQL ka ratio 4/5 nahi ho sakte" — Tue 6 Oct read SQL
+     done 4, SQL 5, rate 125%. Avani Oza's meeting was held on the 5th and she
+     became SQL on the 6th, so the 6th counted her SQL and not her done. Same
+     lag, same answer: of the companies whose SQL done falls in this period,
+     how many have reached SQL — at any time, so a row can rise later as
+     clients come back. Floors again mean a company's sql arrival is never
+     earlier than its done one. */
+  const sqlEver = new Set(arrivals.filter((a) => a.metric === "sql").map((a) => a.company));
+  for (const a of arrivals) {
+    if (a.metric !== "done" || !inWindow(a.at) || !sqlEver.has(a.company)) continue;
+    bump(key(a.at), a.owner, "doneSql");
+  }
+
   /* ONE PER COMPANY PER PERIOD, and separately one per company per owner per
      period. Two associates who both touched the same account in a week are two
      entries in their own columns and ONE in the team's — so the team total is
@@ -439,6 +455,7 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
   const totals = periods.reduce((acc, r) => {
     for (const m of METRICS) acc[m.key] += r[m.key];
     acc.bookedHeld += r.bookedHeld;    /* not a METRIC, so not in that loop */
+    acc.doneSql += r.doneSql;
     return acc;
   }, blank());
 

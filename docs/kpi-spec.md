@@ -80,8 +80,12 @@ Consequences, all deliberate:
 - It is `bookedHeld ÷ booked`. **`bookedHeld` is not a rung** — it adds no
   column to the table and no line to the email; it exists only as that
   numerator (`report.mjs`, and `views.js` `RATE_COLS`).
-- `→ SQL` (SQL ÷ SQL done) still divides period by period and carries the same
-  lag. It is left alone for now.
+- **`SQL done → SQL` is a cohort too, since 1.58.1** (Ayush, 2026-10-10: "SQL
+  done to SQL ka ratio 4/5 nahi ho sakte" — Tue 6 Oct read 125%). Of the
+  companies whose SQL done falls in this period, how many have reached SQL,
+  whenever they did. `doneSql ÷ done`; `doneSql` is not a rung either. On that
+  day it reads 4 of 4: Avani Oza's meeting was held on the 5th, so she belongs
+  to the 5th's cohort, not the 6th's.
 
 ### On the same screen, and not rungs
 

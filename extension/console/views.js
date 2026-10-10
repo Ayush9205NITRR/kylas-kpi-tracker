@@ -1152,9 +1152,14 @@
      it. The rung name still comes from RUNG. */
   const RATE_COLS = LADDER_ORDER.slice(1).map((key, i) => {
     const col = { key, of: LADDER_ORDER[i], label: `→ ${rung(key)}` };
+    /* And SQL, for the same reason one step on: SQL done on the 5th, SQL on
+       the 6th read 125% on the 6th (2026-10-10). Of the meetings held in this
+       period, how many have reached SQL. */
     return key === "done"
       ? { ...col, num: "bookedHeld", label: `${rung("booked")} → held`, cohort: true }
-      : col;
+      : key === "sql"
+        ? { ...col, num: "doneSql", label: `${rung("done")} → ${rung("sql")}`, cohort: true }
+        : col;
   });
 
   /* Where the report is pointed: which level, and the window a drill-down has
@@ -1467,6 +1472,9 @@
       const v = Math.round((n / d) * 100) + "%";
       /* A cohort is a subset of its own denominator, so it cannot carry in and
          the "over" note below would never be right for it. */
+      if (c.cohort && c.num === "doneSql") return `<span title="${n} of the ${d} ${
+        d === 1 ? "meeting" : "meetings"} held in this period ${
+        n === 1 ? "has" : "have"} since reached SQL. Counted whenever SQL happened, so this row can rise later — a meeting held this period that turns SQL next week belongs to this period.">${v}</span>`;
       if (c.cohort) return `<span title="${n} of the ${d} ${
         d === 1 ? "meeting" : "meetings"} booked in this period ${
         n === 1 ? "has" : "have"} since been held. Counted whenever the meeting happened, so this row can rise later — a booking made this period that happens next month belongs to this period's bookings.">${v}</span>`;
@@ -1512,10 +1520,11 @@
         : ""}Counted from the call log and the stage history, so every level is the same rows cut a
         different way and they always agree. A company is counted on the period it FIRST reached a
         rung — moving on, or back and forth, never counts twice.
-        <b>${esc(rung("booked"))} → held</b> is the one column that is not a step in that chain:
-        a meeting is booked on one day and happens on another, so it counts the meetings
-        <i>booked in this period</i> that have since taken place, whenever they took place.
-        That is why it never passes 100%, and why a past row can rise.</p>`;
+        <b>${esc(rung("booked"))} → held</b> and <b>${esc(rung("done"))} → ${esc(rung("sql"))}</b>
+        are not steps in that chain: a meeting is booked one day and held another, and a client
+        turns SQL days after the meeting. So they count the meetings <i>booked</i> (or <i>held</i>)
+        <i>in this period</i> that have since moved on, whenever they did.
+        That is why they never pass 100%, and why a past row can rise.</p>`;
   }
 
   /* ── RCA: why an account stopped moving ────────────────────────────────

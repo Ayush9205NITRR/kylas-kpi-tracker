@@ -362,6 +362,38 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   eq("a straight jump to SQL counts as booked", r.totals.booked, 1);
   eq("...and as held, in the same period", r.totals.bookedHeld, 1);
 }
+{
+  /* SQL DONE -> SQL, AYUSH'S 6 OCT. Day view: SQL done 4, SQL 5, rate 125%.
+     Avani: held on the 5th, SQL on the 6th. Kshitij: booked on the 28th,
+     SQL on the 6th (skipping done). Three more jumped straight to SQL. */
+  const SQL = "SQL_SALES_QUALIFIED_LEAD";
+  const r = report("day", { transitions: [
+    { at: "2026-09-28T09:00:00Z", owner: "M", company: "avani", to: BOOK },
+    { at: "2026-10-05T09:00:00Z", owner: "M", company: "avani", to: HELD },
+    { at: "2026-10-06T09:00:00Z", owner: "M", company: "avani", to: SQL },
+    { at: "2026-09-28T10:00:00Z", owner: "A", company: "kshitij", to: BOOK },
+    { at: "2026-10-06T10:00:00Z", owner: "A", company: "kshitij", to: SQL },
+    { at: "2026-10-06T11:00:00Z", owner: "G", company: "shahil", to: SQL },
+    { at: "2026-10-06T11:10:00Z", owner: "A", company: "sushmita", to: SQL },
+    { at: "2026-10-06T11:20:00Z", owner: "N", company: "shubha", to: SQL },
+  ] }, { from: "2026-10-05", to: "2026-10-06" });
+  const day = (k) => r.periods.find((p) => p.key === k);
+  eq("6 Oct: SQL done 4, as his screen said", day("2026-10-06").done, 4);
+  eq("6 Oct: SQL 5, as his screen said", day("2026-10-06").sql, 5);
+  eq("...and the cohort is 4 of those 4 — 100%, not 125%", day("2026-10-06").doneSql, 4);
+  eq("Avani is credited to the 5th, where her meeting was held", day("2026-10-05").doneSql, 1);
+  ok("doneSql never exceeds done, in any period", r.periods.every((p) => p.doneSql <= p.done));
+  eq("the window totals agree", r.totals.doneSql, 5);
+}
+{
+  /* A meeting held but not yet SQL is in the denominator and not the numerator,
+     and becomes SQL later — the row rises. */
+  const r = report("month", { transitions: [
+    { at: "2026-10-03T09:00:00Z", owner: "A", company: "c9", to: HELD },
+    { at: "2026-11-02T09:00:00Z", owner: "A", company: "c9", to: "SQL_SALES_QUALIFIED_LEAD" },
+  ] }, { from: "2026-10-01", to: "2026-10-31" });
+  eq("held in October, SQL in November: October still credited", r.periods[0].doneSql, 1);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
