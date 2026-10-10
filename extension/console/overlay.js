@@ -75,11 +75,16 @@
   /* These cover the call console rather than replacing it, so the record the
      associate was on is still there when they navigate back. */
   let view = null;
+  /* Where the accounts list was scrolled to when it was left, so coming
+     back to it lands on the same rows. */
+  let accountsTop = 0;
   function showView(which) {
     const port = document.getElementById("viewport");
     const wrap = document.getElementById("vwrap");
     if (!port) return;
+    if (view === "companies" && which !== "companies") accountsTop = port.scrollTop || 0;
     view = which;
+    paintBack();
     if (!which) { port.hidden = true; wrap.innerHTML = ""; return; }
     port.hidden = false;
     /* Both views fetch the allotted-companies list, so both are async now. A
@@ -87,7 +92,29 @@
        unhandled rejection in the console. */
     wrap.innerHTML = `<p class="vnote">Loading…</p>`;
     (which === "dashboard" ? Views.dashboard : Views.companies)(wrap)
+      .then(() => { if (which === "companies" && view === "companies") port.scrollTop = accountsTop; })
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
+  }
+
+  /* ── BACK ────────────────────────────────────────────────────────────
+     Ayush, 2026-10-10: "Contacts -> going back -> companies -> dashboard —
+     this is how the back button should work." So it follows that ladder, not
+     the order things happened to be opened in: from a contact or company
+     card it goes to the accounts list (filters, search and scroll as they
+     were left — the explorer keeps them), from the list to the dashboard,
+     and on the dashboard there is nowhere further back to go. A history
+     stack would send a person who arrived on a contact straight from Kylas
+     nowhere useful; the ladder always has a next rung up. */
+  const backBtn = document.getElementById("backBtn");
+  function paintBack() {
+    if (!backBtn) return;
+    backBtn.hidden = view === "dashboard";
+    backBtn.textContent = view === "companies" ? "← Dashboard" : "← Accounts";
+    backBtn.title = view === "companies" ? "Back to the dashboard" : "Back to the accounts list";
+  }
+  if (backBtn) {
+    backBtn.onclick = () => showView(view === "companies" ? "dashboard" : "companies");
+    paintBack();
   }
 
   /* Clicking a company in the list should take you into it. */

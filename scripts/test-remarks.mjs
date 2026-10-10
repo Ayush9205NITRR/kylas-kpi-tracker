@@ -26,7 +26,7 @@
  * the other is the bug this guards.
  */
 import { readFileSync } from "node:fs";
-import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes } from "./kylas.mjs";
+import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes, kylasRemarksOf, toConsoleContact } from "./kylas.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -136,6 +136,29 @@ console.log("\nnotes on earlier calls, from Kylas call logs");
   eq("...and says who typed it", got[1].by, "Muskan Rajpoot");
   eq("a plain-string note is kept", got[0].text, "typed as a plain string");
   eq("the outcome reads as words", got[0].outcome, "left message");
+}
+
+/* ── the team's Remarks custom field ─────────────────────────────────
+   Ayush, 2026-10-10: "Previous Notes — pull it from cfRemarks (custom field
+   created for each contact under the name of remarks)". */
+console.log("\nthe Remarks custom field (cfRemarks)");
+{
+  const c = (cf) => ({ id: 1, customFieldValues: cf });
+  eq("read from cfRemarks", kylasRemarksOf(c({ cfRemarks: "Met at the expo, call after Diwali" })),
+     "Met at the expo, call after Diwali");
+  eq("rich text reads as text", kylasRemarksOf(c({ cfRemarks: "<p>Goa,&nbsp;2 nights</p><p>budget 8L</p>" })),
+     "Goa, 2 nights\nbudget 8L");
+  eq("a field renamed in Kylas still counts if it says remark",
+     kylasRemarksOf(c({ cfBdRemarks: "Wants Udaipur" })), "Wants Udaipur");
+  eq("cfRemarks wins over another remark-ish field",
+     kylasRemarksOf(c({ cfOldRemarks: "old", cfRemarks: "new" })), "new");
+  eq("no field is no note", kylasRemarksOf(c({ cfPipelineStageBd: 7 })), "");
+  eq("no contact is no note", kylasRemarksOf(null), "");
+  eq("NOT the built-in remarks field — that is the console's block",
+     kylasRemarksOf({ remarks: "Stage MQL", customFieldValues: {} }), "");
+  eq("the console's contact carries it as kylasRemarks",
+     toConsoleContact({ id: 9, customFieldValues: { cfRemarks: "Prefers WhatsApp" } }, {}).kylasRemarks,
+     "Prefers WhatsApp");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

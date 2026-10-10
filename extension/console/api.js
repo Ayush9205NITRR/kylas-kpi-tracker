@@ -338,6 +338,8 @@
     /* Every company's focus-list status, and setting one. */
     focusAll: () => req("/focus", { timeout: 20000 }),
     setFocus: (body) => req("/focus", { method: "POST", body, timeout: 20000 }),
+    /* Many accounts onto a focus list in one request: [{companyId, companyName, ownerName, previous}]. */
+    addFocusMany: (items, setBy) => req("/focus", { method: "POST", body: { status: "focus", items, setBy }, timeout: 60000 }),
     /* A company's account research, and saving it. */
     research: (companyId) => req(`/research?companyId=${encodeURIComponent(companyId)}`, { timeout: 20000 }),
     saveResearch: (companyId, companyName, values, updatedBy) => req("/research",

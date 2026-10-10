@@ -885,11 +885,10 @@ export async function readCompanies(at) {
       ownerId: String(f["Kylas Owner ID"] || ""),
       /* Attached, not joined. */
       kpi: kpis.get(id) || null,
-      /* `_airtable: { updatedAt }` used to ride here. Nothing has ever read
-         it — not the console, not a report, not a test — and on a list of ten
-         thousand companies an unread field is a quarter of a megabyte of
-         nothing. Kylas Updated At is still on the row in Airtable and in the
-         copy; it is just not sent to a browser that does not want it. */
+      /* Read now: the accounts list filters on "Last updated at" (2026-10-10).
+         The copy holds no creation time or users, so those columns are empty
+         on this path and full on the Kylas one. */
+      updatedAt: f["Kylas Updated At"] || null,
     };
   });
 }
@@ -1150,6 +1149,32 @@ export async function writeFocus(at, { companyId, companyName, status, reason = 
     "Set At": nowIso,
   });
   return { cleared: false, at: nowIso, dropped };
+}
+
+/* MANY ACCOUNTS ONTO A FOCUS LIST AT ONCE. Ayush, 2026-10-10: "bulk focus —
+   adding multiple accounts at one go into the focus list (every owner can do
+   the same)". writeFocus() one at a time is two Airtable requests an account,
+   so 200 accounts were 400 requests behind a 5-a-second limit shared with
+   every save the team was making. Here it is ten rows a request: 200 accounts
+   is 40. Focus only — taking accounts OFF is a decision made one at a time,
+   with a reason, and a bulk "remove" is the button that empties somebody's
+   list by accident. */
+export async function writeFocusMany(at, items, { setBy = "" } = {}) {
+  const nowIso = new Date().toISOString();
+  const rows = items.filter((x) => x && x.companyId).map((x) => ({
+    "Kylas Company ID": String(x.companyId),
+    "Company Name": x.companyName || "",
+    Status: "focus", Reason: "", Note: x.note || "",
+    Owner: x.ownerName || "", "Set By": setBy, "Set At": nowIso,
+  }));
+  if (!rows.length) return { written: 0, at: nowIso };
+  const { recs, dropped } = await upsertManyTolerant(at, "Focus", "Kylas Company ID", rows);
+  await upsertManyTolerant(at, "Focus History", "Key", items.filter((x) => x && x.companyId).map((x) => ({
+    Key: `${x.companyId}-${nowIso}`, "Kylas Company ID": String(x.companyId),
+    "From Status": x.previous || "normal", "To Status": "focus",
+    Reason: "", Note: "added in bulk", Owner: x.ownerName || "", "Set By": setBy, "Changed At": nowIso,
+  }))).catch(() => ({}));          /* history is best-effort; the state is not */
+  return { written: recs.length, at: nowIso, dropped };
 }
 
 /* What the last sync managed, so the console can say how complete this mirror

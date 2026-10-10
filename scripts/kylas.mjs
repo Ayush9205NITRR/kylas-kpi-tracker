@@ -105,6 +105,11 @@ export function createClient(key, {
   /* Exactly what the probe proved this endpoint returns, plus metaData for the
      owner name. Anything beyond this is what the 500 is suspected to be about. */
   const COMPANY_LEAN = ["id", "name", "ownerId", "customFieldValues", "metaData"];
+  /* Kylas' audit fields, for the accounts filters (2026-10-10). Tried as a
+     shape of their own, directly above the proven lean one: if asking for
+     them is what upsets this endpoint, the crawl falls back to exactly what
+     it did before rather than breaking. */
+  const COMPANY_AUDIT = [...COMPANY_LEAN, "createdAt", "updatedAt", "createdBy", "updatedBy"];
 
   /* The schema calls company and ownerId LOOK_UP, but the query builder rejects
      that and wants "long". Confirmed live — see docs/kylas-picklists.md. */
@@ -129,6 +134,8 @@ export function createClient(key, {
       body: (o) => ({ fields: COMPANY_LEAN, jsonRule: rule("ownerId", o) }), filtered: true },
     { name: "ownerId/integer + lean fields",
       body: (o) => ({ fields: COMPANY_LEAN, jsonRule: rule("ownerId", o, "integer") }), filtered: true },
+    { name: "free-text + lean + audit fields, filtered here",
+      body: () => ({ fields: COMPANY_AUDIT, jsonRule: freeText("") }), filtered: false },
     /* Proven by the probe on 2026-09-16, so it is the reliable floor. It cannot
        filter, hence filtered:false. */
     { name: "free-text + lean fields, filtered here",
@@ -692,6 +699,23 @@ const stripHtml = (s) => String(s || "")
   .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n").replace(/<[^>]+>/g, "")
   .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
   .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+/* THE TEAM'S OWN "REMARKS" FIELD. Ayush, 2026-10-10: "Previous Notes — pull
+   it from cfRemarks (custom field created for each contact under the name of
+   remarks)". Not the record's built-in `remarks`, which the console has read
+   since 1.47 and which mostly holds the console's own block: a custom field
+   the team types into in Kylas. Its API name is the label in camelCase with a
+   cf prefix — cfRemarks — but a field renamed in Kylas' settings keeps the
+   word, so any cf key with "remark" in it is accepted after that one. Rich
+   text arrives as HTML. */
+export function kylasRemarksOf(c) {
+  const cf = c?.customFieldValues || {};
+  const key = ["cfRemarks", "cfremarks"].find((k) => cf[k] != null && cf[k] !== "")
+    || Object.keys(cf).find((k) => /^cf.*remark/i.test(k) && cf[k] != null && cf[k] !== "");
+  const v = key ? cf[key] : "";
+  const text = Array.isArray(v) ? v.map((x) => x?.value ?? x?.name ?? x).join("\n") : String(v ?? "");
+  return stripHtml(text);
+}
+
 export function callNotes(body) {
   const logs = Array.isArray(body) ? body : body?.content || body?.data || body?.records || [];
   const out = [];
@@ -978,6 +1002,7 @@ export function toConsoleContact(c, { ownerName, company, writeMap, tzMin = 330 
       return { nextCallDate: got.date, nextCallTime: got.time };
     })(),
     remarks: pick(c.remarks, "") || "",
+    kylasRemarks: kylasRemarksOf(c),
     /* REQ-04, the read side. Hardcoded "" until now: the console wrote the
        offsite quarter to Kylas on every save and never read it back. The
        console recomputes it from the timeline text anyway, so nothing was
@@ -1049,5 +1074,14 @@ export function toConsoleCompany(co) {
        picklist id, an option object or text. The handlers turn them into
        quarters with the field's options, which only they have. */
     offsiteRaw: Object.fromEntries(Object.entries(cf).filter(([k, v]) => /offsite/i.test(k) && v != null && v !== "")),
+    /* Kylas' audit fields. The users come back as ids (or {id, name}); the
+       name is in metaData when Kylas sends it, and the caller fills the rest
+       from the users list. */
+    createdAt: pick(co?.createdAt, null),
+    updatedAt: pick(co?.updatedAt, null),
+    createdById: String(idOf(co?.createdBy) ?? ""),
+    updatedById: String(idOf(co?.updatedBy) ?? ""),
+    createdBy: pick(nameOf(co?.createdBy), lookupName(co, "createdBy", idOf(co?.createdBy)), "") || "",
+    updatedBy: pick(nameOf(co?.updatedBy), lookupName(co, "updatedBy", idOf(co?.updatedBy)), "") || "",
   };
 }

@@ -68,6 +68,30 @@
          read it back so the reminder pane is right at once. */
       Focus.load(true);
     },
+    /* Many at once (the accounts list's "Add to Focus"). Optimistic like
+       set(): the stars appear now, and go back if the server refuses. An
+       account already on the list, or deprioritized, is left as it is —
+       un-dropping one is a decision for its own row, with its reason in view. */
+    async addMany(list, { setBy = "" } = {}) {
+      const items = list.map((c) => ({ companyId: String(c.id), companyName: c.name || "",
+                                       ownerName: c.owner || "", previous: map[String(c.id)]?.status || "normal" }))
+        .filter((x) => x.previous === "normal");
+      if (!items.length) return { written: 0, skipped: list.length };
+      const before = { ...map };
+      const at = new Date().toISOString();
+      for (const x of items)
+        map[x.companyId] = { companyId: x.companyId, companyName: x.companyName, status: "focus",
+                             reason: "", note: "", ownerName: x.ownerName, setByEmail: setBy, setAt: at };
+      tell();
+      try {
+        const r = await API.addFocusMany(items, setBy);
+        Focus.load(true);
+        return { written: r?.written ?? items.length, skipped: list.length - items.length };
+      } catch (e) {
+        map = before; tell();
+        throw e;
+      }
+    },
   };
   global.Focus = Focus;
 })(window);

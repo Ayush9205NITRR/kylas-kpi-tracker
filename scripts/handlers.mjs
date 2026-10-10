@@ -26,7 +26,7 @@
  * it is exactly the part that differs: Node gives a stream, fetch gives a
  * Request. A handler that does not need one simply ignores it.
  */
-import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes,
+import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes, kylasRemarksOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
@@ -37,7 +37,7 @@ import { createAirtable, syncContact, readCompanyKpis,
          readCompanies, readSyncState, listTolerant,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter,
-         readFocus, readResearch, writeFocus, writeResearch,
+         readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
@@ -75,7 +75,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      restarts. Three of the five fail here and each costs a full rate-limit gap,
      so re-probing spent 1.35s of every cold start re-learning the same answer.
      A file, not a constant, because the answer is per-account. */
-  const shapeHint = ((await store.get("company-shape")) || "").trim();
+  /* "-v2": the list of shapes gained one (audit fields, 2026-10-10) above the
+     one every deployment has remembered. A remembered answer is never
+     re-asked, so the key moves and each server probes once more. */
+  const shapeHint = ((await store.get("company-shape-v2")) || "").trim();
 
   /* EVERY SETTING IS PASSED, none left to be picked up from the ambient
      environment. On a laptop `env` IS process.env so nothing changes; on a
@@ -93,7 +96,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* Deliberately not awaited, and its failure deliberately ignored. This is
          a cache: the probe has already produced the answer this request needs,
          and losing the write costs 1.35s on some later cold start. */
-      store.put("company-shape", name).catch(() => {});
+      store.put("company-shape-v2", name).catch(() => {});
     },
   });
 
@@ -422,6 +425,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   const companyCache = new Map();
   const COMPANY_TTL = Number(env.COMPANY_TTL_MS || 5 * 60 * 1000);
+  /* The most accounts one bulk "add to focus" may carry: 50 Airtable requests. */
+  const FOCUS_BULK_MAX = Number(env.FOCUS_BULK_MAX || 250);
   /* The shortest gap between two crawls that Refresh can force. */
   const COMPANY_FRESH_FLOOR_MS = Number(env.COMPANY_FRESH_FLOOR_MS || 10 * 60 * 1000);
 
@@ -444,8 +449,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         /* Seed the name cache too — the contact mapper then never has to fetch
            a company whose name already came back on this list. */
         if (co?.id && co?.name) companyNames.set(String(co.id), co.name);
+        const mapped = toConsoleCompany(co);
+        if (!mapped.createdBy && mapped.createdById) mapped.createdBy = (await ownerName(mapped.createdById)) || "";
+        if (!mapped.updatedBy && mapped.updatedById) mapped.updatedBy = (await ownerName(mapped.updatedById)) || "";
         list.push({
-          ...toConsoleCompany(co),
+          ...mapped,
           offsiteRaw: Object.fromEntries(Object.entries(cf).filter(([k, v]) =>
             (offKeys.has(k) || /offsite/i.test(k)) && v != null && v !== "")),
           owner: known || (await ownerName(co.ownerId)) || "",
@@ -2227,6 +2235,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         return { configured: true, today, focus, tat };
       }
       if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+      /* { items: [{companyId, companyName, ownerName, previous}], status: "focus" }
+         — many at once, for anyone (it is their own list they are building). */
+      if (Array.isArray(body.items)) {
+        if (String(body.status || "focus") !== "focus")
+          throw Object.assign(new Error("only adding to focus can be done in bulk"), { status: 400 });
+        if (body.items.length > FOCUS_BULK_MAX)
+          throw Object.assign(new Error(`at most ${FOCUS_BULK_MAX} accounts at a time — narrow the list and add the rest after`), { status: 400 });
+        const setBy = body.setBy || (await whoami().catch(() => null))?.email || "";
+        const res = await writeFocusMany(airtable, body.items, { setBy });
+        log(`focus: ${res.written} account(s) added in bulk by ${setBy || "?"}`);
+        return { ok: true, ...res };
+      }
       const status = String(body.status || "");
       if (!["focus", "normal", "depri"].includes(status))
         throw Object.assign(new Error(`unknown focus status ${JSON.stringify(status)}`), { status: 400 });
@@ -2537,12 +2557,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const id = url.searchParams.get("id");
       if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
       const hit = historyCache.get(id);
-      if (hit && Date.now() - hit.at < HISTORY_TTL) return { items: hit.items, cached: true };
+      if (hit && Date.now() - hit.at < HISTORY_TTL) return { items: hit.items, remarks: hit.remarks || "", cached: true };
       try {
-        const items = callNotes(await kylas.callLogs(id)).slice(0, 10);
-        historyCache.set(id, { at: Date.now(), items });
+        /* The contact too, for its Remarks custom field (cfRemarks): the card
+           is usually served from the Airtable copy, which has never held it.
+           One more Kylas read per contact opened, cached with the notes. */
+        const [logs, contact] = await Promise.all([
+          kylas.callLogs(id), kylas.contact(id).catch(() => null)]);
+        const items = callNotes(logs).slice(0, 10);
+        const remarks = kylasRemarksOf(contact);
+        historyCache.set(id, { at: Date.now(), items, remarks });
         if (historyCache.size > 2000) historyCache.delete(historyCache.keys().next().value);
-        return { items };
+        return { items, remarks };
       } catch (e) {
         log(`! history ${id}: ${e.message.slice(0, 160)}`);
         return { items: [], error: e.message.slice(0, 200) };

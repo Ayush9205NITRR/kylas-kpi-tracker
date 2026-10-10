@@ -1149,6 +1149,26 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('...but three more asks inside ten minutes crawl nothing', again === 0, `${again} crawl(s)`);
 }
 
+/* ── 15d · MANY ACCOUNTS ONTO A FOCUS LIST AT ONCE ─────────────────────
+   Ayush, 2026-10-10: "bulk focus — every owner can do the same". One request,
+   ten rows an Airtable call, and a ceiling on how many one request may carry. */
+{
+  console.log('\n15d. bulk add to focus');
+  const w = await coldWorker(1580);
+  const items = [{ companyId: '1776620', companyName: 'seats', ownerName: 'Enout Super Admin' },
+                 { companyId: '1778327', companyName: 'bbb', ownerName: 'Enout Super Admin' }];
+  const r = await post(w, '/focus', { status: 'focus', items, setBy: 'ayush@enout.in' });
+  check('a bulk add answers', r.status === 200 && r.body.ok, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+  check('...and wrote both', r.body.written === 2, `written ${r.body.written}`);
+  const read = await get(await coldWorker(1581), '/focus');
+  check('...which read back as on a focus list', ['1776620', '1778327'].every((id) => read.body.focus?.[id]?.status === 'focus'),
+        JSON.stringify(Object.keys(read.body.focus || {})));
+  const big = await post(w, '/focus', { status: 'focus', items: Array.from({ length: 251 }, (_, i) => ({ companyId: String(9000 + i) })) });
+  check('more than the ceiling is refused, not half-written', big.status === 400, `${big.status} ${big.body.error || ''}`);
+  const depri = await post(w, '/focus', { status: 'depri', items });
+  check('bulk is for adding only — dropping is one at a time, with a reason', depri.status === 400, `${depri.status}`);
+}
+
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────
    Cloudflare runs several isolates, each with its own memory. If a save is
    noted onto the copy an isolate happened to be holding, an isolate that
@@ -1193,6 +1213,11 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('...with the note typed on the earlier call, as text', items.some((x) => /Goa, 2 nights/.test(x.text) && !/<div>/.test(x.text)),
         JSON.stringify(items[0]?.text || null).slice(0, 90));
   check('...dated, so the strip can say when it was said', !!items[0]?.at, items[0]?.at);
+  /* Ayush, 2026-10-10: "Previous Notes — pull it from cfRemarks". The card is
+     usually served from the Airtable copy, which never had it, so it rides
+     here, read from Kylas with the call logs. */
+  check('...and the contact\'s Remarks custom field, as text', /budget sits with the CFO/.test(h1.body.remarks || '')
+        && !/<p>/.test(h1.body.remarks || ''), JSON.stringify(h1.body.remarks || null).slice(0, 90));
 
   /* A save writes a new call log with its note; the next /history on the SAME
      instance must include it, not serve the copy cached before the call. */

@@ -354,6 +354,10 @@ body.framed .ovOnly{display:inline-block}
 .vrca span{flex:1;min-width:0}
 .vrca span b{font-weight:var(--w-strong)}
 .vrca .gbtn{margin-left:auto;border-color:var(--amber);color:var(--amber)}
+/* "175 across all accounts": the wider total, as a link rather than a
+   second number competing with the one for this list. */
+.vrca .linkbtn{background:transparent;border:0;padding:0;font:inherit;color:inherit;
+  text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
 .vrca .gbtn:hover{background:var(--amber);color:var(--panel)}
 /* TODAY'S FOLLOW-UPS, in the same one-line shape as the stall strip. Amber is
    the flag colour and it is earned here only while something is overdue — a
@@ -526,10 +530,18 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
    a name is the fastest way to one account and it was the one thing the
    toolbar could not do. It grows into whatever the toolbar has spare so that
    a long company name is readable while it is being typed. */
-.srch{flex:1 1 200px;min-width:160px;max-width:340px;display:flex}
+.srch{flex:1 1 260px;min-width:220px;max-width:420px;display:flex}
 .srch input{flex:1;min-width:0;border:1px solid var(--line2);background:var(--panel);
   border-radius:var(--r);padding:7px 10px;font:inherit;font-size:var(--t-label);color:var(--text)}
 .srch input::placeholder{color:var(--text3)}
+/* The operator rides inside the box's left edge, so the search still reads as
+   one control: [contains ▾| Search accounts…]. */
+.srch{position:relative;align-items:stretch}
+.srch .srchop{flex:none;border:1px solid var(--line2);border-right:0;border-radius:var(--r) 0 0 var(--r);
+  background:var(--panel2);color:var(--text2);font:inherit;font-size:var(--t-meta);padding:0 6px;cursor:pointer}
+.srch .srchop+input{border-radius:0 var(--r) var(--r) 0}
+.srch .srchn{position:absolute;right:30px;top:50%;transform:translateY(-50%);font-size:var(--t-meta);
+  color:var(--text3);pointer-events:auto;background:var(--panel);padding:0 4px}
 .srch input:focus-visible{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
 .frow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:7px}
 .frow .lbl{font-size:var(--t-meta);color:var(--text3);min-width:74px}

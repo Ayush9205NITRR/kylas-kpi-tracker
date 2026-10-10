@@ -183,7 +183,9 @@
          reached". Two different facts, two fields — merging them would make the
          Stage filter match rows whose POCs are somewhere else entirely. */
       if (seed) for (const k of ["name", "source", "owner", "ownerId", "batch",
-                                 "health", "lastCalledAt", "kylasStage", "acctStage"])
+                                 "health", "lastCalledAt", "kylasStage", "acctStage",
+                                 /* Kylas' audit fields — the Created / Updated filters. */
+                                 "createdAt", "updatedAt", "createdBy", "updatedBy"])
         if (!co[k] && seed[k]) co[k] = seed[k];
       /* acctN is a COUNT and 0 is an answer ("this account has no contacts in
          Kylas"), so it cannot ride the truthiness loop above, which would drop
@@ -206,6 +208,8 @@
     for (const co of base || []) {
       if (!co?.id) continue;
       row(String(co.id), { name: co.name, source: co.source, owner: co.owner,
+                           createdAt: co.createdAt, updatedAt: co.updatedAt,
+                           createdBy: co.createdBy, updatedBy: co.updatedBy,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
                            lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
                            offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich,
@@ -2065,6 +2069,8 @@
      a company with no stage belongs to no family and so had no tile. A set of
      chips answers the same question in one line, takes two stages at once, and
      has a chip for the blank. */
+  /* The search box's operators — see Q_OPS, where each is defined. */
+  const Q_OPS_KEYS = ["contains", "equal", "not_equal", "not_contains", "begins_with"];
   const ACC = { stages: new Set(), stageOpen: false, stageFind: "",
                 /* OWNERS, PLURAL. A manager's question is "Gurnoor and Muskan
                    together", and a single select answered "one, or everyone".
@@ -2111,6 +2117,12 @@
                    not in the stored preference: it is the most temporary
                    question on the screen. */
                 q: "",
+                /* How the search box reads what was typed — Kylas' own string
+                   operators. "contains" is the old behaviour: every word
+                   anywhere on the row. The rest look at the company NAME, and
+                   take many values at once (comma-separated, or a pasted
+                   column): "is" with forty names finds those forty. */
+                qOp: "contains",
                 /* Hand-set column widths, in pixels, keyed by column. Absent
                    means "whatever the layout gives it". */
                 widths: {},
@@ -2177,6 +2189,7 @@
       if (ACC[prop].size) q.set(short, [...ACC[prop]].join("~"));
     for (const o of ACC.owners) q.append("owner", o);
     if (ACC.q) q.set("q", ACC.q);
+    if (ACC.q && ACC.qOp && ACC.qOp !== "contains") q.set("qop", ACC.qOp);
     if (ACC.priMin !== "") q.set("pri", ACC.priMin);
     if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
     if (ACC.sort !== "next") q.set("sort", ACC.sort);
@@ -2196,6 +2209,7 @@
        by the old build still reads, because getAll of one key is one name. */
     ACC.owners = new Set(q.getAll("owner").filter((x) => x !== null));
     ACC.q = q.get("q") || "";
+    ACC.qOp = Q_OPS_KEYS.includes(q.get("qop")) ? q.get("qop") : "contains";
     ACC.priMin = q.get("pri") || "";
     ACC.srcOp = q.get("srcop") || "any";
     ACC.srcText = q.get("srctext") || "";
@@ -2239,11 +2253,42 @@
     if (ACC.q !== Q_FOR) { Q_FOR = ACC.q; Q_TERMS = ACC.q.toLowerCase().split(/\s+/).filter(Boolean); }
     return Q_TERMS;
   };
+  /* THE VALUES, for the operators that take a list. Split on commas, semicolons
+     and line breaks — a column pasted out of a sheet arrives one per line. */
+  let Q_VALS = [], Q_VALS_FOR = null;
+  const qValues = () => {
+    const key = ACC.qOp + "\u0000" + ACC.q;
+    if (key !== Q_VALS_FOR) {
+      Q_VALS_FOR = key;
+      Q_VALS = [...new Set(String(ACC.q).split(/[,;\n]+/).map((v) => v.trim().toLowerCase()).filter(Boolean))];
+    }
+    return Q_VALS;
+  };
+  const norm = (v) => String(v || "").trim().toLowerCase();
+  const Q_OPS = {
+    /* Kylas' operators, by their names in the search API. */
+    contains: { label: "contains", multi: "any" },
+    equal: { label: "is", multi: "any" },
+    not_equal: { label: "is not", multi: "none" },
+    not_contains: { label: "does not contain", multi: "none" },
+    begins_with: { label: "begins with", multi: "any" },
+  };
   const qMatch = (co) => {
-    const terms = qTerms();
-    if (!terms.length) return true;
-    const hay = textOf(co);
-    return terms.every((t) => hay.includes(t));
+    if (!String(ACC.q || "").trim()) return true;
+    const op = ACC.qOp || "contains";
+    /* contains, one value: the old search, every word anywhere on the row. */
+    if (op === "contains" && !/[,;\n]/.test(ACC.q)) {
+      const terms = qTerms();
+      const hay = textOf(co);
+      return terms.every((t) => hay.includes(t));
+    }
+    const vals = qValues();
+    if (!vals.length) return true;
+    const name = norm(co.name);
+    const hit = (v) => op === "equal" || op === "not_equal" ? name === v
+      : op === "begins_with" ? name.startsWith(v)
+      : name.includes(v);
+    return Q_OPS[op]?.multi === "none" ? !vals.some(hit) : vals.some(hit);
   };
 
   /* `skip` leaves one dimension out, so a chip row can show what its own
@@ -2759,25 +2804,30 @@
      "Select all" ticks THE FILTERED ROWS, never the whole account, and says
      which it did. That distinction is the whole safety story: the person can
      see the list they are about to move. */
+  /* EVERYBODY SELECTS NOW. Ayush, 2026-10-10: "bulk focus — add multiple
+     accounts at one go into the focus list (every owner can do the same)".
+     Ticking rows and "Add to Focus" is for anyone — it is their own list.
+     Moving contacts stays admin-only, below the same bar. */
   function bulkBar(rows) {
-    if (!API.isAdmin) return "";
     const n = ACC.picked.size;
     const shown = rows.length;
     const allShown = shown > 0 && rows.every((r) => ACC.picked.has(String(r.id)));
     if (!n) return `<div class="exbulk idle">
       <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
-      <span class="exbh">…to re-assign them to somebody else.</span></div>`;
+      <span class="exbh">…to add them to your Focus list${API.isAdmin ? ", or re-assign them to somebody else" : ""}.</span>
+      ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}</div>`;
     return `<div class="exbulk">
       <span class="exbn tnum">${n} selected</span>
       <button class="gbtn sm" id="accPickAll" type="button">${
         allShown ? "Select none" : `Select these ${shown}`}</button>
-      <label class="exbto">Move their contacts to
+      <button class="gbtn sm" id="accFocusMany" type="button">★ Add to Focus</button>
+      ${API.isAdmin ? `<label class="exbto">Move their contacts to
         <select id="accTo" aria-label="Move the contacts on these accounts to">
           <option value="">choose a person…</option>
           ${ownerOptions().map((o) =>
             `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
         </select></label>
-      <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>
+      <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>` : ""}
       <button class="gbtn sm" id="accPickClear" type="button">Clear</button>
       ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}
       ${/* SAY WHAT IT DOES NOT DO, ON THE CONTROL ITSELF. Kylas accepts a
@@ -2786,9 +2836,9 @@
            of this button erased one instead of moving it. The contacts are
            what move, and a person about to click needs to know that here,
            not in a release note. */ ""}
-      <p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
+      ${API.isAdmin ? `<p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
         not let this tool change an account's own owner — do that in Kylas.
-        Nothing is written until you have seen the count.</p>
+        Nothing is written until you have seen the count.</p>` : ""}
     </div>`;
   }
   /* The people an account can be handed TO. Names alone are not enough — the
@@ -3080,6 +3130,24 @@
     { k: "boolean", label: "Boolean post", w: ".7fr",
       ff: { type: "link", get: (c) => en(c).bp || "" },
       cell: (c) => linkChip(en(c).bp, "post") },
+    /* KYLAS' OWN AUDIT FIELDS on the company record. Ayush, 2026-10-10:
+       "filter on the basis of Last Updated At, Last Created At, Last Updated
+       By, Last Created By (use Kylas' existing schema)". Off by default: they
+       are questions asked of the list now and then ("what did Ravi add last
+       week"), not something read on every row. Read from the Kylas crawl;
+       a company served from the Airtable copy carries only the update time. */
+    { k: "created", label: "Created at", w: ".8fr",
+      ff: { type: "date", get: (c) => c.createdAt || "" },
+      cell: (c) => esc(day(c.createdAt)) },
+    { k: "createdBy", label: "Created by", w: ".9fr",
+      ff: { type: "enum", get: (c) => c.createdBy || "" },
+      cell: (c) => dash(esc(c.createdBy || "")) },
+    { k: "updated", label: "Last updated at", w: ".8fr",
+      ff: { type: "date", get: (c) => c.updatedAt || "" },
+      cell: (c) => esc(day(c.updatedAt)) },
+    { k: "updatedBy", label: "Last updated by", w: ".9fr",
+      ff: { type: "enum", get: (c) => c.updatedBy || "" },
+      cell: (c) => dash(esc(c.updatedBy || "")) },
   ];
   const COL_DEFAULTS = ACOLS.filter((c) => c.on).map((c) => c.k);
   const colsOn = () => ACOLS.filter((c) => c.fixed || ACC.cols.has(c.k));
@@ -3280,24 +3348,32 @@
        Ayush, 2026-09-29: "today followup where next call date is of today,
        unke followup".
 
-       It counts the WHOLE account list, not the filtered rows — a promise
-       does not stop being due because you are looking at Series B companies
-       — and it says so when the two differ, or the number would look wrong
-       to anyone who had filtered. One line: the count is the message, and
-       one click filters to them. Nothing shows when nothing is owed, which
-       is most afternoons. Amber only when something is overdue: a broken
-       promise is a flag, work due today is not. */
+       IT COUNTS WHAT IS ON SCREEN. It used to count the whole account list,
+       on the argument that a promise does not stop being due because you are
+       looking at Series B companies — and Ayush, 2026-10-10, filtered to one
+       owner and one source and read "175" over a list where four were due:
+       "it still shows the cumulative account... should be a count in
+       accordance to the filters". So the number is the filtered one, split
+       the same way, and the whole list's total sits after it as a link, for
+       the morning when "everything I owe" is the question. Nothing shows
+       when nothing is owed anywhere. Amber only for overdue. */
     const due = { overdue: 0, today: 0 };
     for (const c of all) { const k = nextOf(c); if (k in due) due[k]++; }
     const owed = due.overdue + due.today;
-    const inView = shown.length < all.length || any;
-    const dueHere = inView ? rows.filter((c) => ["overdue", "today"].includes(nextOf(c))).length : owed;
-    const strip = !owed ? "" : `<div class="vrca vfu${due.overdue ? "" : " calm"}">
-      <b>${owed}</b>
-      <span>${[due.overdue ? `<b>${due.overdue}</b> overdue` : "",
-               due.today ? `<b>${due.today}</b> due today` : ""].filter(Boolean).join(" · ")
-        }${inView && dueHere !== owed ? ` — ${dueHere} of them in this filtered list` : ""}</span>
-      <button class="gbtn sm" id="accToday" type="button">Show them</button>
+    const filtered = rows.length < all.length || any;
+    const here = { overdue: 0, today: 0 };
+    for (const c of filtered ? rows : all) { const k = nextOf(c); if (k in here) here[k]++; }
+    const dueHere = here.overdue + here.today;
+    const allLink = filtered && owed !== dueHere
+      ? `<button class="linkbtn" id="accTodayAll" type="button">${owed} across all accounts</button>` : "";
+    const strip = !owed ? "" : `<div class="vrca vfu${here.overdue ? "" : " calm"}">
+      <b>${dueHere}</b>
+      <span>${dueHere
+          ? [here.overdue ? `<b>${here.overdue}</b> overdue` : "",
+             here.today ? `<b>${here.today}</b> due today` : ""].filter(Boolean).join(" · ")
+            + (filtered ? " in this filtered list" : "")
+          : "due in this filtered list"}${allLink ? ` · ${allLink}` : ""}</span>
+      ${dueHere ? `<button class="gbtn sm" id="accToday" type="button">Show them</button>` : ""}
     </div>`;
 
     return `
@@ -3319,8 +3395,13 @@
         </div>
         <div class="extools">
           <div class="srch">
-            <input id="accQ" type="search" value="${esc(ACC.q)}" placeholder="Search accounts…"
-              aria-label="Search accounts by name, owner, source or stage" autocomplete="off" spellcheck="false">
+            <select id="accQOp" class="srchop" aria-label="How to match">
+              ${Object.entries(Q_OPS).map(([k, o]) => `<option value="${k}"${(ACC.qOp || "contains") === k ? " selected" : ""}>${esc(o.label)}</option>`).join("")}
+            </select>
+            <input id="accQ" type="search" value="${esc(ACC.q)}" placeholder="${
+              (ACC.qOp || "contains") === "contains" ? "Search accounts… (or paste a list)" : "Company names, comma-separated or pasted"}"
+              aria-label="Search accounts" autocomplete="off" spellcheck="false">
+            ${qValues().length > 1 && ACC.q ? `<span class="srchn" title="${esc(qValues().join(", "))}">${qValues().length} values</span>` : ""}
           </div>
           ${ownerPicker(all)}
           <select id="accSort" aria-label="Sort">
@@ -3647,8 +3728,8 @@
     /* One definition, used by the first paint and by every filter tick. */
     const rowHTML = (c) => `
           <div class="vr${ACC.picked.has(String(c.id)) ? " on" : ""}" data-id="${esc(c.id)}">
-            <span class="c1">${API.isAdmin ? `<input class="cpick" type="checkbox" data-pick="${esc(c.id)}"
-              aria-label="Select ${esc(c.name)}"${ACC.picked.has(String(c.id)) ? " checked" : ""}>` : ""
+            <span class="c1">${`<input class="cpick" type="checkbox" data-pick="${esc(c.id)}"
+              aria-label="Select ${esc(c.name)}"${ACC.picked.has(String(c.id)) ? " checked" : ""}>`
             }<b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
             <span class="c2">${esc(label(c.stage) || "—")}</span>
             <span class="c3">${c.contacts.length}</span>
@@ -3943,7 +4024,15 @@
        filter is what this is, so it goes through the same state as the chips
        rather than becoming a fourth kind of view — Clear filters undoes it,
        and Copy link carries it. */
+    /* "Show them" narrows THIS list to what is due — the filters stay, so
+       it is the same accounts the number above counted. */
     on("accToday", "click", () => {
+      ACC.nextSet = new Set(["overdue", "today"]);
+      ACC.sort = "next"; ACC.limit = 100;
+      saveAccPrefs(); redraw();
+    });
+    /* "...across all accounts" clears everything else, as Show them used to. */
+    on("accTodayAll", "click", () => {
       ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
       ACC.focusSet.clear();
       for (const st of moreSets()) st.clear();
@@ -3978,6 +4067,24 @@
          "search pane se bahar nikal ja rahe hoon"). keepPlace waits for the
          paint and then puts the caret and the scroll back. */
       qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 200);
+    });
+    on("accQOp", "change", (e) => {
+      ACC.qOp = Q_OPS_KEYS.includes(e.target.value) ? e.target.value : "contains";
+      ACC.limit = 100; saveAccPrefs();
+      keepPlace(redraw).then(() => document.getElementById("accQ")?.focus()).catch(() => {});
+    });
+    /* A COLUMN PASTED OUT OF A SHEET. A one-line box would glue forty names
+       into one; they arrive comma-separated instead, which is what the
+       operators split on. */
+    on("accQ", "paste", (e) => {
+      const t = e.clipboardData?.getData("text") || "";
+      if (!/[\r\n]/.test(t.trim())) return;
+      e.preventDefault();
+      const box = e.target;
+      const list = t.split(/[\r\n]+/).map((x) => x.trim()).filter(Boolean).join(", ");
+      const a = box.selectionStart ?? box.value.length, b = box.selectionEnd ?? box.value.length;
+      box.value = box.value.slice(0, a) + list + box.value.slice(b);
+      box.dispatchEvent(new Event("input", { bubbles: true }));
     });
     on("accQ", "keydown", (e) => {
       if (e.key !== "Escape") return;
@@ -4318,6 +4425,27 @@
       ACC.busy = ""; redraw();
     });
     on("accPickClear", "click", () => { ACC.picked.clear(); ACC.busy = ""; redraw(); });
+    on("accFocusMany", "click", async () => {
+      const ids = new Set(ACC.picked);
+      const list = all.filter((c) => ids.has(String(c.id)));
+      if (!list.length) return;
+      /* The server takes 250 a request; say so here rather than send 600 and
+         be refused. */
+      if (list.length > 250) { ACC.busy = `${list.length} selected — add at most 250 at a time. Narrow the list, add, then the rest.`; redraw(); return; }
+      const btn = document.getElementById("accFocusMany");
+      if (btn) btn.disabled = true;
+      ACC.busy = `adding ${list.length} to Focus…`; redraw();
+      try {
+        const me = API.state.user?.email || API.state.user?.name || "";
+        const r = await global.Focus.addMany(list, { setBy: me });
+        ACC.busy = `★ ${r.written} added to Focus` +
+          (r.skipped ? ` · ${r.skipped} already on a list or deprioritized, left as they were` : "") + ".";
+        ACC.picked.clear();
+      } catch (e) {
+        ACC.busy = `Could not add to Focus — ${String(e.message || e).slice(0, 160)}`;
+      }
+      redraw();
+    });
     on("accTo", "change", () => {
       const go = document.getElementById("accGo");
       if (go) go.disabled = !document.getElementById("accTo").value;

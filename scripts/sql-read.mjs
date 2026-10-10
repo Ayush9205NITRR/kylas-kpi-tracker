@@ -52,6 +52,7 @@ export async function readCompaniesSql(db) {
       website: r.website || null,
       owner: r.owner || "",
       ownerId: String(r.kylas_owner_id || ""),
+      updatedAt: r.kylas_updated_at || null,
       /* A company with no Kylas id cannot be joined to anything the console
          holds, and readCompanyKpis skips it — so no KPI block here either,
          or the two sides would differ on a row neither can use. */

@@ -164,6 +164,13 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A remembered answer is never re-asked.** The company crawl remembers which
+request shape Kylas accepted (`company-shape` in the store) and goes straight
+to it on every cold start. 1.58 added a shape above the remembered one (lean
+fields + Kylas' audit fields, for the Created/Updated filters) — and no server
+would ever have tried it. The key is now `company-shape-v2`, so each probes
+once; a new shape above the remembered one needs the key moved again.
+
 **A save made with the accounts view open asked Kylas for every company.**
 `savedLanded()` re-read the list with `force`, which sends `?fresh=1`, which
 sets `companies-want-fresh`, which makes the next minute's `maintain()` crawl

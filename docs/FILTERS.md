@@ -17,6 +17,18 @@ on it, which nobody reports as a bug.
 
 ---
 
+## The search box has operators too
+
+Beside the search box: **contains** (the default — every word, anywhere on the
+row: name, owner, source, stages), and Kylas' own string operators on the
+company **name**: **is**, **is not**, **does not contain**, **begins with**.
+Each takes many values at once — comma-separated, or a column pasted out of a
+sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
+"is not" and "does not contain" match *none*. The operator rides in the URL
+(`qop=`), so Copy link carries it.
+
+---
+
 ## The six types
 
 | type | operators | value control |
@@ -53,6 +65,10 @@ on it, which nobody reports as a bug.
 | Demand team stage | Single select | `enrich.aps` | Company List's `Account Pipeline Stage`, a reference the demand team maintains by hand. Off by default |
 | LinkedIn | Link | `enrich.li` | |
 | Boolean post | Link | `enrich.bp` | whichever of the three Boolean columns is filled |
+| Created at | **Date** | `createdAt` | Kylas' own audit field on the company. Off by default |
+| Created by | Single select | `createdBy` | the Kylas user who created the company record |
+| Last updated at | **Date** | `updatedAt` | the company record's last change in Kylas — not the last call |
+| Last updated by | Single select | `updatedBy` | the Kylas user who last changed it |
 
 ### Three stages, and why all three are here
 

@@ -72,6 +72,11 @@ const COMPANIES = {
       cfSourceOfData: "COLD_CALLING", cfAccountHealthBd: "AMBER",
       cfLastCalledAtDate: "2026-04-17", cfWebsite: "http://www.seats.aero",
     },
+    /* Kylas' audit fields, both shapes a user comes back in: a bare id named
+       through metaData, and an {id, name} object. */
+    createdAt: "2026-03-02T09:15:00.000Z", updatedAt: "2026-10-01T12:00:00.000Z",
+    createdBy: 74725, updatedBy: { id: 74726, name: "Priya Deshmukh" },
+    metaData: { idNameStore: { createdBy: { 74725: "Enout Super Admin" } } },
   },
   903: { id: 903, name: "Shorehouse Retail", ownerId: 74726, customFieldValues: {} },
   /* Allotted, never worked: no contacts point at it. A companies list derived
@@ -143,7 +148,10 @@ const CONTACTS = [
     linkedin: "https://linkedin.com/in/hema-bharathi",
     emails: [{ type: "OFFICE", value: "hema@seats.aero", primary: true }],
     phoneNumbers: [{ type: "MOBILE", dialCode: "+91", code: "IN", value: "9876501234", primary: true }],
-    customFieldValues: { cfPipelineStageBd: id("MQL_MARKETING_QUALIFIED_LEAD"), cfSourceOfData: "Round-Robin" },
+    /* cfRemarks: the team's own Remarks custom field — what "Said before"
+       now reads first (2026-10-10). Rich text, as Kylas stores it. */
+    customFieldValues: { cfPipelineStageBd: id("MQL_MARKETING_QUALIFIED_LEAD"), cfSourceOfData: "Round-Robin",
+                         cfRemarks: "<p>Spoke in March — budget sits with the CFO, call after the 20th.</p>" },
     updatedAt: "2026-09-15T10:02:00.000Z" },
 
   { id: 112937, firstName: "Shipra", lastName: "Gupta", ownerId: 74726,

@@ -21,7 +21,7 @@
  *
  * Every request is a GET. Nothing is written.
  */
-import { createClient, callNotes, toConsoleContact } from "./kylas.mjs";
+import { createClient, callNotes, toConsoleContact, kylasRemarksOf } from "./kylas.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
@@ -50,6 +50,15 @@ const mapped = toConsoleContact(c, {});
 const human = String(mapped.remarks || "").split("--- BD CONSOLE (auto")[0].trim();
 console.log(`\n1 · REMARKS FIELD on the contact`);
 console.log(human ? `  "${clip(human, 300)}"` : "  (empty — nothing typed here, or only the console's own block)");
+
+/* 1b · the team's Remarks CUSTOM field — what "Said before" reads first
+   since 1.58. Every custom field with "remark" in its name is listed, so a
+   field Kylas named differently shows up here rather than reading as empty. */
+console.log(`\n1b · REMARKS CUSTOM FIELD (cfRemarks)`);
+const cfKeys = Object.keys(c?.customFieldValues || {}).filter((k) => /remark/i.test(k));
+console.log(cfKeys.length ? `  fields: ${cfKeys.join(", ")}` : "  no custom field with \"remark\" in its name on this contact");
+const kr = kylasRemarksOf(c);
+console.log(kr ? `  reads as: "${clip(kr, 300)}"` : "  (empty)");
 
 /* 2 · call logs */
 console.log(`\n2 · CALL LOGS — what the strip now reads`);

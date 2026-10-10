@@ -446,17 +446,20 @@ const humanNote=s=>{
    no answer, next, and it must not wait on a second request. When the notes
    arrive the strip is swapped in place, and only if the same contact is still
    on screen. */
-const HIST=new Map(), HIST_WAIT=new Set();
+/* HREM: the contact's Remarks custom field (cfRemarks) as Kylas holds it,
+   which arrives with the call notes — the card is usually served from the
+   Airtable copy, which never had it. */
+const HIST=new Map(), HIST_WAIT=new Set(), HREM=new Map();
 function loadHistory(a){
   const kid=String(a?.kid||"");
   if(!kid||HIST.has(kid)||HIST_WAIT.has(kid)||typeof API==="undefined"||!API.history)return;
   HIST_WAIT.add(kid);
-  API.history(kid).then(r=>HIST.set(kid,Array.isArray(r?.items)?r.items:[]))
+  API.history(kid).then(r=>{HIST.set(kid,Array.isArray(r?.items)?r.items:[]);if(r?.remarks)HREM.set(kid,String(r.remarks));})
     .catch(()=>HIST.set(kid,[]))
     .finally(()=>{
       HIST_WAIT.delete(kid);
       const cur=rec();
-      if(String(cur?.kid||"")!==kid||!(HIST.get(kid)||[]).length)return;
+      if(String(cur?.kid||"")!==kid||(!(HIST.get(kid)||[]).length&&!HREM.get(kid)))return;
       const C=document.getElementById("callbar");if(!C)return;
       const box=prevNotes(cur,HIST.get(kid));if(!box)return;
       const old=C.querySelector(".pnote");
@@ -473,6 +476,10 @@ function prevNotes(a,hist=[]){
   /* Earlier calls first, newest at the top: the last thing said is the one
      the associate needs before the ringing starts. */
   const owns=[];
+  /* The team's Remarks field in Kylas first: it is what somebody chose to
+     write down about this person, rather than what a call log caught. */
+  const kr=String(a.kylasRemarks||HREM.get(String(a.kid||""))||"").trim();
+  if(kr)owns.push(["Remarks",kr]);
   const own=humanNote(a.remarks);
   const rows=[];
   for(const r of [...(a.past||[]),...(a.current||[])]){
