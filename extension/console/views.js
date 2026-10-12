@@ -1146,8 +1146,18 @@
     if (!m) return Number(s) > 0 ? "<1m" : "—";
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
+  /* TALK TIME SAYS HOW MUCH OF IT IS KNOWN. Ayush, 2026-10-12: "galat dikha
+     rahe hai". The console times a call only when it is dialled from its own
+     button — 7 of 1,379 on that day — and the rest were being summed as zero
+     seconds, so a month of calling read as three minutes. Unknown is not
+     zero: the total stands beside how many calls it covers. */
+  const talkCell = (s, p) => {
+    const timed = Number(p?.timedCalls || 0), calls = Number(p?.calls || 0);
+    if (!timed) return calls ? `<span class="nt" title="None of these ${calls} calls was dialled from the console, so none was timed">not timed</span>` : "—";
+    return `${fmtTalk(s)}${timed < calls ? ` <small class="cov" title="Only calls dialled from the console's own button are timed">${timed}/${calls} timed</small>` : ""}`;
+  };
   const COUNT_COLS = [{ key: "calls", label: "Calls" },
-    { key: "talkSeconds", label: "Talk time", fmt: fmtTalk, noDelta: true },
+    { key: "talkSeconds", label: "Talk time", fmt: talkCell, noDelta: true },
     ...LADDER_ORDER.map((key) => ({ key, label: rung(key) }))];
   /* Each rate is this rung out of the one above it, so the pairs follow the
      ladder's own order rather than being listed by hand.
@@ -1389,16 +1399,17 @@
                  they carry no step number and no conversion, and sit above
                  the rungs under their own rule. Same report, same period. */
               [{ key: "calls", name: "Calls", fmt: (v) => String(v || 0) },
-               { key: "talkSeconds", name: "Talk time", fmt: fmtTalk }].map((a, j) => {
+               { key: "talkSeconds", name: "Talk time", fmt: (v, p) => talkCell(v, p) }].map((a, j) => {
                 const top = Math.max(1, ...people.map((p) => p[a.key] || 0));
                 return `<tr class="act${j === 1 ? " last" : ""}">
                 <td class="rung"><span class="rungname">${esc(a.name)}</span></td>
-                <td class="teamcol"><b class="tnum">${a.fmt(cur[a.key])}</b>${
+                <td class="teamcol"><b class="tnum">${a.fmt(cur[a.key], cur)}</b>${
                   prev && a.key === "calls" ? deltaHTML(cur.delta ? cur.delta.calls : null) : ""}</td>
-                <td class="conv">${j === 0 ? `<span>calls, not companies</span>` : ""}</td>
+                <td class="conv">${j === 0 ? `<span>calls, not companies</span>`
+                  : `<span>timed only when dialled from the console</span>`}</td>
                 ${people.map((p) => {
                   const v = p[a.key] || 0;
-                  return `<td><div class="cellv tnum${v ? "" : " zero"}">${a.fmt(v)}</div>
+                  return `<td><div class="cellv tnum${v ? "" : " zero"}">${a.fmt(v, p)}</div>
                     <div class="lbar"><i class="r1" style="width:${v / top * 100}%"></i></div></td>`;
                 }).join("")}
               </tr>`;
@@ -1519,7 +1530,7 @@
       <tr${p.key === cur.key ? ' class="now"' : ""}${
         canDrill ? ` data-into="${esc(p.key)}" tabindex="0" role="button"` : ""}>
         <td class="pl">${esc(p.label)}${canDrill ? `<i class="into">\u203a</i>` : ""}</td>
-        ${COUNT_COLS.map((c) => `<td class="tnum">${c.fmt ? c.fmt(p[c.key]) : p[c.key] || 0}${c.noDelta ? "" : 
+        ${COUNT_COLS.map((c) => `<td class="tnum">${c.fmt ? c.fmt(p[c.key], p) : p[c.key] || 0}${c.noDelta ? "" : 
           p.delta && p.delta[c.key] ? ` ${deltaHTML(p.delta[c.key])}` : ""}</td>`).join("")}
         ${RATE_COLS.map((c) => `<td class="tnum rt">${rate(p, c)}</td>`).join("")}
       </tr>`).join("");

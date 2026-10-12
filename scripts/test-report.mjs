@@ -409,6 +409,11 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   eq("a rolled-up day carries its total", day("2026-10-05").talkSeconds, 1800);
   eq("the window total", r.totals.talkSeconds, 3020);
   eq("per owner too", (r.byOwner || []).find((o) => o.owner === "B")?.talkSeconds, 900);
+  /* 2026-10-12: the total is read beside how many calls it covers. */
+  eq("timed calls on the 6th: three of four had a duration", day("2026-10-06").timedCalls, 3);
+  eq("...out of four calls", day("2026-10-06").calls, 4);
+  eq("the window's timed calls (a rolled-up group with seconds counts whole)", r.totals.timedCalls, 15);
+  eq("per owner: B timed one of two", (r.byOwner || []).find((o) => o.owner === "B")?.timedCalls, 1);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

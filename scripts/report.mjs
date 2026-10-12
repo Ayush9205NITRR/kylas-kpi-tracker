@@ -197,7 +197,14 @@ export const METRICS = [
 /* `talkSeconds` — the day's talk time, summed from the calls' durations.
    Ayush, 2026-10-10: "dashboard mein daily talk time ka option add karo". Not
    a rung either: a total of seconds, shown beside Calls. */
-const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0, doneSql: 0, talkSeconds: 0 });
+/* `timedCalls` — how many of the calls HAVE a duration. Ayush, 2026-10-12:
+   "talk time kahan se utha rahe ho, galat dikha rahe hai". The console only
+   times a call dialled from its own button; on 2026-10-12 that was 7 of
+   1,379, so talkSeconds read as the team's talk time was 3 minutes for a
+   month. The total is only honest beside how many calls it covers — a call
+   with no duration is UNKNOWN, not zero seconds. */
+const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0, doneSql: 0,
+                       talkSeconds: 0, timedCalls: 0 });
 
 /* ── the aggregation ───────────────────────────────────────────────── */
 /* calls:        [{ at, owner, outcome, secs }]   secs: the call's duration, or
@@ -369,7 +376,13 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
        would make a year of history a million allocations. */
     const n = Number(c.n) > 0 ? Number(c.n) : 1;
     bump(key(c.at), c.owner, "calls", n);
-    if (Number(c.secs) > 0) bump(key(c.at), c.owner, "talkSeconds", Number(c.secs));
+    if (Number(c.secs) > 0) {
+      bump(key(c.at), c.owner, "talkSeconds", Number(c.secs));
+      /* A rolled-up row does not say how many of its calls were timed; any
+         seconds at all count it as the whole group's — an upper bound, and
+         Call Rollup has held no talk seconds so far. */
+      bump(key(c.at), c.owner, "timedCalls", n);
+    }
     /* "Connected" is any outcome that is not a no-answer. A dial that nobody
        picked up is work, but it is not a conversation. */
     if (c.outcome && c.outcome !== "No answer") bump(key(c.at), c.owner, "connects", n);
@@ -462,6 +475,7 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
     acc.bookedHeld += r.bookedHeld;    /* not a METRIC, so not in that loop */
     acc.doneSql += r.doneSql;
     acc.talkSeconds += r.talkSeconds;
+    acc.timedCalls += r.timedCalls;
     return acc;
   }, blank());
 
