@@ -1840,6 +1840,8 @@
         <button class="gbtn sm" id="dRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the list, and ask the server to pull fresh stage changes from Kylas">${
             loading ? "refreshing…" : "Refresh"}</button>
+        <button class="linkbtn" id="dLocal" type="button"
+          title="Dials and talk time saved from this Chrome only, and the capture export">Calls saved in this browser</button>
       </div>
       ${CACHE.error ? (API.needsSignIn
         ? signInNote("showing only the companies this browser holds, so these counts are not your real funnel")
@@ -1871,6 +1873,8 @@
            one line. */
         team ? `<div class="vsec">${stepTable(cos, (c) => c.owner)}</div>` : ""}`;
 
+    const lc = document.getElementById("dLocal");
+    if (lc) lc.onclick = () => global.openLocalDash?.();
     const sel = document.getElementById("dOwner");
     /* No network: the whole account is already held, so this is a filter. */
     if (sel) sel.onchange = () => { DASH_OWNER = sel.value; dashboard(host); };

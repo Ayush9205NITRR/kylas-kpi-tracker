@@ -40,8 +40,8 @@ const walk = [];
 for (let i=0;i<3;i++){ await page.keyboard.press('1'); await page.waitForTimeout(250); walk.push(await F().evaluate(()=>rec().stage)); }
 console.log('CNC walk       :', walk.join(' -> '));
 
-// dashboard sheet
-await F().locator('#dashBtn').click(); await page.waitForTimeout(700); f = F();
+// the browser-only sheet (the Dashboard button opens the funnel view since 1.59.3)
+await F().evaluate(() => window.openLocalDash()); await page.waitForTimeout(700); f = F();
 console.log('dashboard sheet:', await f.locator('.sheet.wide').count(), '| tiles', await f.locator('.gt').count(), '| data link', await f.locator('#gdata').count());
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 

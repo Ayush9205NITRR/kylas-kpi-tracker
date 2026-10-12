@@ -609,7 +609,7 @@
     await Store.freezeDays();
     const s = el("div", "scrim");
     s.innerHTML = `<div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="gh">
-      <div class="h"><h3 id="gh">Dashboard</h3><button class="gbtn" id="gx" type="button">Close</button></div>
+      <div class="h"><h3 id="gh">Calls saved in this browser</h3><button class="gbtn" id="gx" type="button">Close</button></div>
       <div class="b"><div class="rtabs" id="rtabs"></div><div id="gbody"></div></div></div>`;
     document.body.appendChild(s);
     s.onclick = (e) => { if (e.target === s) s.remove(); };
@@ -666,8 +666,17 @@
     paint();
   }
 
+  /* THE DASHBOARD BUTTON OPENS THE DASHBOARD. It opened the sheet above,
+     which counts only the calls saved in THIS browser — so for anyone who had
+     not dialled from this exact Chrome it was six zeros, and for an admin it
+     was always six zeros. Ayush, 2026-10-12: "Dashboard section above is not
+     working". The real one — the ladder, Me / Everyone, talk time, from
+     Airtable — was reachable only through "← Dashboard". The browser-only
+     sheet stays, one link away inside it ("Calls saved in this browser"),
+     because the capture export lives there. */
+  window.openLocalDash = openDash;
   const dashBtn = document.getElementById("dashBtn");
-  if (dashBtn) dashBtn.onclick = openDash;
+  if (dashBtn) dashBtn.onclick = () => showView("dashboard");
 
   /* Catch up on any days that ended while the console was closed. */
   Store.freezeDays();

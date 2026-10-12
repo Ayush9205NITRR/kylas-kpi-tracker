@@ -8,7 +8,8 @@
  *   3  Created at / by and Last updated at / by, from Kylas' audit fields
  *   4  bulk "Add to Focus" for anyone: only the ticked rows in the list on
  *      screen, split into batches the server takes, the bar one line per job
- *   5  Back: card -> accounts (scroll kept) -> dashboard -> nothing further
+ *   5  Back: card -> accounts (scroll kept) -> dashboard -> nothing further;
+ *      the Dashboard button opens that dashboard
  *   6  "Said before" reads the contact's Remarks custom field (cfRemarks)
  *
  * NEEDS the stack and the :8778 stub as test-console-ux-live.mjs says, with
@@ -159,6 +160,19 @@ ok('...and Back now says Dashboard', /Dashboard/.test(await back()), await back(
 await f.locator('#backBtn').click();await page.waitForTimeout(4000);
 ok('Back from the list goes to the dashboard', await vw()==='dashboard');
 ok('...where there is no further Back', await back()==='hidden');
+
+console.log('\n5b · the Dashboard button opens the dashboard, not the browser-only sheet');
+/* Ayush, 2026-10-12: "Dashboard section above is not working" — the button
+   opened six zeros counted from this browser's own saves. */
+await f.locator('#vwrap .vr').first().waitFor({timeout:1}).catch(()=>{});
+await f.locator('#backBtn').isHidden() || await f.locator('#backBtn').click();
+await f.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.id==='dashBtn');b.click();});await page.waitForTimeout(4000);
+ok('Dashboard opens the funnel view', await vw()==='dashboard' && /funnel/i.test(await f.evaluate(()=>document.querySelector('#vwrap h2')?.textContent||'')),
+   await f.evaluate(()=>document.querySelector('#vwrap h2')?.textContent||''));
+ok('...not the browser-only sheet', await f.evaluate(()=>!document.querySelector('.scrim .sheet')));
+await f.locator('#dLocal').click();await page.waitForTimeout(800);
+ok('the browser-only sheet is one link away, and says what it is', /saved in this browser/.test(await f.evaluate(()=>document.getElementById('gh')?.textContent||'')));
+await f.evaluate(()=>document.querySelector('.scrim')?.remove());
 
 console.log('\n6 · Said before reads the Remarks custom field');
 page.on('console',m=>{if(/contact|history|kylas/i.test(m.text()))console.log('   [console] '+m.text().slice(0,160));});
