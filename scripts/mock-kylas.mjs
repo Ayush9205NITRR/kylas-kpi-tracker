@@ -488,12 +488,46 @@ createServer(async (req, res) => {
   /* A company update. Strict about being sent the WHOLE record, as a PUT
      that replaces it would be: a body without the name is refused rather than
      wiping it, so a client that sends only the changed field fails loudly. */
+  /* Create and delete, for bulk-tag-companies.mjs' throwaway canary. A new
+     company is owned by the key's user, as Kylas does. */
+  if (p === "/v1/companies" && req.method === "POST") {
+    const body = JSON.parse(await text(req));
+    if (!body.name) return json(res, 400, { code: "001001", message: "name is required" });
+    const id = 9000000 + Object.keys(COMPANIES).length;
+    COMPANIES[id] = { id, ownerId: 74725, customFieldValues: {}, ...body,
+                      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    WRITES.push({ kind: "company-create", id, body });
+    return json(res, 200, COMPANIES[id]);
+  }
+  const coDel = p.match(/^\/v1\/companies\/(\d+)$/);
+  if (coDel && req.method === "DELETE") {
+    if (!COMPANIES[coDel[1]]) return json(res, 404, { message: "no such company" });
+    delete COMPANIES[coDel[1]];
+    WRITES.push({ kind: "company-delete", id: Number(coDel[1]) });
+    return json(res, 200, {});
+  }
+
   const coPut = p.match(/^\/v1\/companies\/(\d+)$/);
   if (coPut && req.method === "PUT") {
     const body = JSON.parse(await text(req));
     if (!COMPANIES[coPut[1]]) return json(res, 404, { message: "no such company" });
     if (!body.name) return json(res, 400, { code: "001001", message: "name is required" });
-    COMPANIES[coPut[1]] = { ...COMPANIES[coPut[1]], ...body, updatedAt: new Date().toISOString() };
+    /* MOCK_COMPANY_PUT says what an update does to the record:
+         merge (default)     the body over the record
+         replace-drop-owner  what live Kylas did to lucidity on 2026-09-30:
+                             the body REPLACES the record and any owner in it
+                             is dropped, so the account comes out ownerless
+         replace-keep-owner  the body replaces the record, the owner is kept
+                             (Kylas' documented Update Company has no owner)
+       bulk-tag-companies.mjs' canary is tested against all three. */
+    const mode = process.env.MOCK_COMPANY_PUT || "merge";
+    const prev = COMPANIES[coPut[1]];
+    const { ownerId: _o, owner: _ow, ...rest } = body;
+    COMPANIES[coPut[1]] = mode === "replace-drop-owner"
+      ? { id: prev.id, ...rest, updatedAt: new Date().toISOString() }
+      : mode === "replace-keep-owner"
+        ? { id: prev.id, ownerId: prev.ownerId, ...rest, updatedAt: new Date().toISOString() }
+        : { ...prev, ...body, updatedAt: new Date().toISOString() };
     WRITES.push({ kind: "company-update", id: Number(coPut[1]), body });
     return json(res, 200, COMPANIES[coPut[1]]);
   }

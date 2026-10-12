@@ -20,3 +20,7 @@ screenshots/
 
 db/*.sqlite
 db/*.sqlite-journal
+
+# bulk-tag-companies.mjs: the canary verdict and the before-write snapshots (company data)
+.bulk-tag-canary.json
+bulk-tag-*.json
