@@ -698,6 +698,10 @@ export function createClient(key, {
          - a log that says which contact it is about must name this one. */
     callLogs: async (contactId) => {
       const id = String(contactId);
+      /* Known to be ignored (Ayush's account, 2026-10-12: the same ten logs
+         for his contact and for an id nobody has) — do not spend a Kylas
+         request per contact opened to learn it again. */
+      if (callLogFilterHonoured === false) return { content: [] };
       const q = (who) => call("GET",
         /* NO page/size: with them this read answers 404 on the live account
            (probe, 2026-10-10); without them it answers. */
