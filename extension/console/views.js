@@ -2116,7 +2116,7 @@
                    indexes: the list re-sorts and re-filters under the ticks,
                    and an index would silently come to mean a different
                    company. Survives a repaint for the same reason. */
-                picked: new Set(), busy: "",
+                picked: new Set(), busy: "", adding: false,
                 sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
@@ -2623,6 +2623,11 @@
             ...FB_EXTRA().map((f) => build(f.k, f.label, f))];
   }
   let FB_CACHE = [];
+  /* THE ROWS THE ACCOUNTS LIST PAINTED — search, operators, chips and all.
+     The bulk handlers are bound in companies(), where `rows` is the OTHER
+     view's list (all.filter(keep)), which ignores the accounts search. They
+     read this instead. Ayush, 2026-10-12: "Select these 59" ticked 18,062. */
+  let EXPLORER_ROWS = [];
   const fbField = (k) => FB_CACHE.find((f) => f.k === k) || FB_CACHE[0];
 
   /* A condition is { f, op, v: [] }. A group is { join, items: [condition] }.
@@ -2843,37 +2848,67 @@
      accounts at one go into the focus list (every owner can do the same)".
      Ticking rows and "Add to Focus" is for anyone — it is their own list.
      Moving contacts stays admin-only, below the same bar. */
+  /* ONLY WHAT IS IN THIS LIST. Ayush, 2026-10-12, a list of 59 under a bar
+     reading "18062 selected" and a refusal: ticks made on an earlier, wider
+     list stayed ticked when the filter narrowed, and the actions took all of
+     them. So every action takes the ticked rows that are IN FRONT OF THEM;
+     ticks outside the list are named, left out, and can be forgotten. The
+     safety story above depended on exactly this and had quietly lost it. */
+  const pickedIn = (rows) => rows.filter((r) => ACC.picked.has(String(r.id)));
+  /* The server takes FOCUS_BULK (250) a request. The console splits a bigger
+     selection itself instead of refusing it — matches scripts/handlers.mjs.
+     A test with a 43-account fixture sets __FOCUS_BULK to see the split. */
+  const focusBulk = () => Number(global.__FOCUS_BULK) || 250;
   function bulkBar(rows) {
-    const n = ACC.picked.size;
+    const mine = pickedIn(rows);
+    const n = mine.length;
+    const away = ACC.picked.size - n;
     const shown = rows.length;
-    const allShown = shown > 0 && rows.every((r) => ACC.picked.has(String(r.id)));
+    const allShown = shown > 0 && n === shown;
+    const msg = ACC.busy ? `<div class="exbrow exbmsg" role="status">${esc(ACC.busy)}</div>` : "";
+    const awayRow = away > 0 ? `<div class="exbrow exbaway">
+        <span>${away} more ticked earlier ${away === 1 ? "is" : "are"} not in this list — left out of everything below.</span>
+        <button class="linkbtn" id="accPickForget" type="button">Forget them</button></div>` : "";
     if (!n) return `<div class="exbulk idle">
-      <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
-      <span class="exbh">…to add them to your Focus list${API.isAdmin ? ", or re-assign them to somebody else" : ""}.</span>
-      ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}</div>`;
+      <div class="exbrow">
+        <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
+        <span class="exbh">…or tick rows, to add them to your Focus list${API.isAdmin ? ", or move their contacts to somebody else" : ""}.</span>
+      </div>${awayRow}${msg}</div>`;
+    const batches = Math.ceil(n / focusBulk());
     return `<div class="exbulk">
-      <span class="exbn tnum">${n} selected</span>
-      <button class="gbtn sm" id="accPickAll" type="button">${
-        allShown ? "Select none" : `Select these ${shown}`}</button>
-      <button class="gbtn sm" id="accFocusMany" type="button">★ Add to Focus</button>
-      ${API.isAdmin ? `<label class="exbto">Move their contacts to
-        <select id="accTo" aria-label="Move the contacts on these accounts to">
-          <option value="">choose a person…</option>
-          ${ownerOptions().map((o) =>
-            `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
-        </select></label>
-      <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>` : ""}
-      <button class="gbtn sm" id="accPickClear" type="button">Clear</button>
-      ${ACC.busy ? `<span class="exbmsg">${esc(ACC.busy)}</span>` : ""}
+      <div class="exbrow exbsel">
+        <span class="exbk">Selected</span>
+        <span class="exbn tnum">${n} of ${shown} in this list</span>
+        <button class="gbtn sm" id="accPickAll" type="button">${
+          allShown ? "Select none" : `Select all ${shown}`}</button>
+        <button class="gbtn sm" id="accPickClear" type="button">Clear selection</button>
+      </div>
+      ${awayRow}
+      <div class="exbrow">
+        <span class="exbk">Focus</span>
+        <button class="gbtn sm pri" id="accFocusMany" type="button"${ACC.adding ? " disabled" : ""}>★ Add ${n} to my Focus</button>
+        <span class="exbh">${batches > 1 ? `Sent in ${batches} batches of up to ${focusBulk()}. ` : ""}Accounts already on a list or deprioritized are left as they are.</span>
+      </div>
       ${/* SAY WHAT IT DOES NOT DO, ON THE CONTROL ITSELF. Kylas accepts a
            company PUT carrying ownerId and silently drops it, so the account's
            own owner cannot be set through the API at all — an earlier version
            of this button erased one instead of moving it. The contacts are
            what move, and a person about to click needs to know that here,
            not in a release note. */ ""}
-      ${API.isAdmin ? `<p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
+      ${API.isAdmin ? `<div class="exbrow">
+        <span class="exbk">Re-assign</span>
+        <label class="exbto">Move their contacts to
+          <select id="accTo" aria-label="Move the contacts on these accounts to">
+            <option value="">choose a person…</option>
+            ${ownerOptions().map((o) =>
+              `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
+          </select></label>
+        <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>
+      </div>
+      <p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
         not let this tool change an account's own owner — do that in Kylas.
         Nothing is written until you have seen the count.</p>` : ""}
+      ${msg}
     </div>`;
   }
   /* The people an account can be handed TO. Names alone are not enough — the
@@ -3354,6 +3389,7 @@
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
     const rows = all.filter((c) => accMatch(c)).sort(cmp);
+    EXPLORER_ROWS = rows;
     const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
       || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
 
@@ -4453,31 +4489,47 @@
     });
     on("accPickAll", "click", () => {
       /* THE ROWS IN FRONT OF THEM, never the whole account. */
-      const ids = rows.map((r) => String(r.id));
+      const ids = EXPLORER_ROWS.map((r) => String(r.id));
       const allOn = ids.length && ids.every((i) => ACC.picked.has(i));
       if (allOn) ids.forEach((i) => ACC.picked.delete(i));
       else ids.forEach((i) => ACC.picked.add(i));
       ACC.busy = ""; redraw();
     });
     on("accPickClear", "click", () => { ACC.picked.clear(); ACC.busy = ""; redraw(); });
+    on("accPickForget", "click", () => {
+      const here = new Set(EXPLORER_ROWS.map((r) => String(r.id)));
+      for (const id of [...ACC.picked]) if (!here.has(id)) ACC.picked.delete(id);
+      ACC.busy = ""; redraw();
+    });
     on("accFocusMany", "click", async () => {
-      const ids = new Set(ACC.picked);
-      const list = all.filter((c) => ids.has(String(c.id)));
-      if (!list.length) return;
-      /* The server takes 250 a request; say so here rather than send 600 and
-         be refused. */
-      if (list.length > 250) { ACC.busy = `${list.length} selected — add at most 250 at a time. Narrow the list, add, then the rest.`; redraw(); return; }
-      const btn = document.getElementById("accFocusMany");
-      if (btn) btn.disabled = true;
-      ACC.busy = `adding ${list.length} to Focus…`; redraw();
+      /* The ticked rows IN THIS LIST — never ticks left from a wider one. */
+      const list = pickedIn(EXPLORER_ROWS);
+      if (!list.length || ACC.adding) return;
+      /* A batch at a time, in order, so one failure says how far it got and
+         the batches already written stay written. */
+      ACC.adding = true;
+      const me = API.state.user?.email || API.state.user?.name || "";
+      let written = 0, skipped = 0, sent = 0;
       try {
-        const me = API.state.user?.email || API.state.user?.name || "";
-        const r = await global.Focus.addMany(list, { setBy: me });
-        ACC.busy = `★ ${r.written} added to Focus` +
-          (r.skipped ? ` · ${r.skipped} already on a list or deprioritized, left as they were` : "") + ".";
-        ACC.picked.clear();
+        const size = focusBulk();
+        for (let i = 0; i < list.length; i += size) {
+          const part = list.slice(i, i + size);
+          ACC.busy = list.length > size
+            ? `Adding to Focus… ${sent} of ${list.length} done`
+            : `Adding ${list.length} to Focus…`;
+          redraw();
+          const r = await global.Focus.addMany(part, { setBy: me });
+          written += r.written || 0; skipped += r.skipped || 0; sent += part.length;
+          for (const c of part) ACC.picked.delete(String(c.id));
+        }
+        ACC.busy = `★ ${written} added to your Focus list` +
+          (skipped ? ` · ${skipped} already on a list or deprioritized, left as they were` : "") + ".";
       } catch (e) {
-        ACC.busy = `Could not add to Focus — ${String(e.message || e).slice(0, 160)}`;
+        ACC.busy = (sent ? `${written} added, then it stopped at ${sent} of ${list.length} — ` : "") +
+          `could not add to Focus: ${String(e.message || e).slice(0, 160)}` +
+          (sent ? ". The rest are still ticked — press Add again." : "");
+      } finally {
+        ACC.adding = false;
       }
       redraw();
     });
@@ -4490,7 +4542,8 @@
       const ownerId = sel?.value;
       if (!ownerId) return;
       const toName = sel.options[sel.selectedIndex]?.text || "them";
-      const ids = [...ACC.picked];
+      const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
+      if (!ids.length) return;
       const go = document.getElementById("accGo");
       if (go) go.disabled = true;
       try {
@@ -4516,7 +4569,7 @@
         const r = await API.reassign(ids, ownerId);
         const failed = r.failed?.length ? ` · ${r.failed.length} failed` : "";
         ACC.busy = `Moved ${r.contacts} contact(s) across ${r.moved} account(s) to ${toName}${failed}.`;
-        ACC.picked.clear();
+        ids.forEach((i) => ACC.picked.delete(i));
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
         redraw();

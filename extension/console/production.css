@@ -506,18 +506,41 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
 /* HANDING ACCOUNTS OVER. Structure, not a new hue: the bar is the same card
    surface with a rule above it, and the one accent it uses is --blue, which
    is the accent this console already has. */
-.exbulk{flex:1 0 100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  margin-top:10px;padding:10px 12px;border-radius:var(--r);
+/* ONE LINE PER JOB, stacked, each led by its label: what is selected, then
+   Focus, then (admins) re-assign, then what happened. It was one wrapping
+   flex row, and at console width the buttons, the select and the note piled
+   into each other — Ayush, 2026-10-12: "list everything clearly". */
+.exbulk{flex:1 0 100%;display:flex;flex-direction:column;align-items:stretch;gap:0;
+  margin-top:10px;padding:0;border-radius:var(--r);
   background:var(--panel2);border:1px solid var(--line2)}
+.exbulk .exbrow{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;
+  padding:9px 12px;min-width:0}
+.exbulk .exbrow+.exbrow,.exbulk .exbnote+.exbrow{border-top:1px solid var(--line2)}
+/* The row's label: a fixed column, so the four rows' controls line up. */
+.exbulk .exbk{flex:0 0 72px;font-size:var(--t-meta);font-weight:var(--w-strong);
+  color:var(--text3);text-transform:uppercase;letter-spacing:.04em}
+.exbulk .exbh{flex:1 1 220px;min-width:0;font-size:var(--t-meta);color:var(--text3)}
 /* Nothing ticked: one quiet button, so the control is discoverable without a
    permanent "re-assign everything" sitting on a list of 17,925. */
-.exbulk.idle{background:transparent;border-style:dashed;padding:7px 12px}
-.exbulk.idle .exbh{font-size:var(--t-meta);color:var(--text3)}
+.exbulk.idle{background:transparent;border-style:dashed}
+.exbulk.idle .exbrow{padding:7px 12px}
 .exbulk .exbn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--blue)}
-.exbulk .exbto{display:inline-flex;align-items:center;gap:6px;
+.exbulk .gbtn.pri{background:var(--blue);border-color:var(--blue);color:var(--onBlue);font-weight:var(--w-strong)}
+.exbulk .gbtn.pri:disabled{opacity:.55;cursor:progress}
+.exbulk .exbto{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;
   font-size:var(--t-meta);color:var(--text2)}
-.exbulk .exbmsg{font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-med)}
-.exbulk .exbnote{flex:1 0 100%;margin:0;font-size:var(--t-meta);color:var(--text3)}
+.exbulk .exbto select{max-width:220px;border:1px solid var(--line2);background:var(--panel);
+  color:var(--text);border-radius:var(--r);padding:5px 8px;font:inherit}
+/* Ticks left behind by an earlier, wider list. Amber marks flags. */
+.exbulk .exbaway{font-size:var(--t-meta);color:var(--text2);background:var(--amberSoft)}
+.exbulk .exbmsg{font-size:var(--t-meta);color:var(--text);font-weight:var(--w-med);
+  background:var(--panel)}
+.exbulk .exbnote{flex:none;margin:0;padding:0 12px 9px calc(12px + 72px + 10px);
+  font-size:var(--t-meta);color:var(--text3)}
+@media (max-width:600px){
+  .exbulk .exbk{flex-basis:100%}
+  .exbulk .exbnote{padding-left:12px}
+}
 /* The tick sits inside the name cell rather than taking a grid column of its
    own: the column template is built from the Columns picker, and a ninth
    hard-coded track would fight it on every layout. */

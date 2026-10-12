@@ -164,6 +164,19 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**Two lists share one function, and a handler bound there reads the wrong
+one.** `companies()` renders both the old Companies view and the Accounts
+explorer, and its local `rows` is the Companies view's `all.filter(keep)`,
+which the accounts search, operators and chips do not touch. The bulk
+handlers (Select these N, Add to Focus, Move contacts) read that `rows`, so on
+a searched list of 59, "Select these 59" ticked every account the person held
+(Ayush, 2026-10-12: "18062 selected", and a refusal over 250). They now read
+`EXPLORER_ROWS`, which `explorerHTML()` sets to exactly what it painted.
+Each action takes only the ticked rows in that list, names any ticks left
+outside it, and adds to Focus in batches of 250 instead of refusing.
+`test-accounts-ux-live.mjs` §4. A handler in `companies()` that reads `rows`
+for the explorer is this bug again.
+
 **A remembered answer is never re-asked.** The company crawl remembers which
 request shape Kylas accepted (`company-shape` in the store) and goes straight
 to it on every cold start. 1.58 added a shape above the remembered one (lean

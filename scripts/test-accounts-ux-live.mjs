@@ -6,7 +6,8 @@
  *   2  search operators (is / is not / begins with) with many values, and a
  *      pasted column arriving comma-separated
  *   3  Created at / by and Last updated at / by, from Kylas' audit fields
- *   4  bulk "Add to Focus" for anyone, written to Airtable in batches
+ *   4  bulk "Add to Focus" for anyone: only the ticked rows in the list on
+ *      screen, split into batches the server takes, the bar one line per job
  *   5  Back: card -> accounts (scroll kept) -> dashboard -> nothing further
  *   6  "Said before" reads the contact's Remarks custom field (cfRemarks)
  *
@@ -76,18 +77,71 @@ const rowText=await f.evaluate(()=>[...document.querySelectorAll('#vwrap .vr')].
 ok('a company shows who created and last updated it', /Enout Super Admin/.test(rowText) && /Priya Deshmukh/.test(rowText), rowText.slice(-160));
 await f.locator('#accQ').fill('');await page.waitForTimeout(800);
 
-console.log('\n4 · bulk Focus');
+console.log('\n4 · bulk Focus — only the ticked rows IN THIS LIST, split into batches');
+/* Ayush, 2026-10-12: a list of 59 under "18062 selected" and a refusal. Ticks
+   from the wider list stayed ticked when the search narrowed it. */
+const bar=()=>f.evaluate(()=>{const b=document.querySelector('#vwrap .exbulk');if(!b)return null;
+  const rs=[...b.querySelectorAll(':scope>.exbrow,:scope>.exbnote')].map(r=>r.getBoundingClientRect());
+  const kids=[...b.querySelectorAll('button,select,label,span')].map(e=>e.getBoundingClientRect()).filter(r=>r.width);
+  const out=kids.filter(r=>r.right>b.getBoundingClientRect().right+1||r.left<b.getBoundingClientRect().left-1).length;
+  const overlap=rs.some((r,i)=>i&&r.top<rs[i-1].bottom-1);
+  return {n:b.querySelector('.exbn')?.textContent||'',away:b.querySelector('.exbaway')?.textContent.replace(/\s+/g,' ').trim()||'',
+    add:document.getElementById('accFocusMany')?.textContent||'',msg:b.querySelector('.exbmsg')?.textContent||'',
+    rows:rs.length,overlap,out,scroll:b.scrollWidth>b.clientWidth+1};});
 await f.locator('#accQ').fill('');await page.waitForTimeout(1200);
-const n=await rowsShown();
+const n=await cnt();
 await f.locator('#accPickAll').click();await page.waitForTimeout(600);
-await f.locator('#accFocusMany').click();await page.waitForTimeout(3500);
-const msg=await f.evaluate(()=>document.querySelector('.exbmsg')?.textContent||'');
-ok('selecting the rows and Add to Focus says how many went in', /added to Focus/.test(msg), msg);
+let B=await bar();
+ok('selecting all says how many of this list', B.n===`${n} of ${n} in this list`, B.n);
+await f.selectOption('#accQOp','equal');await page.waitForTimeout(400);
+await f.locator('#accQ').fill(two.join(', '));await page.waitForTimeout(1200);
+B=await bar();
+ok('narrowing the list counts only the ticked rows in it', B.n==='2 of 2 in this list', B.n);
+ok('...names the ticks left outside it, and leaves them out', new RegExp(`^${n-2} more ticked earlier`).test(B.away), B.away);
+ok('...and the button adds exactly those', /Add 2 to my Focus/.test(B.add), B.add);
+await page.screenshot({path:(process.env.S||'/tmp')+'/bulk-bar-narrowed.png'});
+let calls=[];
+await f.evaluate(()=>{const real=API.addFocusMany;window.__calls=[];API.addFocusMany=(items,by)=>{window.__calls.push(items.length);return real(items,by);};});
+await f.locator('#accFocusMany').click();await page.waitForTimeout(2500);
+calls=await f.evaluate(()=>window.__calls);
+B=await bar();
+ok('Add to Focus sends the 2, not the whole earlier selection', JSON.stringify(calls)==='[2]', JSON.stringify(calls));
+ok('...and says how many went in', /2 added to your Focus/.test(B.msg), B.msg);
+const at2=await (await fetch('http://127.0.0.1:9901/__writes',{headers:{Authorization:'Bearer x'}})).json();
+const ids2=await f.evaluate((two)=>two.map(nm=>String([...document.querySelectorAll('#vwrap .vr')].find(r=>r.textContent.includes(nm))?.dataset.id||'')),two);
+ok('...both are on Focus in Airtable', ids2.every(id=>id&&(at2.tables?.Focus||[]).some(r=>JSON.stringify(r.fields).includes(id))), JSON.stringify(ids2));
+await f.locator('#accPickForget').click();await page.waitForTimeout(500);
+ok('Forget them drops the ticks outside the list', await f.evaluate(()=>!document.querySelector('.exbaway'))
+   && (await bar()).n==='', JSON.stringify(await bar()));
+
+/* THE ROOT OF IT: "Select these N" ticked the other view's list, which the
+   accounts search does not narrow, so it ticked every account. */
+await f.locator('#accPickAll').click();await page.waitForTimeout(600);
+B=await bar();
+ok('"Select these 2" on a narrowed list ticks those 2 and nothing else', B.n==='2 of 2 in this list' && !B.away, JSON.stringify(B));
+await f.locator('#accPickClear').click();await page.waitForTimeout(400);
+
+console.log('\n   the whole list, past one batch (batch size 1: the fixture list is a handful of rows)');
+await f.evaluate(()=>{window.__FOCUS_BULK=1;window.__calls=[];});
+await f.selectOption('#accQOp','contains');await f.locator('#accQ').fill('');await page.waitForTimeout(1200);
+await f.locator('#accPickAll').click();await page.waitForTimeout(600);
+B=await bar();
+ok('the bar says it will go in batches', new RegExp(`Sent in ${n} batches of up to 1\\b`).test(await f.evaluate(()=>document.querySelector('.exbulk').textContent)), B.n);
+ok('the bar is one labelled line per job, nothing overlapping or spilling', B.rows>=2 && !B.overlap && !B.out && !B.scroll, JSON.stringify(B));
+await page.screenshot({path:(process.env.S||'/tmp')+'/bulk-bar-all.png'});
+await f.locator('#accFocusMany').click();
+let done='';for(let i=0;i<30&&!/added to your Focus/.test(done);i++){await page.waitForTimeout(500);done=(await bar())?.msg||'';}
+calls=await f.evaluate(()=>window.__calls);
+/* The 2 already starred are skipped before a request, so 2 requests of 1. */
+ok(`${n} ticked are sent a batch at a time, none refused`, calls.length>=2 && calls.every(c=>c<=1), JSON.stringify(calls));
+ok('...and it says how many went in and how many were already there', /added to your Focus/.test(done) && /\d+ already on a list/.test(done), done);
 const stars=await f.evaluate(()=>Object.values(Focus.map).filter(x=>x.status==='focus').length);
 ok('...and they are on the focus map', stars>=n-1, `${stars} on focus, ${n} rows`);
 const at=await (await fetch('http://127.0.0.1:9901/__writes',{headers:{Authorization:'Bearer x'}})).json();
 const focusRows=(at.tables?.Focus||[]).length;
-ok('...written to Airtable in batches, not one by one', focusRows>=n-1, `${focusRows} Focus rows`);
+ok('...written to Airtable', focusRows>=n-1, `${focusRows} Focus rows`);
+ok('...and nothing is left ticked', (await bar())?.n==='', (await bar())?.n);
+await f.evaluate(()=>{delete window.__FOCUS_BULK;});
 await f.locator('#accQ').fill('');await page.waitForTimeout(800);
 
 console.log('\n5 · Back: card -> accounts -> dashboard');
