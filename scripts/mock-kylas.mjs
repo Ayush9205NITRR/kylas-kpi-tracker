@@ -252,8 +252,18 @@ createServer(async (req, res) => {
      times against a record that never moved. A mock that reports success for a
      write it dropped is worse than no mock. */
   const co = p.match(/^\/v1\/companies\/(\d+)$/);
-  if (co && req.method === "GET")
-    return COMPANIES[co[1]] ? json(res, 200, COMPANIES[co[1]]) : json(res, 404, { message: "no such company" });
+  if (co && req.method === "GET") {
+    if (!COMPANIES[co[1]]) return json(res, 404, { message: "no such company" });
+    /* MOCK_COMPANY_GET_OWNER: where a single-company read puts the owner.
+       ownerId (default) | owner — as {id, name} | none — nowhere, so only the
+       search knows it. The live account read "owner NONE" for all 273 of the
+       October batch through ownerId on 2026-10-12, so a client must not
+       assume the search's shape here. */
+    const { ownerId, ...rest } = COMPANIES[co[1]];
+    const how = process.env.MOCK_COMPANY_GET_OWNER || "ownerId";
+    return json(res, 200, how === "owner" ? { ...rest, ...(ownerId != null ? { owner: { id: ownerId, name: USERS[ownerId]?.name || "" } } : {}) }
+      : how === "none" ? rest : COMPANIES[co[1]]);
+  }
 
   const ct = p.match(/^\/v1\/contacts\/(\d+)$/);
   /* Method matters: without this check the GET branch also swallows PUTs and
@@ -310,13 +320,18 @@ createServer(async (req, res) => {
       path: "/v1/search/company" });
     if ((mode === "fields" || mode === "all") && extra.length) return npe();
     if ((mode === "owner" || mode === "all") && rules.some((r) => r.field === "ownerId")) return npe();
+    /* MOCK_NO_ID_SEARCH=1: a search by id is refused, so nothing but the
+       record itself can say who owns a company. */
+    if (process.env.MOCK_NO_ID_SEARCH === "1" && rules.some((r) => r.field === "id")) return npe();
 
     const bad = rules.find((r) => r.field === "ownerId" && r.type !== "long");
     if (bad) return json(res, 400, { message: "Invalid Type" });
 
     let out = Object.values(COMPANIES);
-    for (const r of rules)
+    for (const r of rules) {
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
+      if (r.field === "id") out = out.filter((c) => Number(c.id) === Number(r.value));
+    }
 
     /* An updatedAt UPPER BOUND, which is how a client walks past the result
        window: page by offset until the window runs out, then ask for the next

@@ -24,12 +24,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const H = { "api-key": "k" };
 
 let mock = null;
-async function startMock(mode) {
+async function startMock(mode, extra = {}) {
   /* Wait for the old one to be GONE: a new mock that cannot bind the port
      dies quietly, and the old one — other mode, other data — keeps answering. */
   if (mock && mock.exitCode === null) { const old = mock; await new Promise((r) => { old.once("exit", r); old.kill(); }); }
   mock = spawn(process.execPath, ["scripts/mock-kylas.mjs"], {
-    env: { ...process.env, PORT: String(PORT), MOCK_COMPANY_PUT: mode }, stdio: ["ignore", "ignore", "inherit"] });
+    env: { ...process.env, PORT: String(PORT), MOCK_COMPANY_PUT: mode, ...extra }, stdio: ["ignore", "ignore", "inherit"] });
   for (let i = 0; i < 50; i++) {
     try { if ((await fetch(`${BASE}/v1/companies/903`, { headers: H })).ok) return; } catch { /* not yet */ }
     await sleep(100);
@@ -130,6 +130,55 @@ clearCanary();
   ok("the canary passes", c.code === 0 && /PASSED/.test(c.out));
   const r = run("--apply", "--all");
   ok("both tagged, owners kept", /2 tagged/.test(r.out) && (await co(1776620)).ownerId === 74725 && (await co(903)).ownerId === 74726);
+}
+
+/* The owner as the search sees it, whatever a single read does with it. */
+const ownerBySearch = async (id) => {
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch(`${BASE}/v1/search/company?page=0&size=5`, { method: "POST",
+      headers: { ...H, "content-type": "application/json" },
+      body: JSON.stringify({ fields: ["id", "ownerId"], jsonRule: { condition: "AND", valid: true,
+        rules: [{ id: "id", field: "id", type: "long", input: "number", operator: "equal", value: id }] } }) });
+    if (r.status === 429) { await sleep(400); continue; }
+    return ((await r.json()).content || []).find((c) => c.id === id)?.ownerId ?? null;
+  }
+};
+
+console.log("\n5 · as the live account read on 2026-10-12: a single company read carries no ownerId");
+await startMock("replace-keep-owner", { MOCK_COMPANY_GET_OWNER: "none" });
+clearCanary();
+{
+  const dry = run();
+  ok("the dry run still finds every owner — through the search", /0 with no owner found/.test(dry.out) && /"search":2/.test(dry.out),
+     dry.out.split("\n").filter((l) => /owner (read|found)|no owner/.test(l)).join(" | "));
+  ok("...and prints what the record does carry", /owner-like fields on 1776620/.test(dry.out));
+  const c = run("--canary");
+  ok("the canary can test, and passes", c.code === 0 && /read from search/.test(c.out) && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
+  const a = run("--apply", "--all");
+  ok("both tagged", /2 tagged/.test(a.out), a.out.trim().split("\n").slice(-1)[0]);
+  ok("...owners still there, by the search", (await ownerBySearch(1776620)) === 74725 && (await ownerBySearch(903)) === 74726);
+}
+
+console.log("\n6 · a single company read carrying the owner as owner: {id, name}");
+await startMock("replace-keep-owner", { MOCK_COMPANY_GET_OWNER: "owner" });
+clearCanary();
+{
+  const dry = run();
+  ok("read from the owner field", /"owner":2/.test(dry.out) && /0 with no owner found/.test(dry.out),
+     dry.out.split("\n").filter((l) => /owner read from/.test(l)).join(""));
+  const c = run("--canary");
+  ok("the canary passes", c.code === 0 && /read from owner/.test(c.out));
+}
+
+console.log("\n7 · nobody knows the owner: the script must not guess");
+await startMock("replace-keep-owner", { MOCK_COMPANY_GET_OWNER: "none", MOCK_NO_ID_SEARCH: "1" });
+clearCanary();
+{
+  const c = run("--canary");
+  ok("the canary cannot test, so it does not pass", c.code === 1 && /cannot test/.test(c.out) && !/PASSED/.test(c.out),
+     c.out.trim().split("\n").filter((l) => /cannot test|refused/.test(l)).join(" | ").slice(0, 200));
+  const a = run("--apply", "--all");
+  ok("...and --apply refuses", a.code === 1 && /Refusing/.test(a.out));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

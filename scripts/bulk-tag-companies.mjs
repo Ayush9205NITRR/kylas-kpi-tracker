@@ -81,7 +81,7 @@ const SERVER_KEYS = new Set([
   "metaData", "idNameStore", "companyStage", "lastActivityAt",
   "nextActivityAt", "score", "duplicateOf", "ownerName",
 ]);
-const OWNER_KEYS = new Set(["ownerId", "owner"]);
+const OWNER_KEYS = new Set(["ownerId", "owner", "ownedBy", "ownerDetails", "assignedTo", "recordOwner"]);
 const cfOf = (v) => (Array.isArray(v) ? v.map(cfOf) : v && typeof v === "object" ? (v.id ?? v.value) : v);
 const isLookup = (v) => !!v && typeof v === "object" && !Array.isArray(v)
   && v.id !== undefined && Object.keys(v).every((k) => k === "id" || k === "name");
@@ -89,7 +89,47 @@ const topOf = (v) => (Array.isArray(v) ? (v.every(isLookup) ? v.map((x) => x.id)
 const idOf = (v) => (v && typeof v === "object" ? v.id : v) ?? null;
 const textOf = (v) => (v && typeof v === "object" ? (v.name ?? v.value ?? "") : (v ?? "")).toString();
 
-function bodyFor(rec, newSource, ownerMode) {
+/* WHERE THE OWNER IS. The company SEARCH returns it as ownerId, and that is
+   what this script first assumed of GET /v1/companies/{id} too — the first
+   live dry run (2026-10-12) read all 273 as "owner NONE" and the canary
+   could not test anything. So: every name it plausibly lives under on the
+   record, then the search the console's own crawl uses, by id. Whatever is
+   found is said, with where it came from. */
+const OWNER_FIELDS = ["ownerId", "owner", "ownedBy", "ownerDetails", "assignedTo", "recordOwner"];
+function ownerOnRecord(rec) {
+  for (const k of OWNER_FIELDS) {
+    const v = idOf(rec?.[k]);
+    if (v !== null && v !== undefined && v !== "") return { id: String(v), from: k };
+  }
+  const store = rec?.metaData?.idNameStore?.ownerId;
+  if (store && typeof store === "object" && Object.keys(store).length === 1)
+    return { id: String(Object.keys(store)[0]), from: "metaData.idNameStore.ownerId" };
+  return null;
+}
+let searchWorks = null;
+async function ownerBySearch(id) {
+  if (searchWorks === false) return null;
+  try {
+    const r = await call("POST", "/v1/search/company?page=0&size=5", { fields: ["id", "name", "ownerId"],
+      jsonRule: { condition: "AND", valid: true, rules: [
+        { id: "id", field: "id", type: "long", input: "number", operator: "equal", value: Number(id) }] } });
+    const row = (r?.content || r?.data || []).find((x) => String(x.id) === String(id));
+    const v = row ? idOf(row.ownerId ?? row.owner) : null;
+    searchWorks = true;
+    return v == null || v === "" ? null : { id: String(v), from: "search" };
+  } catch (e) {
+    if (searchWorks === null) console.log(`  (the company search by id is refused: ${e.message.slice(0, 120)})`);
+    searchWorks = false;
+    return null;
+  }
+}
+const ownerOf = async (id, rec) => ownerOnRecord(rec) || ownerBySearch(id);
+/* The record's owner-ish fields, as Kylas sent them — printed once, so a
+   name nobody guessed shows up in the output instead of reading as "none". */
+const ownerishKeys = (rec) => Object.fromEntries(Object.entries(rec || {})
+  .filter(([k]) => /own|assign/i.test(k)).map(([k, v]) => [k, JSON.stringify(v)?.slice(0, 80)]));
+
+function bodyFor(rec, newSource, ownerMode, owner) {
   const body = {};
   for (const [k, v] of Object.entries(rec || {})) {
     if (SERVER_KEYS.has(k) || OWNER_KEYS.has(k) || v === undefined || v === null) continue;
@@ -103,7 +143,7 @@ function bodyFor(rec, newSource, ownerMode) {
   /* "omit": the owner is not in the body at all (Kylas' documented Update
      Company has no owner field). "same": the owner it already has. Which of
      the two keeps it is what --canary finds out. */
-  if (ownerMode === "same" && idOf(rec.ownerId) != null) body.ownerId = Number(idOf(rec.ownerId));
+  if (ownerMode === "same" && owner?.id) body.ownerId = Number(owner.id);
   return body;
 }
 const withTag = (src) => {
@@ -123,14 +163,14 @@ function shape(rec) {
     if (k === FIELD || v === undefined || v === null || v === "") continue;
     out[`cf.${k}`] = JSON.stringify(cfOf(v));
   }
-  out.ownerId = JSON.stringify(idOf(rec?.ownerId));
   return out;
 }
-function differences(before, after, newSource) {
+function differences(before, after, newSource, ownerBefore, ownerAfter) {
   const a = shape(before), b = shape(after), diff = [];
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)]))
     if (a[k] !== b[k]) diff.push(`${k}: ${a[k] ?? "(none)"} -> ${b[k] ?? "(none)"}`);
-  if (idOf(after?.ownerId) == null) diff.unshift("OWNER IS GONE");
+  if (!ownerAfter?.id) diff.unshift(`OWNER IS GONE (was ${ownerBefore?.id ?? "?"})`);
+  else if (ownerAfter.id !== ownerBefore?.id) diff.unshift(`OWNER CHANGED ${ownerBefore?.id} -> ${ownerAfter.id}`);
   if (textOf(after?.customFieldValues?.[FIELD]) !== newSource)
     diff.push(`${FIELD} did not take: ${JSON.stringify(textOf(after?.customFieldValues?.[FIELD]))}`);
   return diff;
@@ -149,15 +189,17 @@ if (has("canary")) {
       id = made?.id;
       if (!id) throw new Error("Kylas created no id");
       const before = await call("GET", `/v1/companies/${id}`);
-      if (idOf(before?.ownerId) == null) {
-        tried.push({ mode, ok: false, why: "the new company has no owner to lose — the test proves nothing" });
-        console.log(`  ${mode.padEnd(5)} cannot test: Kylas gave the new company no owner.`);
+      const ownerBefore = await ownerOf(id, before);
+      if (!ownerBefore) {
+        tried.push({ mode, ok: false, why: "no owner found on the new company — the test proves nothing", fields: ownerishKeys(before) });
+        console.log(`  ${mode.padEnd(5)} cannot test: no owner found on the new company. Owner-like fields: ${JSON.stringify(ownerishKeys(before))}`);
         continue;
       }
+      console.log(`  ${mode.padEnd(5)} test company ${id}, owner ${ownerBefore.id} (read from ${ownerBefore.from})`);
       const want = withTag(textOf(before.customFieldValues?.[FIELD]));
-      await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode));
+      await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode, ownerBefore));
       const after = await call("GET", `/v1/companies/${id}`);
-      const diff = differences(before, after, want);
+      const diff = differences(before, after, want, ownerBefore, await ownerOf(id, after));
       tried.push({ mode, ok: !diff.length, diff });
       console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : "kept the owner and every field"}` +
         (diff.length ? `\n         ${diff.join("\n         ")}` : ""));
@@ -190,19 +232,24 @@ if (ids.some((x) => !/^\d+$/.test(x))) { console.error(`${IDS_FILE}: every line 
 /* ── 1 · dry run ─────────────────────────────────────────────────── */
 if (!has("apply")) {
   console.log(`\nDRY RUN — ${ids.length} companies, tag "${TAG}". Nothing is written.\n`);
-  let todo = 0, done = 0, missing = 0, noOwner = 0;
+  let todo = 0, done = 0, missing = 0, noOwner = 0, shown = false;
+  const fromCount = {};
   for (const id of ids) {
     let rec;
     try { rec = await call("GET", `/v1/companies/${id}`); }
     catch (e) { missing++; console.log(`  ${id.padEnd(9)} ! cannot read: ${e.message.slice(0, 80)}`); continue; }
+    if (!shown) { shown = true; console.log(`  owner-like fields on ${id} as Kylas sends them: ${JSON.stringify(ownerishKeys(rec))}\n`); }
     const src = textOf(rec.customFieldValues?.[FIELD]);
-    if (idOf(rec.ownerId) == null) noOwner++;
+    const owner = await ownerOf(id, rec);
+    if (!owner) noOwner++; else fromCount[owner.from] = (fromCount[owner.from] || 0) + 1;
     if (hasTag(src)) { done++; continue; }
     todo++;
-    console.log(`  ${id.padEnd(9)} ${String(rec.name || "").slice(0, 28).padEnd(28)} owner ${String(idOf(rec.ownerId) ?? "NONE").padEnd(7)}` +
+    console.log(`  ${id.padEnd(9)} ${String(rec.name || "").slice(0, 28).padEnd(28)} owner ${String(owner?.id ?? "NONE").padEnd(7)}` +
       `  "${src.slice(0, 40)}" -> "+ ${TAG}"`);
   }
-  console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner today`);
+  console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner found`);
+  console.log(`owner read from: ${JSON.stringify(fromCount)}`);
+  if (noOwner) console.log(`! ${noOwner} with no owner found. --apply skips those; if it is most of them, send this output back.`);
   console.log(`Next: --canary (creates and deletes one test company; no real company is touched).\n`);
   process.exit(0);
 }
@@ -227,19 +274,20 @@ for (const id of ids) {
   const before = await call("GET", `/v1/companies/${id}`);
   const src = textOf(before.customFieldValues?.[FIELD]);
   if (hasTag(src)) { skipped++; continue; }
-  if (idOf(before.ownerId) == null) { console.log(`  ${id} has no owner already — skipped, set it in Kylas first`); skipped++; continue; }
+  const ownerBefore = await ownerOf(id, before);
+  if (!ownerBefore) { console.log(`  ${id} — no owner found, skipped (cannot prove it survives)`); skipped++; continue; }
   const want = withTag(src);
-  snaps.push({ id, before }); keep();
-  await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode));
+  snaps.push({ id, owner: ownerBefore, before }); keep();
+  await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode, ownerBefore));
   const after = await call("GET", `/v1/companies/${id}`);
-  const diff = differences(before, after, want);
+  const diff = differences(before, after, want, ownerBefore, await ownerOf(id, after));
   if (diff.length) {
     console.log(`\n  STOPPED at ${id} (${before.name}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
       `\n  Its before-image is in ${snapFile}. Nothing after it was touched.\n`);
     process.exit(1);
   }
   wrote++;
-  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${String(before.name || "").slice(0, 30).padEnd(30)} owner kept · "${want.slice(-60)}"`);
+  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${String(before.name || "").slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept · "${want.slice(-60)}"`);
 }
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");
