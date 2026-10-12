@@ -454,6 +454,12 @@ table.ladder td.conv b{font-size:var(--t-label);color:var(--text)}
 i.carry{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);
   background:var(--amberSoft);border-radius:4px;padding:1px 6px;margin-left:4px;white-space:nowrap;cursor:help}
 table.ladder tr.carried td.conv{color:var(--text2)}
+/* Calls and talk time above the rungs: effort, not outcomes. Separated by
+   structure — a tinted band and a heavier rule under it — not by a hue. */
+table.ladder tr.act td{background:var(--panel2)}
+table.ladder tr.act.last td{border-bottom:2px solid var(--line2)}
+table.ladder tr.act td.rung .rungname{color:var(--text2);font-weight:var(--w-strong)}
+table.ladder tr.act td.conv span{font-size:var(--t-meta);color:var(--text3)}
 /* Progress has no room for the "carried in" tag the ladder shows, so a rate
    over 100% is marked on the figure itself — amber, which is this console's
    flag colour, and the title explains it. The NUMBER is still printed: one

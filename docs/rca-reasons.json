@@ -1,6 +1,6 @@
 {
-  "_": "DRAFT. These reasons are placeholders written to get the mechanism working — Ayush said he would rewrite them. Edit ONLY here, then run: node scripts/gen-rca.mjs",
-  "note": "A gate is a step in the funnel that an account can sit at without moving. `from` is the rung it has reached, `to` is what it has not done, `days` is how long it may sit there before somebody owes an explanation. `code` is stored in Airtable and never shown; `label` is what the associate picks. Changing a label is free. Changing a CODE orphans every answer already recorded under the old one, so add a new code instead and retire the old. doneNoSql added 2026-09-19 for the prototype's second RCA chart, \"After the SQL meeting\". 14 days is a starting number, not a measured one — it is shorter than the two gates before it because the funnel narrows: an account that has had the meeting is the one worth chasing soonest.",
+  "_": "Placeholders are being replaced by Ayush's lists gate by gate: discoveryNoBooking is his (2026-10-12); rightNoDiscovery and doneNoSql are still drafts. Edit ONLY here, then run: node scripts/gen-rca.mjs",
+  "note": "A gate is a step in the funnel that an account can sit at without moving. `from` is the rung it has reached, `to` is what it has not done, `days` is how long it may sit there before somebody owes an explanation. `code` is stored in Airtable and never shown; `label` is what the associate picks. Changing a label is free. Changing a CODE orphans every answer already recorded under the old one, so add a new code instead and retire the old. doneNoSql added 2026-09-19 for the prototype's second RCA chart, \"After the SQL meeting\". 14 days is a starting number, not a measured one — it is shorter than the two gates before it because the funnel narrows: an account that has had the meeting is the one worth chasing soonest. discoveryNoBooking's reasons replaced 2026-10-12 with Ayush's list (\"Reasons for Not Booking an SQL Meeting after Successful Discovery Call\") — the five labels only, no descriptions yet, and no 'Something else' because his list has none. The RCA table held no answers then, so no old code was orphaned.",
   "gates": [
     {
       "key": "rightNoDiscovery",
@@ -57,40 +57,24 @@
       "ask": "The discovery call happened and nothing is in the diary since. Why has it not converted?",
       "reasons": [
         {
-          "code": "AWAITING_CLIENT_INPUTS",
-          "label": "Waiting on inputs they promised"
+          "code": "NO_ACTIONABLE_REQUIREMENT",
+          "label": "No Actionable Requirement"
         },
         {
-          "code": "DATES_NOT_FIXED",
-          "label": "Their dates are not fixed yet"
+          "code": "REQUIREMENT_ALREADY_COVERED",
+          "label": "Requirement Already Covered"
         },
         {
-          "code": "BUDGET_TOO_LOW",
-          "label": "Budget too low for the ask"
+          "code": "BELOW_COMMERCIAL_VIABILITY",
+          "label": "Below Commercial Viability"
         },
         {
-          "code": "COMPARING_VENDORS",
-          "label": "Comparing us against other vendors"
+          "code": "FUTURE_REQUIREMENT_NOT_ACTIONABLE",
+          "label": "Future Requirement, Not Yet Actionable"
         },
         {
-          "code": "DECISION_DEFERRED",
-          "label": "Decision pushed to a later quarter"
-        },
-        {
-          "code": "LOST_INTERNAL_CHAMPION",
-          "label": "Lost the person championing it"
-        },
-        {
-          "code": "PROPOSAL_PENDING_OUR_SIDE",
-          "label": "Proposal still pending at our end"
-        },
-        {
-          "code": "MY_FOLLOW_UP_SLIPPED",
-          "label": "My own follow-up slipped"
-        },
-        {
-          "code": "OTHER",
-          "label": "Something else"
+          "code": "NO_WILLINGNESS_TO_PROCEED",
+          "label": "No Willingness to Proceed"
         }
       ]
     },

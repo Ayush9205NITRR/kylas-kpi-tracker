@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS "rca" (
   -- Days between Stuck Since and the answer. Frozen at answer time, so a row read months later still says how long it had been when somebody looked.
   , "stuck_days" INTEGER
   -- Blank until answered. Codes, not labels — a label can be reworded without orphaning the history.
-  , "reason" TEXT CHECK ("reason" IS NULL OR "reason" IN ('NO_SLOT', 'GHOSTING', 'NO_EVENT_PLANNED', 'BUDGET_NOT_SIGNED_OFF', 'NEEDS_SENIOR_BUY_IN', 'INCUMBENT_VENDOR', 'WRONG_FIT', 'MY_FOLLOW_UP_SLIPPED', 'OTHER', 'AWAITING_CLIENT_INPUTS', 'DATES_NOT_FIXED', 'BUDGET_TOO_LOW', 'COMPARING_VENDORS', 'DECISION_DEFERRED', 'LOST_INTERNAL_CHAMPION', 'PROPOSAL_PENDING_OUR_SIDE', 'SCOPE_MISMATCH', 'LOST_TO_COMPETITOR', 'EVENT_POSTPONED', 'NO_DECISION_MAKER', 'WENT_SILENT'))
+  , "reason" TEXT CHECK ("reason" IS NULL OR "reason" IN ('NO_SLOT', 'GHOSTING', 'NO_EVENT_PLANNED', 'BUDGET_NOT_SIGNED_OFF', 'NEEDS_SENIOR_BUY_IN', 'INCUMBENT_VENDOR', 'WRONG_FIT', 'MY_FOLLOW_UP_SLIPPED', 'OTHER', 'NO_ACTIONABLE_REQUIREMENT', 'REQUIREMENT_ALREADY_COVERED', 'BELOW_COMMERCIAL_VIABILITY', 'FUTURE_REQUIREMENT_NOT_ACTIONABLE', 'NO_WILLINGNESS_TO_PROCEED', 'AWAITING_CLIENT_INPUTS', 'SCOPE_MISMATCH', 'BUDGET_TOO_LOW', 'LOST_TO_COMPETITOR', 'EVENT_POSTPONED', 'DECISION_DEFERRED', 'NO_DECISION_MAKER', 'PROPOSAL_PENDING_OUR_SIDE', 'WENT_SILENT'))
   -- Free text. Optional, and the only place the specifics of one account can live.
   , "note" TEXT
   , "answered_at" TEXT CHECK ("answered_at" IS NULL OR "answered_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')

@@ -26,15 +26,11 @@ export const RCA_GATES = [
     title: "Discovery done, no SQL meeting booked",
     ask: "The discovery call happened and nothing is in the diary since. Why has it not converted?",
     reasons: [
-      { code: "AWAITING_CLIENT_INPUTS", label: "Waiting on inputs they promised" },
-      { code: "DATES_NOT_FIXED", label: "Their dates are not fixed yet" },
-      { code: "BUDGET_TOO_LOW", label: "Budget too low for the ask" },
-      { code: "COMPARING_VENDORS", label: "Comparing us against other vendors" },
-      { code: "DECISION_DEFERRED", label: "Decision pushed to a later quarter" },
-      { code: "LOST_INTERNAL_CHAMPION", label: "Lost the person championing it" },
-      { code: "PROPOSAL_PENDING_OUR_SIDE", label: "Proposal still pending at our end" },
-      { code: "MY_FOLLOW_UP_SLIPPED", label: "My own follow-up slipped" },
-      { code: "OTHER", label: "Something else" },
+      { code: "NO_ACTIONABLE_REQUIREMENT", label: "No Actionable Requirement" },
+      { code: "REQUIREMENT_ALREADY_COVERED", label: "Requirement Already Covered" },
+      { code: "BELOW_COMMERCIAL_VIABILITY", label: "Below Commercial Viability" },
+      { code: "FUTURE_REQUIREMENT_NOT_ACTIONABLE", label: "Future Requirement, Not Yet Actionable" },
+      { code: "NO_WILLINGNESS_TO_PROCEED", label: "No Willingness to Proceed" },
     ],
   },
   {
@@ -68,24 +64,26 @@ export const RCA_LABEL = {
   WRONG_FIT:                     "Not a fit for what we do",
   MY_FOLLOW_UP_SLIPPED:          "My own follow-up slipped",
   OTHER:                         "Something else",
+  NO_ACTIONABLE_REQUIREMENT:     "No Actionable Requirement",
+  REQUIREMENT_ALREADY_COVERED:   "Requirement Already Covered",
+  BELOW_COMMERCIAL_VIABILITY:    "Below Commercial Viability",
+  FUTURE_REQUIREMENT_NOT_ACTIONABLE: "Future Requirement, Not Yet Actionable",
+  NO_WILLINGNESS_TO_PROCEED:     "No Willingness to Proceed",
   AWAITING_CLIENT_INPUTS:        "Waiting on inputs they promised",
-  DATES_NOT_FIXED:               "Their dates are not fixed yet",
-  BUDGET_TOO_LOW:                "Budget too low for the ask",
-  COMPARING_VENDORS:             "Comparing us against other vendors",
-  DECISION_DEFERRED:             "Decision pushed to a later quarter",
-  LOST_INTERNAL_CHAMPION:        "Lost the person championing it",
-  PROPOSAL_PENDING_OUR_SIDE:     "Proposal still pending at our end",
   SCOPE_MISMATCH:                "Wants something we do not do",
+  BUDGET_TOO_LOW:                "Budget too low for the ask",
   LOST_TO_COMPETITOR:            "Went with another agency",
   EVENT_POSTPONED:               "Event postponed or cancelled",
+  DECISION_DEFERRED:             "Decision pushed to a later quarter",
   NO_DECISION_MAKER:             "The decision maker was not in the room",
+  PROPOSAL_PENDING_OUR_SIDE:     "Proposal still pending at our end",
   WENT_SILENT:                   "Stopped replying after the meeting",
 };
 
 export const RCA_GATE = Object.fromEntries(RCA_GATES.map((g) => [g.key, g]));
 
 /* What the Airtable Reason column offers. */
-export const RCA_REASON_CODES = ["NO_SLOT","GHOSTING","NO_EVENT_PLANNED","BUDGET_NOT_SIGNED_OFF","NEEDS_SENIOR_BUY_IN","INCUMBENT_VENDOR","WRONG_FIT","MY_FOLLOW_UP_SLIPPED","OTHER","AWAITING_CLIENT_INPUTS","DATES_NOT_FIXED","BUDGET_TOO_LOW","COMPARING_VENDORS","DECISION_DEFERRED","LOST_INTERNAL_CHAMPION","PROPOSAL_PENDING_OUR_SIDE","SCOPE_MISMATCH","LOST_TO_COMPETITOR","EVENT_POSTPONED","NO_DECISION_MAKER","WENT_SILENT"];
+export const RCA_REASON_CODES = ["NO_SLOT","GHOSTING","NO_EVENT_PLANNED","BUDGET_NOT_SIGNED_OFF","NEEDS_SENIOR_BUY_IN","INCUMBENT_VENDOR","WRONG_FIT","MY_FOLLOW_UP_SLIPPED","OTHER","NO_ACTIONABLE_REQUIREMENT","REQUIREMENT_ALREADY_COVERED","BELOW_COMMERCIAL_VIABILITY","FUTURE_REQUIREMENT_NOT_ACTIONABLE","NO_WILLINGNESS_TO_PROCEED","AWAITING_CLIENT_INPUTS","SCOPE_MISMATCH","BUDGET_TOO_LOW","LOST_TO_COMPETITOR","EVENT_POSTPONED","DECISION_DEFERRED","NO_DECISION_MAKER","PROPOSAL_PENDING_OUR_SIDE","WENT_SILENT"];
 export const RCA_GATE_KEYS = ["rightNoDiscovery","discoveryNoBooking","doneNoSql"];
 
 /* ── WHO OWES AN EXPLANATION ──────────────────────────────────────────

@@ -1381,6 +1381,28 @@
               <span>${esc(firstName(p.owner))}</span></span></th>`).join("")}
           </tr></thead>
           <tbody>
+            ${/* CALLS FIRST, AND NOT AS A RUNG. Ayush, 2026-10-12: "need to add
+                 call count as a part of console". The count was only in the
+                 period table at the foot of the page; the ladder is what is
+                 read, and it had nobody's effort on it — only outcomes. These
+                 two rows count CALLS and their minutes, not companies, so
+                 they carry no step number and no conversion, and sit above
+                 the rungs under their own rule. Same report, same period. */
+              [{ key: "calls", name: "Calls", fmt: (v) => String(v || 0) },
+               { key: "talkSeconds", name: "Talk time", fmt: fmtTalk }].map((a, j) => {
+                const top = Math.max(1, ...people.map((p) => p[a.key] || 0));
+                return `<tr class="act${j === 1 ? " last" : ""}">
+                <td class="rung"><span class="rungname">${esc(a.name)}</span></td>
+                <td class="teamcol"><b class="tnum">${a.fmt(cur[a.key])}</b>${
+                  prev && a.key === "calls" ? deltaHTML(cur.delta ? cur.delta.calls : null) : ""}</td>
+                <td class="conv">${j === 0 ? `<span>calls, not companies</span>` : ""}</td>
+                ${people.map((p) => {
+                  const v = p[a.key] || 0;
+                  return `<td><div class="cellv tnum${v ? "" : " zero"}">${a.fmt(v)}</div>
+                    <div class="lbar"><i class="r1" style="width:${v / top * 100}%"></i></div></td>`;
+                }).join("")}
+              </tr>`;
+              }).join("")}
             ${RUNGS.map((rg, i) => {
               /* A RUNG CAN EXCEED THE ONE BELOW IT, legitimately. These count
                  ARRIVALS IN THIS PERIOD, and a company worked in January can
