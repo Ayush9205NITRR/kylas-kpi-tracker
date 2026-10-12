@@ -256,7 +256,7 @@
                         : `The proxy predates this console (${mine}) — it is old enough not to ` +
                           `report its build. Restart it: stop node scripts/proxy.mjs, then start it again.`)
                       : `The server is on build ${theirs || "unknown"}, this console is ${mine}. ` +
-                        `Deploy the server (npx wrangler deploy) — until then newer features may not answer.` };
+                        `Deploy the server (npm run deploy) — until then newer features may not answer.` };
         announce();
         return r;
       } catch { return null; }

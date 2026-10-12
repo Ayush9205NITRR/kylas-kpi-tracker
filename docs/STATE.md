@@ -164,6 +164,13 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**`npx wrangler` is whatever was released last.** With no `package.json`, every
+deploy fetched the newest wrangler, and on 2026-10-12 that was 4.149.0, which
+died before uploading ("Received a malformed response from the API", reading
+the deployment list). Wrangler is pinned in `package.json` now (3.114.17,
+the version the dry-run builds were checked with): `npm install` once, then
+`npm run deploy`. Move the pin deliberately, after `npm run deploy:check`.
+
 **Two lists share one function, and a handler bound there reads the wrong
 one.** `companies()` renders both the old Companies view and the Accounts
 explorer, and its local `rows` is the Companies view's `all.filter(keep)`,

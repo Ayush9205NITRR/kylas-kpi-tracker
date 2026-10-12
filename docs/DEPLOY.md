@@ -137,8 +137,16 @@ key.
 ## Part 5 · Deploy
 
 ```sh
-npx wrangler deploy
+npm install
+npm run deploy
 ```
+
+**Wrangler is pinned** in `package.json` (3.114.17). Once `npm install` has
+run, `npx wrangler …` uses that copy too. Without it, `npx wrangler` fetches
+whatever was released last — and on 2026-10-12 that was 4.149.0, which died
+before uploading with *"Received a malformed response from the API"* while
+reading the account's deployment list. Change the pin on purpose, after
+`npm run deploy:check` (a dry-run build) passes with the new version.
 
 It prints the address it published to. Check it is alive:
 
@@ -193,7 +201,7 @@ checked against, so that a Google token minted for somebody else's app cannot
 be used as a login here. The client **secret** beside it is not used and
 should not be copied anywhere.
 
-Redeploy after any change here: `npx wrangler deploy`.
+Redeploy after any change here: `npm run deploy`.
 
 ## Part 7 · Update the extension
 

@@ -488,7 +488,7 @@
         return `<p class="vwarn">The company list has not been built yet, because the server's
           background job has never run. Its schedule is not set up in Cloudflare: open
           <b>Workers &amp; Pages</b> in the Cloudflare dashboard once, then run
-          <code>npx wrangler deploy</code> again.${held}</p>`;
+          <code>npm run deploy</code> again.${held}</p>`;
       if (CACHE.buildError) {
         const plan = /subrequest/i.test(CACHE.buildError.message || "")
           ? " Your Cloudflare account is on the Free plan, which does not allow a job this size — upgrade to Workers Paid in the Cloudflare dashboard."

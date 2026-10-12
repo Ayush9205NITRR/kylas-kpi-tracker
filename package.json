@@ -1,0 +1,12 @@
+{
+  "name": "enout-bd-call-console",
+  "private": true,
+  "description": "Pins the tools only. The Worker, scripts and extension have no runtime dependencies.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "deploy:check": "wrangler deploy --dry-run --outdir .wrangler/dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "3.114.17"
+  }
+}
