@@ -1160,14 +1160,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        D1 copy, which reads whole tables, disagreed with this path. */
     const ALL = { pageSize: 100, maxPages: 2000 };
     const [callRows, rolledRows, transRows, contactRows, team] = await Promise.all([
-      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration"], ...ALL }),
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
          six weeks at this call volume. Missing this read would make every month
          older than the window read zero — history silently deleted rather than
          compacted. Tolerated when absent so a base without the table still
          reports, just without the old days. */
-      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls", "Talk Seconds"], ...ALL })
+      listTolerant(airtable, "Call Rollup", { fields: ["Day", "Owner", "Outcome", "Calls", "Talk Seconds", "Stage Set"], ...ALL })
         .catch(() => []),
       listTolerant(airtable, "Stage Transitions", { fields: ["Changed At", "Owner", "To Stage", "Contact"], ...ALL }),
       /* Right POC and discovery are DATA becoming true, not a stage move, so
@@ -1187,9 +1187,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
     const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
                                        outcome: r.fields.Outcome,
+                                       /* What decides connected — see callConnected. */
+                                       stage: r.fields["Stage Set"] || "",
                                        secs: Number(r.fields.Duration || 0) }));
     const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
                                             outcome: r.fields.Outcome,
+                                            stage: r.fields["Stage Set"] || "",
                                             n: Number(r.fields.Calls || 0),
                                             secs: Number(r.fields["Talk Seconds"] || 0) }));
     /* A day can briefly exist in both tables — the rollup writes before it

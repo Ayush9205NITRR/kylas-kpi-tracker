@@ -74,7 +74,7 @@ export async function run({ env = {}, log = () => {}, apply = false,
               (before ? "" : ` (${DAYS} days)`));
 
   const rows = await at.listAll("Call Log", {
-    fields: ["Called At", "Owner", "Outcome", "Duration"],
+    fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set"],
     pageSize: 100, maxPages: 400,
   });
   log(`\n${rows.length} raw call row(s) in the base`);
@@ -108,20 +108,25 @@ export async function run({ env = {}, log = () => {}, apply = false,
 
   let wrote = 0, deleted = 0, aggregates = 0;
   for (const d of days) {
-    const group = new Map();          // "owner|outcome" -> { calls, seconds }
+    /* GROUPED BY STAGE TOO, because the stage is what says whether the call
+       connected (report.mjs, callConnected). Rolling a day up by owner and
+       outcome alone threw that away, and every rolled-up day would have read
+       zero connected for ever after — the same fault the raw rows had. */
+    const group = new Map();          // "owner|outcome|stage" -> { calls, seconds }
     for (const r of byDay.get(d)) {
       const owner = r.fields?.Owner || "";
       const outcome = r.fields?.Outcome || "";
-      const k = `${owner}|${outcome}`;
-      if (!group.has(k)) group.set(k, { owner, outcome, calls: 0, seconds: 0 });
+      const stage = r.fields?.["Stage Set"] || "";
+      const k = `${owner}|${outcome}|${stage}`;
+      if (!group.has(k)) group.set(k, { owner, outcome, stage, calls: 0, seconds: 0 });
       const g = group.get(k);
       g.calls++;
       g.seconds += Number(r.fields?.Duration || 0);
     }
 
     const out = [...group.values()].map((g) => ({
-      Key: `${d}|${g.owner}|${g.outcome}`,
-      Day: d, Owner: g.owner, Outcome: g.outcome,
+      Key: `${d}|${g.owner}|${g.outcome}|${g.stage}`,
+      Day: d, Owner: g.owner, Outcome: g.outcome, "Stage Set": g.stage,
       Calls: g.calls, "Talk Seconds": g.seconds,
       "Rolled At": new Date().toISOString(),
     }));

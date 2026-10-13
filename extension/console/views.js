@@ -1157,6 +1157,10 @@
     return `${fmtTalk(s)}${timed < calls ? ` <small class="cov" title="Only calls dialled from the console's own button are timed">${timed}/${calls} timed</small>` : ""}`;
   };
   const COUNT_COLS = [{ key: "calls", label: "Calls" },
+    /* CONNECTED, from the stage the call set — see report.mjs callConnected.
+       Ayush, 2026-10-13. A call, not a company: "Companies picked" below is
+       the same question asked of accounts. */
+    { key: "connects", label: "Connected" },
     { key: "talkSeconds", label: "Talk time", fmt: talkCell, noDelta: true },
     ...LADDER_ORDER.map((key) => ({ key, label: rung(key) }))];
   /* Each rate is this rung out of the one above it, so the pairs follow the
@@ -1398,15 +1402,25 @@
                  two rows count CALLS and their minutes, not companies, so
                  they carry no step number and no conversion, and sit above
                  the rungs under their own rule. Same report, same period. */
-              [{ key: "calls", name: "Calls", fmt: (v) => String(v || 0) },
-               { key: "talkSeconds", name: "Talk time", fmt: (v, p) => talkCell(v, p) }].map((a, j) => {
+              [{ key: "calls", name: "Calls dialled", fmt: (v) => String(v || 0),
+                 note: "one per save, calls not companies" },
+               /* CONNECTED IS A STAGE. Ayush, 2026-10-13: "Connected call
+                  already defined which stages are defined as connected
+                  calls." Anything but the CNC rungs means somebody answered,
+                  the same list the Companies picked rung uses. The rate is
+                  of dials, so it is the team's connect rate. */
+               { key: "connects", name: "Connected", fmt: (v) => String(v || 0),
+                 of: "calls", note: "of dials — the stage says somebody answered" },
+               { key: "talkSeconds", name: "Talk time", fmt: (v, p) => talkCell(v, p),
+                 note: "timed only when dialled from the console" }].map((a, j, arr) => {
                 const top = Math.max(1, ...people.map((p) => p[a.key] || 0));
-                return `<tr class="act${j === 1 ? " last" : ""}">
+                return `<tr class="act${j === arr.length - 1 ? " last" : ""}">
                 <td class="rung"><span class="rungname">${esc(a.name)}</span></td>
                 <td class="teamcol"><b class="tnum">${a.fmt(cur[a.key], cur)}</b>${
-                  prev && a.key === "calls" ? deltaHTML(cur.delta ? cur.delta.calls : null) : ""}</td>
-                <td class="conv">${j === 0 ? `<span>calls, not companies</span>`
-                  : `<span>timed only when dialled from the console</span>`}</td>
+                  prev && a.key !== "talkSeconds" ? deltaHTML(cur.delta ? cur.delta[a.key] : null) : ""}</td>
+                <td class="conv">${a.of
+                  ? `<b class="tnum">${pc(cur[a.key] || 0, cur[a.of] || 0)}</b> <span>${esc(a.note)}</span>`
+                  : `<span>${esc(a.note)}</span>`}</td>
                 ${people.map((p) => {
                   const v = p[a.key] || 0;
                   return `<td><div class="cellv tnum${v ? "" : " zero"}">${a.fmt(v, p)}</div>

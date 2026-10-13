@@ -149,7 +149,7 @@ export const METRICS = [
      rungs: a rung counts companies, and mixing the two units is what let the
      ladder show 0 connected above 2 right POC. */
   { key: "calls", label: "Calls logged", kind: "flow" },
-  { key: "connects", label: "Calls picked", kind: "flow" },
+  { key: "connects", label: "Calls connected", kind: "flow" },
   /* TOUCH — one per company per PERIOD, not once ever.
      Ayush, 2026-09-30: "Companies worked — kuch activity (likely any stage
      change). Companies picked — where pipeline stage != CNC."
@@ -207,7 +207,9 @@ const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bo
                        talkSeconds: 0, timedCalls: 0 });
 
 /* ── the aggregation ───────────────────────────────────────────────── */
-/* calls:        [{ at, owner, outcome, secs }]   secs: the call's duration, or
+/* calls:        [{ at, owner, outcome, stage, secs }]  stage: the pipeline
+                 stage set on the call, which is what decides connected;
+                 secs: the call's duration, or
                  a rolled-up day's total talk for that owner and outcome
    transitions:  [{ at, owner, to, contact }]     `to` is a stage CODE
    contactRight / contactDiscovery: [{ at, owner, contact }] — when a contact
@@ -317,6 +319,32 @@ export function arrivalsByCompany(input) {
    where it was is still that account being worked. They date the FIRST touch
    only, so they add a period rather than every period; the transitions carry
    the rest. */
+/* ── WAS THE CALL CONNECTED? THE STAGE SAYS SO ─────────────────────────
+   Ayush, 2026-10-13: "Connected call already defined which stages are
+   defined as connected calls."
+
+   This used to read the Call Log's Outcome field — the 1-4 keypress on the
+   card — and that field is BLANK on every row the team has ever saved
+   (589 of 589 over 2026-10-12/13, checked in the base). Blank is not "No
+   answer", so `outcome && outcome !== "No answer"` was false for all of
+   them and Calls connected read ZERO for the whole team, for ever.
+
+   What every row DOES carry is Stage Set: the pipeline stage the associate
+   chose on that call. NOT_CONNECTED already names the stages that mean
+   nobody picked up — the three CNC rungs, the CNC follow-up, never-mined —
+   and the Companies picked rung has always been defined by it. One rule,
+   both units: a call whose stage is not on that list is a call somebody
+   answered.
+
+   The outcome is still honoured where a stage is missing, so the handful of
+   old rows that have one keep counting. */
+export const callConnected = (c) => {
+  const stage = String(c?.stage || "").trim();
+  if (stage) return !NOT_CONNECTED.includes(stage);
+  const outcome = String(c?.outcome || "").trim();
+  return !!outcome && outcome !== "No answer";
+};
+
 export function touchEvents({ transitions = [], signals = [] } = {}) {
   const out = [];
   for (const t of transitions) {
@@ -385,7 +413,7 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
     }
     /* "Connected" is any outcome that is not a no-answer. A dial that nobody
        picked up is work, but it is not a conversation. */
-    if (c.outcome && c.outcome !== "No answer") bump(key(c.at), c.owner, "connects", n);
+    if (callConnected(c)) bump(key(c.at), c.owner, "connects", n);
   }
 
   /* FIRST arrival only, per company per milestone — computed once, by

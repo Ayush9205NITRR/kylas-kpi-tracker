@@ -164,6 +164,19 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**A field nobody fills is not a field.** "Calls connected" was
+`outcome && outcome !== "No answer"` over the Call Log's Outcome column — the
+1-4 keypress on the call card. That column is BLANK on every row the team has
+saved: 589 of 589 over 2026-10-12/13, read from the base. Blank is not "No
+answer", so the test was false for all of them and the metric was zero for the
+whole team, for ever — and nothing said so, because zero is a number.
+Connected now comes from **Stage Set**, which every row does carry, through
+`callConnected` in report.mjs: a call whose stage is not in NOT_CONNECTED is a
+call somebody answered. That is the same list the Companies picked rung has
+always used, so one rule now covers both units. The outcome is still honoured
+where a row has no stage. Before trusting a metric built on a column, count
+how many rows actually have one.
+
 **`npx wrangler` is whatever was released last.** With no `package.json`, every
 deploy fetched the newest wrangler, and on 2026-10-12 that was 4.149.0, which
 died before uploading ("Received a malformed response from the API", reading

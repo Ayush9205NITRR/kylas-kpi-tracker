@@ -395,6 +395,56 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   eq("held in October, SQL in November: October still credited", r.periods[0].doneSql, 1);
 }
 {
+  /* CONNECTED IS DECIDED BY THE STAGE (2026-10-13). Ayush: "Connected call
+     already defined which stages are defined as connected calls."
+
+     The live base settles why this had to change: Outcome is blank on all
+     589 calls saved on 2026-10-12/13, so the old `outcome !== "No answer"`
+     rule counted none of them and Connected read zero for the whole team.
+     Stage Set is filled on every one. */
+  const r = report("day", { calls: [
+    /* the CNC rungs and the CNC follow-up: nobody picked up */
+    { at: "2026-10-13T09:00:00Z", owner: "A", stage: "CNC_COULD_NOT_CONNECT" },
+    { at: "2026-10-13T09:10:00Z", owner: "A", stage: "CNC_COULD_NOT_CONNECT_2" },
+    { at: "2026-10-13T09:20:00Z", owner: "A", stage: "CNC_COULD_NOT_CONNECT_3" },
+    { at: "2026-10-13T09:30:00Z", owner: "A", stage: "FOLLOWUP_CNC" },
+    { at: "2026-10-13T09:40:00Z", owner: "A", stage: "YET_TO_BE_MINED" },
+    /* everything else means somebody answered — including the bad news */
+    { at: "2026-10-13T10:00:00Z", owner: "A", stage: "CONNECT_LATER" },
+    { at: "2026-10-13T10:10:00Z", owner: "A", stage: "NOT_INTERESTED" },
+    { at: "2026-10-13T10:20:00Z", owner: "B", stage: "NOT_A_DECISION_MAKER_NDM" },
+    { at: "2026-10-13T10:30:00Z", owner: "B", stage: "FOLLOW_UP_1" },
+    { at: "2026-10-13T10:40:00Z", owner: "B", stage: "SQL_SALES_QUALIFIED_LEAD" },
+  ] }, { from: "2026-10-13", to: "2026-10-13" });
+  const d = r.periods[0];
+  eq("every call is a dial", d.calls, 10);
+  eq("the five CNC/never-mined stages are not connected", d.connects, 5);
+  eq("per owner: A connected two of seven", (r.byOwner || []).find((o) => o.owner === "A")?.connects, 2);
+  eq("per owner: B connected all three", (r.byOwner || []).find((o) => o.owner === "B")?.connects, 3);
+}
+{
+  /* A BLANK OUTCOME IS NOT "CONNECTED", and a blank stage falls back to it. */
+  const r = report("day", { calls: [
+    { at: "2026-10-13T09:00:00Z", owner: "A", outcome: "" },                        /* the live shape */
+    { at: "2026-10-13T09:05:00Z", owner: "A", outcome: "", stage: "FOLLOW_UP_1" },  /* stage wins */
+    { at: "2026-10-13T09:10:00Z", owner: "A", outcome: "Right POC" },               /* no stage: outcome */
+    { at: "2026-10-13T09:15:00Z", owner: "A", outcome: "No answer" },
+    /* the stage is authoritative even when the outcome disagrees */
+    { at: "2026-10-13T09:20:00Z", owner: "A", outcome: "Right POC", stage: "CNC_COULD_NOT_CONNECT" },
+  ] }, { from: "2026-10-13", to: "2026-10-13" });
+  eq("blank outcome with no stage is not connected", r.periods[0].calls, 5);
+  eq("...only the stage row and the Right POC row count", r.periods[0].connects, 2);
+}
+{
+  /* A ROLLED-UP DAY CARRIES ITS STAGE, so compacting cannot zero it. */
+  const r = report("day", { calls: [
+    { at: "2026-10-01", owner: "A", stage: "CNC_COULD_NOT_CONNECT", n: 40 },
+    { at: "2026-10-01", owner: "A", stage: "FOLLOW_UP_1", n: 10 },
+  ] }, { from: "2026-10-01", to: "2026-10-01" });
+  eq("the whole day's dials", r.periods[0].calls, 50);
+  eq("only the connected group counts", r.periods[0].connects, 10);
+}
+{
   /* DAILY TALK TIME (2026-10-10). The calls' durations summed per day, raw
      rows and rolled-up days alike, per owner too. */
   const r = report("day", { calls: [

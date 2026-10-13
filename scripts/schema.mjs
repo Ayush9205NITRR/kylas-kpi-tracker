@@ -268,7 +268,7 @@ export const TABLES = [
     description: "One row per day per owner per outcome, replacing the raw Call Log rows for days past the retention window. Written by rollup-calls.mjs. The period report reads this for old days and the raw log for recent ones.",
     fields: [
       { name: "Key", type: "singleLineText",
-        description: "day|owner|outcome. The upsert key, so re-running a day overwrites rather than adds." },
+        description: "day|owner|outcome|stage. The upsert key, so re-running a day overwrites rather than adds." },
       /* TEXT, not a date field. An Airtable date carries a timezone and this is
          a calendar day that has already been decided — storing it as a date
          invites the day to shift by one under a different viewer's zone, which
@@ -277,6 +277,10 @@ export const TABLES = [
       { name: "Day", type: "singleLineText" },
       { name: "Owner", type: "singleLineText" },
       { name: "Outcome", type: "singleLineText" },
+      /* The pipeline stage set on the calls in this group. Connected is
+         decided by it (report.mjs, callConnected), so a rollup that dropped
+         it would make every compacted day read zero connected. */
+      { name: "Stage Set", type: "singleLineText" },
       { name: "Calls", type: "number", options: num },
       { name: "Talk Seconds", type: "number", options: num },
       { name: "Rolled At", type: "dateTime", options: dateTime },

@@ -150,9 +150,10 @@ for (const [what, re] of [
      funnel exists to reach were on the ladder and missing from the table
      beside it — and it kept "→ Booked" while everything else said
      "SQL booked", because nothing checked this one either. */
-  /* Talk time (2026-10-10) sits between Calls and the rungs; it is a duration,
-     not a rung, so it is allowed there and the rungs still come from RUNG. */
-  ["COUNT_COLS, the Progress table", /const COUNT_COLS = \[\{ key: "calls".*\n(\s*\{ key: "talkSeconds".*\n)?\s*\.\.\.LADDER_ORDER\.map/],
+  /* Connected (2026-10-13) and Talk time (2026-10-10) sit between Calls and
+     the rungs. Both count CALLS, not companies, so they are allowed there and
+     the rungs after them still come from RUNG. */
+  ["COUNT_COLS, the Progress table", /const COUNT_COLS = \[\{ key: "calls"[\s\S]{0,600}?\n\s*\.\.\.LADDER_ORDER\.map/],
   ["RATE_COLS, its conversions", /const RATE_COLS = LADDER_ORDER\.slice\(1\)/],
 ]) ok(`${what} is built from RUNG`, re.test(views));
 
