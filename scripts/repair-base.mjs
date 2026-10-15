@@ -35,7 +35,11 @@ if (!PAT || !BASE) {
   process.exit(1);
 }
 
-const META = "https://api.airtable.com/v0/meta";
+/* AIRTABLE_BASE_URL overrides the host, the way the other scripts take it, so
+   this one can be pointed at a stub to check what it prints when the token is
+   refused. Airtable's own host is the default and nothing passes it in
+   production. */
+const META = `${process.env.AIRTABLE_BASE_URL || "https://api.airtable.com"}/v0/meta`;
 async function call(method, path, body) {
   const res = await fetch(`${META}${path}`, {
     method,
@@ -43,6 +47,23 @@ async function call(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
+  /* THE SCOPE, NAMED. This tool needs schema.bases:write to add a table or a
+     column, and a token minted for the Worker has only the data scopes — which
+     comes back as a bare 403 and read as "the script is broken". Both the
+     missing scope and a base the token cannot see land here, and they are
+     different problems with different fixes, so both are spelled out. */
+  if (!res.ok && (res.status === 401 || res.status === 403)) {
+    console.error(`\n${method} ${path} -> ${res.status}`);
+    console.error(text ? `${text}\n` : "");
+    console.error("This is almost always the token's SCOPES, not the base.");
+    console.error("  repair-base.mjs needs:  schema.bases:read  schema.bases:write");
+    console.error("  (the Worker's token has only data.records:read / :write, which cannot");
+    console.error("   add a table or a column.)");
+    console.error("\nMint one at airtable.com/create/tokens with those two scopes AND access");
+    console.error(`to the base ${BASE}, then run this with AIRTABLE_PAT set to it.`);
+    console.error("It is only needed for this run — do not put it in the Worker.\n");
+    process.exit(1);
+  }
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}\n${text}`);
   return text ? JSON.parse(text) : {};
 }
