@@ -1970,6 +1970,25 @@ on("qToggle","click",e=>{
 
 document.querySelectorAll(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 function newContact(){
+  /* SAY IT NOW, NOT AT THE SAVE GATE.
+     Ayush, 2026-10-15: "New contact kyon aate hai jab mein new contact add
+     nahi kar sakte."
+
+     A new contact must carry an owner — missing() requires it — and the list
+     of owners comes from Kylas, through the server. Until it arrives OWNERS is
+     [""], so the dropdown has nothing in it but the blank, and `ME` is only
+     set once this console has learned who is using it. With neither, the
+     button opened a blank card, let a whole POC be typed into it, and then
+     refused the save with "Still needed: Owner" pointing at a box with no
+     options — a dead end discovered at the end.
+
+     The button stays enabled, because the list usually arrives a moment later
+     and disabling it would read as "this console cannot add contacts". What
+     changes is that the reason is given before the typing, not after. */
+  if(!ME && !OWNERS.some(Boolean)){
+    toast("Cannot add a contact yet — Kylas has not sent the owner list, and a new contact needs an owner. Check the link badge at the top, then try again.");
+    return;
+  }
   const b=blank();
   /* Inside a company scope the new POC belongs to that company. */
   if(scope){b.company=scope.name;b.companyId=String(scope.id);}

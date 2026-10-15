@@ -472,6 +472,24 @@ check('the call saved on one instance is in the next report from ANOTHER',
       `${rep1.body.totals?.calls} -> ${rep3.body.totals?.calls}`);
 check('and that report still read nothing from Airtable', (await reads()) === r0, `${(await reads()) - r0} reads`);
 
+/* An owner Kylas will not name. ownerName() caches the id AS the name when
+   the lookup fails, which turns the report's name filter into a string no row
+   carries — a full report of zeros for somebody who was in fact calling all
+   day. Ayush, 2026-10-15: "Anjali ka data mere console mein nahi dikhta hai."
+   Zeros are indistinguishable from a day off, so this must SAY so instead. */
+const ghost = await get(await coldWorker(26), '/report?period=week&owner=909909909');
+check('an owner Kylas cannot name is reported, not served as zeros',
+      !!ghost.body.error && ghost.body.unresolvedOwner === '909909909',
+      ghost.body.error || JSON.stringify(ghost.body.totals));
+check('...and it does NOT fall back to the signed-in user\'s own numbers',
+      !(ghost.body.periods || []).length, `${(ghost.body.periods || []).length} period(s)`);
+/* The same guard must not touch the two shapes that are legitimate: the team,
+   and asking for nothing at all (which IS your own report). */
+const asTeam = await get(await coldWorker(27), REPORT);
+check('asking for the team still answers', !asTeam.body.error && !!asTeam.body.periods?.length);
+const asMe = await get(await coldWorker(28), '/report?period=week');
+check('...and so does asking for nothing, which means me', !asMe.body.error, asMe.body.error || 'ok');
+
 const synced = await get(await coldWorker(25), '/companies?owner=all');
 check('once the sync has run, the company list comes from the copy',
       synced.body.source === 'airtable' && (await reads()) === r0,

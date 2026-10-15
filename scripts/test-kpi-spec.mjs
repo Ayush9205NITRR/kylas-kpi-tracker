@@ -83,12 +83,19 @@ ok("Worked fires on ANY transition", /out\.push\(\{ metric: "worked"/.test(repor
 ok("Picked fires only when the stage landed on is not a no-answer",
    /if \(!NOT_CONNECTED\.includes\(t\.to\)\)/.test(report));
 
-/* ── Reached is not a ladder rung ───────────────────────────────────── */
-console.log("\n6. Reached");
-ok("Reached means at least one call logged",
-   /reached:\s*\{ label: "Reached",\s*sub: "at least one call logged"/.test(views));
+/* ── the all-time rung is Worked too, over a different window ───────── */
+/* Ayush, 2026-10-15: "We cannot have two different definitions of how
+   companies are being worked." It used to be labelled "Reached", which was a
+   SECOND WORD for the test `worked` already names — the only difference is
+   the window. One word now, and the window in `sub`. */
+console.log("\n6. the all-time window of Worked");
+ok("it is at least one call logged, ever",
+   /reached:\s*\{ label: "Worked",\s*sub: "at least one call logged, ever"/.test(views));
+ok("\"Reached\" is no longer a label anywhere", !/label: "Reached"/.test(views + report));
+ok("...nor in the accounts list's own column",
+   /const KPI_LABELS = \["Not worked", \.\.\.RUNG_ORDER\.map/.test(views));
 ok("the spec says it is not a ladder rung",
-   /\*\*Reached\*\* is not a ladder rung/.test(spec));
+   /is not a ladder rung/.test(spec));
 
 /* ── one name per rung, still ───────────────────────────────────────── */
 console.log("\n7. no rung is named two things");
@@ -97,8 +104,17 @@ for (const [, k, v] of views.match(/const RUNG = \{[\s\S]*?\n  \};/)[0]
   .matchAll(/(\w+):\s*\{ label: "([^"]*)"/g)) RUNG[k] = v;
 const byLabel = {};
 for (const [k, v] of Object.entries(RUNG)) (byLabel[v] = byLabel[v] || []).push(k);
-const dupes = Object.entries(byLabel).filter(([, ks]) => ks.length > 1);
+/* WORKED AND REACHED ARE EXEMPT, AND THAT IS THE POINT. They are one
+   definition over two windows — "was a call logged", this period and ever —
+   so sharing a name is not the fault this check exists to catch; it is the
+   fix for the opposite fault, which is what Ayush reported on 2026-10-15.
+   Every OTHER pair sharing a label is still a bug. */
+const ONE_DEFINITION = ["worked", "reached"];
+const dupes = Object.entries(byLabel).filter(([, ks]) =>
+  ks.length > 1 && ks.join() !== ONE_DEFINITION.join());
 ok("no two rungs share a label", dupes.length === 0, JSON.stringify(dupes));
+ok("...and the two windows of Worked DO share one",
+   RUNG.worked && RUNG.worked === RUNG.reached, `worked=${RUNG.worked} reached=${RUNG.reached}`);
 /* The ladder, the funnel, the buckets and the email all read from RUNG. The
    ladder's own list was missed the first time and kept the long old names. */
 ok("the ladder builds its rows from RUNG", /const RUNGS = LADDER_ORDER\.map/.test(views));

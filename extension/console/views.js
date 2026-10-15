@@ -45,12 +45,27 @@
      keys and chip labels, read at a glance a hundred times a day. */
   const RUNG_ORDER = ["reached", "right", "discovery", "booked", "done", "sql"];
   const RUNG = {
-    /* The ladder's bottom two. They are PER-PERIOD counts — companies touched,
-       and companies that got past a no-answer, inside the window on screen —
-       which is why they are not just "reached" under another name. */
+    /* WORKED AND REACHED ARE ONE DEFINITION, SO THEY ARE ONE WORD.
+       Ayush, 2026-10-15: "We cannot have two different definitions of how
+       companies are being worked."
+
+       He is right, and the two keys below were the last of it. Both ask the
+       same question — was a call logged against this company — and differ only
+       in the WINDOW: `worked` counts inside the period on screen, `reached`
+       counts ever. The old labels said "Worked" and "Reached", two words for
+       one test, and the reader had to work out that 539 Worked above 517
+       Reached was not a contradiction. The server has always known they are
+       the same thing; handlers.mjs says so in as many words beside its own
+       RUNGS list ("worked" is the reference's "Companies reached").
+
+       So both say WORKED and the window is said by `sub`, which is what `sub`
+       is for. The two keys stay because the two windows are genuinely
+       different numbers — what is gone is the second NAME. test-kpi-spec §7
+       asserts no rung is named two things; this pair is its mirror image, one
+       name over two rungs, and is asserted there deliberately. */
     worked:    { label: "Worked",     sub: "some activity this period" },
     picked:    { label: "Picked",     sub: "got past a no-answer" },
-    reached:   { label: "Reached",    sub: "at least one call logged" },
+    reached:   { label: "Worked",     sub: "at least one call logged, ever" },
     right:     { label: "Right POC",  sub: "any of budget, timeline or pax" },
     discovery: { label: "Discovery",  sub: "one complete row" },
     booked:    { label: "SQL booked", sub: "booked, regardless of outcome" },
@@ -753,8 +768,10 @@
     const rows = funnelRows(cos);
     const at = (key) => rows.find((r) => r.key === key) || { n: 0, fromPrev: null };
     const tiles = [
-      { k: "reached",   label: "Companies reached", sub: "at least one call logged" },
-      { k: "right",     label: "Right POC",         sub: "of reached" },
+      /* Labels off RUNG, never written out again — these two were the last
+         hardcoded copies, and "Companies reached" was a second name on top. */
+      { k: "reached",   label: rung("reached"),     sub: RUNG.reached.sub },
+      { k: "right",     label: rung("right"),       sub: `of ${rung("reached").toLowerCase()}` },
       { k: "discovery", label: "Discovery",         sub: "of right POC" },
       { k: "booked",    label: "SQL booked",        sub: "of discovery" },
     ];
@@ -779,7 +796,7 @@
         <span class="fl">Rung</span>
         <span class="fn">Companies</span>
         <span class="fp">vs rung above</span>
-        <span class="fo">vs reached</span>
+        <span class="fo">vs ${esc(rung("reached").toLowerCase())}</span>
       </div>
       ${rows.map((r) => `
       <div class="vfr${r.widened ? " grew" : ""}" title="${esc(r.label)} — ${esc(r.sub)}. ${r.n} compan${r.n === 1 ? "y" : "ies"}${
@@ -847,7 +864,7 @@
         }<td class="tnum">${b.total}</td></tr>`).join("")}</tbody></table></details>`;
 
     return `<div class="vhead sm"><h2>Where companies stopped</h2>
-      <span class="vsub">Each bar is one associate's reached companies, split by the furthest rung they got to.</span></div>
+      <span class="vsub">Each bar is one associate's companies worked, split by the furthest rung they got to.</span></div>
       ${legend}${chart}${table}`;
   }
 
@@ -2159,7 +2176,11 @@
   /* The rung a company has reached, as an index into KPI_LABELS. -1 is "not
      reached". Read off the same booleans the board and the funnel use, highest
      first, so a company cannot be one rung here and another there. */
-  const KPI_LABELS = ["Not reached", "Reached", "Right POC", "Discovery", "SQL booked", "SQL done", "SQL"];
+  /* Off RUNG, so the accounts list and the dashboard cannot drift apart: this
+     was a hand-written seventh copy of the rung names, and the one place
+     "Reached" survived as a second word for Worked. Index 0 is "no rung yet",
+     which is not a rung and so is the only literal left. */
+  const KPI_LABELS = ["Not worked", ...RUNG_ORDER.map((k) => rung(k))];
   const KPI_ORDER = ["reached", "right", "discovery", "booked", "done", "sql"];
   const kpiOf = (co) => {
     for (let i = KPI_ORDER.length - 1; i >= 0; i--) if (co[KPI_ORDER[i]]) return i;

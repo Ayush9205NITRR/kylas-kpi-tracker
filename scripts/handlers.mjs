@@ -36,7 +36,7 @@ import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant,
          readRcaDue, writeRcaAnswer,
-         readTeam, writeTeam, counter,
+         readTeam, writeTeam, counter, nameKey,
          readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
@@ -2312,9 +2312,38 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          owner NAME (Airtable's Owner column holds the name the writer put there).
          Passing an id straight through here matched nothing and would have shown
          an associate an empty report while telling them it was theirs. */
-      const askedId = await scopeOwner(url.searchParams.get("owner"));
-      const owner = askedId === "all" ? "all"
-        : (owners.get(String(askedId)) || (await ownerName(askedId)) || userName(await whoami()) || "");
+      /* AN UNRESOLVED OWNER IS A REPORT OF ZEROS, AND ZEROS LOOK LIKE A QUIET DAY.
+         Ayush, 2026-10-15: "agar Anjali ka data mere console mein nahi dikhta
+         hai kai baar, so uske data mujhe dikhte nahi hai."
+
+         This route filters on a NAME. The id→name step is ownerName(), and on
+         a lookup Kylas refuses it caches `owners.set(k, k)` — the ID ITSELF as
+         the name, deliberately, so one failed lookup cannot fail a whole
+         fetch. Harmless where a name is only ever displayed. Here it is the
+         filter: `owner` becomes "1234567", no row in the base carries that as
+         an Owner, every list filters to nothing, and the dashboard renders a
+         complete, confident report of zeros for a person who in fact made
+         ninety calls. Nothing on screen distinguishes it from a day off.
+
+         So an id that resolved only to itself is treated as unresolved and
+         SAID, rather than served. The whoami fallback below stays for the one
+         case it means — nothing was asked for, so it is your own report. */
+      const asked = url.searchParams.get("owner");
+      const askedId = await scopeOwner(asked);
+      const wantedSomebody = !!askedId && askedId !== "all";
+      const resolved = askedId === "all" ? "all"
+        : (owners.get(String(askedId)) || (await ownerName(askedId)) ||
+           (wantedSomebody ? "" : userName(await whoami())) || "");
+      /* A person's name is never their numeric Kylas id, so this is only ever
+         ownerName's own fallback showing through. */
+      if (wantedSomebody && (!resolved || resolved === String(askedId))) {
+        log(`! report: owner ${askedId} could not be resolved to a name — serving nothing rather than zeros`);
+        return { error: `Kylas would not say who owner ${askedId} is, so this report would ` +
+                        `have been all zeros rather than their real numbers. Refresh, or ask for the team.`,
+                 period, from, to, periods: [], team: [], excluded: [],
+                 unresolvedOwner: String(askedId) };
+      }
+      const owner = resolved;
 
       /* THE FOUR TABLES, READ ONCE FOR EVERY PERIOD AND EVERY OWNER.
          None of this depends on the period, the date window or who is asking —
@@ -2331,9 +2360,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          into it, so the list of people left out was always empty and the funnel
          shrank with nothing on screen saying why. */
       let excluded = [];
+      /* nameKey, not ===. One capital letter between Kylas' spelling and the
+         one saved on the row used to drop every one of that person's rows and
+         show them an empty report that looked like a quiet day. */
+      const key = nameKey(owner);
       const pick = (list) => {
         const byOwner = owner && owner !== "all"
-          ? list.filter((x) => String(x.owner || "") === owner) : list;
+          ? list.filter((x) => nameKey(x.owner) === key) : list;
         return owner === "all" && team.length ? byOwner.filter((x) => counts(x.owner)) : byOwner;
       };
       /* Every owner the data mentions, before the roster narrows it — so the

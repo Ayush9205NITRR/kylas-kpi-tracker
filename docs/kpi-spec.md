@@ -33,9 +33,18 @@ PER-PERIOD activity. Rungs 3–7 are ONCE-EVER arrivals.**
 `CNC_COULD_NOT_CONNECT_3`, `FOLLOWUP_CNC`. **`CONNECT_LATER` counts as
 Picked** — somebody answered and asked to be called back.
 
-**Reached** is not a ladder rung. It belongs to the Accounts view and the
-stacked bar, and means **at least one call logged, ever**. In the bar it is the
-bucket for "reached and got no further" (§3).
+**The all-time window of Worked** is not a ladder rung. It belongs to the
+Accounts view and the stacked bar, and means **at least one call logged,
+ever** — the same test as rung 1, without the period. In the bar it is the
+bucket for "worked and got no further" (§3).
+
+It was labelled **"Reached"** until 2026-10-15, which was a *second word for
+one test* and read as a contradiction wherever the two sat together: 539
+Worked above 517 Reached. Ayush: *"We cannot have two different definitions of
+how companies are being worked."* Both now say **Worked**, and the window —
+*this period* or *ever* — is what distinguishes them. The key in the code is
+still `reached`, because the two windows are genuinely two numbers; what is
+gone is the second name. `test-kpi-spec` §6 and §7 hold it there.
 
 ### Three consequences that make correct numbers look wrong
 

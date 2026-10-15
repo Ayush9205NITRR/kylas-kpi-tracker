@@ -1150,6 +1150,77 @@ who placed them. Note the `owner=all` in §5: `/report` with no `owner` scopes
 to the signed-in person, and these calls belong to the associates, not to the
 key's user. That read as "talkSeconds 0, still broken" for a while. It is not.
 
+## 3i · One word for "worked", and the screen that was simply out of date
+
+Ayush, 2026-10-15, over two screenshots: *"We cannot have two different
+definitions of how companies are being worked"*, *"agar Anjali ka data mere
+console mein nahi dikhta hai kai baar"*, *"New contact kyon aate hai jab mein
+new contact add nahi kar sakte"*.
+
+**Read the screenshots before the code.** The console's own link badge in the
+second one says **"reload me"** — `API.oldConsole`, which fires only when the
+loaded extension is behind the deployed server. Two more tells agree: Talk time
+reads `—` where 1.61 renders `not timed`, and Step conversion still heads its
+first column **Reached**, which 1.62 replaced. The screen he was objecting to
+was three releases old, and the two-vocabulary table on it had already been
+fixed. That is worth stating plainly rather than re-fixing: **the badge is the
+first thing to read when a complaint is about something that looks already
+done.**
+
+**But one genuine second word was left, and it was the one he could still
+see.** The Accounts list's KPI column said **Reached** for the identical test
+the dashboard calls **Worked** — `co.reached = worked.length > 0`, the local
+variable named for what it is, and `handlers.mjs` says the same beside its own
+list ("worked" is the reference's "Companies reached"). The two differ only in
+WINDOW: this period, or ever. So both now read **Worked**, and the window lives
+in `sub` ("some activity this period" / "at least one call logged, ever").
+
+The two keys stay — the two windows are genuinely two numbers — and
+`test-kpi-spec` §7, which asserts no rung is named two things, now asserts the
+mirror image for this one pair: that they DO share a name, because they are one
+definition. The accounts chips come off `RUNG` too (`KPI_LABELS` was a
+hand-written seventh copy of the rung names). The Airtable column is still
+called `Reached`; renaming it is a base migration for no gain, since nobody
+reads the column name.
+
+### An unresolved owner was a confident report of zeros
+
+`/report` filters on a NAME. The id→name step, `ownerName()`, caches
+`owners.set(k, k)` — **the id itself as the name** — when Kylas refuses the
+lookup, deliberately, so one bad lookup cannot fail a whole fetch. Harmless
+where a name is only displayed. As a filter it is not: `owner` becomes
+`"1234567"`, no row in the base carries that, every list filters to nothing,
+and the dashboard renders a complete report of zeros for somebody who made
+ninety calls. **Nothing on screen separated that from a day off** — which is
+exactly what "uske data mujhe dikhte nahi hai" looks like.
+
+An id that resolves only to itself is now treated as unresolved and said, not
+served. `test-worker` pins both halves: the ghost owner is reported, and the
+two legitimate shapes — the team, and asking for nothing, which means you — are
+untouched.
+
+Alongside it, the roster join is no longer case-sensitive. `Team.Name` has to
+be spelled exactly as the Owner column spells it, and nothing keeps the two in
+step: this base holds **"Aditi saini"** and whether Kylas writes "Aditi Saini"
+is not ours to decide. One capital letter detached somebody from their roster
+row; they stayed counted (an unknown name counts), so the only symptom was a
+Team tick that did nothing. `nameKey()` in `airtable.mjs` is now the one
+spelling-insensitive comparison, used by `counter()` and by the report's owner
+filter.
+
+### "+ New contact" led to a dead end it could have named
+
+A new contact must carry an owner — `missing()` requires it — and the owner
+list comes from Kylas through the server. Until it arrives `OWNERS` is `[""]`,
+so the dropdown holds nothing but the blank, and `ME` is only set once the
+console has learned who is using it. With neither, the button opened a card,
+let a whole POC be typed into it, and then refused the save with "Still needed:
+Owner" pointing at a box with no options.
+
+The button stays enabled — the list usually lands a moment later, and disabling
+it would read as "this console cannot add contacts". What changed is that the
+reason is given before the typing instead of after.
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current

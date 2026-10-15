@@ -1019,13 +1019,23 @@ export async function readTeam(at) {
   })).filter((p) => p.name);
 }
 
+/* ONE SPELLING OF A NAME. The roster joins to the data on a typed string and
+   nothing keeps the two in step: this base holds "Aditi saini" in Team, and
+   whether Kylas spells the same person "Aditi Saini" is not up to us. An exact
+   match meant one capital letter silently detached somebody from their own
+   roster row — they stayed counted (an unknown name counts), so the only
+   symptom was a Team panel whose tick did nothing. Case and surrounding space
+   are not part of who somebody is. */
+export const sameName = (a, b) => nameKey(a) === nameKey(b);
+export const nameKey = (v) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
 /* Returns a predicate, so every caller asks the same question the same way.
    `known` is the set of names the roster has an opinion about — a name it has
    never heard of is counted, per the rule above. */
 export function counter(team) {
-  const known = new Map(team.map((p) => [p.name, p.inFunnel]));
+  const known = new Map(team.map((p) => [nameKey(p.name), p.inFunnel]));
   return (name) => {
-    const n = String(name || "").trim();
+    const n = nameKey(name);
     if (!n) return false;                 /* an unattributed row is nobody's */
     return known.has(n) ? known.get(n) : true;
   };
