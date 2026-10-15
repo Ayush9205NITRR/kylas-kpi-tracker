@@ -142,7 +142,12 @@ if (process.env.MOCK_MANY) {
 
 /* Stages arrive as ids, not codes — the mapping layer has to cope. */
 const CONTACTS = [
-  { id: 112936, firstName: "Hema", lastName: "Bharathi", ownerId: 74725,
+  /* MOCK_CONTACT_DEAD_OWNER=1 parks this contact on 74727 "Gone Away", who is
+     deactivated. Kylas refuses to assign a record to an inactive user, so a
+     control write taken FROM such an owner cannot be put back — which is how
+     the live probe stranded Vaibhav Bhandari on 2026-10-15. */
+  { id: 112936, firstName: "Hema", lastName: "Bharathi",
+    ownerId: process.env.MOCK_CONTACT_DEAD_OWNER === "1" ? 74727 : 74725,
     /* Search returns company as a bare id with no name — this is what blanked
        the Company field against the live account. */
     company: 1776620, designation: "Founder's Office",
@@ -300,6 +305,11 @@ createServer(async (req, res) => {
     let sent = null; try { sent = JSON.parse(await text(req)); } catch { /* not json */ }
     const want = sent?.ownerId ?? sent?.owner?.id ?? sent;
     const n = Number(want && typeof want === "object" ? want.id : want);
+    /* AN INACTIVE USER CANNOT BE GIVEN A RECORD. Kylas answers 400; the live
+       restore of contact 5358966 hit exactly this, because the owner it was
+       taken from had been deactivated. */
+    if (Number.isFinite(n) && USERS[n] && USERS[n].active === false)
+      return json(res, 400, { code: "02803002", message: "user is not active" });
     if (honour && Number.isFinite(n)) {
       if (kind === "companies" && COMPANIES[id]) COMPANIES[id].ownerId = n;
       if (kind === "contacts") {

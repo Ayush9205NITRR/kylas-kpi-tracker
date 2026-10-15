@@ -131,7 +131,7 @@ node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable
 node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
-node scripts/test-owner-endpoint.mjs     # 22 · can an ACCOUNT's owner move? The live
+node scripts/test-owner-endpoint.mjs     # 27 · can an ACCOUNT's owner move? The live
                                          #      probe's verdict, in all four worlds its
                                          #      mock can be — including the 200 that
                                          #      changes nothing, which must never read
@@ -957,12 +957,57 @@ A fifth guard: an account whose contacts are **already** on the target is
 declared `INCONCLUSIVE`, not a pass. The first live run reported LANDED on
 exactly that, because the readback matched without anything having happened.
 
-`test-owner-endpoint` (22) runs the probe against a mock that can *be* each of
+`test-owner-endpoint` (27) runs the probe against a mock that can *be* each of
 those worlds — `MOCK_OWNER_ENDPOINT=404|ignore|lead|works` — and asserts the
 conclusion it draws, because the verdict is the only part of it anybody acts
 on. A probe that gets this wrong either builds an account cascade over an
 endpoint that silently does nothing, which is how lucidity lost its owner, or
 writes off an endpoint that works.
+
+### The live run, 2026-10-15 — and the two faults it exposed in the probe
+
+`--company 1780629 (aristocrat) --reassign-endpoint 82978 (Gurnoor Kaur)`:
+
+```
+contact 5358966  PUT /v1/contacts/5358966/owner  {"ownerId":82978}
+  -> 200 {"entityId":5358966,"newOwnerId":82978,"oldOwnerId":76689}   LANDED
+
+company 1780629  PUT /v1/companies/1780629/owner {"ownerId":82978}
+  -> 200 {"id":1780629}                                              owner unchanged
+                 ...as a string                 -> 200, unchanged
+                 ...{"ownerId":{"id":N}}        -> 400 generic.error (02803002)
+                 ...{"owner":{"id":N}}          -> 500 Generic error
+                 ...bare id                     -> 400 generic.error
+                 PUT /companies/{id}/owners     -> 404 NOT_FOUND
+```
+
+**The contact endpoint is real and clean** — it answers with the old and new
+owner, which is a reassignment endpoint behaving properly. The company path
+takes the request and does nothing with it. That is the answer, and it matches
+Kylas' own collection.
+
+But the run exposed two faults in the probe itself, both now fixed and tested:
+
+**1 · The company readback was blind.** It read `GET /v1/companies/{id}`, which
+**does not carry `ownerId` on this account** — the same fact recorded above for
+the October batch. So "owner before (none), owner after (none)" said nothing
+about the write; `--list` showed aristocrat's owner as 82867 through the SEARCH
+in the same session. A verdict drawn from a read that cannot see the field is
+not a verdict, which is the exact error the probe exists to avoid. `companyOwner()`
+now reads the search first, prints `[via search]`, and when neither read
+returns an owner it says **CANNOT TELL** rather than concluding.
+
+**2 · It stranded a live contact.** The control moved Vaibhav Bhandari (5358966)
+off **Charu Rathi (76689), a DEACTIVATED user**, and the restore came back 400:
+Kylas will not hand a record to an inactive user. The contact was left on the
+wrong person. Now the probe checks that the current owner is active *before*
+writing — an inactive owner makes the control a one-way trip and that contact
+is skipped with the reason named — falls back to `PUT /v1/contacts/{id}` if
+`/owner` refuses the way home, and if it still cannot restore, prints the exact
+repair command instead of a quiet "NO".
+
+`--set-contact-owner <contactId> --to <userId>` is that repair: both paths,
+read back, and it says plainly when the target being deactivated is the reason.
 
 **A 200 from the company endpoint means the request was well formed. It never
 means anything happened.** Read the record back.

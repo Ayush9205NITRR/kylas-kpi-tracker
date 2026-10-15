@@ -108,7 +108,7 @@ for (const [flag, val] of [["company", CO], ["to", TO]]) {
     process.exit(1);
   }
 }
-if (!CO && !LIST && !USERS) {
+if (!CO && !LIST && !USERS && !arg("set-contact-owner")) {
   console.error("Pass --company <kylas id> — an account you do not mind moving.\n" +
                 "Don't know one? --list shows a few, with their owners and contact counts.\n" +
                 "--users shows who you can hand an account to, with their ids.");
@@ -155,6 +155,46 @@ const equals = (field, value, type = "long") => ({ condition: "AND", valid: true
 const contactsOf = (companyId) => call("POST", "/v1/search/contact?page=0&size=100",
   { fields: ["id"], jsonRule: equals("company", Number(companyId)) });
 const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
+
+/* ── WHERE A COMPANY'S OWNER ACTUALLY READS ───────────────────────────
+   NOT from GET /v1/companies/{id}. That read does not carry ownerId on this
+   account — all 273 companies of the October batch read "owner NONE" through
+   it on 2026-10-12, and aristocrat (1780629) read "(none)" on 2026-10-15 while
+   the SEARCH endpoint said 82867 in the same session.
+
+   This cost a wrong answer. The owner probe read the single GET before and
+   after each write, got "(none)" both times, and reported ACCEPTED AND IGNORED
+   — when all it had established was that the field is invisible to that read.
+   A blind readback proves nothing in either direction, and the whole point of
+   the probe is that a 200 means nothing without one.
+
+   So the owner is read from the search, which is the only shape that returns
+   it, with the single GET as a fallback for an account where it does. */
+/* The same narrating PUT as the owner probe's, hoisted so the repair flag
+   above can use it too: status AND body, with a 429 wait. */
+async function rawPutTop(path, body) {
+  for (let t = 0; t < 6; t++) {
+    try {
+      const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H, body: JSON.stringify(body) });
+      const text = await r.text();
+      if (r.status === 429 && t < 5) {
+        const wait = Number(r.headers.get("retry-after") || 0) * 1000 || (500 * 2 ** t);
+        await sleep(wait); continue;
+      }
+      return { status: r.status, body: text };
+    } catch (e) { return { status: 0, body: `network error: ${e.message}` }; }
+  }
+  return { status: 429, body: "still throttled" };
+}
+
+const companyOwner = async (id) => {
+  const r = await call("POST", "/v1/search/company?page=0&size=1",
+    { fields: ["id", "name", "ownerId"], jsonRule: equals("id", Number(id)) }).catch(() => null);
+  const hit = rows(r).find((c) => String(c.id) === String(id));
+  if (hit && hit.ownerId !== undefined) return { id: idOf(hit.ownerId), via: "search" };
+  const one = await call("GET", `/v1/companies/${id}`).catch(() => null);
+  return { id: idOf(one?.ownerId), via: one ? "GET (the search did not answer)" : "neither read answered" };
+};
 
 /* ── --users ─────────────────────────────────────────────────────────────
    WHO YOU CAN HAND SOMETHING TO. Every other flag here takes a Kylas USER ID
@@ -353,6 +393,44 @@ function diff(before, after) {
   return out;
 }
 
+/* ── --set-contact-owner <contactId> --to <userId> · PUT ONE BACK ──────
+   The repair for a contact this tool moved and could not return — which
+   happened once, to Vaibhav Bhandari (5358966), because the owner it was
+   taken from had since been deactivated. Both known paths are tried and the
+   record is read back, because on this API a 200 means the request parsed. */
+const SET_CT = arg("set-contact-owner");
+if (SET_CT) {
+  if (!/^\d+$/.test(String(SET_CT))) { console.error(`\n--set-contact-owner wants a contact id, not "${SET_CT}".\n`); process.exit(1); }
+  if (!TO) { console.error("\nPass --to <userId> as well — who the contact should end up on.\n"); process.exit(1); }
+  const who = async (id) => { const u = await call("GET", `/v1/users/${id}`).catch(() => null);
+    return u ? `${[u.firstName, u.lastName].filter(Boolean).join(" ")}${(u.active ?? u.isActive) === false ? " (DEACTIVATED)" : ""}` : "(unknown)"; };
+  console.log(`\nContact ${SET_CT} -> owner ${TO} (${await who(TO)})`);
+  const now0 = idOf((await call("GET", `/v1/contacts/${SET_CT}`).catch(() => null))?.ownerId);
+  console.log(`  owner now        ${now0 ?? "(none)"}  ${now0 ? await who(now0) : ""}`);
+  if (String(now0 ?? "") === String(TO)) { console.log(`  already there — nothing to do.\n`); process.exit(0); }
+
+  const tryIt = async (what, fn) => {
+    const r = await fn();
+    await sleep(600);
+    const got = idOf((await call("GET", `/v1/contacts/${SET_CT}`).catch(() => null))?.ownerId);
+    const done = String(got ?? "") === String(TO);
+    console.log(`  ${done ? "OK  " : "no  "} ${what.padEnd(34)} HTTP ${String(r.status).padEnd(4)} owner reads ${got ?? "(none)"}`);
+    if (!done && r.body) console.log(`       ${String(r.body).replace(/\s+/g, " ").slice(0, 180)}`);
+    return done;
+  };
+  let ok2 = await tryIt("PUT /v1/contacts/{id}/owner", () =>
+    rawPutTop(`/v1/contacts/${SET_CT}/owner`, { ownerId: Number(TO) }));
+  if (!ok2) {
+    const full = await call("GET", `/v1/contacts/${SET_CT}`).catch(() => null);
+    if (full) ok2 = await tryIt("PUT /v1/contacts/{id} (full record)", () =>
+      rawPutTop(`/v1/contacts/${SET_CT}`, contactBody(full, Number(TO))));
+  }
+  console.log(ok2 ? `\n  Done.\n`
+    : `\n  NEITHER PATH WORKED. If the target is deactivated, Kylas refuses it —\n` +
+      `  reactivate them, or pick a live owner. Otherwise set it by hand in Kylas.\n`);
+  process.exit(ok2 ? 0 : 1);
+}
+
 const before = await readAll();
 const heldCo = String(idOf(before.company.ownerId) ?? "");
 /* SAY WHICH MODE IS RUNNING, FIRST. Every mode prints the same account header,
@@ -499,12 +577,14 @@ if (RE_EP) {
 
   /* ONE ATTEMPT, FULLY NARRATED: what was sent, what came back, what the
      record said before and after, and what that combination means. */
-  const attempt = async (label, path, readPath, body) => {
-    const start = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
+  const attempt = async (label, path, readPath, body, readOwner) => {
+    const read = readOwner || (async () => ({ id: idOf((await call("GET", readPath).catch(() => null))?.ownerId), via: "GET" }));
+    const b4 = await read();
+    const start = b4.id;
     console.log(`\n    ${label}`);
     console.log(`      PUT  ${path}`);
     console.log(`      body ${JSON.stringify(body)}`);
-    console.log(`      owner before     ${await withName(start)}`);
+    console.log(`      owner before     ${await withName(start)}   [via ${b4.via}]`);
     if (String(start ?? "") === String(n)) {
       console.log(`      SKIPPED — already owned by the target, so nothing here could be proved.`);
       return { verdict: null, status: null };
@@ -513,8 +593,18 @@ if (RE_EP) {
     const clean = String(res.body || "").replace(/\s+/g, " ").trim();
     console.log(`      <-   HTTP ${res.status}${clean ? ` ${clean.slice(0, 220)}` : " (empty body)"}`);
     await sleep(700);
-    const now = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
-    console.log(`      owner after      ${await withName(now)}`);
+    const af = await read();
+    const now = af.id;
+    console.log(`      owner after      ${await withName(now)}   [via ${af.via}]`);
+    /* A READ THAT CANNOT SEE THE FIELD IS NOT EVIDENCE. If the owner is
+       invisible both before and after, "unchanged" is a statement about the
+       read, not about the write — which is exactly the mistake the first live
+       run made on aristocrat. Say so instead of concluding. */
+    if (start == null && now == null) {
+      console.log(`      => CANNOT TELL — neither read returns an owner for this record, so`);
+      console.log(`         "unchanged" here means invisible, not untouched.`);
+      return { verdict: null, status: res.status, blind: true };
+    }
     const landed = String(now ?? "") === String(n);
     const moved = String(now ?? "") !== String(start ?? "");
     console.log(`      => ${landed ? "LANDED — the owner is now the target"
@@ -535,7 +625,8 @@ if (RE_EP) {
   console.log(`the loose end this settles.\n`);
   console.log(`  target owner     ${n}  ${target}`);
   console.log(`  subject account  ${CO}  ${String(before.company?.name || "(unnamed)").slice(0, 44)}`);
-  console.log(`  its owner now    ${await withName(idOf(before.company?.ownerId))}`);
+  const coOwner0 = await companyOwner(CO);
+  console.log(`  its owner now    ${await withName(coOwner0.id)}   [via ${coOwner0.via}]`);
   console.log(`  contacts on it   ${before.contacts.length}`);
 
   /* ── the control, on a contact ──────────────────────────────────────
@@ -544,13 +635,38 @@ if (RE_EP) {
      the probe is asking wrongly and nothing can be concluded about companies.
      The control runs FIRST for that reason. */
   console.log(`\n  1 · THE CONTROL — a contact, where ownership is known to be settable.`);
-  const victim = before.contacts.find((c) => String(idOf(c.ownerId) ?? "") !== String(n));
+  /* NEVER MOVE A CONTACT YOU CANNOT MOVE BACK. The first live run picked
+     Vaibhav Bhandari (5358966), whose owner was Charu Rathi (76689) — a
+     DEACTIVATED user. The move landed, the restore came back 400, and the
+     probe left somebody's contact on the wrong person. Kylas will not assign a
+     record to an inactive user, so an inactive current owner means the control
+     is a one-way trip. Checked before anything is written. */
+  const activeOf = async (id) => {
+    const u = await call("GET", `/v1/users/${id}`).catch(() => null);
+    return u ? (u.active ?? u.isActive ?? true) : null;
+  };
+  let victim = null, refused = [];
+  for (const c of before.contacts) {
+    const own = idOf(c.ownerId);
+    if (String(own ?? "") === String(n)) continue;
+    if (own == null) { refused.push(`${c.id} has no owner to restore to`); continue; }
+    const live = await activeOf(own);
+    if (live === false) { refused.push(`${c.id} is owned by ${await whoIs(own)} (${own}), who is DEACTIVATED — Kylas will not give a record back to an inactive user`); continue; }
+    victim = c; break;
+  }
+  if (!victim && refused.length) {
+    console.log(`\n    No contact here can be moved AND PUT BACK:`);
+    for (const r of refused.slice(0, 6)) console.log(`      - ${r}`);
+    console.log(`    Pick another --company, or reactivate the owner in Kylas first.`);
+  }
   let ct = { verdict: null };
   let restored = "not needed";
-  if (!victim) {
+  if (!victim && !refused.length) {
     console.log(`\n    SKIPPED — every contact on this account is already owned by ${n}.`);
     console.log(`    Re-run with an owner none of them has, or the control is a no-op`);
     console.log(`    that reports success.`);
+  } else if (!victim) {
+    /* already explained above */
   } else {
     const was = idOf(victim.ownerId);
     ct = await attempt(`contact ${victim.id} — ${[victim.firstName, victim.lastName].filter(Boolean).join(" ") || "(unnamed)"}`,
@@ -559,13 +675,32 @@ if (RE_EP) {
        account's. The old version moved a real contact and walked away. */
     if (ct.verdict === true) {
       await sleep(500);
-      const back = await rawPut(`/v1/contacts/${victim.id}/owner`, { ownerId: Number(was) });
+      let back = await rawPut(`/v1/contacts/${victim.id}/owner`, { ownerId: Number(was) });
       await sleep(600);
-      const check = idOf((await call("GET", `/v1/contacts/${victim.id}`).catch(() => null))?.ownerId);
+      let check = idOf((await call("GET", `/v1/contacts/${victim.id}`).catch(() => null))?.ownerId);
+      /* SECOND WAY HOME. /owner refusing does not mean the contact is stuck:
+         PUT /v1/contacts/{id} with ownerId is the path the product itself uses
+         and it may accept an owner /owner would not. Tried before giving up,
+         because giving up here leaves live data wrong. */
+      if (String(check ?? "") !== String(was ?? "")) {
+        console.log(`    /owner refused the way back (HTTP ${back.status}) — trying the full record PUT`);
+        const full = await call("GET", `/v1/contacts/${victim.id}`).catch(() => null);
+        if (full) {
+          back = await rawPut(`/v1/contacts/${victim.id}`, contactBody(full, Number(was)));
+          await sleep(600);
+          check = idOf((await call("GET", `/v1/contacts/${victim.id}`).catch(() => null))?.ownerId);
+        }
+      }
       restored = String(check ?? "") === String(was ?? "")
         ? `yes — contact ${victim.id} is back on ${await withName(was)}`
         : `NO — contact ${victim.id} reads ${await withName(check)}, wanted ${await withName(was)} (HTTP ${back.status})`;
       console.log(`\n    control undone?  ${restored}`);
+      if (!/^yes/.test(restored)) {
+        console.log(`\n    !! THIS IS LIVE DATA AND IT IS STILL WRONG. Put it back with:`);
+        console.log(`       node --env-file=.env.local scripts/probe-reassign.mjs \\`);
+        console.log(`            --set-contact-owner ${victim.id} --to ${was}`);
+        console.log(`       ...or set it by hand in Kylas. Do not leave it.`);
+      }
     }
   }
 
@@ -585,7 +720,7 @@ if (RE_EP) {
   let co = { verdict: false };
   const tried = [];
   for (const [label, path, body] of shapes) {
-    const r = await attempt(label, path, `/v1/companies/${CO}`, body);
+    const r = await attempt(label, path, `/v1/companies/${CO}`, body, () => companyOwner(CO));
     tried.push({ label, path, body, ...r });
     if (r.verdict === true) { co = r; break; }
     if (r.verdict === null) { co = r; break; }

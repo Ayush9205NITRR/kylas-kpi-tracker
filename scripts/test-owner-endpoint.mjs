@@ -152,5 +152,61 @@ console.log("\n6 · a user id that is not a person is refused before anything is
   }
 }
 
+console.log("\n7 · the company readback must not be blind");
+{
+  /* GET /v1/companies/{id} does not carry ownerId on the live account — all
+     273 companies of the October batch read "owner NONE" through it, and
+     aristocrat read "(none)" while the SEARCH said 82867 in the same session.
+     The probe read the single GET, saw "(none)" before and after, and called
+     it ACCEPTED AND IGNORED. All it had shown was that the field is invisible
+     to that read. The owner now comes off the search. */
+  const p = spawn(process.execPath, ["scripts/mock-kylas.mjs"],
+    { env: { ...process.env, PORT: String(KY), MOCK_OWNER_ENDPOINT: "works",
+             MOCK_COMPANY_GET_OWNER: "none" },
+      stdio: ["ignore", "ignore", "inherit"] });
+  kids.push(p);
+  if (!await upFor(`http://127.0.0.1:${KY}/v1/users/me`)) ok("the mock came up", false);
+  else {
+    const r = spawnSync(process.execPath,
+      ["scripts/probe-reassign.mjs", "--company", CO, "--reassign-endpoint", TO],
+      { env: { ...process.env, KYLAS_KEY: "k", KYLAS_BASE: `http://127.0.0.1:${KY}` }, encoding: "utf8" });
+    const out = (r.stdout || "") + (r.stderr || "");
+    ok("the owner is read through the search, not the blind GET",
+       /\[via search\]/.test(out), (out.match(/its owner now[^\n]*/) || ["(absent)"])[0]);
+    ok("...so a write that DID land is seen as landing",
+       /THE COMPANY OWNER IS SETTABLE/.test(out) && r.status === 0,
+       (out.match(/=> [A-Z][^\n]*/) || ["(no verdict)"])[0]);
+    p.kill();
+  }
+  await sleep(400);
+}
+
+console.log("\n8 · a control it cannot put back is never started");
+{
+  /* The live run moved Vaibhav Bhandari off Charu Rathi, who had since been
+     DEACTIVATED, and the restore came back 400 — leaving somebody's contact on
+     the wrong person. Kylas will not hand a record to an inactive user, so an
+     inactive current owner makes the control a one-way trip. */
+  const p = spawn(process.execPath, ["scripts/mock-kylas.mjs"],
+    { env: { ...process.env, PORT: String(KY), MOCK_OWNER_ENDPOINT: "works",
+             MOCK_CONTACT_DEAD_OWNER: "1" },
+      stdio: ["ignore", "ignore", "inherit"] });
+  kids.push(p);
+  if (!await upFor(`http://127.0.0.1:${KY}/v1/users/me`)) ok("the mock came up", false);
+  else {
+    const r = spawnSync(process.execPath,
+      ["scripts/probe-reassign.mjs", "--company", "1776620", "--reassign-endpoint", TO],
+      { env: { ...process.env, KYLAS_KEY: "k", KYLAS_BASE: `http://127.0.0.1:${KY}` }, encoding: "utf8" });
+    const out = (r.stdout || "") + (r.stderr || "");
+    ok("a contact owned by a deactivated user is refused as the control",
+       /DEACTIVATED/.test(out), (out.match(/- \d+ is owned by[^\n]*/) || ["(not refused)"])[0]);
+    ok("...and the reason names Kylas' rule, not just 'skipped'",
+       /will not give a record back to an inactive user/.test(out));
+    ok("...and nothing was written to it",
+       !/=> LANDED — the owner is now the target/.test(out.split("2 · THE COMPANY")[0] || ""));
+    p.kill();
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
