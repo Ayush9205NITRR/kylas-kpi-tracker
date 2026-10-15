@@ -84,11 +84,22 @@ export function createAirtable(pat, baseId, {
              found") deliberately does not distinguish a scope problem from a
              wrong table name. So the hint is added here, where every caller
              gets it. */
+          /* BOTH CAUSES, AND THE CHEAPER ONE FIRST. The first version of this
+             hint led with the token's scopes, which on 2026-10-15 sent the
+             search in the wrong direction for an hour: the token was fine and
+             the TABLE DID NOT EXIST — repair-base.mjs had only ever been run
+             with --dry-run. Airtable's own error names both causes and
+             distinguishes neither, so neither may be presented as the likely
+             one. The table is listed first because it is the one you can check
+             in five seconds, by opening the base. */
           const scopes = (res.status === 401 || res.status === 403)
-            ? `\n  ${method === "GET" ? "Reading" : "Writing"} rows needs data.records:${
-                method === "GET" ? "read" : "write"} on the token, and access to ${baseId}.` +
-              `\n  A token minted for repair-base.mjs has only the schema scopes and cannot do this —` +
-              `\n  use the one the Worker uses (.env.local). If the scopes are right, check the table name.`
+            ? `\n  Airtable says this for TWO different causes and does not say which:` +
+              `\n   1. the table does not exist in ${baseId} — open the base and look.` +
+              `\n      A table from the schema is created by:  node scripts/repair-base.mjs` +
+              `\n      (without --dry-run; --dry-run only prints what it would do).` +
+              `\n   2. the token lacks data.records:${method === "GET" ? "read" : "write"} or access to this base.` +
+              `\n      A token minted for repair-base.mjs has ONLY the schema scopes and cannot` +
+              `\n      read or write rows — for that, use the one the Worker uses (.env.local).`
             : "";
           const err = new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}${scopes}`);
           err.status = res.status;
