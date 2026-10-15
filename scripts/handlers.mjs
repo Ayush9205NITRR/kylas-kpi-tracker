@@ -1159,7 +1159,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        the month's numbers were silently the first 4,000 calls. Found when the
        D1 copy, which reads whole tables, disagreed with this path. */
     const ALL = { pageSize: 100, maxPages: 2000 };
-    const [callRows, rolledRows, transRows, contactRows, team] = await Promise.all([
+    const [callRows, rolledRows, transRows, contactRows, diallerRows, team] = await Promise.all([
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
@@ -1176,6 +1176,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       listTolerant(airtable, "Contacts", {
         fields: ["Name", "Owner", "Is Right POC", "Is Discovery", "KPI Rank At", "Company",
                  "First Worked At", "First Picked At"], ...ALL }),
+      /* THE KYLAS DIALLER APP'S CALLS — the only real talk time. Tolerated
+         when the table is absent so a base without it still reports, just
+         without talk time. See import-dialler-calls.mjs. */
+      listTolerant(airtable, "Dialler Calls", { fields: ["Called At", "Owner", "Duration"], ...ALL })
+        .catch(() => []),
       /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
          Dropping non-team people in the view would leave the Team column summing
          everybody while the per-person columns beside it summed the team — two
@@ -1199,6 +1204,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        deletes. mergeCalls prefers the raw rows for any such day, so an
        interrupted rollup reads correctly instead of double. */
     const calls = mergeCalls(raw, rolled);
+    const dialler = diallerRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
+                                              secs: Number(r.fields.Duration || 0) }));
     /* A TRANSITION LINKS TO A CONTACT, AND THE LADDER COUNTS COMPANIES.
        This used to key a transition by its contact record, so booked/done/sql
        deduped per CONTACT while worked/picked/right/discovery deduped per
@@ -1237,7 +1244,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
       if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
     }
-    return { calls, transitions, signals, team };
+    return { calls, transitions, signals, dialler, team };
   });
 
   /* Picklists, read once. The console cannot know what an account's custom
@@ -2316,7 +2323,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          re-paid a crawl of the whole call log for numbers already in hand.
          ?fresh=1 is the Refresh button; a save drops the cache, so the next
          dashboard open sees the call just logged. */
-      const { calls, transitions, signals, team } =
+      const { calls, transitions, signals, dialler, team } =
         await reportData({ fresh: !!url.searchParams.get("fresh") });
       const counts = counter(team);
       /* Filled below, once calls/transitions/signals all exist — an earlier
@@ -2336,7 +2343,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           .map((x) => String(x.owner || "").trim())
           .filter((o) => o && !counts(o)))].sort();
       const out = withDeltas(report(period, { calls: pick(calls), transitions: pick(transitions),
-                                              signals: pick(signals) }, { from, to }));
+                                              signals: pick(signals), dialler: pick(dialler) },
+                                     { from, to }));
       log(`report ${period} ${out.from}..${out.to} — ${out.periods.length} period(s), ` +
           `${out.totals.calls} call(s)`);
       /* WHICH PERIOD THIS ACTUALLY IS. An older proxy silently falls back to

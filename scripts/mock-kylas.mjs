@@ -210,6 +210,33 @@ const CALL_LOGS = [{
   notes: [{ description: "<div>Spoke to Hema — offsite is <b>Goa, 2 nights</b>, ~60 pax.</div><div>Finance signs off after the 20th; call back then.</div>" }],
   relatedTo: { entity: "contact", id: 112936 },
 }];
+
+/* MOCK_DIALLER=<n> seeds n calls the way the Kylas DIALLER APP writes them — a
+   real duration, a deviceId, and the ASSOCIATE as owner — each followed by the
+   0-second log this console writes a minute later under the API key's own
+   user. That contrast is the whole point: it is what import-dialler-calls.mjs
+   filters on, and it is what the live account served on 2026-10-15. */
+if (process.env.MOCK_DIALLER) {
+  const N = Number(process.env.MOCK_DIALLER) || 20;
+  const people = ["Muskan Rajpoot", "Aditi saini", "Arshdeep Singh"];
+  const t0 = Date.parse(process.env.MOCK_DIALLER_FROM
+    || `${new Date().toISOString().slice(0, 10)}T04:00:00.000Z`);
+  for (let i = 0; i < N; i++) {
+    const at = t0 + i * 6e5;                         /* ten minutes apart */
+    const contact = 5300000 + (i % 7);
+    const person = { id: 70000 + (i % 3), name: people[i % 3] };
+    CALL_LOGS.push({ id: 45900000 + i * 2, startTime: new Date(at).toISOString(),
+                     duration: 40 + (i % 5) * 23, callType: "outgoing", outcome: "connected",
+                     isManual: false, deviceId: `dev-${i % 3}`,
+                     callRecording: `https://rec.example/${i}`, owner: person, createdBy: person,
+                     relatedTo: [{ id: contact, entity: "contact", name: `contact ${contact}` }] });
+    CALL_LOGS.push({ id: 45900001 + i * 2, startTime: new Date(at + 6e4).toISOString(),
+                     duration: 0, callType: "outgoing", outcome: "connected", isManual: true,
+                     owner: { id: 74725, name: "Enout Super Admin" },
+                     createdBy: { id: 74725, name: "Enout Super Admin" },
+                     relatedTo: [{ id: contact, entity: "contact", name: `contact ${contact}` }] });
+  }
+}
 let recent = [];
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -579,12 +606,22 @@ createServer(async (req, res) => {
     }
     if (p === "/v1/call-logs" && req.method === "GET") {
       if (callLogs404) return json(res, 404, { errorCode: "02002001" });
-      /* ...and, like the live account, 404 the moment page or size is added. */
-      if (url.searchParams.has("page") || url.searchParams.has("size")) return json(res, 404, {});
+      /* EXACTLY WHAT THE LIVE ACCOUNT DOES (probe, 2026-10-15):
+           ?page=...   404, with or without size
+           ?size=N     HONOURED — the newest N, unfiltered. The only shape
+                       that returns more than the latest ten, and what
+                       import-dialler-calls.mjs is built on.
+           otherwise   the latest ten, every filter ignored.
+         The 404-on-page is why `size` has to be tried on its own. */
+      if (url.searchParams.has("page")) return json(res, 404, {});
+      const all = [...CALL_LOGS].sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));
+      if (url.searchParams.has("size")) {
+        const n = Math.max(1, Number(url.searchParams.get("size")) || 10);
+        return json(res, 200, { content: all.slice(0, n), totalElements: all.length, page: 0, size: Math.min(n, all.length) });
+      }
       const who = url.searchParams.get("relatedToId") || "";
-      const rows = CALL_LOGS.filter((l) => callLogsUnfiltered || String(l.relatedTo?.id) === who)
-        .sort((a, b) => String(b.startTime).localeCompare(String(a.startTime)));
-      return json(res, 200, { content: rows, totalElements: rows.length, page: 0, size: rows.length });
+      const rows = (callLogsUnfiltered ? all : all.filter((l) => String(l.relatedTo?.id) === who)).slice(0, 10);
+      return json(res, 200, { content: rows, totalElements: all.length, page: 0, size: rows.length });
     }
   }
   if (p === "/v1/call-logs/" && req.method === "POST") {

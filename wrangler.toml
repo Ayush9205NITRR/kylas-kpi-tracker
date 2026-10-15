@@ -115,7 +115,7 @@ RESEARCH_TABLE = "Company List"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.63.0"
+VERSION = "1.64.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day
@@ -138,6 +138,16 @@ CRON_SNAPSHOT = "45 18 * * *"
 # morning reaches the ladder within the hour instead of at 02:00 tomorrow. The
 # company crawl is the expensive half and stays on the nightly run.
 CRON_SYNC_FAST = "40 * * * *"
+# Every hour at :10 — the Kylas dialler app's own call logs, which are the only
+# place a real call length exists. HOURLY IS NOT A PREFERENCE. The read Kylas
+# allows (`GET /v1/call-logs?size=N`) has no paging, no sort and no date
+# filter, so a run sees the newest N logs and nothing else; whatever arrived
+# past that window since the last run cannot be asked for again. At 300-600
+# calls a day, hourly against size=1000 overlaps many times over. The import
+# is keyed on the Kylas log id, so the overlap is free, and it shouts if a gap
+# ever opens anyway. Offset from :40 so the two hourly jobs do not share a
+# minute of Kylas' rate limit.
+CRON_DIALLER = "10 * * * *"
 CRON_ROLLUP = "0 21 * * SUN"
 # 02:45 IST, daily — 45 minutes after the sync, so it reads a base that was
 # just refreshed and cannot race it.
@@ -183,6 +193,7 @@ crons = [
   "30 20 * * *",   # 02:00 IST, daily   · Kylas -> Airtable
   "45 18 * * *",   # 00:15 IST, daily   · freeze yesterday
   "40 * * * *",    # hourly             · Kylas -> Airtable, contacts only
+  "10 * * * *",    # hourly             · the dialler app's calls -> talk time
   "0 21 * * SUN",  # 02:30 IST, Monday  · roll up the call log
   "15 21 * * *",   # 02:45 IST, daily   · Airtable -> Kylas: call-back + offsite quarter
   "* * * * *",     # every minute       · keep the D1 copies current

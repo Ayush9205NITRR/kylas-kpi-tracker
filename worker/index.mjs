@@ -237,6 +237,20 @@ const JOBS = {
     apply: String(env.PUSH_APPLY || "") === "1",
     limit: Number(env.PUSH_LIMIT || 0) || Infinity,
   }),
+  /* HOURLY, AND IT HAS TO BE. The Kylas dialler app is the only place a real
+     call length exists, and `GET /v1/call-logs?size=N` is the only read that
+     serves more than the latest ten — no paging, no sort, no date filter. So
+     a run can only ever see the newest N logs, and anything that arrived
+     beyond that window between two runs is lost for ever. Hourly at 300-600
+     calls a day keeps the windows overlapping with a wide margin; the import
+     says so loudly if one ever does not (see the gap check in the script).
+     Idempotent on the Kylas log id, so an overlap costs nothing. */
+  dialler: async (env, log) => {
+    const out = await (await import("../scripts/import-dialler-calls.mjs")).run({
+      env, log, apply: true, size: Number(env.DIALLER_SIZE || 1000) });
+    return { ...out, after: await (await handlers(env, log)).maintain({
+      rebuild: true, only: ["Dialler Calls"] }) };
+  },
   /* Every few minutes. Idle, it asks nothing of Airtable or Kylas. */
   maintain: async (env, log) => (await handlers(env, log)).maintain(),
   snapshot: async (env, log) =>
@@ -249,6 +263,7 @@ export default {
     const byCron = new Map([
       [String(env.CRON_SYNC || ""), "sync"],
       [String(env.CRON_SYNC_FAST || ""), "syncFast"],
+      [String(env.CRON_DIALLER || ""), "dialler"],
       [String(env.CRON_ROLLUP || ""), "rollup"],
       [String(env.CRON_SNAPSHOT || ""), "snapshot"],
       [String(env.CRON_PUSH || ""), "push"],
@@ -264,6 +279,7 @@ export default {
           `CRON_SYNC=${env.CRON_SYNC || "(unset)"} CRON_ROLLUP=${env.CRON_ROLLUP || "(unset)"} ` +
           `CRON_SNAPSHOT=${env.CRON_SNAPSHOT || "(unset)"} CRON_PUSH=${env.CRON_PUSH || "(unset)"} ` +
           `CRON_SYNC_FAST=${env.CRON_SYNC_FAST || "(unset)"} ` +
+          `CRON_DIALLER=${env.CRON_DIALLER || "(unset)"} ` +
           `CRON_MAINTAIN=${env.CRON_MAINTAIN || "(unset)"}`);
       return;
     }

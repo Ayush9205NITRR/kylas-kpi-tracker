@@ -56,6 +56,7 @@ export const MIRROR_TABLES = {
                  "Contact", "Removed At", "Kylas Contact ID (from Contact)"],
   "Call Log": ["Called At", "Owner", "Outcome", "Contact", "Next Call Date", "Duration", "Stage Set"],
   "Call Rollup": ["Day", "Owner", "Outcome", "Calls", "Talk Seconds", "Stage Set"],
+  "Dialler Calls": ["Key", "Called At", "Owner", "Duration", "Contact Kylas ID"],
   "Stage Transitions": ["Changed At", "Owner", "To Stage", "Contact"],
   RCA: ["Key", "Gate", "Reason", "Answered At"],
   Team: ["Name", "Role", "In Funnel", "Note"],

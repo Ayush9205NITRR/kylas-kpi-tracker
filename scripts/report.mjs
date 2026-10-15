@@ -361,7 +361,7 @@ export function touchEvents({ transitions = [], signals = [] } = {}) {
   return out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
-export function report(period, { calls = [], transitions = [], signals = [] } = {},
+export function report(period, { calls = [], transitions = [], signals = [], dialler = [] } = {},
                       { from = "", to = "" } = {}) {
   const key = KEY_OF[period] || dayKey;
 
@@ -395,6 +395,21 @@ export function report(period, { calls = [], transitions = [], signals = [] } = 
   };
 
   const inWindow = (at) => dayKey(at) >= start && dayKey(at) <= end;
+
+  /* ── TALK TIME, FROM THE DIALLER APP ────────────────────────────────
+     One row per call the Kylas dialler app placed, with the length it
+     measured and the associate who dialled. These are NOT calls for the
+     purpose of "Calls dialled" — that counts console saves, one per call
+     worked — so they bump only the two things they are evidence of: the
+     seconds, and how many calls those seconds cover. Counting them as calls
+     as well would double every dial the moment the import switched on. */
+  for (const d of dialler) {
+    if (!inWindow(d.at)) continue;
+    const secs = Number(d.secs) || 0;
+    if (secs <= 0) continue;
+    bump(key(d.at), d.owner, "talkSeconds", secs);
+    bump(key(d.at), d.owner, "timedCalls", 1);
+  }
 
   for (const c of calls) {
     if (!inWindow(c.at)) continue;

@@ -131,6 +131,9 @@ node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable
 node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
+node scripts/test-dialler.mjs            # 26 · real talk time: the one read Kylas allows, the
+                                         #      filter, the idempotent write, the gap it cannot
+                                         #      close, and the report not double-counting dials
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
 xvfb-run -a node scripts/test-ui-live.mjs     # 50 · the three things that only exist on
@@ -1059,6 +1062,94 @@ both and in the console's order, a `{id}` wrapper is unwrapped, a
 single-select account works, and five kinds of nothing read as no quarter
 rather than throwing.
 
+## 3h · Talk time comes from the Kylas DIALLER APP, not the console's stopwatch
+
+Ayush, 2026-10-15: *"Talk time kahan se utha rahe hoo, galat dikha rahe hai"*,
+then decisively: *"Talk time needs to be added -->> through kylas dialer app se
+joh talk time aa rahe hai usko list karo."*
+
+The dashboard was summing the console's own stopwatch, which only runs when a
+call is dialled from the console's dial button. **7 of 1,379 rows had one**, so
+a month of calling read as about three minutes. Nothing was miscalculated; the
+number was honest about almost no calls. The first fix was to say so — the
+`timed/calls` coverage line under Talk time — and that is still there, because
+a coverage of 7/1379 is the thing you want to see.
+
+The real source is the dialler app, and the live account proves the two kinds
+of log apart (2026-10-15):
+
+```
+#45926805  10:52:09  1m11s  dialler app  · deviceId set · owner Muskan Rajpoot
+#45926838  10:53:43     0s  this console · isManual     · owner Enout Super Admin
+```
+
+Read the owner column as carefully as the duration. **The dialler's logs carry
+the associate who dialled; every log this console writes carries the API key's
+user**, which is the whole of the "everything says Enout Super Admin"
+complaint: the account has one API key, Kylas attributes a write to the key's
+user, and so every console save is logged as that user no matter who saved it.
+So this import fixes talk time and gives per-person attribution for it in the
+same stroke — without per-associate API keys, which is still the open question
+for the *console's* writes.
+
+### The one read Kylas allows, and the gap it can open
+
+`GET /v1/call-logs?size=N` is the **only** shape that returns more than the
+account's latest ten. Seventeen were tried (`probe-call-durations.mjs`): `page`
+→ 404; `sort`, `startTime`, `relatedToId` are accepted and silently ignored;
+`/v1/search/call-log|calllog|call|calls` → 400 "entity type is invalid";
+`/v1/search/call_log`, `/v1/search/activity` → 400 "Entity Definition does not
+exist"; `/v1/call-logs/search` → 422; `/v1/call-logs/filter`, `/v1/activities`,
+`/v1/activity-logs`, `/v1/contacts/{id}/call-logs|activities|timeline` → 404.
+`?size=100` returned 100 of 8,655, so the parameter works and nothing else does.
+
+That has one hard consequence, and it is not a style note:
+
+> **If more than N logs arrive between two runs, the ones in the middle are
+> lost for ever.** There is no paging and no date filter, so there is no way to
+> go back for them.
+
+Three things hold it shut. The import is **idempotent** on the Kylas log id, so
+overlapping windows cost nothing. It **checks for the gap** every run — if the
+oldest log it just read is newer than the newest it already holds, calls were
+placed in between that it will never see, and it says `! GAP` with what to do.
+And the cron is **hourly** (`CRON_DIALLER = "10 * * * *"`, offset from the
+contacts sync at :40) against `size=1000`, at 300–600 calls a day: the window
+overlaps many times over. Do not move that to daily to save requests — daily at
+size=1000 is fine right up until a busy day, and the day it is not, the missing
+hours cannot be recovered.
+
+### Where it lands
+
+A new Airtable table, **`Dialler Calls`** (`Key` = the Kylas log id, `Called
+At`, `Owner`, `Duration` in seconds, `Contact Kylas ID`, `Call Type`, `Device`,
+`Recording`, `Imported At`), mirrored into D1 like the rest. `report.mjs` takes
+a `dialler` input that bumps **only** `talkSeconds` and `timedCalls` — never
+`calls` or `connects`. That separation is the point: *Calls dialled* stays one
+per console save and *Connected* stays a function of the stage, so importing
+the dialler's logs cannot inflate either. `test-dialler` §4 pins it with two
+saves and two dialler calls for the same work: `calls 2, connects 1,
+talkSeconds 118`.
+
+A duration is the filter, and it is the right one. The console's writes are 0s
+by construction, and a dialler call of zero length is a call that never
+connected — not talk time either way.
+
+**Before the first run the table has to exist**: `node scripts/schema.mjs`
+against the live base, then
+`node --env-file=.env.local scripts/import-dialler-calls.mjs` (dry, reports
+what it would write), then `--apply`. After that the cron keeps it current.
+Nothing in the console changes; Talk time on the dashboard just starts being
+true.
+
+`test-dialler` is 26 and covers the read, the filter, the per-associate credit,
+the write, the idempotent re-run, the gap warning, the report not
+double-counting, and the whole path end to end through the proxy — where the
+20 generated calls arrive as 1,720 seconds split across the three associates
+who placed them. Note the `owner=all` in §5: `/report` with no `owner` scopes
+to the signed-in person, and these calls belong to the associates, not to the
+key's user. That read as "talkSeconds 0, still broken" for a while. It is not.
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current
@@ -1163,6 +1254,14 @@ rather than throwing.
   `migrate-first-worked.mjs`. **That order** — each reads what the one before
   it writes. The last is what makes the funnel's bottom two rungs stop reading
   zero; without it "Companies worked" is 0 under a non-zero "Right POC".
+- **Create the `Dialler Calls` table, then import once by hand** (§3h). The
+  table is in `scripts/schema.mjs`, so `node scripts/schema.mjs` against the
+  live base makes it; then
+  `node --env-file=.env.local scripts/import-dialler-calls.mjs` reports what it
+  would write, and `--apply` writes it. The hourly cron takes over after that —
+  but it only ever sees the newest 1,000 logs, so the first catch-up is the one
+  pass that has to be run deliberately. Until it is run, Talk time on the
+  dashboard stays the console stopwatch's near-zero number.
 - Enable GitHub Pages, or host `docs/privacy.html` on enout.in, for the store's
   privacy policy URL.
 

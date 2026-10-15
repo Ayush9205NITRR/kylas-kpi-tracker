@@ -286,6 +286,35 @@ export const TABLES = [
       { name: "Rolled At", type: "dateTime", options: dateTime },
     ],
   },
+  /* THE KYLAS DIALLER APP'S OWN CALLS — the only real talk time there is.
+     Ayush, 2026-10-15: "talk time needs to be added through kylas dialer app".
+     Proved on the live account the same day: the app's logs carry a real
+     duration (1m11s, 0m47s, 1m40s) AND the associate who dialled (Muskan
+     Rajpoot, Aditi saini), where every log this console writes carries 0s and
+     the API key's user. So this table is the dialler's rows, one per Kylas
+     call log, and talk time on the dashboard is summed from it.
+
+     NOT merged into Call Log: that table is one row per console SAVE, written
+     by the save path and rolled up and deleted after CALL_RETAIN_DAYS. A
+     dialler call is a different event with its own id, and pairing the two by
+     time would be a guess. Kept apart, each is exactly what it says. */
+  {
+    name: "Dialler Calls",
+    description: "One row per call placed through the Kylas dialler app, imported by import-dialler-calls.mjs. The only source of real talk time: the console's own stopwatch runs only when a call is dialled from its button. Append-only — Kylas owns these rows.",
+    fields: [
+      { name: "Key", type: "singleLineText",
+        description: "The Kylas call log id. The upsert key, so re-importing a window overwrites rather than adds." },
+      { name: "Called At", type: "dateTime", options: dateTime },
+      { name: "Owner", type: "singleLineText",
+        description: "The associate Kylas says placed the call — the dialler app records the real person, unlike the console's own logs." },
+      { name: "Duration", type: "number", options: num, description: "Seconds of talk time, as the dialler measured it." },
+      { name: "Contact Kylas ID", type: "singleLineText" },
+      { name: "Call Type", type: "singleLineText" },
+      { name: "Device", type: "singleLineText" },
+      { name: "Recording", type: "singleLineText" },
+      { name: "Imported At", type: "dateTime", options: dateTime },
+    ],
+  },
   /* WHY AN ACCOUNT STOPPED MOVING, in the associate's own words, at the moment
      it is still fresh enough to remember.
 
