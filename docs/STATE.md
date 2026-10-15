@@ -916,6 +916,31 @@ lands, the account cascade goes back in.
 **A 200 from the company endpoint means the request was well formed. It never
 means anything happened.** Read the record back.
 
+### It goes 50 at a time, with the progress on screen
+
+Ayush, 2026-10-15: *"bulk re-assignment abhi ho nahi rahe hai"* — and it was
+not, for two reasons at once, on a selection of 276:
+
+| | what happened |
+|---|---|
+| the count | `plan()` reads the company **and** its contacts per account, so 276 was ~550 Kylas requests at five a second — past the 120s the console waits. "The server took too long to answer." |
+| the write | `apply()` REFUSES a batch over `MAX_ACCOUNTS` (200) rather than truncating it, so even a count that landed could not be acted on |
+| and | any redraw re-rendered the owner `<select>` empty, which disabled **Move contacts** again mid-flow. `ACC.moveTo` holds the choice now. |
+
+So the console sends **50 accounts a request**, for both halves:
+
+- **Count** — one `reassignPlan` per batch, totals accumulated, `Counting 2/6`
+  on a progress bar. Nothing is written.
+- **Agree once**, to the whole run, with the batch count stated.
+- **Write** — one `reassign` per batch, `Moving 3/6` with contacts moved so far.
+  Each batch is **final as it lands** and its accounts are unticked there and
+  then, so a failure mid-run keeps everything already moved, leaves the rest
+  ticked, and says which batch stopped it: pressing Move again carries on
+  rather than starting over.
+
+`MAX_ACCOUNTS` stays at 200 as the server's own fence — 50 is well inside it,
+and the cap is what stops a caller that ignores the batching.
+
 ### So the fence went back up
 
 `test-replace` asserted that nothing in the tree called `updateCompany`, with

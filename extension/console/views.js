@@ -2186,7 +2186,7 @@
                    indexes: the list re-sorts and re-filters under the ticks,
                    and an index would silently come to mean a different
                    company. Survives a repaint for the same reason. */
-                picked: new Set(), busy: "", adding: false,
+                picked: new Set(), busy: "", adding: false, moving: false, prog: null, moveTo: "",
                 sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
@@ -2925,6 +2925,26 @@
      ticks outside the list are named, left out, and can be forgotten. The
      safety story above depended on exactly this and had quietly lost it. */
   const pickedIn = (rows) => rows.filter((r) => ACC.picked.has(String(r.id)));
+  /* RE-ASSIGN GOES 50 ACCOUNTS AT A TIME. Ayush, 2026-10-15: "batch progress
+     laga do, 50-50 ka hoga" — and before that, "bulk re-assignment abhi ho
+     nahi rahe hai", which it was not, twice over:
+
+       the count  plan() reads the company AND its contacts for every account,
+                  so 276 accounts was ~550 Kylas requests at five a second —
+                  past the 120s the console waits, which is the "server took
+                  too long to answer" he was getting
+       the write  apply() REFUSES more than MAX_ACCOUNTS (200) rather than
+                  truncating, so even a count that landed could not be acted on
+
+     Fifty is the unit for both halves: ~100 requests to count a batch and a
+     few hundred to write one, each comfortably inside its timeout, and a
+     failure costs one batch rather than the run. Every batch that lands is
+     final — its accounts are unticked as it finishes — so a stop is a resume,
+     not a restart. */
+  const REASSIGN_BATCH = 50;
+  const inBatches = (list, n) => Array.from({ length: Math.ceil(list.length / n) },
+    (_, i) => list.slice(i * n, i * n + n));
+
   /* The server takes FOCUS_BULK (250) a request. The console splits a bigger
      selection itself instead of refusing it — matches scripts/handlers.mjs.
      A test with a 43-account fixture sets __FOCUS_BULK to see the split. */
@@ -2936,6 +2956,15 @@
     const shown = rows.length;
     const allShown = shown > 0 && n === shown;
     const msg = ACC.busy ? `<div class="exbrow exbmsg" role="status">${esc(ACC.busy)}</div>` : "";
+    /* WHERE A LONG RUN HAS GOT TO. Without this a re-assign of 276 was a
+       disabled button and nothing else for several minutes, which reads as
+       broken whether or not it is. */
+    const prog = ACC.prog ? `<div class="exbrow exbprog" role="status" aria-live="polite">
+        <span class="exbk">${esc(ACC.prog.label || "Working")}</span>
+        <span class="pbar"><i style="width:${Math.round((ACC.prog.done / Math.max(1, ACC.prog.total)) * 100)}%"></i></span>
+        <span class="exbh">${ACC.prog.done} of ${ACC.prog.total} ${
+          ACC.prog.unit || "accounts"}${ACC.prog.note ? ` \u00b7 ${esc(ACC.prog.note)}` : ""}</span>
+      </div>` : "";
     const awayRow = away > 0 ? `<div class="exbrow exbaway">
         <span>${away} more ticked earlier ${away === 1 ? "is" : "are"} not in this list — left out of everything below.</span>
         <button class="linkbtn" id="accPickForget" type="button">Forget them</button></div>` : "";
@@ -2943,7 +2972,7 @@
       <div class="exbrow">
         <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
         <span class="exbh">…or tick rows, to add them to your Focus list${API.isAdmin ? ", or move their contacts to somebody else" : ""}.</span>
-      </div>${awayRow}${msg}</div>`;
+      </div>${awayRow}${prog}${msg}</div>`;
     const batches = Math.ceil(n / focusBulk());
     return `<div class="exbulk">
       <div class="exbrow exbsel">
@@ -2970,14 +2999,19 @@
         <label class="exbto">Move their contacts to
           <select id="accTo" aria-label="Move the contacts on these accounts to">
             <option value="">choose a person…</option>
+            ${/* THE CHOICE SURVIVES A REDRAW. The bar is re-rendered on every
+                  focus-list change and after every batch, and the select came
+                  back empty each time — which disabled Move again, mid-flow,
+                  for no reason the person could see. */ ""}
             ${ownerOptions().map((o) =>
-              `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}
+              `<option value="${esc(o.id)}"${String(ACC.moveTo) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
           </select></label>
-        <button class="gbtn sm" id="accGo" type="button" disabled>Move contacts</button>
+        <button class="gbtn sm" id="accGo" type="button"${ACC.moveTo && !ACC.moving ? "" : " disabled"}>${ACC.moving ? "Moving…" : "Move contacts"}</button>
       </div>
       <p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
         not let this tool change an account's own owner — do that in Kylas.
         Nothing is written until you have seen the count.</p>` : ""}
+      ${prog}
       ${msg}
     </div>`;
   }
@@ -4603,49 +4637,97 @@
       }
       redraw();
     });
-    on("accTo", "change", () => {
+    on("accTo", "change", (e) => {
+      ACC.moveTo = e.target.value || "";
       const go = document.getElementById("accGo");
-      if (go) go.disabled = !document.getElementById("accTo").value;
+      if (go) go.disabled = !ACC.moveTo;
     });
     on("accGo", "click", async () => {
-      const sel = document.getElementById("accTo");
-      const ownerId = sel?.value;
-      if (!ownerId) return;
-      const toName = sel.options[sel.selectedIndex]?.text || "them";
+      const ownerId = ACC.moveTo || document.getElementById("accTo")?.value || "";
+      if (!ownerId || ACC.moving) return;
+      const toName = (ownerOptions().find((o) => String(o.id) === String(ownerId)) || {}).name || "them";
       const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
       if (!ids.length) return;
-      const go = document.getElementById("accGo");
-      if (go) go.disabled = true;
+      const batches = inBatches(ids, REASSIGN_BATCH);
+      ACC.moving = true;
       try {
-        /* STEP ONE: COUNT, WRITING NOTHING. The number that goes in front of
-           the person comes from the same reads the write will use, not from
-           the row count on screen — an account whose contacts have changed
-           since the last sync would otherwise be agreed to on a stale figure. */
-        ACC.busy = "counting…"; redraw();
-        const p = await API.reassignPlan(ids, ownerId);
-        const bad = p.problems?.length ? `\n\n${p.problems.length} account(s) could not be read and will be skipped.` : "";
-        const same = p.already ? `\n${p.already} contact(s) are already theirs.` : "";
-        if (!p.contacts) { ACC.busy = `Nothing to move — every contact on these ${ids.length} is already ${toName}'s.`; redraw(); return; }
-        /* STEP TWO: THE PERSON AGREES TO THE ACTUAL NUMBERS — and is told, at
-           the moment of agreeing, that the accounts themselves stay put. */
+        /* STEP ONE: COUNT, WRITING NOTHING, A BATCH AT A TIME. The number put
+           in front of the person comes from the same reads the write will use,
+           never the row count on screen. Batched because counting 276 accounts
+           is ~550 Kylas reads, and asking for all of them in one request is
+           what was timing out. */
+        const plan = { contacts: 0, moving: 0, already: 0, problems: [] };
+        for (const [i, batch] of batches.entries()) {
+          ACC.busy = "";
+          ACC.prog = { done: i * REASSIGN_BATCH, total: ids.length,
+                       label: `Counting ${i + 1}/${batches.length}`,
+                       note: plan.contacts ? `${plan.contacts} contacts so far` : "" };
+          redraw();
+          const p = await API.reassignPlan(batch, ownerId);
+          plan.contacts += p.contacts || 0;
+          plan.moving += p.moving || 0;
+          plan.already += p.already || 0;
+          plan.problems.push(...(p.problems || []));
+        }
+        ACC.prog = null;
+        const bad = plan.problems.length
+          ? `\n\n${plan.problems.length} account(s) could not be read and will be skipped.` : "";
+        const same = plan.already ? `\n${plan.already} contact(s) are already theirs.` : "";
+        if (!plan.contacts) {
+          ACC.busy = `Nothing to move — every contact on these ${ids.length} is already ${toName}'s.`;
+          redraw(); return;
+        }
+        /* STEP TWO: ONE AGREEMENT, TO THE WHOLE RUN. How it is batched is
+           stated rather than asked — it is the method, not the decision. */
         const yes = confirm(
-          `Move ${p.contacts} contact${p.contacts === 1 ? "" : "s"} across ` +
-          `${p.moving} account${p.moving === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
-          `The accounts' own owner does NOT change — Kylas does not allow that ` +
-          `through the API. Set it in Kylas if you need it.\n\n` +
+          `Move ${plan.contacts} contact${plan.contacts === 1 ? "" : "s"} across ` +
+          `${plan.moving} account${plan.moving === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
+          `This goes in ${batches.length} batch${batches.length === 1 ? "" : "es"} of up to ${REASSIGN_BATCH}. ` +
+          `Each batch is final as it lands, so if one fails the earlier ones stay moved and ` +
+          `the rest stay ticked for another go.\n\n` +
+          `The accounts' own owner does NOT change — Kylas does not allow that through the ` +
+          `API. Set it in Kylas if you need it.\n\n` +
           `This writes to Kylas and cannot be undone from here.`);
         if (!yes) { ACC.busy = ""; redraw(); return; }
-        ACC.busy = `moving ${p.contacts} contact(s)…`; redraw();
-        const r = await API.reassign(ids, ownerId);
-        const failed = r.failed?.length ? ` · ${r.failed.length} failed` : "";
-        ACC.busy = `Moved ${r.contacts} contact(s) across ${r.moved} account(s) to ${toName}${failed}.`;
-        ids.forEach((i) => ACC.picked.delete(i));
+
+        /* STEP THREE: THE WRITE, batch by batch, each unticked as it lands so
+           a stop is a resume and never a restart. */
+        let moved = 0, contacts = 0, skipped = 0, failed = 0, doneAccounts = 0;
+        for (const [i, batch] of batches.entries()) {
+          ACC.prog = { done: doneAccounts, total: ids.length,
+                       label: `Moving ${i + 1}/${batches.length}`,
+                       note: `${contacts} of ${plan.contacts} contacts moved` };
+          redraw();
+          try {
+            const r = await API.reassign(batch, ownerId);
+            moved += r.moved || 0; contacts += r.contacts || 0;
+            skipped += r.skipped || 0; failed += (r.failed || []).length;
+            batch.forEach((id) => ACC.picked.delete(id));
+            doneAccounts += batch.length;
+          } catch (e) {
+            ACC.prog = null;
+            ACC.busy = `Stopped at batch ${i + 1} of ${batches.length} — ${
+              String(e.message || e).slice(0, 110)}. ${contacts} contact(s) across ${moved
+              } account(s) already moved to ${toName}; the other ${ids.length - doneAccounts
+              } accounts are still ticked, so press Move contacts again to carry on.`;
+            ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
+            redraw(); return;
+          }
+        }
+        ACC.prog = null;
+        ACC.busy = `Moved ${contacts} contact(s) across ${moved} account(s) to ${toName}` +
+          (skipped ? ` · ${skipped} were already theirs` : "") +
+          (failed ? ` · ${failed} contact(s) failed` : "") +
+          `. The accounts' own owner is unchanged — set that in Kylas.`;
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
         redraw();
       } catch (e) {
+        ACC.prog = null;
         ACC.busy = `Could not re-assign — ${String(e.message || e).slice(0, 160)}`;
         redraw();
+      } finally {
+        ACC.moving = false;
       }
     });
 
