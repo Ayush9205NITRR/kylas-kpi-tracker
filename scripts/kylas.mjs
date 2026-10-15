@@ -677,6 +677,27 @@ export function createClient(key, {
     /* Sent the WHOLE company, read just before — see writeCompanyOffsite() in
        handlers.mjs for why a partial body is not risked here. */
     updateCompany: (id, body) => call("PUT", `/v1/companies/${id}`, body),
+    /* ── AN ACCOUNT'S OWNER. A DIFFERENT ENDPOINT, AND THAT IS THE POINT ───
+       PUT /v1/companies/{id}/owner {"ownerId": N} — proven on the live account
+       2026-10-15, turbohire (1779587) moving 82867 -> 74757 and the SEARCH
+       reading it back changed.
+
+       This is NOT updateCompany and must never be folded into it. updateCompany
+       REPLACES the record: it is how lucidity (1777441) lost its owner, and
+       kylas-airtable-sync's restore_company_owners.py exists because three such
+       runs reassigned companies across a whole account to the API user. The
+       fence in test-replace stays up on that one. THIS endpoint touches one
+       field and replaces nothing, so it carries none of that risk.
+
+       WHY IT TOOK THREE WRONG ANSWERS TO FIND. The body was right from the
+       first attempt — `ownerId`, exactly as the leads flavour documents. What
+       was broken was the READBACK: GET /v1/companies/{id} does not return the
+       owner on this account, so every check saw "(none)" before and after and
+       called a write that had landed "accepted and ignored". `ownedBy`, the
+       key the record itself carries, 500s here. Read the owner back through
+       the SEARCH or do not claim to have read it at all. */
+    setCompanyOwner: (id, ownerId) =>
+      call("PUT", `/v1/companies/${id}/owner`, { ownerId: Number(ownerId) }),
     companyFields: () => call("GET",
       "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200"),
     createCallLog: (body) => call("POST", "/v1/call-logs/", body),

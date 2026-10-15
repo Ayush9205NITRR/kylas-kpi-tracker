@@ -57,7 +57,7 @@ async function world(mode) {
   return { out: (r.stdout || "") + (r.stderr || ""), code: r.status };
 }
 
-console.log("\n1 · the path is not there at all (the default)");
+console.log("\n1 · the path is not there at all");
 {
   const { out, code } = await world("404");
   ok("the verdict is that /owner is a leads endpoint", /NEITHER MOVED/.test(out),

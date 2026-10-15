@@ -4742,7 +4742,7 @@
 
         /* STEP THREE: THE WRITE, batch by batch, each unticked as it lands so
            a stop is a resume and never a restart. */
-        let moved = 0, contacts = 0, skipped = 0, failed = 0, doneAccounts = 0;
+        let moved = 0, contacts = 0, skipped = 0, failed = 0, doneAccounts = 0, owners = 0, ownersFailed = 0;
         for (const [i, batch] of batches.entries()) {
           ACC.prog = { done: doneAccounts, total: ids.length,
                        label: `Moving ${i + 1}/${batches.length}`,
@@ -4752,6 +4752,7 @@
             const r = await API.reassign(batch, ownerId);
             moved += r.moved || 0; contacts += r.contacts || 0;
             skipped += r.skipped || 0; failed += (r.failed || []).length;
+            owners += r.accountOwners || 0; ownersFailed += r.accountOwnersFailed || 0;
             batch.forEach((id) => ACC.picked.delete(id));
             doneAccounts += batch.length;
           } catch (e) {
@@ -4768,18 +4769,16 @@
         ACC.busy = `Moved ${contacts} contact(s) across ${moved} account(s) to ${toName}` +
           (skipped ? ` · ${skipped} were already theirs` : "") +
           (failed ? ` · ${failed} contact(s) failed` : "") +
-          /* WHY, not just WHAT. "Set that in Kylas" reads as an oversight, and
-             the question came back ("Why are the owner not changing"). Kylas
-             accepts ownerId on a company PUT, silently drops it, and because
-             the PUT REPLACES the record, ignored means erased — one account
-             came out of the first real write with no owner at all and had to
-             be repaired in Kylas' own UI. Seven encodings and nine endpoints
-             were tried, and Kylas' own Postman collection documents company
-             update with no ownerId and reassignment for leads only. So this is
-             a refusal, not a gap. See STATE.md §3e. */
-          `. The accounts' own owner is unchanged: Kylas drops ownerId on a ` +
-          `company write and the write replaces the record, so setting it here ` +
-          `would erase it. Change account ownership in Kylas itself.`;
+          /* THE ACCOUNT'S OWNER MOVES TOO, SINCE 2026-10-15. This said the
+             opposite for a fortnight — "Kylas drops ownerId, change it in
+             Kylas itself" — and it was wrong. PUT /companies/{id}/owner with
+             {"ownerId"} works and always did; what was broken was the readback
+             that checked it (GET /companies/{id} does not return the owner on
+             this account), and a blind check turned a write that had landed
+             into a confident refusal. Ayush pushed back three times. He was
+             right each time. See STATE.md §3e. */
+          (owners ? ` · ${owners} account owner(s) moved too` : "") +
+          (ownersFailed ? ` · ${ownersFailed} account owner(s) Kylas refused` : "");
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
         redraw();

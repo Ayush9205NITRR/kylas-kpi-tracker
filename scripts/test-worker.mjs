@@ -916,12 +916,13 @@ console.log('\n11. a copy that is short of the account is not the account');
      call here looked equivalent and was not — the probe was unauthenticated
      and came back "Too many requests", so it compared two error messages and
      called that proof. */
-  /* The account's own owner is REPORTED and never written — Kylas accepts a
-     company PUT carrying ownerId and drops it, so an earlier version of this
-     erased one. The dry run must say whose it is and say plainly that it is
-     not going to change. */
-  check('...and reports the account owner without moving it',
-        dj.accounts?.[0]?.accountOwner === '74726' && dj.accountOwnerMoves === false,
+  /* The account's own owner is reported AND moves, since 2026-10-15: a
+     dedicated PUT /companies/{id}/owner does it and replaces nothing. The
+     replacing PUT that erased lucidity's owner is still fenced off in
+     test-replace; these are two different endpoints and the dry run has to be
+     straight about which one it means. */
+  check('...and reports the account owner, which now moves too',
+        dj.accounts?.[0]?.accountOwner === '74726' && dj.accountOwnerMoves === true,
         JSON.stringify({ a: dj.accounts?.[0], moves: dj.accountOwnerMoves }));
 
   const empty = await call('/reassign', { method: 'POST',

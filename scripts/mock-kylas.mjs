@@ -284,8 +284,12 @@ createServer(async (req, res) => {
      times against a record that never moved. A mock that reports success for a
      write it dropped is worse than no mock. */
   /* ── PUT /{entity}/{id}/owner — the endpoint probe-reassign settles ──
-     MOCK_OWNER_ENDPOINT picks which world this mock is:
-       404    (default) the path does not exist, on either entity
+     MOCK_OWNER_ENDPOINT picks which world this mock is. The DEFAULT is now
+     `works`, because that is what the live account does: proven 2026-10-15 on
+     turbohire (1779587), 82867 -> 74757, read back through the search. The
+     other modes stay because test-owner-endpoint needs to be able to BE each
+     of them to check the probe's verdict.
+       404    the path does not exist, on either entity
        ignore 200 and the owner does NOT change — the trap this API sets, and
               the whole reason every check reads the record back
        lead   it works on contacts (the documented "lead" flavour) and is
@@ -295,7 +299,7 @@ createServer(async (req, res) => {
      verdict is the only part of it anybody acts on. */
   const ownerEp = p.match(/^\/v1\/(companies|contacts)\/(\d+)\/owner$/);
   if (ownerEp && req.method === "PUT") {
-    const mode = process.env.MOCK_OWNER_ENDPOINT || "404";
+    const mode = process.env.MOCK_OWNER_ENDPOINT || "works";
     if (mode === "404") return json(res, 404, { message: "Not Found" });
     const [, kind, id] = ownerEp;
     const honour = mode === "works" || (mode === "lead" && kind === "contacts");

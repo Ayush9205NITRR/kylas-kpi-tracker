@@ -5,33 +5,33 @@
  * individual." The pain behind it is accounts drifting onto the Enout super
  * admin and taking their POCs with them.
  *
- * ── WHAT THIS DOES NOT DO, AND WHY ─────────────────────────────────────
+ * ── THE ACCOUNT'S OWN OWNER, AND THE THREE WRONG ANSWERS BEFORE IT ─────
  *
- * IT DOES NOT SET THE COMPANY'S OWN OWNER. Kylas will not let it. Established
- * the hard way on 2026-09-30, on a live account (lucidity, 1777441), which is
- * the only reason it is known at all:
+ * IT DOES SET IT, through a DIFFERENT ENDPOINT:
  *
- *   PUT /v1/companies/{id} carrying ownerId is ACCEPTED — 200, no complaint —
- *   and the field is silently DROPPED. Because the PUT replaces the record,
- *   "ignored" means "erased": the account came out of the write with no owner
- *   at all, and there was no way to put it back through the API.
+ *   PUT /v1/companies/{id}/owner   {"ownerId": N}
  *
- *   Seven encodings were tried (number, string, {id}, {id,name}, `owner`,
- *   PATCH twice) and nine endpoints (per-record and bulk assign, owner,
- *   bulk-update, merge-patch, json-patch). Every one either 404'd, 400'd, or
- *   returned 200 and changed nothing. A 200 from this endpoint means the
- *   request was well formed, never that it did anything.
+ * Proven live 2026-10-15 — turbohire (1779587), 82867 -> 74757, read back
+ * through the SEARCH and changed. Not updateCompany, and never to be folded
+ * into it: that one REPLACES the record, which is how lucidity (1777441) lost
+ * its owner on 2026-09-30 and why test-replace's "nothing calls updateCompany"
+ * fence stays up. This endpoint touches one field and replaces nothing.
  *
- * So the company write is GONE from this file, not flagged off, and
- * test-replace's original fence — "nothing calls updateCompany" — is back up
- * exactly as it was. Its note said the day it stopped being true would be the
- * day contacts started moving on their own. It was right, it took one
- * afternoon, and it cost one account its owner.
+ * THE BODY WAS RIGHT ALL ALONG. `ownerId`, exactly as Kylas' leads flavour
+ * documents it, from the very first attempt. What was broken was the READBACK:
+ * GET /v1/companies/{id} does not return the owner on this account, so every
+ * check read "(none)" before and after and called a write that had LANDED
+ * "accepted and ignored". That one blind read produced three wrong answers in
+ * a row — including a confident "this cannot be done, change it in Kylas' own
+ * UI" written into this very header. `ownedBy`, the key the record itself
+ * carries, 500s on this endpoint.
  *
- * What remains is the part that works and is proven: the CONTACTS on the
- * selected accounts move. Contacts take ownerId as a plain number — the save
- * path has always done it and test-replace pins it. Account ownership itself
- * has to be set in Kylas' own UI.
+ * The lesson is not about Kylas. It is that a readback which cannot see the
+ * field is not a readback, and a verdict drawn from one is worth less than no
+ * verdict at all, because it stops the search.
+ *
+ * What was never in doubt: the CONTACTS on the selected accounts move, through
+ * PUT /v1/contacts/{id} with ownerId as a plain number.
  *
  * ── THE RULES THAT STILL HOLD ──────────────────────────────────────────
  *
@@ -128,7 +128,7 @@ export async function plan({ kylas, companies = [], ownerId, log = () => {} }) {
   if (!ids.length) throw Object.assign(new Error("no accounts were selected"), { status: 400 });
 
   const accounts = [], problems = [];
-  let contacts = 0, already = 0;
+  let contacts = 0, already = 0, accountOwners = 0;
   for (const id of ids) {
     try {
       const co = await kylas.company(id);
@@ -140,9 +140,17 @@ export async function plan({ kylas, companies = [], ownerId, log = () => {} }) {
       const toMove = people.filter((p) => String(idOf(p?.ownerId) ?? "") !== to);
       already += people.length - toMove.length;
       contacts += toMove.length;
+      /* THE ACCOUNT'S OWN OWNER COUNTS AGAIN. The single GET does not return it
+         on this account, so "" here means UNKNOWN, not unowned — and an unknown
+         owner is treated as needing the write, because the write is a no-op
+         when it is already right. */
+      const accOwner = String(idOf(co?.ownerId) ?? "");
+      const accMoves = accOwner !== to;
+      if (accMoves) accountOwners++;
       accounts.push({ id, name: co?.name || `Company ${id}`,
-                      accountOwner: String(idOf(co?.ownerId) ?? ""),
+                      accountOwner: accOwner,
                       accountOwnerName: co?.ownerId?.name || "",
+                      accountOwnerMoving: accMoves,
                       contacts: people.length, moving: toMove.length });
     } catch (e) {
       problems.push({ id, why: e.message.slice(0, 160), status: e.status || 0 });
@@ -150,14 +158,16 @@ export async function plan({ kylas, companies = [], ownerId, log = () => {} }) {
   }
   const moving = accounts.filter((a) => a.moving > 0).length;
   log(`reassign: ${contacts} contact(s) across ${moving} account(s) would move` +
+      (accountOwners ? `, and ${accountOwners} account owner(s)` : "") +
       (already ? `, ${already} already there` : "") +
       (problems.length ? `, ${problems.length} could not be read` : ""));
   return { accounts, moving, contacts, already, problems, ownerId: to, cap: MAX_ACCOUNTS,
-           /* So the console never again implies something it cannot do. */
-           accountOwnerMoves: false };
+           accountOwners,
+           /* True since 2026-10-15 — see setCompanyOwner in kylas.mjs. */
+           accountOwnerMoves: true };
 }
 
-/* THE WRITE — CONTACTS ONLY.
+/* THE WRITE — THE CONTACTS, THEN THE ACCOUNT.
    Sequential on purpose: the Kylas client rate-limits at about five a second
    and a burst of parallel PUTs buys nothing but 429s. */
 export async function apply({ kylas, companies = [], ownerId, log = () => {},
@@ -174,7 +184,7 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
       { status: 400 });
 
   const moved = [], failed = [];
-  let contactsMoved = 0, skipped = 0, done = 0;
+  let contactsMoved = 0, skipped = 0, done = 0, accountOwnersMoved = 0, ownerFailed = 0;
   for (const id of ids) {
     try {
       /* The company is READ, never written — for its name, and to fail the
@@ -195,7 +205,25 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
           contactsMoved++; n++;
         } catch (e) { stuck.push({ id: String(p.id), why: e.message.slice(0, 120) }); }
       }
-      moved.push({ id, name: co?.name || `Company ${id}`, contacts: n,
+      /* THE ACCOUNT ITSELF, AFTER ITS PEOPLE. Order matters only for what a
+         half-finished batch looks like: contacts moved under an account that
+         still reads as somebody else's is the state the console has always
+         shown, and is recoverable by running again. The reverse — the account
+         handed over with its POCs left behind — is the split state rule 4 of
+         the header exists to avoid.
+
+         A FAILURE HERE DOES NOT FAIL THE ACCOUNT. The contacts have already
+         moved and that is the half that decides whose queue they are in; the
+         owner field is reported separately so a partial result is legible. */
+      let ownerSet = false, ownerWhy = "";
+      if (String(idOf(co?.ownerId) ?? "") !== to) {
+        try {
+          await kylas.setCompanyOwner(id, to);
+          ownerSet = true; accountOwnersMoved++;
+        } catch (e) { ownerWhy = e.message.slice(0, 120); ownerFailed++; }
+      }
+      moved.push({ id, name: co?.name || `Company ${id}`, contacts: n, ownerSet,
+                   ...(ownerWhy ? { ownerWhy } : {}),
                    ...(stuck.length ? { contactsFailed: stuck } : {}) });
     } catch (e) {
       failed.push({ id, why: e.message.slice(0, 160), status: e.status || 0 });
@@ -204,10 +232,13 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
     onProgress({ done, total: ids.length });
   }
   log(`reassign: moved ${contactsMoved} contact(s) across ${moved.length} account(s) to owner ${to}` +
+      (accountOwnersMoved ? `, and ${accountOwnersMoved} account owner(s)` : "") +
+      (ownerFailed ? `, ${ownerFailed} account owner(s) REFUSED` : "") +
       (skipped ? `, ${skipped} already there` : "") +
       (failed.length ? `, ${failed.length} FAILED` : ""));
   return { moved: moved.length, contacts: contactsMoved, skipped, failed, accounts: moved,
-           ownerId: to, accountOwnerMoves: false };
+           ownerId: to, accountOwners: accountOwnersMoved, accountOwnersFailed: ownerFailed,
+           accountOwnerMoves: true };
 }
 
 /* THE WHOLE CONTACT, with one field changed.

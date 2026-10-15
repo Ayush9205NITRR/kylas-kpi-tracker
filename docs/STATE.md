@@ -888,7 +888,61 @@ individual."*
 
 **The contacts move. The account's own owner does not, and cannot.**
 
-### A company's owner is not settable through this API
+### A company's owner IS settable — and the readback is what lied
+
+**Resolved 2026-10-15, after three wrong answers in a row.** It is settable:
+
+```
+PUT /v1/companies/1779587/owner   {"ownerId": 74757}   ->  200 {"id":1779587}
+  owner before  82867 Muskan Rajpoot      [read through the SEARCH]
+  owner after   74757 Bhaumik Sachdeva    [read through the SEARCH]
+```
+
+**The body was right from the first attempt** — `ownerId`, exactly as Kylas'
+leads flavour documents it. What was broken was the **readback**:
+`GET /v1/companies/{id}` **does not return the owner on this account**, so
+every check read "(none)" before and after and called a write that had LANDED
+"accepted and ignored". `ownedBy`, the key the record itself carries, **500s**
+on this endpoint — so the one shape that looked most promising from
+`kylas-airtable-sync` is in fact the wrong one.
+
+**How it went wrong three times, because the pattern matters more than the fact:**
+
+1. The first live run read the owner through the single GET, saw "(none)"
+   twice, and reported ACCEPTED AND IGNORED. The write had worked.
+2. The next run, against the same account, found it **already on the target** —
+   its own earlier work — skipped every shape, and the verdict chain checked
+   the contact control *before* it checked for "skipped", so it printed
+   "companies do not expose it" having tested the company **zero times**.
+3. That verdict was written into `reassign.mjs`' header, STATE.md and the
+   console's own message, where it sat for a fortnight telling people to change
+   account ownership in Kylas' UI.
+
+**Ayush pushed back three times and was right each time** — the last time by
+pointing at `kylas-airtable-sync`, which has carried
+`update_company_owner()` → `PUT companies/{id}/owner {"ownerId"}` all along.
+A verdict drawn from a read that cannot see the field is worth *less* than no
+verdict, because it stops the search.
+
+**What is live now.** `kylas.mjs` has `setCompanyOwner(id, ownerId)` — a
+separate method on a separate endpoint — and `reassign.mjs` writes the account
+owner after its contacts, reporting `accountOwners` and `accountOwnersFailed`
+so a partial result is legible. A refused owner field does not fail the
+account: the contacts have already moved and that is the half that decides
+whose queue it is in.
+
+**The fence on `updateCompany` stays up.** That is the *replacing* PUT — it
+erased lucidity's owner on 2026-09-30, and three such runs in
+`kylas-airtable-sync` on 2026-07-01 reassigned companies across a whole account
+to the API user (hence its `restore_company_owners.py`). `test-replace` still
+asserts nothing calls it, and `test-reassign` asserts the header keeps both
+halves straight so the next person neither retries the dangerous endpoint nor
+re-abandons the safe one.
+
+Everything below is the history, kept because it is how the API behaves and
+because the *replacing* PUT's half of it is still true.
+
+### The replacing PUT: a company's owner is not settable THAT way
 
 Found the hard way, on a live account, which is the only reason it is known:
 

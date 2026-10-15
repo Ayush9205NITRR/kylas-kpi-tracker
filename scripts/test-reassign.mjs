@@ -88,16 +88,21 @@ console.log("\n2. the company owner is never written");
      !/kylas\.updateCompany\s*\(/.test(src));
   ok("...and exports no companyBody for anything else to call",
      !/export function companyBody/.test(src));
-  /* Kylas ACCEPTS a company PUT carrying ownerId and drops the field. On a
-     replacing PUT that erases the owner, and nothing in the API could set it
-     back. Documented in the file header; asserted here so it cannot creep in
-     again on a quiet afternoon. */
-  ok("the file says why, so the next person does not retry it",
-     /silently DROPPED|ACCEPTED/.test(src) && /lucidity/.test(src));
+  /* THE FENCE IS ON THE REPLACING PUT, NOT ON OWNERSHIP. updateCompany
+     REPLACES the record — it erased lucidity's owner on 2026-09-30 — and must
+     never come back. PUT /companies/{id}/owner is a different endpoint that
+     touches one field, proven live 2026-10-15, and IS used. The header has to
+     keep both halves straight so the next person neither retries the dangerous
+     one nor re-abandons the safe one. */
+  ok("the file still warns off the replacing PUT", /lucidity/.test(src) && /REPLACES the record/.test(src));
+  ok("...and records that the owner endpoint works, with the proof",
+     /companies\/\{id\}\/owner/.test(src) && /1779587/.test(src));
+  ok("...and says the readback, not the body, was what was broken",
+     /READBACK/.test(src) && /does not return the owner/.test(src));
 }
 
 /* ── a fake Kylas that records every write ──────────────────────────── */
-const fake = ({ failContact = null, failCompany = null } = {}) => {
+const fake = ({ failContact = null, failCompany = null, failOwner = null } = {}) => {
   const wrote = { companies: [], contacts: [] };
   const people = { 903: [{ id: 11 }, { id: 12 }], 904: [{ id: 21 }], 905: [] };
   const cOwners = { 11: 74725, 12: 74726, 21: 74725 };
@@ -109,7 +114,14 @@ const fake = ({ failContact = null, failCompany = null } = {}) => {
     },
     contactsForCompany: async (id) => (people[id] || []).map((p) => ({ ...p, ownerId: { id: cOwners[p.id] } })),
     contact: async (id) => ({ ...PERSON, id: Number(id), ownerId: { id: cOwners[id] ?? 74725 } }),
+    /* THE FENCE STAYS ON THE REPLACING PUT. setCompanyOwner is a different
+       endpoint that replaces nothing — see kylas.mjs. If reassign ever reaches
+       for updateCompany again, this still fails the suite. */
     updateCompany: async () => { throw new Error("nothing may write a company"); },
+    setCompanyOwner: async (id, ownerId) => {
+      if (String(id) === String(failOwner)) throw new Error("owner write rejected");
+      wrote.companies.push({ id: String(id), ownerId: Number(ownerId) });
+    },
     updateContact: async (id, body) => {
       if (String(id) === String(failContact)) throw new Error("contact write rejected");
       wrote.contacts.push({ id: String(id), ownerId: body.ownerId });
@@ -126,7 +138,9 @@ console.log("\n3. plan() counts and writes nothing");
   is("two contacts would move", p.contacts, 2);
   is("...across two accounts", p.moving, 2);
   is("...and one is already there", p.already, 1);
-  is("it says plainly that the account owner does not move", p.accountOwnerMoves, false);
+  is("it says the account owner moves too", p.accountOwnerMoves, true);
+  /* The fake owns everything as 74725, so all three accounts need the write. */
+  is("...and counts the account owners that would change", p.accountOwners, 3);
   ok("each account reports who owns it, for display only",
      p.accounts.every((a) => "accountOwner" in a));
 }
@@ -143,11 +157,29 @@ console.log("\n5. apply() moves the people, and only the ones that need it");
 {
   const k = fake();
   const r = await apply({ kylas: k, companies: ["903", "904"], ownerId: "74726" });
-  is("no company was written", k.wrote.companies, []);
+  is("every account's owner was set, through the /owner endpoint",
+     k.wrote.companies.map((c) => c.id), ["903", "904"]);
+  is("...to the new owner", [...new Set(k.wrote.companies.map((c) => c.ownerId))], [74726]);
   is("only the contacts that needed moving were written", k.wrote.contacts.map((c) => c.id), ["11", "21"]);
   is("...to the new owner", [...new Set(k.wrote.contacts.map((c) => c.ownerId))], [74726]);
   is("the reply counts contacts, and the accounts they sat on", [r.contacts, r.moved], [2, 2]);
-  is("...and repeats that the account owner did not move", r.accountOwnerMoves, false);
+  is("...and the account owners it moved", r.accountOwners, 2);
+  is("...with none refused", r.accountOwnersFailed, 0);
+}
+
+console.log("\n5b. an account-owner write that fails does not lose the contacts");
+{
+  /* The contacts are the half that decides whose queue an account is in, and
+     they are written FIRST. A refused owner field is reported, not fatal. */
+  const k = fake({ failOwner: "904" });
+  const r = await apply({ kylas: k, companies: ["903", "904"], ownerId: "74726" });
+  is("the contacts still moved", k.wrote.contacts.map((c) => c.id), ["11", "21"]);
+  is("the owner landed on the account that allowed it", k.wrote.companies.map((c) => c.id), ["903"]);
+  is("...and the refusal is counted, not thrown", r.accountOwnersFailed, 1);
+  is("...and the account is still reported as moved", r.moved, 2);
+  ok("...with the reason on the account that refused",
+     /owner write rejected/.test(r.accounts.find((a) => a.id === "904")?.ownerWhy || ""));
+  is("...and the one that worked says so", r.accounts.find((a) => a.id === "903")?.ownerSet, true);
 }
 
 console.log("\n6. an account whose people are all already there costs no write");
