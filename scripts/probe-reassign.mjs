@@ -779,6 +779,21 @@ if (RE_EP) {
     console.log(`  reassign.mjs can use this and the account cascade goes back in. It`);
     console.log(`  is a dedicated endpoint, so it does NOT replace the record and none`);
     console.log(`  of the PUT-erases-fields risk applies. Send this block back.`);
+  } else if (co.verdict === null) {
+    /* SKIPPED IS NOT FAILED. This branch used to sit AFTER the control's, so a
+       run where every company shape was skipped — because the account was
+       already on the target — printed "companies do not expose it" on the
+       strength of the contact alone, having tested the company zero times.
+       That is how 1780629 was written off: the earlier write had in fact
+       landed, so the next run found nothing left to change and the verdict
+       read as a failure. A shape that never ran proves nothing either way. */
+    console.log(`  INCONCLUSIVE — every company shape was SKIPPED, so the company was never`);
+    console.log(`  actually tested. ${tried.length === 1 ? "The one shape" : `All ${tried.length} shapes`} found it already owned by ${n}${
+      ct.verdict === true ? ", and the contact control moving says nothing about companies" : ""}.`);
+    console.log(`  NOTE THAT CAREFULLY: if it is already on the target and you did not set`);
+    console.log(`  it by hand, an EARLIER run of this probe is what put it there — which`);
+    console.log(`  would mean the endpoint works. Re-run against a company that is NOT on`);
+    console.log(`  ${n} yet, with --reassign-endpoint set to somebody it is not on, to settle it.`);
   } else if (ct.verdict === true) {
     console.log(`  THE METHOD IS RIGHT AND COMPANIES DO NOT EXPOSE IT. The contact moved`);
     console.log(`  through /owner; the company did not, on ${tried.length} different bodies.`);
