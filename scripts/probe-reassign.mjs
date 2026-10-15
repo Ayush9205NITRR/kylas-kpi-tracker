@@ -188,12 +188,17 @@ async function rawPutTop(path, body) {
 }
 
 const companyOwner = async (id) => {
+  /* BOTH KEYS. Kylas carries a record's owner as `ownedBy` and the search also
+     answers `ownerId`; asking for one and not the other is how a readback goes
+     blind, which already cost one wrong verdict. */
   const r = await call("POST", "/v1/search/company?page=0&size=1",
-    { fields: ["id", "name", "ownerId"], jsonRule: equals("id", Number(id)) }).catch(() => null);
+    { fields: ["id", "name", "ownerId", "ownedBy"], jsonRule: equals("id", Number(id)) }).catch(() => null);
   const hit = rows(r).find((c) => String(c.id) === String(id));
-  if (hit && hit.ownerId !== undefined) return { id: idOf(hit.ownerId), via: "search" };
+  const pick = (o) => (o?.ownedBy !== undefined && idOf(o.ownedBy) != null ? idOf(o.ownedBy) : idOf(o?.ownerId));
+  if (hit && (hit.ownerId !== undefined || hit.ownedBy !== undefined))
+    return { id: pick(hit), via: `search:${hit.ownedBy !== undefined ? "ownedBy" : "ownerId"}` };
   const one = await call("GET", `/v1/companies/${id}`).catch(() => null);
-  return { id: idOf(one?.ownerId), via: one ? "GET (the search did not answer)" : "neither read answered" };
+  return { id: pick(one), via: one ? "GET (the search did not answer)" : "neither read answered" };
 };
 
 /* ── --users ─────────────────────────────────────────────────────────────
@@ -709,14 +714,46 @@ if (RE_EP) {
      exact body is what it wants" are two claims and only one of them has any
      evidence. Each is read back; the first that lands stops the rest. */
   console.log(`\n  2 · THE COMPANY — ${CO}. Several bodies, each read back.`);
+  /* ownedBy IS THE FIELD KYLAS ACTUALLY USES, and it was missing from this
+     list until 2026-10-15. Every shape here said `ownerId`, which is what the
+     LEADS reassignment endpoint documents — but on a record Kylas carries the
+     owner as `ownedBy`, either {id,name} or a bare id, and the whole
+     kylas-airtable-sync repo reads it that way (02_contact_sync, 03_deal_sync,
+     06_account_health, 08_deal_rot). Its client also WRITES it:
+     update_company_owner() tries PUT /companies/{id}/owner {"ownerId"} and
+     then falls back to a full PUT with body["ownedBy"] = {id}.
+
+     And its restore_company_owners.py says, from a real incident on
+     2026-07-01, that "field PUTs to /companies/{id} that OMIT the owner make
+     Kylas silently reassign the company to the API user". That is proof
+     ownership IS writable through the company endpoint — a PUT that leaves it
+     out changes it — so the question was never whether it can be written, only
+     under which key. `ownedBy` is the candidate this list never tried. */
   const shapes = [
+    ["ownedBy wrapped — the field Kylas reads", `/v1/companies/${CO}/owner`, { ownedBy: { id: n } }],
+    ["ownedBy as a bare id", `/v1/companies/${CO}/owner`, { ownedBy: n }],
     ["as documented for leads", `/v1/companies/${CO}/owner`, { ownerId: n }],
     ["ownerId as a string", `/v1/companies/${CO}/owner`, { ownerId: String(n) }],
     ["wrapped, the way lookups come back", `/v1/companies/${CO}/owner`, { ownerId: { id: n } }],
     ["under `owner` instead", `/v1/companies/${CO}/owner`, { owner: { id: n } }],
     ["the bare id, no envelope", `/v1/companies/${CO}/owner`, n],
-    ["the plural path, in case it is /owners", `/v1/companies/${CO}/owners`, { ownerId: n }],
+    ["the plural path, in case it is /owners", `/v1/companies/${CO}/owners`, { ownedBy: { id: n } }],
   ];
+  /* THE FULL-RECORD PUT IS OPT-IN, AND THAT IS NOT CAUTION FOR ITS OWN SAKE.
+     It REPLACES the record. It is how lucidity (1777441) lost its owner, and
+     kylas-airtable-sync's restore_company_owners.py exists because three such
+     runs on 2026-07-01 reassigned companies across the whole account to the
+     API user. A shape that has destroyed data twice does not belong in a
+     default run of a diagnostic, however much we want the answer — the
+     dedicated /owner shapes above cannot erase anything, so they go first and
+     alone. --try-full-put adds it, for a company you can afford to repair. */
+  if (process.argv.includes("--try-full-put")) {
+    shapes.push(["the full record with ownedBy set (REPLACES THE RECORD)", `/v1/companies/${CO}`,
+      { ...companyBody(before.company, n), ownedBy: { id: n } }]);
+  } else {
+    console.log(`\n  (not trying the full-record PUT: it replaces the record and has erased`);
+    console.log(`   an owner before. Add --try-full-put on a company you can repair.)`);
+  }
   let co = { verdict: false };
   const tried = [];
   for (const [label, path, body] of shapes) {

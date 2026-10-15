@@ -171,8 +171,11 @@ console.log("\n7 · the company readback must not be blind");
       ["scripts/probe-reassign.mjs", "--company", CO, "--reassign-endpoint", TO],
       { env: { ...process.env, KYLAS_KEY: "k", KYLAS_BASE: `http://127.0.0.1:${KY}` }, encoding: "utf8" });
     const out = (r.stdout || "") + (r.stderr || "");
+    /* The readback now names WHICH key answered — search:ownedBy or
+       search:ownerId — because asking for only one of them is how it went
+       blind in the first place. */
     ok("the owner is read through the search, not the blind GET",
-       /\[via search\]/.test(out), (out.match(/its owner now[^\n]*/) || ["(absent)"])[0]);
+       /\[via search:(ownedBy|ownerId)\]/.test(out), (out.match(/its owner now[^\n]*/) || ["(absent)"])[0]);
     ok("...so a write that DID land is seen as landing",
        /THE COMPANY OWNER IS SETTABLE/.test(out) && r.status === 0,
        (out.match(/=> [A-Z][^\n]*/) || ["(no verdict)"])[0]);
