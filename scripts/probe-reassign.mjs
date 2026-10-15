@@ -92,6 +92,22 @@ const LIST = process.argv.includes("--list");
 const USERS = process.argv.includes("--users");
 
 if (!KEY) { console.error("Set KYLAS_KEY (or use --env-file=.env.local)."); process.exit(1); }
+/* A PLACEHOLDER IS NOT AN ID. `--company ACCOUNT_ID` — the literal text out of
+   an instruction — went to Kylas, came back 400, and surfaced as an unhandled
+   Error with a stack trace, which reads like the tool is broken rather than
+   like the argument is. Every id here is numeric; anything else is caught
+   before a request goes out. */
+for (const [flag, val] of [["company", CO], ["to", TO]]) {
+  if (val === undefined) continue;
+  if (!/^\d+$/.test(String(val))) {
+    console.error(`\n--${flag} wants a numeric Kylas id, not "${val}".`);
+    console.error(flag === "company"
+      ? "Run --list and copy an id from the second block (the accounts that have contacts)."
+      : "Run --users and copy an id from the ID column.");
+    console.error("");
+    process.exit(1);
+  }
+}
 if (!CO && !LIST && !USERS) {
   console.error("Pass --company <kylas id> — an account you do not mind moving.\n" +
                 "Don't know one? --list shows a few, with their owners and contact counts.\n" +
