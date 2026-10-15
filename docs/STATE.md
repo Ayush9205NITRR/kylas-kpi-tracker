@@ -131,7 +131,7 @@ node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable
 node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
-node scripts/test-dialler.mjs            # 26 · real talk time: the one read Kylas allows, the
+node scripts/test-dialler.mjs            # 30 · real talk time: the one read Kylas allows, the
                                          #      filter, the idempotent write, the gap it cannot
                                          #      close, and the report not double-counting dials
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
@@ -1142,7 +1142,36 @@ what it would write), then `--apply`. After that the cron keeps it current.
 Nothing in the console changes; Talk time on the dashboard just starts being
 true.
 
-`test-dialler` is 26 and covers the read, the filter, the per-associate credit,
+### "Talk time is not getting mapped" — the screen blamed the wrong thing
+
+Ayush, 2026-10-15, on a dashboard running 1.65: Talk time read **`not timed`**
+against all ten associates, with the note *"timed only when dialled from the
+console"*.
+
+Both were wrong in the same way. The note described the stopwatch this release
+replaced, and `not timed` is a statement about *these calls* — but it was also
+what appeared on a base where the `Dialler Calls` table **does not exist**, so
+nothing has ever been imported. Those are not the same fact, and the difference
+is the difference between "nobody dialled" and "the setup is not finished": the
+first sends you to look at the team, the second at `repair-base.mjs`. A wrong
+reason is worse than no reason.
+
+`reportData` used to `.catch(() => [])` the Dialler Calls read, which flattened
+"absent table" and "empty table" into one empty array. The failure now travels
+with the rows, and `/report` carries `dialler: { state, rows, why }` with three
+states, each with its own sentence and tooltip on screen:
+
+| state | cell | means |
+|---|---|---|
+| `missing` | **not set up** | no table — run `repair-base.mjs` |
+| `empty` | **not imported** | table exists, cron has not filled it yet |
+| `ok` | **not timed** / `n/m timed` | real coverage for these calls |
+
+An older server sends no `dialler` block; that reads as `""` and the cell falls
+back to the plain `not timed` it always said, so a console ahead of its server
+degrades quietly.
+
+`test-dialler` is 30 and covers the read, the filter, the per-associate credit,
 the write, the idempotent re-run, the gap warning, the report not
 double-counting, and the whole path end to end through the proxy — where the
 20 generated calls arrive as 1,720 seconds split across the three associates
@@ -1325,14 +1354,18 @@ reason is given before the typing instead of after.
   `migrate-first-worked.mjs`. **That order** — each reads what the one before
   it writes. The last is what makes the funnel's bottom two rungs stop reading
   zero; without it "Companies worked" is 0 under a non-zero "Right POC".
-- **Create the `Dialler Calls` table, then import once by hand** (§3h). The
-  table is in `scripts/schema.mjs`, so `node scripts/schema.mjs` against the
-  live base makes it; then
-  `node --env-file=.env.local scripts/import-dialler-calls.mjs` reports what it
-  would write, and `--apply` writes it. The hourly cron takes over after that —
-  but it only ever sees the newest 1,000 logs, so the first catch-up is the one
-  pass that has to be run deliberately. Until it is run, Talk time on the
-  dashboard stays the console stopwatch's near-zero number.
+- **Create the `Dialler Calls` table** (§3h), which is the whole of why Talk
+  time is blank. `schema.mjs` is DATA, not a script — running it does nothing,
+  and saying otherwise cost a day (2026-10-15). The executable is
+  **`node scripts/repair-base.mjs --dry-run`**, then without `--dry-run`; it
+  creates absent tables and adds absent fields and touches nothing that exists.
+  Its PAT needs **`schema.bases:write`**, which a data-only token does not
+  have. The base read on 2026-10-15 holds thirteen tables and no Dialler Calls.
+  After that the hourly cron fills it on its own, so nothing else is required —
+  `node --env-file=.env.local scripts/import-dialler-calls.mjs` (dry, then
+  `--apply`) only saves the wait. The dashboard now says which of these three
+  it is rather than "not timed": **not set up** (no table), **not imported**
+  (table, no rows), **not timed** (rows, but none for these calls).
 - Enable GitHub Pages, or host `docs/privacy.html` on enout.in, for the store's
   privacy policy URL.
 

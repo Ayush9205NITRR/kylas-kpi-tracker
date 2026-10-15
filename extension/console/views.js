@@ -1041,14 +1041,14 @@
        in the last little while. `stale` is only about whether to ask again — it
        never withholds what is in hand. */
     const held = DISK.report[key];
-    if (held) { REP.data = held.data; REP.error = ""; REP.key = key; REP.at = held.at; }
+    if (held) { REP.data = held.data; REP.error = ""; REP.key = key; REP.at = held.at; adoptDialler(held.data); }
     const stale = force || !held || Date.now() - (held.at || 0) > SWR_TTL;
     if (!stale) return false;
 
     REP.loading = true; REP.key = key; REP.period = period; REP.owner = owner;
     API.report(period, owner, from, to)
       .then((r) => {
-        REP.data = r; REP.error = r?.error || ""; REP.at = Date.now();
+        REP.data = r; REP.error = r?.error || ""; REP.at = Date.now(); adoptDialler(r);
         if (!r?.error) { DISK.report[key] = { at: REP.at, data: r }; persist("report"); }
       })
       /* A failed revalidate must not throw away a good answer. Offline, the
@@ -1199,15 +1199,39 @@
     if (!m) return Number(s) > 0 ? "<1m" : "—";
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
-  /* TALK TIME SAYS HOW MUCH OF IT IS KNOWN. Ayush, 2026-10-12: "galat dikha
-     rahe hai". The console times a call only when it is dialled from its own
-     button — 7 of 1,379 on that day — and the rest were being summed as zero
-     seconds, so a month of calling read as three minutes. Unknown is not
-     zero: the total stands beside how many calls it covers. */
+  /* TALK TIME SAYS HOW MUCH OF IT IS KNOWN, AND WHY. Ayush, 2026-10-12:
+     "galat dikha rahe hai"; 2026-10-15: "Talk time is not getting mapped."
+
+     Two different complaints, and the second one was the screen's own fault.
+     Talk time comes from the KYLAS DIALLER APP (1.64) — the console's own
+     stopwatch only ever ran on calls dialled from its button, 7 of 1,379 — but
+     this cell still explained itself in the stopwatch's terms, and said "not
+     timed" whether the dialler import had run or had never been set up. On a
+     base with no Dialler Calls table that put "not timed" against every
+     associate, which reads as "nobody dialled" rather than "nothing has been
+     imported". A wrong reason is worse than no reason: it sends somebody to
+     look at the team instead of at the setup.
+
+     So the SETUP states come off the report's `dialler` block and are said in
+     their own words; "not timed" is kept for what it actually means — this
+     period's calls carry no dialler time, on a base that has some. */
+  const DIALLER = { state: "", rows: 0 };
+  /* Read off whatever answer is on screen, cached or fresh, so a dashboard
+     served from disk explains itself the same way a live one does. An older
+     server sends no `dialler` block at all; that reads as "" and the cell
+     falls back to the plain "not timed" it always said. */
+  const adoptDialler = (r) => {
+    DIALLER.state = String(r?.dialler?.state || "");
+    DIALLER.rows = Number(r?.dialler?.rows || 0);
+  };
   const talkCell = (s, p) => {
     const timed = Number(p?.timedCalls || 0), calls = Number(p?.calls || 0);
-    if (!timed) return calls ? `<span class="nt" title="None of these ${calls} calls was dialled from the console, so none was timed">not timed</span>` : "—";
-    return `${fmtTalk(s)}${timed < calls ? ` <small class="cov" title="Only calls dialled from the console's own button are timed">${timed}/${calls} timed</small>` : ""}`;
+    if (!timed) {
+      if (DIALLER.state === "missing") return `<span class="nt" title="This base has no Dialler Calls table, so no call length has ever been imported — the number is missing, not zero. Run scripts/repair-base.mjs to create it; the hourly job fills it after that.">not set up</span>`;
+      if (DIALLER.state === "empty") return `<span class="nt" title="The Dialler Calls table is there but still empty — the import has not run yet, or Kylas served no timed calls. It runs hourly; scripts/import-dialler-calls.mjs --apply does it now.">not imported</span>`;
+      return calls ? `<span class="nt" title="None of these ${calls} calls has a length from the Kylas dialler app. A call placed from the dialler carries one; one logged in the console without dialling does not.">not timed</span>` : "—";
+    }
+    return `${fmtTalk(s)}${timed < calls ? ` <small class="cov" title="Only calls placed through the Kylas dialler app carry a length — ${timed} of these ${calls} do">${timed}/${calls} timed</small>` : ""}`;
   };
   const COUNT_COLS = [{ key: "calls", label: "Calls" },
     /* CONNECTED, from the stage the call set — see report.mjs callConnected.
@@ -1464,8 +1488,13 @@
                   of dials, so it is the team's connect rate. */
                { key: "connects", name: "Connected", fmt: (v) => String(v || 0),
                  of: "calls", note: "of dials — the stage says somebody answered" },
+               /* The note names the SOURCE, because that is the question this
+                  row keeps raising. It was "timed only when dialled from the
+                  console", which stopped being true in 1.64. */
                { key: "talkSeconds", name: "Talk time", fmt: (v, p) => talkCell(v, p),
-                 note: "timed only when dialled from the console" }].map((a, j, arr) => {
+                 note: DIALLER.state === "missing" ? "not set up — run repair-base.mjs, then the dialler import"
+                   : DIALLER.state === "empty" ? "the Kylas dialler app's calls — none imported yet"
+                   : "from the Kylas dialler app, which measures every call it places" }].map((a, j, arr) => {
                 const top = Math.max(1, ...people.map((p) => p[a.key] || 0));
                 return `<tr class="act${j === arr.length - 1 ? " last" : ""}">
                 <td class="rung"><span class="rungname">${esc(a.name)}</span></td>

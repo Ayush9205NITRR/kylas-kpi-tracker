@@ -1179,8 +1179,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* THE KYLAS DIALLER APP'S CALLS — the only real talk time. Tolerated
          when the table is absent so a base without it still reports, just
          without talk time. See import-dialler-calls.mjs. */
+      /* THE REASON IS CARRIED, NOT SWALLOWED. Returning [] for both "the table
+         is not in this base" and "the table is there and empty" is what made
+         Talk time read `not timed` for the whole team with nothing saying the
+         import had never been run. Ayush, 2026-10-15: "Talk time is not
+         getting mapped." The two cases need two different sentences on screen,
+         so the failure travels with the rows. */
       listTolerant(airtable, "Dialler Calls", { fields: ["Called At", "Owner", "Duration"], ...ALL })
-        .catch(() => []),
+        .then((rows) => ({ rows, missing: false }))
+        .catch((e) => ({ rows: [], missing: true, why: String(e?.message || e).slice(0, 160) })),
       /* THE ROSTER FILTERS THE NUMBERS, NOT JUST THE COLUMNS.
          Dropping non-team people in the view would leave the Team column summing
          everybody while the per-person columns beside it summed the team — two
@@ -1204,8 +1211,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        deletes. mergeCalls prefers the raw rows for any such day, so an
        interrupted rollup reads correctly instead of double. */
     const calls = mergeCalls(raw, rolled);
-    const dialler = diallerRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
-                                              secs: Number(r.fields.Duration || 0) }));
+    const dialler = (diallerRows.rows || []).map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
+                                                           secs: Number(r.fields.Duration || 0) }));
+    /* missing → the table is not in this base at all, so nothing has ever been
+       imported and `repair-base.mjs` is the fix. empty → the table exists and
+       the hourly cron has simply not filled it yet (or Kylas served no timed
+       calls). ok → there is talk time; whether THIS period has any is a
+       question for the period, not for the setup. */
+    const diallerState = { state: diallerRows.missing ? "missing" : (dialler.length ? "ok" : "empty"),
+                           rows: dialler.length, why: diallerRows.why || "" };
     /* A TRANSITION LINKS TO A CONTACT, AND THE LADDER COUNTS COMPANIES.
        This used to key a transition by its contact record, so booked/done/sql
        deduped per CONTACT while worked/picked/right/discovery deduped per
@@ -1244,7 +1258,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
       if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
     }
-    return { calls, transitions, signals, dialler, team };
+    return { calls, transitions, signals, dialler, diallerState, team };
   });
 
   /* Picklists, read once. The console cannot know what an account's custom
@@ -2352,7 +2366,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          re-paid a crawl of the whole call log for numbers already in hand.
          ?fresh=1 is the Refresh button; a save drops the cache, so the next
          dashboard open sees the call just logged. */
-      const { calls, transitions, signals, dialler, team } =
+      const { calls, transitions, signals, dialler, diallerState, team } =
         await reportData({ fresh: !!url.searchParams.get("fresh") });
       const counts = counter(team);
       /* Filled below, once calls/transitions/signals all exist — an earlier
@@ -2391,7 +2405,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          screen cannot distinguish "nobody worked those accounts" from "the sync
          has not run since". Both look like a small number. */
       const sync = await syncState();
-      return { ...out, period, team, excluded,
+      return { ...out, period, team, excluded, dialler: diallerState,
                sync: sync ? { at: sync.at || "", contacts: sync.contacts ?? null,
                               moves: sync.moves ?? null } : null };
     },

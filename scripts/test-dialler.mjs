@@ -161,7 +161,42 @@ console.log("\n5 · end to end, through the proxy the console talks to");
     ok("...split across the three who dialled", per.length === 3,
        JSON.stringify(per.map((o) => [o.owner, o.talkSeconds])));
     ok("...and their seconds add back up", per.reduce((n, o) => n + o.talkSeconds, 0) === 1720);
+    ok("...and the report says the table is in use", rep.dialler?.state === "ok",
+       JSON.stringify(rep.dialler));
   }
+}
+
+console.log("\n6 · a base with no talk time says WHY, and says the right why");
+{
+  /* Ayush, 2026-10-15: "Talk time is not getting mapped." The dashboard read
+     `not timed` against every associate on a base whose Dialler Calls table
+     had never been created — which reads as "nobody dialled" rather than
+     "nothing has been imported", and sends somebody to look at the team
+     instead of at the setup. The route has to tell the two apart. */
+  const AT2 = 9964, PROXY2 = 9965;
+  start("scripts/mock-airtable.mjs", { PORT: String(AT2), MOCK_AIRTABLE_404: "Dialler Calls" });
+  if (!await upFor(`http://127.0.0.1:${AT2}/__count`)) { ok("the second Airtable mock came up", false); }
+  else {
+    start("scripts/proxy.mjs", { PORT: String(PROXY2), KYLAS_BASE: `http://127.0.0.1:${KY}`, KYLAS_KEY: "k",
+      AIRTABLE_BASE_URL: `http://127.0.0.1:${AT2}`, AIRTABLE_PAT: "pat_mock", AIRTABLE_BASE: "appMOCK" });
+    if (!await upFor(`http://127.0.0.1:${PROXY2}/health`)) { ok("the second proxy came up", false); }
+    else {
+      const gone = await fetch(`http://127.0.0.1:${PROXY2}/report?period=day&from=${DAY}&to=${DAY}&owner=all&fresh=1`)
+        .then((r) => r.json()).catch((e) => ({ error: e.message }));
+      ok("a base with no Dialler Calls table reports it missing", gone.dialler?.state === "missing",
+         JSON.stringify(gone.dialler));
+      ok("...and still serves the rest of the report", !gone.error && Array.isArray(gone.periods),
+         gone.error || `${(gone.periods || []).length} period(s)`);
+    }
+  }
+  /* And the third state: the table is there, and simply has nothing in it yet.
+     Last, because it wipes the rows every section above reads. */
+  await sleep(1500);
+  await fetch(`http://127.0.0.1:${AT}/__reset`, { headers: H });
+  const bare = await fetch(`http://127.0.0.1:${PROXY}/report?period=day&from=${DAY}&to=${DAY}&owner=all&fresh=1`)
+    .then((r) => r.json()).catch((e) => ({ error: e.message }));
+  ok("an empty table reports empty, not missing", bare.dialler?.state === "empty",
+     JSON.stringify(bare.dialler));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
