@@ -1032,10 +1032,23 @@ Three consequences, none of them cosmetic:
   never heard of, and Charu Rathi and Gaurav Kumar both showed real numbers in
   the per-associate table while being inactive in Kylas and absent from Team.
 
-The fix is ordinary work, not new code: find what the thirteen own and move the
-contacts to live owners with the console's bulk Re-assign, which is exactly the
-path that does work. Worth doing before reading another funnel, because until
-then some share of the pipeline belongs to people who left.
+**Counted in the KPI copy, 2026-10-15: 24 contacts across 10 companies**, and
+only five of the thirteen own anything at all — Shreya Bodwal 9 contacts,
+Charu Rathi 5, Tanay Kumar 5, Gaurav Kumar 3, Devansh Shukla 2. Nitika Mann,
+Prabhjot Juneja, Reema Agarwal, Rohit Roy, Saahil Bhardwaj, Ajay Priyadarshi,
+Rashid Imam and Ifee Malpani hold nothing.
+
+That is the copy, not the account: Companies and Contacts here hold what the
+console has saved or synced, and Kylas has ~17,000 companies. The real figure
+needs a Kylas read, and the copy's 24 is a floor.
+
+The fix is ordinary work, not new code: move those contacts to live owners with
+the console's bulk Re-assign, which is exactly the path that does work. Two
+dozen is one sitting. Worth doing before reading another funnel, because until
+then some share of the pipeline belongs to people who left — and note that
+Charu Rathi and Gaurav Kumar are also absent from the Team table, so their
+numbers are counted in the team total under `counter()`'s unknown-name rule
+while they have no column.
 
 **A 200 from the company endpoint means the request was well formed. It never
 means anything happened.** Read the record back.
