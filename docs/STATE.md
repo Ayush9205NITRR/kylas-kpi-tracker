@@ -131,6 +131,11 @@ node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable
 node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
 node scripts/test-shadow-read.mjs        # 52 · the two lanes answer the same thing
+node scripts/test-owner-endpoint.mjs     # 22 · can an ACCOUNT's owner move? The live
+                                         #      probe's verdict, in all four worlds its
+                                         #      mock can be — including the 200 that
+                                         #      changes nothing, which must never read
+                                         #      as success
 node scripts/test-dialler.mjs            # 30 · real talk time: the one read Kylas allows, the
                                          #      filter, the idempotent write, the gap it cannot
                                          #      close, and the report not double-counting dials
@@ -915,6 +920,49 @@ answers 404 to both. `probe-reassign.mjs --reassign-endpoint <userId>` tests
 that shape on a **contact first** — where ownership is known to be settable —
 so the method is validated before companies are judged by it. If the company
 lands, the account cascade goes back in.
+
+**How to run it, and what it now prints** (rewritten 2026-10-15, after the
+question came back as "Why are the owner not changing"):
+
+```sh
+node --env-file=.env.local scripts/probe-reassign.mjs --users     # whose ids these are
+node --env-file=.env.local scripts/probe-reassign.mjs --list      # accounts WITH contacts
+node --env-file=.env.local scripts/probe-reassign.mjs \
+     --company <id from --list> --reassign-endpoint <id from --users>
+```
+
+`--users` exists because every flag here takes a Kylas user id and there was no
+way to find one from the tool: the id came from memory or a URL, and a typo'd
+id is indistinguishable from a broken endpoint — "owner reads 74756" says
+nothing about whether 74756 is a person. It is refused up front now, before any
+PUT goes out.
+
+The run narrates every attempt — the request line, the body, the HTTP status
+**and response body**, the owner before and after **with names**, and a verdict
+per attempt. It tries **six** bodies on the company, not one, because "the
+endpoint exists" and "this exact body is what it wants" are two claims. The
+control write on the contact is **put back** afterwards; the old version moved
+somebody's live contact and walked away.
+
+Four verdicts, and only the last exits zero:
+
+| What happened | Verdict |
+|---|---|
+| nothing moved | `/owner` is a leads endpoint, as documented |
+| 200, owner unchanged | **ACCEPTED AND IGNORED** — never read as success |
+| contact moved, company did not | the method is right, companies do not expose it |
+| both moved | **the company owner IS settable** — the cascade goes back in |
+
+A fifth guard: an account whose contacts are **already** on the target is
+declared `INCONCLUSIVE`, not a pass. The first live run reported LANDED on
+exactly that, because the readback matched without anything having happened.
+
+`test-owner-endpoint` (22) runs the probe against a mock that can *be* each of
+those worlds — `MOCK_OWNER_ENDPOINT=404|ignore|lead|works` — and asserts the
+conclusion it draws, because the verdict is the only part of it anybody acts
+on. A probe that gets this wrong either builds an account cascade over an
+endpoint that silently does nothing, which is how lucidity lost its owner, or
+writes off an endpoint that works.
 
 **A 200 from the company endpoint means the request was well formed. It never
 means anything happened.** Read the record back.

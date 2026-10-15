@@ -2,10 +2,23 @@
 /* THE LIVE RE-ASSIGN PROBE — one account, moved, checked field by field, and
  * put back exactly where it was.
  *
+ *   node --env-file=.env.local scripts/probe-reassign.mjs --users
  *   node --env-file=.env.local scripts/probe-reassign.mjs --list
  *   node --env-file=.env.local scripts/probe-reassign.mjs --company 903
  *   node --env-file=.env.local scripts/probe-reassign.mjs --company 903 --to 74726 --write
  *   node --env-file=.env.local scripts/probe-reassign.mjs --company 903 --restore
+ *
+ * TO SETTLE WHETHER AN ACCOUNT'S OWNER CAN MOVE AT ALL (the open question):
+ *
+ *   node --env-file=.env.local scripts/probe-reassign.mjs --users
+ *   node --env-file=.env.local scripts/probe-reassign.mjs --list
+ *   node --env-file=.env.local scripts/probe-reassign.mjs \
+ *        --company <id from --list> --reassign-endpoint <id from --users>
+ *
+ * Pick a --reassign-endpoint the account's contacts are NOT already on, or the
+ * control is a no-op that reports success. It writes one contact (and puts it
+ * back) and tries six bodies on one company, reading the record back after
+ * every one.
  *
  * WHY THIS EXISTS. /reassign writes COMPANIES, which nothing in this codebase
  * had ever done against a live account, using a PUT that REPLACES the record.
@@ -76,11 +89,13 @@ const TO = arg("to");
 const WRITE = process.argv.includes("--write");
 const RESTORE = process.argv.includes("--restore");
 const LIST = process.argv.includes("--list");
+const USERS = process.argv.includes("--users");
 
 if (!KEY) { console.error("Set KYLAS_KEY (or use --env-file=.env.local)."); process.exit(1); }
-if (!CO && !LIST) {
+if (!CO && !LIST && !USERS) {
   console.error("Pass --company <kylas id> — an account you do not mind moving.\n" +
-                "Don't know one? --list shows a few, with their owners and contact counts.");
+                "Don't know one? --list shows a few, with their owners and contact counts.\n" +
+                "--users shows who you can hand an account to, with their ids.");
   process.exit(1);
 }
 
@@ -124,6 +139,42 @@ const equals = (field, value, type = "long") => ({ condition: "AND", valid: true
 const contactsOf = (companyId) => call("POST", "/v1/search/contact?page=0&size=100",
   { fields: ["id"], jsonRule: equals("company", Number(companyId)) });
 const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
+
+/* ── --users ─────────────────────────────────────────────────────────────
+   WHO YOU CAN HAND SOMETHING TO. Every other flag here takes a Kylas USER ID
+   and there was no way to find one from this tool — the id had to come from
+   somebody's memory or a URL, and a typo'd id is indistinguishable from an
+   endpoint that does not work ("owner reads 74756" says nothing about whether
+   74756 is a person). Two shapes, because Kylas documents neither: the paged
+   one first, then the bare one. Copied from kylas.mjs' own users(). */
+if (USERS) {
+  const shapes = [["GET /v1/users?page=0&size=200", "/v1/users?page=0&size=200"],
+                  ["GET /v1/users", "/v1/users"]];
+  let found = null, how = "";
+  for (const [name, path] of shapes) {
+    try {
+      const list = rows(await call("GET", path));
+      if (list.length) { found = list; how = name; break; }
+      console.log(`  ${name} answered with no rows`);
+    } catch (e) { console.log(`  ${name} -> ${e.status || "?"} ${String(e.message).slice(-90)}`); }
+    await sleep(300);
+  }
+  if (!found) {
+    console.log(`\nNo user-list endpoint answered. Open any contact in Kylas and read the`);
+    console.log(`owner's id out of the URL, or pass --reassign-endpoint a value you know.\n`);
+    process.exit(1);
+  }
+  console.log(`\n${found.length} user(s), via ${how}:\n`);
+  console.log(`  ${"ID".padEnd(9)} ${"NAME".padEnd(26)} ${"EMAIL".padEnd(32)} ACTIVE`);
+  for (const u of found) {
+    const nm = [u.firstName, u.lastName].filter(Boolean).join(" ") || "(unnamed)";
+    const active = u.active ?? u.isActive ?? u.status ?? "";
+    console.log(`  ${String(u.id).padEnd(9)} ${nm.slice(0, 25).padEnd(26)} ` +
+                `${String(u.email || "").slice(0, 31).padEnd(32)} ${active === true ? "yes" : active === false ? "no" : String(active)}`);
+  }
+  console.log(`\nPass one of those ids as --reassign-endpoint <id> or --to <id>.\n`);
+  process.exit(0);
+}
 
 /* ── --list ──────────────────────────────────────────────────────────── */
 if (LIST) {
@@ -382,84 +433,186 @@ async function putCompany(base, ownerId) {
 const RE_EP = arg("reassign-endpoint");
 if (RE_EP) {
   const n = Number(RE_EP);
-  const check = async (what, path, readPath) => {
-    /* PROVE IT CHANGED SOMETHING, NOT THAT IT ENDED UP RIGHT.
-       The first live run reported LANDED on a contact that was ALREADY owned
-       by the target: the request came back 400, nothing happened, and the
-       readback matched anyway. A test whose subject already satisfies the
-       assertion proves nothing and, worse, prints a pass. Read first, and
-       refuse to draw a conclusion from a no-op. */
-    const start = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
-    if (String(start ?? "") === String(RE_EP)) {
-      console.log(`  SKIP    ${what} ${String(readPath).padEnd(30)} is ALREADY owned by ${RE_EP} —`);
-      console.log(`          nothing to change, so this can prove nothing. Re-run with a`);
-      console.log(`          --reassign-endpoint value it is NOT already on.`);
-      return null;                       /* null = inconclusive, not false */
+  if (!Number.isFinite(n)) {
+    console.error(`\n--reassign-endpoint wants a Kylas USER ID, not "${RE_EP}".`);
+    console.error(`Run --users to see them.\n`);
+    process.exit(1);
+  }
+
+  /* WHO THE IDS BELONG TO. Every line below reads better with a name on it,
+     and a typo'd id is otherwise indistinguishable from an endpoint that does
+     not work: "owner reads 74756" tells you nothing about whether 74756 was
+     ever a real person. Resolved once, cached, and a failure is not fatal. */
+  const NAMES = new Map();
+  const whoIs = async (id) => {
+    const k = String(id ?? "");
+    if (!k) return "(none)";
+    if (!NAMES.has(k)) {
+      const u = await call("GET", `/v1/users/${k}`).catch(() => null);
+      NAMES.set(k, u ? [u.firstName, u.lastName].filter(Boolean).join(" ") || k : "(unknown user)");
     }
-    let sent = "";
-    /* A 429 IS NOT AN ANSWER. Kylas throttles at about five a second, and
-       reading a rate limit as "this endpoint does not work" would give exactly
-       the wrong conclusion to the one question this probe exists to settle. */
+    return NAMES.get(k);
+  };
+  const withName = async (id) => `${String(id ?? "(none)").padEnd(8)} ${await whoIs(id)}`;
+
+  const target = await whoIs(n);
+  if (target === "(unknown user)") {
+    console.error(`\nKylas has no user ${n}. Run --users and pick one from the list.\n`);
+    process.exit(1);
+  }
+
+  /* THE RAW ANSWER, BODY AND ALL. The old version kept only the status code,
+     and the status code is the least informative part: a 200 that changed
+     nothing and a 200 that worked look identical, while the BODY of a 400 is
+     usually Kylas naming the field it refused. */
+  const rawPut = async (path, body) => {
     for (let t = 0; t < 6; t++) {
       try {
-        const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H,
-          body: JSON.stringify({ ownerId: n }) });
-        sent = String(r.status);
-        if (r.status !== 429) break;
-        const wait = Number(r.headers.get("retry-after") || 0) * 1000 || (500 * 2 ** t);
-        console.log(`    429, waiting ${wait}ms`);
-        await sleep(wait);
-      } catch (e) { sent = `network ${e.message.slice(0, 40)}`; break; }
+        const r = await fetch(`${BASE}${path}`, { method: "PUT", headers: H, body: JSON.stringify(body) });
+        const text = await r.text();
+        if (r.status === 429 && t < 5) {
+          const wait = Number(r.headers.get("retry-after") || 0) * 1000 || (500 * 2 ** t);
+          console.log(`        429 — waiting ${wait}ms`);
+          await sleep(wait); continue;
+        }
+        return { status: r.status, body: text };
+      } catch (e) { return { status: 0, body: `network error: ${e.message}` }; }
     }
-    await sleep(600);
-    const now = await call("GET", readPath).catch(() => null);
-    const got = idOf(now?.ownerId);
-    const landed = String(got ?? "") === String(RE_EP);
-    console.log(`  ${landed ? "LANDED " : "no     "} PUT ${path.padEnd(38)} -> ${sent.padEnd(5)} owner reads ${got ?? "(none)"}`);
-    return landed;
+    return { status: 429, body: "still throttled after six tries" };
   };
-  console.log(`\nKylas documents PUT /v1/leads/{id}/owner {"ownerId": N}. Trying that`);
-  console.log(`shape on a contact first — where we KNOW ownership is settable — then`);
-  console.log(`on the company. Target owner: ${RE_EP}\n`);
 
-  /* A contact that is NOT already on the target, or the control proves nothing. */
-  const victim = before.contacts.find((c) => String(idOf(c.ownerId) ?? "") !== String(RE_EP));
-  let ct = null;
-  console.log("  a contact, to prove the method works at all:");
-  if (victim) {
-    ct = await check("contact", `/v1/contacts/${victim.id}/owner`, `/v1/contacts/${victim.id}`);
-    await sleep(400);
+  /* ONE ATTEMPT, FULLY NARRATED: what was sent, what came back, what the
+     record said before and after, and what that combination means. */
+  const attempt = async (label, path, readPath, body) => {
+    const start = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
+    console.log(`\n    ${label}`);
+    console.log(`      PUT  ${path}`);
+    console.log(`      body ${JSON.stringify(body)}`);
+    console.log(`      owner before     ${await withName(start)}`);
+    if (String(start ?? "") === String(n)) {
+      console.log(`      SKIPPED — already owned by the target, so nothing here could be proved.`);
+      return { verdict: null, status: null };
+    }
+    const res = await rawPut(path, body);
+    const clean = String(res.body || "").replace(/\s+/g, " ").trim();
+    console.log(`      <-   HTTP ${res.status}${clean ? ` ${clean.slice(0, 220)}` : " (empty body)"}`);
+    await sleep(700);
+    const now = idOf((await call("GET", readPath).catch(() => null))?.ownerId);
+    console.log(`      owner after      ${await withName(now)}`);
+    const landed = String(now ?? "") === String(n);
+    const moved = String(now ?? "") !== String(start ?? "");
+    console.log(`      => ${landed ? "LANDED — the owner is now the target"
+      : moved ? "MOVED, BUT NOT TO THE TARGET — read the body above"
+      : res.status >= 200 && res.status < 300
+        ? "ACCEPTED AND IGNORED — 200 with the owner unchanged, the whole trap"
+        : "REFUSED — nothing changed"}`);
+    return { verdict: landed, status: res.status, moved, before: start, after: now };
+  };
+
+  console.log(`\n── PUT /{entity}/{id}/owner, the shape Kylas documents ──────────────`);
+  console.log(`Kylas' own collection documents PUT /v1/leads/{id}/owner {"ownerId": N}`);
+  console.log(`— a dedicated endpoint, not a field on the record, which is why every`);
+  console.log(`company PUT carrying ownerId was accepted and dropped. The collection`);
+  console.log(`documents that flavour for LEADS only, but a blind hunt got`);
+  console.log(`PUT /companies/{id}/owner -> 200 while POST on the same path -> 404,`);
+  console.log(`and a path that does not exist answers 404 to both. That asymmetry is`);
+  console.log(`the loose end this settles.\n`);
+  console.log(`  target owner     ${n}  ${target}`);
+  console.log(`  subject account  ${CO}  ${String(before.company?.name || "(unnamed)").slice(0, 44)}`);
+  console.log(`  its owner now    ${await withName(idOf(before.company?.ownerId))}`);
+  console.log(`  contacts on it   ${before.contacts.length}`);
+
+  /* ── the control, on a contact ──────────────────────────────────────
+     A contact's owner IS settable — PUT /v1/contacts/{id} with ownerId is what
+     the product does every day — so if /owner does not move a contact either,
+     the probe is asking wrongly and nothing can be concluded about companies.
+     The control runs FIRST for that reason. */
+  console.log(`\n  1 · THE CONTROL — a contact, where ownership is known to be settable.`);
+  const victim = before.contacts.find((c) => String(idOf(c.ownerId) ?? "") !== String(n));
+  let ct = { verdict: null };
+  let restored = "not needed";
+  if (!victim) {
+    console.log(`\n    SKIPPED — every contact on this account is already owned by ${n}.`);
+    console.log(`    Re-run with an owner none of them has, or the control is a no-op`);
+    console.log(`    that reports success.`);
   } else {
-    console.log(`  SKIP    every contact here is already owned by ${RE_EP}.`);
-    console.log(`          Re-run with an owner none of them has, or the control is`);
-    console.log(`          a no-op that reports success.`);
+    const was = idOf(victim.ownerId);
+    ct = await attempt(`contact ${victim.id} — ${[victim.firstName, victim.lastName].filter(Boolean).join(" ") || "(unnamed)"}`,
+      `/v1/contacts/${victim.id}/owner`, `/v1/contacts/${victim.id}`, { ownerId: n });
+    /* PUT IT BACK. This is live data and the control is OUR doing, not the
+       account's. The old version moved a real contact and walked away. */
+    if (ct.verdict === true) {
+      await sleep(500);
+      const back = await rawPut(`/v1/contacts/${victim.id}/owner`, { ownerId: Number(was) });
+      await sleep(600);
+      const check = idOf((await call("GET", `/v1/contacts/${victim.id}`).catch(() => null))?.ownerId);
+      restored = String(check ?? "") === String(was ?? "")
+        ? `yes — contact ${victim.id} is back on ${await withName(was)}`
+        : `NO — contact ${victim.id} reads ${await withName(check)}, wanted ${await withName(was)} (HTTP ${back.status})`;
+      console.log(`\n    control undone?  ${restored}`);
+    }
   }
 
-  console.log("\n  the company:");
-  const co = await check("company", `/v1/companies/${CO}/owner`, `/v1/companies/${CO}`);
-
-  console.log("\n  ── what this does and does not show ──");
-  if (co === true) {
-    console.log(`  THE COMPANY OWNER IS SETTABLE through PUT /v1/companies/{id}/owner.`);
-    console.log(`  reassign.mjs should use it and the account cascade goes back in.`);
-  } else if (ct === true) {
-    console.log(`  The contact moved through /owner and the company did not, so the`);
-    console.log(`  METHOD is right and companies genuinely do not expose it.`);
-    console.log(`  Contacts-only is the answer. Nothing more to try.`);
-  } else if (ct === null) {
-    console.log(`  INCONCLUSIVE. The control never ran, so "the company did not move"`);
-    console.log(`  cannot be told apart from "this probe asks wrongly". Re-run with an`);
-    console.log(`  owner the contacts are not already on.`);
-  } else {
-    console.log(`  NEITHER moved. On its own that says /owner is a LEADS endpoint —`);
-    console.log(`  which is exactly how Kylas' collection documents it — and not a`);
-    console.log(`  general one. Contacts still move the proven way, through`);
-    console.log(`  PUT /v1/contacts/{id} with ownerId, which is what the product does.`);
+  /* ── the question itself ────────────────────────────────────────────
+     Several shapes on the company, because "the endpoint is there" and "this
+     exact body is what it wants" are two claims and only one of them has any
+     evidence. Each is read back; the first that lands stops the rest. */
+  console.log(`\n  2 · THE COMPANY — ${CO}. Several bodies, each read back.`);
+  const shapes = [
+    ["as documented for leads", `/v1/companies/${CO}/owner`, { ownerId: n }],
+    ["ownerId as a string", `/v1/companies/${CO}/owner`, { ownerId: String(n) }],
+    ["wrapped, the way lookups come back", `/v1/companies/${CO}/owner`, { ownerId: { id: n } }],
+    ["under `owner` instead", `/v1/companies/${CO}/owner`, { owner: { id: n } }],
+    ["the bare id, no envelope", `/v1/companies/${CO}/owner`, n],
+    ["the plural path, in case it is /owners", `/v1/companies/${CO}/owners`, { ownerId: n }],
+  ];
+  let co = { verdict: false };
+  const tried = [];
+  for (const [label, path, body] of shapes) {
+    const r = await attempt(label, path, `/v1/companies/${CO}`, body);
+    tried.push({ label, path, body, ...r });
+    if (r.verdict === true) { co = r; break; }
+    if (r.verdict === null) { co = r; break; }
+    await sleep(500);
   }
+  if (!co.verdict) co = tried.find((t) => t.verdict === null) || { verdict: false };
+
+  /* ── the verdict ────────────────────────────────────────────────────── */
+  console.log(`\n  ── WHAT THIS SHOWS ─────────────────────────────────────────────────`);
+  const statuses = tried.map((t) => `${t.status ?? "skip"}`).join(", ");
+  console.log(`  contact control : ${ct.verdict === true ? "moved" : ct.verdict === null ? "not run" : "did NOT move"}`);
+  console.log(`  company attempts: ${tried.length} (${statuses})`);
+  console.log(`  control undone  : ${restored}`);
   console.log("");
-  process.exit(co === true ? 0 : 1);
+  if (co.verdict === true) {
+    console.log(`  THE COMPANY OWNER IS SETTABLE, through:`);
+    console.log(`      PUT ${co.path || `/v1/companies/${CO}/owner`}`);
+    console.log(`      ${JSON.stringify(tried.find((t) => t.verdict === true)?.body)}`);
+    console.log(`  reassign.mjs can use this and the account cascade goes back in. It`);
+    console.log(`  is a dedicated endpoint, so it does NOT replace the record and none`);
+    console.log(`  of the PUT-erases-fields risk applies. Send this block back.`);
+  } else if (ct.verdict === true) {
+    console.log(`  THE METHOD IS RIGHT AND COMPANIES DO NOT EXPOSE IT. The contact moved`);
+    console.log(`  through /owner; the company did not, on ${tried.length} different bodies.`);
+    console.log(`  That is the answer: ownership of an ACCOUNT is not settable through`);
+    console.log(`  this API, which is exactly how Kylas' collection documents it`);
+    console.log(`  (reassignment for leads only). Contacts-only stands. Account owners`);
+    console.log(`  have to be changed in Kylas' own UI, and nothing more is worth trying.`);
+  } else if (ct.verdict === null) {
+    console.log(`  INCONCLUSIVE — the control never ran, so "the company did not move"`);
+    console.log(`  cannot be told apart from "this probe asks wrongly". Re-run with an`);
+    console.log(`  owner the contacts on this account are not already sitting on.`);
+  } else {
+    console.log(`  NEITHER MOVED, so /owner is a LEADS endpoint and not a general one —`);
+    console.log(`  which is how Kylas documents it. The 200 that started this hunt was`);
+    console.log(`  a well-formed request landing nowhere, which this API does often.`);
+    console.log(`  Contacts still move the proven way, PUT /v1/contacts/{id} with`);
+    console.log(`  ownerId, which is what the product already does.`);
+  }
+  console.log(`\n  A 200 from this API means the request was well formed. It never means`);
+  console.log(`  anything happened. Every line above read the record back.\n`);
+  process.exit(co.verdict === true ? 0 : 1);
 }
-
 /* ── --move-contacts <userId> · THE SHIPPED ENGINE, ON REAL DATA ───────
    Everything above investigates Kylas. This exercises OUR code: it calls
    reassign.mjs' own plan() and apply() through an adapter over this file's

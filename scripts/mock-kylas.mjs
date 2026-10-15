@@ -278,6 +278,41 @@ createServer(async (req, res) => {
      thing that did — the re-assign probe — reported "company written" three
      times against a record that never moved. A mock that reports success for a
      write it dropped is worse than no mock. */
+  /* ── PUT /{entity}/{id}/owner — the endpoint probe-reassign settles ──
+     MOCK_OWNER_ENDPOINT picks which world this mock is:
+       404    (default) the path does not exist, on either entity
+       ignore 200 and the owner does NOT change — the trap this API sets, and
+              the whole reason every check reads the record back
+       lead   it works on contacts (the documented "lead" flavour) and is
+              ignored on companies: the answer we expect on the live account
+       works  it works on both, which would put the account cascade back in
+     Without these the probe's three verdicts could not be tested, and the
+     verdict is the only part of it anybody acts on. */
+  const ownerEp = p.match(/^\/v1\/(companies|contacts)\/(\d+)\/owner$/);
+  if (ownerEp && req.method === "PUT") {
+    const mode = process.env.MOCK_OWNER_ENDPOINT || "404";
+    if (mode === "404") return json(res, 404, { message: "Not Found" });
+    const [, kind, id] = ownerEp;
+    const honour = mode === "works" || (mode === "lead" && kind === "contacts");
+    /* The body is parsed here rather than taken from scope: each handler below
+       reads it for itself, and this branch sits above all of them. A body that
+       is not JSON is itself one of the shapes the probe tries. */
+    let sent = null; try { sent = JSON.parse(await text(req)); } catch { /* not json */ }
+    const want = sent?.ownerId ?? sent?.owner?.id ?? sent;
+    const n = Number(want && typeof want === "object" ? want.id : want);
+    if (honour && Number.isFinite(n)) {
+      if (kind === "companies" && COMPANIES[id]) COMPANIES[id].ownerId = n;
+      if (kind === "contacts") {
+        const hit = CONTACTS.find((c) => String(c.id) === id);
+        if (hit) hit.ownerId = n;
+      }
+    }
+    /* 200 either way. That is the point: honoured and ignored look identical
+       from the status line, which is why nothing here may be trusted without
+       a readback. */
+    return json(res, 200, { message: "ok" });
+  }
+
   const co = p.match(/^\/v1\/companies\/(\d+)$/);
   if (co && req.method === "GET") {
     if (!COMPANIES[co[1]]) return json(res, 404, { message: "no such company" });
