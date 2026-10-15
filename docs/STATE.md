@@ -1560,8 +1560,17 @@ default.
   `migrate-first-worked.mjs`. **That order** — each reads what the one before
   it writes. The last is what makes the funnel's bottom two rungs stop reading
   zero; without it "Companies worked" is 0 under a non-zero "Right POC".
-- **Create the `Dialler Calls` table** (§3h), which is the whole of why Talk
-  time is blank. `schema.mjs` is DATA, not a script — running it does nothing,
+- ~~**Create the `Dialler Calls` table**~~ — **DONE 2026-10-15.**
+  `repair-base.mjs` created it (and added `Call Rollup.Stage Set`), and the
+  first import wrote **134 calls, 110m37s**, split Muskan Rajpoot 84 / Mayra
+  Singh 34 / Aditi saini 10 / Anjali Athya 6. Verified by reading the base: 134
+  rows, each with the dialler's duration, the associate as Owner, and a device
+  id — `motorola edge 40`, `SM-A066B`, `SM-M356B`, `CPH2467`, one per person,
+  which is independent proof the attribution is real. Talk time covers
+  2026-10-13..15 only, because that is the window the newest 1,000 logs span;
+  the hourly cron keeps it current from here. The steps below are kept because
+  they are the recipe if the table is ever lost.
+- **How it was done** (§3h), which was the whole of why Talk time read blank. `schema.mjs` is DATA, not a script — running it does nothing,
   and saying otherwise cost a day (2026-10-15). The executable is
   **`node scripts/repair-base.mjs --dry-run`**, then without `--dry-run`; it
   creates absent tables and adds absent fields and touches nothing that exists.
