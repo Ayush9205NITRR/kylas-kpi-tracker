@@ -1008,6 +1008,34 @@ repair command instead of a quiet "NO".
 
 `--set-contact-owner <contactId> --to <userId>` is that repair: both paths,
 read back, and it says plainly when the target being deactivated is the reason.
+Charu being inactive meant even that could not land, and Ayush set contact
+5358966 back by hand in Kylas on 2026-10-15. **The question is closed: an
+account's owner is not settable through this API, and the console is right to
+refuse.**
+
+### The thing this turned up: records owned by DEACTIVATED users
+
+`--users` on 2026-10-15 listed **46 users, 13 of them inactive** — Nitika Mann,
+Prabhjot Juneja, Reema Agarwal, Rohit Roy, Saahil Bhardwaj, Ajay Priyadarshi,
+Rashid Imam, Charu Rathi, Tanay Kumar, Ifee Malpani, Devansh Shukla, Gaurav
+Kumar, Shreya Bodwal — and contacts are still sitting on them. Vaibhav
+Bhandari (5358966) was owned by Charu Rathi, who had been deactivated.
+
+Three consequences, none of them cosmetic:
+
+- **Kylas will not assign a record TO an inactive user** (400, errorCode
+  02803002). So any move away from one is one-way: there is no putting it back
+  through the API, as the control write found out.
+- **Those accounts are in nobody's queue.** A deactivated person does not open
+  the console, so whatever they own is not being called by anyone.
+- **They still reach the funnel.** `counter()` counts a name the roster has
+  never heard of, and Charu Rathi and Gaurav Kumar both showed real numbers in
+  the per-associate table while being inactive in Kylas and absent from Team.
+
+The fix is ordinary work, not new code: find what the thirteen own and move the
+contacts to live owners with the console's bulk Re-assign, which is exactly the
+path that does work. Worth doing before reading another funnel, because until
+then some share of the pipeline belongs to people who left.
 
 **A 200 from the company endpoint means the request was well formed. It never
 means anything happened.** Read the record back.
