@@ -16,7 +16,12 @@ const FAULTS = [
    (s) => s.replace('{ name: "Owner", type: "singleLineText" },\n      { name: "Current Stage"',
                     '{ name: "Owner", type: "singleLineText" },\n      { name: "owner", type: "singleLineText" },\n      { name: "Current Stage"')],
   ["formula referring to a missing field",
-   (s) => s.replace('formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`)',
+   /* Anchored on the formula as it now stands. Reached gained {KPI Stage At}
+      on 2026-10-15 — the live base had carried it for weeks and this file had
+      not — and the old anchor then matched nothing, so the fault silently did
+      not apply and the test reported a pass it had not earned. The "fault did
+      not apply" line exists because of exactly this. */
+   (s) => s.replace('formula("Companies", "Reached", `IF(OR({Last Call At}, {KPI Stage At}), 1, 0)`)',
                     'formula("Companies", "Reached", `IF({Nonexistent Field}, 1, 0)`)')],
   ["rollup through a field that is not a link",
    (s) => s.replace('rollup("Contacts", "Call Count", "Call Log", "Called At", "COUNTA(values)")',
@@ -28,8 +33,11 @@ const FAULTS = [
    (s) => s.replace('{ name: "Frozen At", type: "dateTime", options: dateTime },',
                     '{ name: "Frozen At", type: "dateTime", options: dateTime },\n      { name: "Oops", type: "formula", options: { formula: "1" } },')],
   ["unbalanced brackets in a formula",
-   (s) => s.replace('formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0)`)',
-                    'formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0`)')],
+   /* Re-anchored with Reached's, and for the same reason: Is Right POC gained
+      {Ever Right POC} on 2026-10-15 so the rung could not fall back when the
+      event row carrying the budget was removed. */
+   (s) => s.replace('formula("Contacts", "Is Right POC", `IF(OR({Has Signal} = 1, {Ever Right POC}), 1, 0)`)',
+                    'formula("Contacts", "Is Right POC", `IF(OR({Has Signal} = 1, {Ever Right POC}, 1, 0)`)')],
   ["link with no reverse declared",
    (s) => s.replace('link("Call Log", "Contact", "Contacts", "Call Log")',
                     'link("Call Log", "Contact", "Contacts")')],

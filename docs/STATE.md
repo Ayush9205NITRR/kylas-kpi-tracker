@@ -126,7 +126,7 @@ node scripts/test-enrich.mjs             # 62 · the tolerant number parser and 
 node scripts/test-filter-types.mjs       # 169 · every column's type, its operators, and the
                                          #       page documenting them, all agreeing
 node scripts/test-etag.mjs               # 33 · conditional requests, and what may not be cached
-node scripts/test-sql-schema.mjs         # 102 · the generated SQL is the Airtable base, exactly
+node scripts/test-sql-schema.mjs         # 104 · the generated SQL is the Airtable base, exactly
 node scripts/test-sql-derived.mjs        # 98 · the views compute what Airtable's rollups did
 node scripts/test-migration.mjs          # 22 · backfill and reconcile against a live-shaped base
 node scripts/test-shadow.mjs             # 24 · the pull-based copy, on the existing cron
@@ -1411,6 +1411,50 @@ Owner" pointing at a box with no options.
 The button stays enabled — the list usually lands a moment later, and disabling
 it would read as "this console cannot add contacts". What changed is that the
 reason is given before the typing instead of after.
+
+## 3j · The base was AHEAD of the schema, and --update-formulas would have undone it
+
+`repair-base.mjs` on 2026-10-15 created `Dialler Calls` and then reported **7
+formulas differing from the schema**, offering `--update-formulas` to "fix"
+them. Running it would have been a data regression. Every one of the seven was
+the LIVE BASE being right and `scripts/schema.mjs` being out of date:
+
+| field | the base | this file |
+|---|---|---|
+| `Event Rows.Has Any Signal` | excludes a row with `Removed At` | counted removed rows |
+| `Event Rows.Is Complete` | same guard | same gap |
+| `Contacts.Is Right POC` | `OR(Has Signal, Ever Right POC)` | `Has Signal` alone |
+| `Contacts.Right POC Name` | same | same |
+| `Contacts.Is Discovery` | `OR(Has Complete Row, Ever Discovery)` | `Has Complete Row` alone |
+| `Contacts.Discovery Name` | same | same |
+| `Companies.Reached` | `OR(Last Call At, KPI Stage At)` | `Last Call At` alone |
+
+Each difference is load-bearing. Without the `Removed At` guard a row the
+console deleted goes on making its contact a Right POC for ever. Without the
+`Ever` checkboxes the data rungs are not floors — `Has Signal` rolls up the
+LIVE rows, so clearing the budget field takes the rung away again. Without
+`KPI Stage At`, every account worked before this console existed reads as never
+reached, because it has no Call Log row.
+
+**So the schema was brought up to the base, not the other way round** — and
+that exposed the reason the drift had survived: `Event Rows.Removed At`,
+`Contacts.Ever Right POC` and `Contacts.Ever Discovery` **were not in
+`schema.mjs` at all**. They were in Ayush's base, read by `handlers.mjs` and
+`mirror.mjs`, and a fresh `create-base.mjs` would have produced a base without
+them. `validate-schema.mjs` caught it the moment the formulas referenced them
+("refers to {Removed At}, which does not exist on Event Rows yet"), which is
+what that check is for. `Companies.Reached` also had to move after
+`Companies.KPI Stage At`, since field order in that file is creation order.
+
+**Two planted faults in `test-validator.mjs` were anchored on the old formula
+text**, so they stopped applying and the suite reported 10/10 while silently
+running 8. It prints "fault did not apply, test is stale" for exactly this, and
+that line is the only reason it was noticed. Re-anchored; 10/10 again, honestly.
+
+**The rule this leaves:** `--update-formulas` writes the schema over the base,
+so it is only safe once the schema is known to be the newer of the two. Read
+the before/after that `--dry-run` prints and decide per formula. It is never a
+default.
 
 ## 4 · Invariants that look arbitrary and are not
 

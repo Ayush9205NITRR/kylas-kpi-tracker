@@ -132,6 +132,16 @@ export const TABLES = [
       { name: "Service Offering", type: "checkbox", options: check },
       { name: "Ever Picked", type: "checkbox", options: check,
         description: "Set true the first time a non-CNC stage is seen, never unset. This is what makes Phone Picked monotonic." },
+      /* THE SAME TRICK AS Ever Picked, FOR THE TWO DATA RUNGS. Has Signal and
+         Has Complete Row roll up the LIVE event rows, so they fall back to 0
+         the moment the row carrying the budget is removed or edited empty —
+         and these rungs are floors that may only rise. These two are written
+         once and never unset, and Is Right POC / Is Discovery OR them in.
+         In Ayush's base, absent from this file until 2026-10-15. */
+      { name: "Ever Right POC", type: "checkbox", options: check,
+        description: "Set true the first time any event row carries budget, timeline or pax. Never unset." },
+      { name: "Ever Discovery", type: "checkbox", options: check,
+        description: "Set true the first time one event row carries all three. Never unset." },
       { name: "KPI Rank", type: "number", options: num,
         description: "Highest rung ever reached. Written as MAX(existing, computed). Never decreases." },
       { name: "KPI Rank At", type: "dateTime", options: dateTime,
@@ -171,6 +181,14 @@ export const TABLES = [
       { name: "Timeline", type: "multilineText" },
       { name: "Pax", type: "multilineText" },
       { name: "Remarks", type: "multilineText" },
+      /* A ROW THE CONSOLE REMOVED, KEPT RATHER THAN DESTROYED. Blank means
+         live. Has Any Signal and Is Complete both exclude a marked row, so it
+         counts for nothing while its text stays readable. handlers.mjs and
+         mirror.mjs have read it for a long time; it was in Ayush's base and
+         missing from this file until 2026-10-15, which is why a fresh base
+         could not be created with the formulas that reference it. */
+      { name: "Removed At", type: "dateTime", options: dateTime,
+        description: "Set when the console removes this row. Blank means live. A marked row counts for nothing but is never destroyed." },
     ],
   },
   {
@@ -473,10 +491,17 @@ export const FOLLOWUPS = [
   link("RCA", "Contact", "Contacts", "RCA"),
 
   /* Remarks is excluded from both on purpose — see kpi-spec.md §5. */
-  formula("Event Rows", "Has Any Signal", `IF(OR(${anyFilled}), 1, 0)`,
-    "Any qualification field filled → the contact counts as a Right POC."),
-  formula("Event Rows", "Is Complete", `IF(AND(${anyFilled}), 1, 0)`,
-    "All qualification fields filled → a successful discovery call."),
+  /* A REMOVED ROW COUNTS FOR NOTHING. `Removed At` is set when the console
+     removes an event row, and the row is kept rather than destroyed — so both
+     of these have to exclude it, or a deleted row goes on making its contact a
+     Right POC for ever. The live base has carried the guard since the field
+     existed; this file did not, and repair-base.mjs reported it as the base
+     having "drifted" from the schema on 2026-10-15. It was the other way
+     round: --update-formulas would have REMOVED the guard. */
+  formula("Event Rows", "Has Any Signal", `IF({Removed At}, 0, IF(OR(${anyFilled}), 1, 0))`,
+    "Any qualification field filled → the contact counts as a Right POC. A removed row counts for nothing."),
+  formula("Event Rows", "Is Complete", `IF({Removed At}, 0, IF(AND(${anyFilled}), 1, 0))`,
+    "All qualification fields filled → a successful discovery call. A removed row counts for nothing."),
 
   /* A rollup cannot filter on a sibling field, so zero out the estimates first
      and then sum. Otherwise inferred seconds inflate real talk time. */
@@ -511,11 +536,18 @@ export const FOLLOWUPS = [
   rollup("Contacts", "Last Stage Change At", "Stage Transitions", "Changed At", "MAX(values)"),
   rollup("Contacts", "First Stage Change At", "Stage Transitions", "Changed At", "MIN(values)"),
 
-  formula("Contacts", "Is Right POC", `IF({Has Signal} = 1, 1, 0)`),
-  formula("Contacts", "Right POC Name", `IF({Has Signal} = 1, {Name}, "")`,
+  /* ONCE A RIGHT POC, ALWAYS A RIGHT POC. `Has Signal` rolls up the LIVE event
+     rows, so it falls back to 0 the moment the row carrying the budget is
+     removed or edited empty — and these rungs are meant to be floors that only
+     ever rise. `Ever Right POC` and `Ever Discovery` are the checkboxes written
+     once and never unset for exactly that reason, and the live base ORs them
+     in. This file did not, which made the base look drifted when it was the
+     one that was right. */
+  formula("Contacts", "Is Right POC", `IF(OR({Has Signal} = 1, {Ever Right POC}), 1, 0)`),
+  formula("Contacts", "Right POC Name", `IF(OR({Has Signal} = 1, {Ever Right POC}), {Name}, "")`,
     "Name when this contact qualifies, blank otherwise. Rolled up into Companies."),
-  formula("Contacts", "Is Discovery", `IF({Has Complete Row} = 1, 1, 0)`),
-  formula("Contacts", "Discovery Name", `IF({Has Complete Row} = 1, {Name}, "")`,
+  formula("Contacts", "Is Discovery", `IF(OR({Has Complete Row} = 1, {Ever Discovery}), 1, 0)`),
+  formula("Contacts", "Discovery Name", `IF(OR({Has Complete Row} = 1, {Ever Discovery}), {Name}, "")`,
     "Name when one event row has budget AND timeline AND pax. Rolled up into Companies, exactly as Right POC Name is."),
   formula("Contacts", "KPI Stage", ladderFormula("KPI Rank")),
   formula("Contacts", "KPI Score",
@@ -539,7 +571,6 @@ export const FOLLOWUPS = [
     "Which POCs gave a complete row. Successful Discovery is the count of companies where this is not blank."),
   rollup("Companies", "Contact Count", "Contacts", "Name", "COUNTA(values)"),
 
-  formula("Companies", "Reached", `IF({Last Call At}, 1, 0)`),
   /* READS First Picked At, NOT the Ever Picked rollup above it.
      Ever Picked is MAX(values) over a CHECKBOX, and Airtable returns blank for
      that — so this field read 0 on every company in the live base while the
@@ -584,4 +615,13 @@ export const FOLLOWUPS = [
   formula("Companies", "KPI Stage At",
     `IF({KPI Score}, DATEADD(${EPOCH}, MOD({KPI Score}, 10000000000), 'seconds'))`,
     "When the company last moved up a rung."),
+  /* AFTER KPI Stage At, BECAUSE IT READS IT. Field order in this file is
+     creation order, and a formula cannot reference one that does not exist
+     yet — validate-schema.mjs catches it, which is how this was found. */
+  /* A STAGE IS EVIDENCE OF A CALL TOO. Most of the account was worked before
+     this console existed, so there is no Call Log row for it — but the stage it
+     sits on says somebody spoke to them, and `KPI Stage At` dates that. Reading
+     Last Call At alone made every pre-console account read as never reached.
+     The live base ORs them; this file did not. */
+  formula("Companies", "Reached", `IF(OR({Last Call At}, {KPI Stage At}), 1, 0)`),
 ];
