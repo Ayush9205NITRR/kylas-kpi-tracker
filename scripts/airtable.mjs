@@ -75,7 +75,22 @@ export function createAirtable(pat, baseId, {
         const text = await res.text();
         if (res.status === 429) { const w = 1000 * 2 ** i; log(`airtable 429, waiting ${w}ms`); await sleep(w); continue; }
         if (!res.ok) {
-          const err = new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+          /* THE TWO TOKENS, TOLD APART. 2026-10-15: the dialler import was run
+             with the schema-scoped token minted for repair-base.mjs — which can
+             create a TABLE and cannot read or write a ROW. The read came back
+             "could not read Dialler Calls" and the write came back a bare
+             PATCH 403, neither of which points at the token, and Airtable's own
+             message ("Invalid permissions, or the requested model was not
+             found") deliberately does not distinguish a scope problem from a
+             wrong table name. So the hint is added here, where every caller
+             gets it. */
+          const scopes = (res.status === 401 || res.status === 403)
+            ? `\n  ${method === "GET" ? "Reading" : "Writing"} rows needs data.records:${
+                method === "GET" ? "read" : "write"} on the token, and access to ${baseId}.` +
+              `\n  A token minted for repair-base.mjs has only the schema scopes and cannot do this —` +
+              `\n  use the one the Worker uses (.env.local). If the scopes are right, check the table name.`
+            : "";
+          const err = new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}${scopes}`);
           err.status = res.status;
           throw err;
         }

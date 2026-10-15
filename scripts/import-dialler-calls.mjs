@@ -121,7 +121,15 @@ export async function run({ env = process.env, log = console.log, apply = false,
      between those two timestamps were never read and never can be. */
   const held = await listTolerant(at, TABLE, { fields: ["Key", "Called At"], pageSize: 100, maxPages: 200,
     sort: [{ field: "Called At", direction: "desc" }] }).catch((e) => {
-    log(`  (could not read ${TABLE}: ${e.message.slice(0, 90)} — treating it as empty)`);
+    /* THE STATUS FIRST, AND ENOUGH OF THE REASON. This was `slice(0, 90)` of
+       the message, which on a real failure is 90 characters of URL — the 403
+       that actually explained it never reached the screen, and "treating it as
+       empty" then read as "the table is empty". A read that FAILED is not an
+       empty table: it silently disables the gap check below, so the reason has
+       to be visible. */
+    log(`  ! could not read ${TABLE}${e.status ? ` (HTTP ${e.status})` : ""} — ${
+      String(e.message || e).replace(/^[A-Z]+ \S+ -> \d+: /, "").slice(0, 300)}`);
+    log(`    Carrying on as if it were empty, so the gap check below is OFF for this run.`);
     return [];
   });
   const haveKeys = new Set(held.map((r) => String(r.fields?.Key || "")));
