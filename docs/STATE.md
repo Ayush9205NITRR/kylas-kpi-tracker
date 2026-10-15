@@ -164,6 +164,20 @@ expensive half. Rebuilding a suite is ~40 lines of Playwright around those.
 
 ## 3 · The bug catalogue
 
+**Two vocabularies on one screen.** The ladder and Progress call the first
+rung **Worked** and count it per period off the report; the Step conversion
+table below them called it **Reached**, meaning "at least one call logged",
+all time, counted off the companies list. So 2026 showed Worked 539 directly
+above Reached 517, and a "Reached -> Right POC" of 10.1% beside the ladder's
+own Picked -> Right POC (Ayush, 2026-10-15: "Two different terminology shows
+inconsistency"). The four all-time tiles were taken off this page for exactly
+this reason; the table below the fold was missed. Step conversion is now built
+from `currentByOwner` and `RATE_COLS` — the same rows, period and arithmetic
+as the row above it — and `rate(p, c)` was lifted out of `reportSection` as
+`stepRate` so there is one definition of a step rather than two. `reached`
+survives only on the accounts view's KPI chips, where it means an account's
+current furthest rung and the question really is a different one.
+
 **A field nobody fills is not a field.** "Calls connected" was
 `outcome && outcome !== "No answer"` over the Call Log's Outcome column — the
 1-4 keypress on the call card. That column is BLANK on every row the team has

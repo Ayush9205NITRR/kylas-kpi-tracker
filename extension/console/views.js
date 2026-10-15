@@ -855,37 +855,73 @@
   const rate = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
   const show = (v) => (v == null ? "—" : v + "%");
 
-  function stepTable(cos, byLabel) {
-    const count = (list, k) => list.filter((c) => c[k]).length;
-    const line = (label, list) => ({
-      label,
-      n: count(list, "reached"),
-      steps: STEPS.map((st) => rate(count(list, st.to), count(list, st.from))),
-    });
+  /* ONE DEFINITION OF A STEP'S RATE, for every table that shows one. Lifted
+   out of reportSection on 2026-10-15 so the per-associate table below can
+   use it too: two tables on one screen computing the same conversion from
+   two bits of arithmetic is how they came to disagree in the first place. */
+  const stepRate = (p, c) => {
+    const d = p[c.of] || 0;
+    const n = p[c.num || c.key] || 0;
+    if (!d) return "—";
+    const v = Math.round((n / d) * 100) + "%";
+    /* A cohort is a subset of its own denominator, so it cannot carry in and
+       the "over" note below would never be right for it. */
+    if (c.cohort && c.num === "doneSql") return `<span title="${n} of the ${d} ${
+      d === 1 ? "meeting" : "meetings"} held in this period ${
+      n === 1 ? "has" : "have"} since reached SQL. Counted whenever SQL happened, so this row can rise later — a meeting held this period that turns SQL next week belongs to this period.">${v}</span>`;
+    if (c.cohort) return `<span title="${n} of the ${d} ${
+      d === 1 ? "meeting" : "meetings"} booked in this period ${
+      n === 1 ? "has" : "have"} since been held. Counted whenever the meeting happened, so this row can rise later — a booking made this period that happens next month belongs to this period's bookings.">${v}</span>`;
+    if (n <= d) return v;
+    return `<span class="over" title="${n} companies reached this rung inside this period and ${d
+      } reached the one before it. The others got there in an earlier period and moved up in this one, so the two are not the same set of companies.">${v}</span>`;
+  };
 
-    const people = [...new Set(cos.map((c) => byLabel(c) || "Unassigned"))].sort();
-    const rows = [line("All", cos),
-      ...(people.length > 1
-        ? people.map((p) => line(p, cos.filter((c) => (byLabel(c) || "Unassigned") === p)))
-        : [])];
+  /* ── PER-ASSOCIATE CONVERSION, IN THE LADDER'S OWN WORDS ──────────────
+     Ayush, 2026-10-15: "Two different terminology shows inconsistency."
+
+     This table was the last survivor of a second vocabulary. Its first column
+     said "Reached" — all-time, "at least one call logged", counted off the
+     companies list — while the ladder and Progress immediately above it said
+     "Worked" and "Picked" for the period on screen, counted off the report.
+     Two words and two populations for what reads as one thing: 539 Worked
+     sitting above 517 Reached, and a "Reached -> Right POC" of 10.1% beside
+     the ladder's own Picked -> Right POC. The four all-time tiles were taken
+     off this page for precisely that reason (see the ladder's note); this one
+     was missed because it is below the fold.
+
+     So it now reads the same rows, for the same period, with the same
+     arithmetic: currentByOwner off the report, and RATE_COLS — the one place
+     a step is defined, cohorts and all — for every column after the first.
+     What it still adds, and the only reason it exists, is the per-person
+     breakdown of rates the ladder gives for the team alone. */
+  function stepTable(r) {
+    const cur = r?.current;
+    if (!cur) return "";
+    const base = LADDER_ORDER[0];
+    const rows = [{ label: "All", p: cur, all: true },
+      ...(r.currentByOwner || []).slice()
+        .sort((a, b) => String(a.owner || "").localeCompare(String(b.owner || "")))
+        .map((o) => ({ label: o.owner || "Unassigned", p: o }))];
 
     return `<div class="vhead sm"><h2>Step conversion</h2>
-      <span class="vsub">Each column is one rung to the next — the five rates to benchmark against.</span></div>
+      <span class="vsub">${esc(cur.label || "")} \u00b7 the same rungs and the same period as the table above, per associate</span></div>
       <div class="vsteps">
         <table>
-          <thead><tr><th>Who</th><th class="tnum">Reached</th>${
-            STEPS.map((st) => `<th>${esc(st.label)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((r, i) => `
-            <tr${i === 0 && rows.length > 1 ? ' class="all"' : ""}>
-              <td>${esc(r.label)}</td>
-              <td class="tnum">${r.n}</td>
-              ${r.steps.map((v) => `<td class="tnum${v != null && v > 100 ? " over" : ""}"${
-                v != null && v > 100
-                  ? ' title="Above 100%: the rung above was recorded without the qualification data the rung below is counted from."'
-                  : ""}>${show(v)}</td>`).join("")}
+          <thead><tr><th>Who</th><th class="tnum">${esc(rung(base))}</th>${
+            RATE_COLS.map((c) => `<th>${esc(c.label)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr${row.all && rows.length > 1 ? ' class="all"' : ""}>
+              <td>${esc(row.label)}</td>
+              <td class="tnum">${row.p[base] || 0}</td>
+              ${RATE_COLS.map((c) => `<td class="tnum rt">${stepRate(row.p, c)}</td>`).join("")}
             </tr>`).join("")}</tbody>
         </table>
-      </div>`;
+      </div>
+      <p class="vnote">Every rate is one rung divided by the one before it, in this period —
+        the same number the row above shows for the team. ${esc(rung("booked"))} and
+        ${esc(rung("done"))} are cohorts: a meeting booked now may be held later, so those two
+        can rise after the fact and never pass 100%.</p>`;
   }
 
   /* ── trend, from the frozen daily rows ─────────────────────────────── */
@@ -1522,23 +1558,6 @@
        period — a company that booked in September and qualified in October is
        counted in different months under different rungs — so the cell carries
        a title saying so rather than the figure being quietly dropped. */
-    const rate = (p, c) => {
-      const d = p[c.of] || 0;
-      const n = p[c.num || c.key] || 0;
-      if (!d) return "—";
-      const v = Math.round((n / d) * 100) + "%";
-      /* A cohort is a subset of its own denominator, so it cannot carry in and
-         the "over" note below would never be right for it. */
-      if (c.cohort && c.num === "doneSql") return `<span title="${n} of the ${d} ${
-        d === 1 ? "meeting" : "meetings"} held in this period ${
-        n === 1 ? "has" : "have"} since reached SQL. Counted whenever SQL happened, so this row can rise later — a meeting held this period that turns SQL next week belongs to this period.">${v}</span>`;
-      if (c.cohort) return `<span title="${n} of the ${d} ${
-        d === 1 ? "meeting" : "meetings"} booked in this period ${
-        n === 1 ? "has" : "have"} since been held. Counted whenever the meeting happened, so this row can rise later — a booking made this period that happens next month belongs to this period's bookings.">${v}</span>`;
-      if (n <= d) return v;
-      return `<span class="over" title="${n} companies reached this rung inside this period and ${d
-        } reached the one before it. The others got there in an earlier period and moved up in this one, so the two are not the same set of companies.">${v}</span>`;
-    };
 
     const rows = [...r.periods].reverse().map((p) => `
       <tr${p.key === cur.key ? ' class="now"' : ""}${
@@ -1546,7 +1565,7 @@
         <td class="pl">${esc(p.label)}${canDrill ? `<i class="into">\u203a</i>` : ""}</td>
         ${COUNT_COLS.map((c) => `<td class="tnum">${c.fmt ? c.fmt(p[c.key], p) : p[c.key] || 0}${c.noDelta ? "" : 
           p.delta && p.delta[c.key] ? ` ${deltaHTML(p.delta[c.key])}` : ""}</td>`).join("")}
-        ${RATE_COLS.map((c) => `<td class="tnum rt">${rate(p, c)}</td>`).join("")}
+        ${RATE_COLS.map((c) => `<td class="tnum rt">${stepRate(p, c)}</td>`).join("")}
       </tr>`).join("");
 
     return head + `
@@ -1918,7 +1937,7 @@
            the same six numbers. stepTable, stackedByOwner, funnelHTML and
            trendChart are all still in this file, so putting any of them back is
            one line. */
-        team ? `<div class="vsec">${stepTable(cos, (c) => c.owner)}</div>` : ""}`;
+        team ? `<div class="vsec">${stepTable(REP.data)}</div>` : ""}`;
 
     const lc = document.getElementById("dLocal");
     if (lc) lc.onclick = () => global.openLocalDash?.();
