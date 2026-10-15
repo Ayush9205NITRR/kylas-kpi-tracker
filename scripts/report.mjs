@@ -194,23 +194,30 @@ export const METRICS = [
    console can divide without a second request. */
 /* `doneSql` is the same kind of thing for the next step: of the companies
    whose SQL done was counted in a period, how many have reached SQL. */
-/* `talkSeconds` — the day's talk time, summed from the calls' durations.
-   Ayush, 2026-10-10: "dashboard mein daily talk time ka option add karo". Not
-   a rung either: a total of seconds, shown beside Calls. */
-/* `timedCalls` — how many of the calls HAVE a duration. Ayush, 2026-10-12:
-   "talk time kahan se utha rahe ho, galat dikha rahe hai". The console only
-   times a call dialled from its own button; on 2026-10-12 that was 7 of
-   1,379, so talkSeconds read as the team's talk time was 3 minutes for a
-   month. The total is only honest beside how many calls it covers — a call
-   with no duration is UNKNOWN, not zero seconds. */
+/* `talkSeconds` — the day's talk time, and it has ONE source: the `dialler`
+   input, which is the Kylas dialler app's own measurement of every call it
+   placed. Ayush, 2026-10-10: "dashboard mein daily talk time ka option add
+   karo". Not a rung: a total of seconds, shown beside Calls.
+
+   NOT the Call Log's Duration column. That is the console's stopwatch, which
+   runs only on a call dialled from the console's own button, in a console
+   somebody had open — so it measured how the team was using the tool, not how
+   long they talked. It was 7 of 1,379 calls on 2026-10-12 (three minutes for a
+   month), and while BOTH were summed one conversation could be counted twice.
+   Ayush, 2026-10-15: "jitne dher console open hai uske according track ho rahe
+   hai." See the calls loop below for the whole of it. */
+/* `timedCalls` — how many of the period's calls the dialler measured. The
+   total is only honest beside the number it covers: a call the dialler never
+   saw is UNKNOWN, not zero seconds. Since both come from `dialler` now, this
+   can no longer exceed `calls` by double-counting one call from two sources. */
 const blank = () => ({ ...Object.fromEntries(METRICS.map((m) => [m.key, 0])), bookedHeld: 0, doneSql: 0,
                        talkSeconds: 0, timedCalls: 0 });
 
 /* ── the aggregation ───────────────────────────────────────────────── */
-/* calls:        [{ at, owner, outcome, stage, secs }]  stage: the pipeline
-                 stage set on the call, which is what decides connected;
-                 secs: the call's duration, or
-                 a rolled-up day's total talk for that owner and outcome
+/* calls:        [{ at, owner, outcome, stage }]  stage: the pipeline
+                 stage set on the call, which is what decides connected.
+                 `secs` may still be present and is deliberately ignored —
+                 see the calls loop.
    transitions:  [{ at, owner, to, contact }]     `to` is a stage CODE
    contactRight / contactDiscovery: [{ at, owner, contact }] — when a contact
         first became a Right POC / a successful discovery. Those are not stage
@@ -419,13 +426,25 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
        would make a year of history a million allocations. */
     const n = Number(c.n) > 0 ? Number(c.n) : 1;
     bump(key(c.at), c.owner, "calls", n);
-    if (Number(c.secs) > 0) {
-      bump(key(c.at), c.owner, "talkSeconds", Number(c.secs));
-      /* A rolled-up row does not say how many of its calls were timed; any
-         seconds at all count it as the whole group's — an upper bound, and
-         Call Rollup has held no talk seconds so far. */
-      bump(key(c.at), c.owner, "timedCalls", n);
-    }
+    /* THE CALL LOG'S OWN DURATION IS NOT TALK TIME, AND ADDING IT WAS A BUG.
+       Ayush, 2026-10-15: "talk time, jitne dher console open hai uske according
+       track ho rahe hai."
+
+       Exactly right, and this loop was why. `c.secs` is the CONSOLE's
+       stopwatch, which runs only when a call is dialled from the console's own
+       button, in a console that happens to be open — so what it contributed
+       depended on who had the console up and whether they used the dialler
+       inside it. 1.64 made the Kylas dialler app the source of talk time and
+       added the loop above; it did NOT take this one away, so for a while both
+       were summed. The same physical call could be counted twice — the console
+       saying 45s and the dialler 71s, giving 116s for one conversation — and
+       `timedCalls` was bumped by both, so coverage could exceed the call count
+       it is measured against.
+
+       One source, and it is the one that measures every call it places. The
+       console still WRITES Duration and Duration Source to the Call Log, and
+       the Contacts/Companies rollups in Airtable still read them; what stops
+       here is that number reaching the dashboard's talk time. */
     /* "Connected" is any outcome that is not a no-answer. A dial that nobody
        picked up is work, but it is not a conversation. */
     if (callConnected(c)) bump(key(c.at), c.owner, "connects", n);

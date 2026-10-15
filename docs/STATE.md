@@ -96,7 +96,7 @@ copy under test needs `http://127.0.0.1:8778/*` added to `manifest.json`
 node scripts/validate-schema.mjs         # the schema is internally consistent
 node scripts/test-validator.mjs          # ...and the validator catches 10 planted faults
 node scripts/test-fields.mjs             # 62 · field parsing and normalisation
-node scripts/test-report.mjs             # 56 · period maths, deltas, rollup merge
+node scripts/test-report.mjs             # 131 · period maths, deltas, rollup merge
 node scripts/test-kpi-fields.mjs         # the KPI projection matches the schema
 node scripts/test-ladder-migration.mjs   # 33 · stage ladder remaps
 node scripts/test-idempotency.mjs        # 17 · starts its own stack. The template to copy.
@@ -1141,6 +1141,34 @@ against the live base, then
 what it would write), then `--apply`. After that the cron keeps it current.
 Nothing in the console changes; Talk time on the dashboard just starts being
 true.
+
+### Two sources were summed, so talk time moved with how many consoles were open
+
+Ayush, 2026-10-15: *"talk time, jitne dher console open hai uske according track
+ho rahe hai."* Right, and `report()` was why. **1.64 added the dialler as a
+source of talk time and did not remove the old one**, so for two releases both
+were summed:
+
+```
+for (const d of dialler) bump(..., "talkSeconds", d.secs);   // the dialler app
+for (const c of calls)   bump(..., "talkSeconds", c.secs);   // the CONSOLE's stopwatch
+```
+
+`c.secs` is the Call Log's `Duration` — the console's own stopwatch, which runs
+only on a call dialled from the console's button, in a console somebody had
+open. So what it contributed measured *how the team was using the tool*, not how
+long anybody talked, and it moved as consoles came and went. Worse, one
+conversation seen by both was **counted twice** — the console saying 45s and the
+dialler 71s gives 116s for one call — and `timedCalls` was bumped from both, so
+the `n/m timed` coverage could exceed the call count it is measured against.
+
+One source now, and it is the one that measures every call it places. The
+console still WRITES `Duration` and `Duration Source` to the Call Log and the
+Contacts/Companies rollups in Airtable still read them; what stopped is that
+number reaching the dashboard. `test-report` is 131 and every `secs` on a call
+row in its talk-time fixtures is deliberate bait that must not show up in the
+total — plus the one-call-two-sources case, and the no-dialler-rows case that
+must read 0 rather than the stopwatch's three minutes.
 
 ### "Talk time is not getting mapped" — the screen blamed the wrong thing
 

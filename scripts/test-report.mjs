@@ -445,25 +445,69 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   eq("only the connected group counts", r.periods[0].connects, 10);
 }
 {
-  /* DAILY TALK TIME (2026-10-10). The calls' durations summed per day, raw
-     rows and rolled-up days alike, per owner too. */
-  const r = report("day", { calls: [
-    { at: "2026-10-06T09:00:00Z", owner: "A", outcome: "Right POC", secs: 300 },
-    { at: "2026-10-06T10:00:00Z", owner: "A", outcome: "No answer", secs: 20 },
-    { at: "2026-10-06T11:00:00Z", owner: "B", outcome: "Discovery", secs: 900 },
-    { at: "2026-10-05", owner: "A", outcome: "Right POC", n: 12, secs: 1800 },   /* a rolled-up day */
-    { at: "2026-10-06T12:00:00Z", owner: "B", outcome: "No answer" },            /* no duration */
-  ] }, { from: "2026-10-05", to: "2026-10-06" });
+  /* DAILY TALK TIME HAS ONE SOURCE: THE DIALLER APP (2026-10-15).
+     Ayush: "talk time, jitne dher console open hai uske according track ho
+     rahe hai." It was summed from BOTH the Call Log's own Duration — the
+     console's stopwatch, which only runs on a call dialled from its button in
+     a console somebody had open — and the dialler app's measurement. So the
+     number moved with how the team happened to be using the tool, and one
+     conversation seen by both was counted twice.
+
+     Every `secs` on a call row below is therefore deliberate bait: none of it
+     may reach talk time. */
+  const r = report("day", {
+    calls: [
+      { at: "2026-10-06T09:00:00Z", owner: "A", outcome: "Right POC", secs: 300 },
+      { at: "2026-10-06T10:00:00Z", owner: "A", outcome: "No answer", secs: 20 },
+      { at: "2026-10-06T11:00:00Z", owner: "B", outcome: "Discovery", secs: 900 },
+      { at: "2026-10-05", owner: "A", outcome: "Right POC", n: 12, secs: 1800 },  /* a rolled-up day */
+      { at: "2026-10-06T12:00:00Z", owner: "B", outcome: "No answer" },
+    ],
+    dialler: [
+      { at: "2026-10-06T09:01:00Z", owner: "A", secs: 71 },
+      { at: "2026-10-06T11:01:00Z", owner: "B", secs: 180 },
+      { at: "2026-10-05T09:00:00Z", owner: "A", secs: 45 },
+    ],
+  }, { from: "2026-10-05", to: "2026-10-06" });
   const day = (k) => r.periods.find((p) => p.key === k);
-  eq("talk time for the 6th is every call's seconds", day("2026-10-06").talkSeconds, 1220);
-  eq("a rolled-up day carries its total", day("2026-10-05").talkSeconds, 1800);
-  eq("the window total", r.totals.talkSeconds, 3020);
-  eq("per owner too", (r.byOwner || []).find((o) => o.owner === "B")?.talkSeconds, 900);
-  /* 2026-10-12: the total is read beside how many calls it covers. */
-  eq("timed calls on the 6th: three of four had a duration", day("2026-10-06").timedCalls, 3);
+  eq("talk time is the dialler's seconds and nothing else", day("2026-10-06").talkSeconds, 251);
+  eq("...the console's stopwatch is not added on top", day("2026-10-06").talkSeconds !== 1220 + 251, true);
+  eq("a rolled-up day's Talk Seconds is ignored too", day("2026-10-05").talkSeconds, 45);
+  eq("the window total", r.totals.talkSeconds, 296);
+  eq("per owner too", (r.byOwner || []).find((o) => o.owner === "B")?.talkSeconds, 180);
+  /* The total is read beside how many calls it covers, and that count can no
+     longer exceed the calls by being bumped from two sources at once. */
+  eq("timed calls are the dialler's rows", day("2026-10-06").timedCalls, 2);
   eq("...out of four calls", day("2026-10-06").calls, 4);
-  eq("the window's timed calls (a rolled-up group with seconds counts whole)", r.totals.timedCalls, 15);
+  eq("...so coverage never exceeds the calls it covers",
+     day("2026-10-06").timedCalls <= day("2026-10-06").calls, true);
+  eq("the window's timed calls", r.totals.timedCalls, 3);
   eq("per owner: B timed one of two", (r.byOwner || []).find((o) => o.owner === "B")?.timedCalls, 1);
+  /* And the dials themselves are untouched by any of it. */
+  eq("the rolled-up day still counts its twelve dials", day("2026-10-05").calls, 12);
+}
+{
+  /* THE SAME CALL, SEEN BY BOTH. The console logged 45s and the dialler
+     measured 71s for one conversation: 116s and two timed calls was the shape
+     of the bug, on a day with exactly one dial. */
+  const r = report("day", {
+    calls: [{ at: "2026-10-06T09:00:00Z", owner: "A", outcome: "Right POC", secs: 45 }],
+    dialler: [{ at: "2026-10-06T09:00:30Z", owner: "A", secs: 71 }],
+  }, { from: "2026-10-06", to: "2026-10-06" });
+  eq("one conversation is one length", r.totals.talkSeconds, 71);
+  eq("...and one timed call", r.totals.timedCalls, 1);
+  eq("...of one dial", r.totals.calls, 1);
+}
+{
+  /* With no dialler rows at all — the state of a base where the import has
+     never run — talk time is zero and says nothing else. The dashboard calls
+     that "not set up" rather than printing the stopwatch's three minutes. */
+  const r = report("day", {
+    calls: [{ at: "2026-10-06T09:00:00Z", owner: "A", outcome: "Right POC", secs: 300 }],
+  }, { from: "2026-10-06", to: "2026-10-06" });
+  eq("no dialler rows means no talk time", r.totals.talkSeconds, 0);
+  eq("...and none claimed as covered", r.totals.timedCalls, 0);
+  eq("...while the dial still counts", r.totals.calls, 1);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

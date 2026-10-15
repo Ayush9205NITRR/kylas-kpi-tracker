@@ -4768,7 +4768,18 @@
         ACC.busy = `Moved ${contacts} contact(s) across ${moved} account(s) to ${toName}` +
           (skipped ? ` · ${skipped} were already theirs` : "") +
           (failed ? ` · ${failed} contact(s) failed` : "") +
-          `. The accounts' own owner is unchanged — set that in Kylas.`;
+          /* WHY, not just WHAT. "Set that in Kylas" reads as an oversight, and
+             the question came back ("Why are the owner not changing"). Kylas
+             accepts ownerId on a company PUT, silently drops it, and because
+             the PUT REPLACES the record, ignored means erased — one account
+             came out of the first real write with no owner at all and had to
+             be repaired in Kylas' own UI. Seven encodings and nine endpoints
+             were tried, and Kylas' own Postman collection documents company
+             update with no ownerId and reassignment for leads only. So this is
+             a refusal, not a gap. See STATE.md §3e. */
+          `. The accounts' own owner is unchanged: Kylas drops ownerId on a ` +
+          `company write and the write replaces the record, so setting it here ` +
+          `would erase it. Change account ownership in Kylas itself.`;
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
         redraw();
