@@ -141,7 +141,7 @@ node scripts/test-dialler.mjs            # 30 · real talk time: the one read Ky
                                          #      close, and the report not double-counting dials
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
-xvfb-run -a node scripts/test-store-build.mjs # 11 · the PACKAGED build, in a real
+xvfb-run -a node scripts/test-store-build.mjs # 12 · the PACKAGED build, in a real
                                               #      Chrome: what it strips, and that a
                                               #      cross-origin fetch still works with
                                               #      no host permission because the
@@ -1540,8 +1540,25 @@ on Kylas). The only way to zero it is `activeTab` + `scripting` with injection
 on click, which trades the auto-appearing launcher for a click. That is a
 product decision, not a packaging one, and is **open**.
 
-**What the package does now.** `package-extension.sh` builds from a copy and
-strips, leaving `extension/manifest.json` alone so Load unpacked still works:
+**REVERSED THE SAME DAY — read this before the table below.** `dist/` holds
+every package since 1.17.1, and comparing their manifests settles it: **1.17.1
+to 1.67.0, over fifty updates, shipped an IDENTICAL permission set** — same
+three permissions, same four host permissions, same content script — and every
+one cleared review quickly. **1.68.0 was the first package in that whole
+history whose manifest differed**, because this script had started stripping
+hosts, and it is the one that sat in "Pending review". Its only other change
+was 25 lines of `views.js`. A changed permission set is re-reviewed as a
+permission change, even when it is smaller.
+
+So the default is back to **shipping exactly what `extension/manifest.json`
+declares** — the shape the store has approved fifty times — and the stripping
+below happens only with `--strip-hosts`, as a deliberate one-off when a slower
+review is an acceptable price. Never again as a side effect of a routine
+release. The lesson generalises: when a process has a long clean record, the
+first thing to suspect when it stalls is whatever you changed, including
+changes made to "reduce risk".
+
+What `--strip-hosts` does, for when that move is chosen on purpose:
 
 | entry | in the package | why |
 |---|---|---|

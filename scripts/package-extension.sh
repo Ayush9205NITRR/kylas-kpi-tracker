@@ -37,7 +37,7 @@ if command -v git >/dev/null 2>&1 && [ -d "$REPO/.git" ]; then
     echo "! extension/ has uncommitted changes:" >&2
     echo "$DIRTY" | sed 's/^/    /' >&2
     echo "  Commit them first, or this zip is a build nothing can reproduce." >&2
-    [ "${1:-}" = "--force" ] || exit 1
+    case " $* " in *" --force "*) ;; *) exit 1 ;; esac
     echo "  (--force given, continuing anyway)" >&2
   fi
 fi
@@ -78,6 +78,22 @@ rm -f "$OUT"
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 cp -R "$SRC/." "$BUILD/"
+
+# ── STRIPPING IS OPT-IN, AND THE EVIDENCE FOR THAT IS IN dist/ ─────────
+# Every package from 1.17.1 to 1.67.0 — over fifty updates — shipped the SAME
+# permission set: storage, identity, unlimitedStorage, the same four host
+# permissions and the same content script. Each one cleared Chrome Web Store
+# review quickly. 1.68.0 was the FIRST package in that whole history whose
+# manifest differed, because this script started stripping hosts, and it is
+# the one that sat in "Pending review". A changed permission set — even a
+# SMALLER one — is re-reviewed as a permission change.
+#
+# So the default is to ship exactly what extension/manifest.json declares, the
+# shape the store has already approved fifty times. --strip-hosts remains for
+# a deliberate, one-off move to the slimmer set, to be done when a slower
+# review is an acceptable price, never as a side effect of a routine release.
+STRIP=0
+for a in "$@"; do [ "$a" = "--strip-hosts" ] && STRIP=1; done
 # DROPPED: the two loopback hosts, and app.kylas.io.
 #   The loopback pair is the local proxy + Load unpacked, which a published
 #   build never does. app.kylas.io is REDUNDANT: the content script is injected
@@ -95,7 +111,8 @@ cp -R "$SRC/." "$BUILD/"
 # NOTE FOR THE NEXT EDITOR: no apostrophes inside the node -e block below. It
 # is single-quoted for the shell, and one apostrophe in a comment ends the
 # quote and turns the next bracket into a syntax error. That is how this broke.
-STRIPPED=$(node -e '
+STRIPPED=""
+[ "$STRIP" = "1" ] && STRIPPED=$(node -e '
   const fs = require("fs");
   const f = process.argv[1] + "/manifest.json";
   const m = JSON.parse(fs.readFileSync(f, "utf8"));
@@ -118,7 +135,7 @@ STRIPPED=$(node -e '
 
 SIZE=$(du -h "$OUT" | cut -f1)
 echo "built $OUT  ($SIZE)"
-[ -n "$STRIPPED" ] && echo "  host permissions left out of the package (dev-only, or already granted elsewhere): $STRIPPED"
+if [ -n "$STRIPPED" ]; then echo "  host permissions left out of the package (--strip-hosts): $STRIPPED"; else echo "  manifest shipped as declared — the permission set the store has approved since 1.17.1"; fi
 echo
 echo "  files:"
 unzip -Z1 "$OUT" | sed 's/^/    /' | head -20

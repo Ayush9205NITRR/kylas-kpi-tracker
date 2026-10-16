@@ -56,20 +56,34 @@ console.log("\n1 · what each build declares");
      JSON.stringify(src.host_permissions));
   /* What package-extension.sh actually ships. Run it rather than re-deriving
      the rule here: a second copy of the rule is a second thing to drift. */
-  execFileSync("bash", [new URL("./package-extension.sh", import.meta.url).pathname],
-               { stdio: "ignore" });
-  const zip = execFileSync("sh", ["-c",
-    `unzip -p "$(ls -t ${new URL("../dist", import.meta.url).pathname}/*.zip | head -1)" manifest.json`],
-    { encoding: "utf8" });
-  const pkg = JSON.parse(zip);
-  ok("the package drops the loopback hosts", !(pkg.host_permissions || []).some((h) => /127\.0\.0\.1|localhost/.test(h)),
-     JSON.stringify(pkg.host_permissions));
+  const pkgManifest = (args) => {
+    execFileSync("bash", [new URL("./package-extension.sh", import.meta.url).pathname, ...args],
+                 { stdio: "ignore" });
+    return JSON.parse(execFileSync("sh", ["-c",
+      `unzip -p "$(ls -t ${new URL("../dist", import.meta.url).pathname}/*.zip | head -1)" manifest.json`],
+      { encoding: "utf8" }));
+  };
+  /* THE DEFAULT IS THE APPROVED SHAPE. 1.17.1 to 1.67.0 all shipped this exact
+     permission set and all cleared review quickly; 1.68.0 was the first to
+     differ and the one that stalled. A routine release must not change it. */
+  const def = pkgManifest([]);
+  ok("by default the package declares exactly what the source declares",
+     JSON.stringify(def.host_permissions) === JSON.stringify(src.host_permissions)
+       && JSON.stringify(def.permissions) === JSON.stringify(src.permissions),
+     JSON.stringify(def.host_permissions));
+  /* --strip-hosts is the deliberate, one-off move to the slimmer set. */
+  const slim = pkgManifest(["--strip-hosts"]);
+  ok("--strip-hosts drops the loopback hosts", !(slim.host_permissions || []).some((h) => /127\.0\.0\.1|localhost/.test(h)),
+     JSON.stringify(slim.host_permissions));
   ok("...and app.kylas.io, which content_scripts.matches already grants",
-     !(pkg.host_permissions || []).some((h) => /app\.kylas\.io/.test(h)));
+     !(slim.host_permissions || []).some((h) => /app\.kylas\.io/.test(h)));
   ok("...but KEEPS bd.enout.website as the fallback if ALLOWED_ORIGIN is wrong",
-     (pkg.host_permissions || []).some((h) => /bd\.enout\.website/.test(h)));
+     (slim.host_permissions || []).some((h) => /bd\.enout\.website/.test(h)));
   ok("...and still injects into Kylas, which is a host grant of its own",
-     (pkg.content_scripts?.[0]?.matches || []).includes("https://app.kylas.io/*"));
+     (slim.content_scripts?.[0]?.matches || []).includes("https://app.kylas.io/*"));
+  /* Leave dist/ holding the DEFAULT build, so whatever is uploaded next is the
+     approved shape and not the leftover of this test. */
+  pkgManifest([]);
 }
 
 /* ── build the package the way package-extension.sh does ──────────────── */
