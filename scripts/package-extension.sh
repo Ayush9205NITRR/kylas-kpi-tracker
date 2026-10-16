@@ -78,15 +78,33 @@ rm -f "$OUT"
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 cp -R "$SRC/." "$BUILD/"
+# DROPPED: the two loopback hosts, and app.kylas.io.
+#   The loopback pair is the local proxy + Load unpacked, which a published
+#   build never does. app.kylas.io is REDUNDANT: the content script is injected
+#   by content_scripts.matches, which is its own grant, and nothing here
+#   fetches app.kylas.io — every network call is made from console/api.js
+#   inside the console iframe (no fetch in background.js or content/inject.js).
+#
+# KEPT: bd.enout.website. test-store-build proves the fetch works through plain
+#   CORS with no host permission at all, so this entry is not what makes the
+#   console work — ALLOWED_ORIGIN on the Worker is. It stays as the belt to
+#   that braces: if the published extension id is ever missing from
+#   ALLOWED_ORIGIN, this is what keeps the console alive instead of every
+#   associate opening a dead panel.
+#
+# NOTE FOR THE NEXT EDITOR: no apostrophes inside the node -e block below. It
+# is single-quoted for the shell, and one apostrophe in a comment ends the
+# quote and turns the next bracket into a syntax error. That is how this broke.
 STRIPPED=$(node -e '
   const fs = require("fs");
   const f = process.argv[1] + "/manifest.json";
   const m = JSON.parse(fs.readFileSync(f, "utf8"));
-  const dev = (h) => /^https?:\/\/(127\.0\.0\.1|localhost)\b/.test(h);
-  const gone = (m.host_permissions || []).filter(dev);
-  m.host_permissions = (m.host_permissions || []).filter((h) => !dev(h));
+  const drop = (h) => /^https?:\/\/(127\.0\.0\.1|localhost)\b/.test(h)
+                   || /^https:\/\/app\.kylas\.io\b/.test(h);
+  const gone = (m.host_permissions || []).filter(drop);
+  m.host_permissions = (m.host_permissions || []).filter((h) => !drop(h));
   if (!m.host_permissions.length) {
-    console.error("! stripping the dev hosts would leave host_permissions empty");
+    console.error("! stripping would leave host_permissions empty");
     process.exit(1);
   }
   fs.writeFileSync(f, JSON.stringify(m, null, 2) + "\n");
@@ -100,7 +118,7 @@ STRIPPED=$(node -e '
 
 SIZE=$(du -h "$OUT" | cut -f1)
 echo "built $OUT  ($SIZE)"
-[ -n "$STRIPPED" ] && echo "  dev-only host permissions left out of the package: $STRIPPED"
+[ -n "$STRIPPED" ] && echo "  host permissions left out of the package (dev-only, or already granted elsewhere): $STRIPPED"
 echo
 echo "  files:"
 unzip -Z1 "$OUT" | sed 's/^/    /' | head -20

@@ -141,6 +141,11 @@ node scripts/test-dialler.mjs            # 30 · real talk time: the one read Ky
                                          #      close, and the report not double-counting dials
 node scripts/test-worker.mjs             # the whole surface on workerd, with subrequest costs
 
+xvfb-run -a node scripts/test-store-build.mjs # 11 · the PACKAGED build, in a real
+                                              #      Chrome: what it strips, and that a
+                                              #      cross-origin fetch still works with
+                                              #      no host permission because the
+                                              #      Worker answers CORS properly
 xvfb-run -a node scripts/test-ui-live.mjs     # 50 · the three things that only exist on
                                               #      screen: draggable pane widths, the
                                               #      quarter→month→week picker, and the
@@ -1509,6 +1514,56 @@ that line is the only reason it was noticed. Re-anchored; 10/10 again, honestly.
 so it is only safe once the schema is known to be the newer of the two. Read
 the before/after that `--dry-run` prints and decide per formula. It is never a
 default.
+
+## 3k · "Due to the Host Permission… in-depth review", and what actually counts
+
+Ayush, 2026-10-16, from the Chrome Web Store listing form:
+
+> *"Due to the Host Permission, your extension may require an in-depth review
+> which will delay publishing."*
+
+**The fact that caught this out: `content_scripts.matches` IS a host
+permission.** Chrome counts a content-script match pattern exactly as it counts
+a `host_permissions` entry — same install-time warning, same review trigger.
+This was found by a test that passed for the wrong reason: the first version of
+`test-store-build` put its stub host into `content_scripts.matches` so the
+content script had somewhere to run, and then every assertion passed with **no
+Origin header and no preflight**, with even the no-CORS control succeeding.
+The extension had been granted that host after all. The stub is now reached
+only from the console page, so the host appears nowhere in the manifest, which
+is the only way to ask the question honestly.
+
+**So emptying `host_permissions` does NOT silence the warning**, because
+`https://app.kylas.io/*` in `content_scripts.matches` is still there — and that
+one cannot go without removing the thing the product is (the launcher appearing
+on Kylas). The only way to zero it is `activeTab` + `scripting` with injection
+on click, which trades the auto-appearing launcher for a click. That is a
+product decision, not a packaging one, and is **open**.
+
+**What the package does now.** `package-extension.sh` builds from a copy and
+strips, leaving `extension/manifest.json` alone so Load unpacked still works:
+
+| entry | in the package | why |
+|---|---|---|
+| `http://127.0.0.1:*/*` | **dropped** | local proxy + Load unpacked; a published build never does this |
+| `http://localhost:*/*` | **dropped** | same |
+| `https://app.kylas.io/*` | **dropped** | redundant — `content_scripts.matches` already grants it, and nothing fetches it |
+| `https://bd.enout.website/*` | **kept** | see below |
+
+**Why `bd.enout.website` stays, although it is provably not needed.**
+`test-store-build` starts a real Chrome with a build carrying **no host
+permission at all** and shows a cross-origin fetch succeeding — preflight,
+`Authorization` header, the server seeing `chrome-extension://<id>` as the
+origin — with a negative control proving it is CORS doing the work. A host
+permission does not GRANT the fetch; it BYPASSES CORS. The Worker already
+answers correctly, so the entry is not what makes the console work:
+`ALLOWED_ORIGIN` is.
+
+It stays as the belt to that braces. **If the published extension's id is ever
+missing from `ALLOWED_ORIGIN`, the host permission is the only thing standing
+between that and every associate opening a dead panel.** Dropping it would make
+a wrangler.toml typo fatal in a way it currently is not. Check that the
+published id is one of the two in `ALLOWED_ORIGIN` before ever reconsidering.
 
 ## 4 · Invariants that look arbitrary and are not
 
