@@ -1635,8 +1635,25 @@ default.
   `--apply`) only saves the wait. The dashboard now says which of these three
   it is rather than "not timed": **not set up** (no table), **not imported**
   (table, no rows), **not timed** (rows, but none for these calls).
-- Enable GitHub Pages, or host `docs/privacy.html` on enout.in, for the store's
-  privacy policy URL.
+- **The Chrome Web Store privacy policy URL.** GitHub Pages is already ENABLED
+  on this repo (`has_pages: true`, checked 2026-10-16), the repo is public, and
+  the policy is `docs/privacy.html`. What is not knowable from here is which
+  source Pages serves — the API path is blocked through this session's proxy —
+  so a root `privacy.html` redirect was added to make **one** URL work either
+  way:
+
+      https://ayush9205nitrr.github.io/kylas-kpi-tracker/privacy.html
+
+  Open it. If it loads, paste it into the store listing's Privacy tab and the
+  policy requirement is met. If it 404s, Pages is serving a branch that has
+  neither file — switch the source to `main` + `/docs` in
+  Settings → Pages, and that URL starts working.
+
+  The policy itself is written and current: short version, what the extension
+  handles, what it does not, where the data goes, sign-in, browser storage,
+  retention, contact. It must be re-read whenever the extension starts touching
+  something new — a policy that no longer describes the software is worse than
+  a missing one, because it is a false statement about somebody's data.
 
 ## 7 · Things that were tried and rejected
 

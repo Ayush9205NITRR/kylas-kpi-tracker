@@ -61,13 +61,46 @@ fi
 mkdir -p "$REPO/dist"
 rm -f "$OUT"
 
-# -x excludes; run from inside extension/ so paths in the zip are relative to
+# ── THE STORE BUILD DROPS THE DEV-ONLY HOST PERMISSIONS ────────────────
+# extension/manifest.json keeps http://127.0.0.1:*/* and http://localhost:*/*
+# because `npm run proxy` + Load unpacked is how this is developed, and a
+# developer must not have to hand-edit the manifest to test.
+#
+# A PUBLISHED build has no use for them. The console talks to
+# bd.enout.website; nothing a store user does reaches a loopback address. And
+# "unnecessary permissions" is one of the few things a Chrome Web Store
+# reviewer rejects outright, so shipping two localhost grants invites exactly
+# the kind of manual look that turns a two-day review into a two-week one.
+#
+# So the zip is built from a COPY with those two stripped, and the source
+# manifest is left alone. Done in node rather than sed because a manifest is
+# JSON and a regex over JSON is how a trailing comma ships.
+BUILD=$(mktemp -d)
+trap 'rm -rf "$BUILD"' EXIT
+cp -R "$SRC/." "$BUILD/"
+STRIPPED=$(node -e '
+  const fs = require("fs");
+  const f = process.argv[1] + "/manifest.json";
+  const m = JSON.parse(fs.readFileSync(f, "utf8"));
+  const dev = (h) => /^https?:\/\/(127\.0\.0\.1|localhost)\b/.test(h);
+  const gone = (m.host_permissions || []).filter(dev);
+  m.host_permissions = (m.host_permissions || []).filter((h) => !dev(h));
+  if (!m.host_permissions.length) {
+    console.error("! stripping the dev hosts would leave host_permissions empty");
+    process.exit(1);
+  }
+  fs.writeFileSync(f, JSON.stringify(m, null, 2) + "\n");
+  process.stdout.write(gone.join(" "));
+' "$BUILD")
+
+# -x excludes; run from inside the copy so paths in the zip are relative to
 # the manifest, which is what the store requires.
-( cd "$SRC" && zip -q -r -9 "$OUT" . \
+( cd "$BUILD" && zip -q -r -9 "$OUT" . \
     -x "README.md" -x "*/.DS_Store" -x ".DS_Store" )
 
 SIZE=$(du -h "$OUT" | cut -f1)
 echo "built $OUT  ($SIZE)"
+[ -n "$STRIPPED" ] && echo "  dev-only host permissions left out of the package: $STRIPPED"
 echo
 echo "  files:"
 unzip -Z1 "$OUT" | sed 's/^/    /' | head -20
