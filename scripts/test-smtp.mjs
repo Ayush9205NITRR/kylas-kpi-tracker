@@ -66,7 +66,7 @@ console.log("\n1 · a whole conversation");
     /^EHLO/.test(L[0]) && /^AUTH PLAIN/.test(L[1]) && /^MAIL FROM:<ayush@enout.in>$/.test(L[2]) &&
     /^RCPT TO:<ayush@enout.in>$/.test(L[3]) && /^RCPT TO:<ops@enout.in>$/.test(L[4]) && L[5] === "DATA", JSON.stringify(L));
   const auth = Buffer.from(L[1].split(" ")[2], "base64").toString();
-  ok("AUTH PLAIN carries user and password, NUL-separated", auth === `\0${cfg.user}\0${cfg.pass}`);
+  ok("AUTH PLAIN carries user and password, NUL-separated, with the display spaces removed", auth === `\0${cfg.user}\0abcdefghijklmnop`, JSON.stringify(auth));
   ok("the subject is RFC 2047 encoded, so the ⚠ survives", /^Subject: =\?UTF-8\?B\?/m.test(seen.data));
   ok("it is multipart/alternative with a text and an html part", /multipart\/alternative/.test(seen.data) && /text\/plain/.test(seen.data) && /text\/html/.test(seen.data));
   const textPart = seen.data.split(/--=_enout_\w+/)[1];

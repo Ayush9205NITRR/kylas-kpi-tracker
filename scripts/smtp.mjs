@@ -100,7 +100,10 @@ function replies(readable, timeoutMs) {
    Throws on any refusal, with the step and the server's words; resolves with
    { sent: true, id } when the server accepted the message. */
 export async function sendMail(cfg, { connect, timeoutMs = 15000, now, id } = {}) {
-  const { host = "smtp.gmail.com", port = 465, user, pass } = cfg;
+  const { host = "smtp.gmail.com", port = 465, user } = cfg;
+  /* Google shows an app password as "abcd efgh ijkl mnop"; the spaces are for
+     reading and are not part of it. */
+  const pass = String(cfg.pass || "").replace(/\s+/g, "");
   const to = (cfg.to || []).filter(Boolean);
   if (!user || !pass) throw new Error("smtp: no user or password");
   if (!to.length) throw new Error("smtp: no recipient");
