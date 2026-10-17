@@ -1316,6 +1316,75 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('...option lists are not sent to the client', !(j.rows || []).some((x) => 'options' in x), '');
 }
 
+/* ── §16 · the duplicate-flag queue, at the HTTP edge ──────────────────
+   What the admin screen reads and writes (extension/console/flags.js). Admin
+   only; resolving is idempotent; a made-up key is reported and never created;
+   the contact's own mark follows its flags. */
+{
+  console.log('\n16. resolving duplicate flags');
+  const AT = 'http://127.0.0.1:9901/v0/appMOCK';
+  const H = { Authorization: 'Bearer x', 'content-type': 'application/json' };
+  const upsert = (table, on, fields) => fetch(`${AT}/${encodeURIComponent(table)}`, { method: 'PATCH', headers: H,
+    body: JSON.stringify({ performUpsert: { fieldsToMergeOn: [on] }, records: [{ fields }], typecast: true }) });
+  const tables = async () => (await fetch('http://127.0.0.1:9901/__writes', { headers: H }).then((r) => r.json())).tables;
+  const rowsOf = async (t) => ((await tables())[t] || []).map((r) => r.fields);
+  const flag = (kid, name, kind, why, other, at) => upsert('Duplicate Flags', 'Key', { Key: `${kid}|${kind}|${other}`,
+    'Created At': at, 'Kylas ID': kid, Contact: name, Owner: 'Enout Super Admin', Kind: kind, Why: why, 'Other Kylas ID': other, Status: 'Open' });
+  await flag('900010', 'Karan Mehta', 'phone-conflict', 'phone 9811122233 is already on Shipra Gupta', '112937', '2026-10-17T09:00:00.000Z');
+  await flag('900010', 'Karan Mehta', 'other-bd', 'Shipra Gupta sits with Vaibhav Bhandari', '112937', '2026-10-17T09:00:01.000Z');
+  await flag('900011', 'Neha Kapoor', 'email-conflict', 'email shipra@seats.aero is already on Shipra Gupta', '112937', '2026-10-17T10:00:00.000Z');
+  await upsert('Contacts', 'Kylas Contact ID', { 'Kylas Contact ID': '900010', Name: 'Karan Mehta', 'Duplicate Flag': 'phone-conflict, other-bd', 'Duplicate Note': 'x' });
+  await upsert('Contacts', 'Kylas Contact ID', { 'Kylas Contact ID': '900011', Name: 'Neha Kapoor', 'Duplicate Flag': 'email-conflict', 'Duplicate Note': 'y' });
+  const mark = async (kid) => (await rowsOf('Contacts')).find((f) => f['Kylas Contact ID'] === kid)?.['Duplicate Flag'];
+
+  const assocEnv = { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in' };
+  const aw = await coldWorker(1401);
+  const aGet = await aw.fetch(new Request('https://bd.enout.website/dupe-flags', { headers: { Origin: ORIGIN } }), assocEnv, { waitUntil() {} });
+  check('an associate cannot read the queue', aGet.status === 403, `status ${aGet.status}`);
+  const aPost = await (await coldWorker(1402)).fetch(new Request('https://bd.enout.website/dupe-flags-resolve', { method: 'POST',
+    headers: { Origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['900010|phone-conflict|112937'], resolution: 'Acknowledged' }) }),
+    { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in' }, { waitUntil() {} });
+  check('...nor resolve anything', aPost.status === 403, `status ${aPost.status}`);
+  check('...and the refusal changed nothing', (await rowsOf('Duplicate Flags')).every((f) => f.Status === 'Open'));
+
+  const g = await (await call('/dupe-flags', { env: withStore(ENV) })).json();
+  check('an admin reads three open flags', g.flags?.length === 3 && g.flags.every((f) => f.status === 'Open'), JSON.stringify(g).slice(0, 160));
+  check('...newest first', g.flags[0].contact === 'Neha Kapoor', g.flags.map((f) => f.contact).join(','));
+  check('...with the reason and the other contact\'s id', g.flags.some((f) => /Shipra/.test(f.why) && f.otherKid === '112937'));
+  const resolvedNone = await (await call('/dupe-flags?status=Resolved', { env: withStore(ENV) })).json();
+  check('nothing is resolved yet', resolvedNone.flags.length === 0);
+
+  const bad = await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['900010|phone-conflict|112937'], resolution: 'Whatever' }, env: withStore(ENV) });
+  check('an unknown resolution is a 400', bad.status === 400, `status ${bad.status}`);
+  const none = await call('/dupe-flags-resolve', { method: 'POST', body: { keys: [], resolution: 'Acknowledged' }, env: withStore(ENV) });
+  check('no keys is a 400', none.status === 400, `status ${none.status}`);
+  const before = (await rowsOf('Duplicate Flags')).length;
+  const ghost = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['999|made-up|1'], resolution: 'Acknowledged' }, env: withStore(ENV) })).json();
+  check('a made-up key is reported, not created', ghost.updated === 0 && ghost.unknown?.[0] === '999|made-up|1' && (await rowsOf('Duplicate Flags')).length === before, JSON.stringify(ghost));
+  const quote = await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ["x'); DROP"], resolution: 'Acknowledged' }, env: withStore(ENV) });
+  check('a key with a quote in it is refused before it reaches a formula', quote.status === 400, `status ${quote.status}`);
+
+  const one = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['900010|phone-conflict|112937'], resolution: 'Not a duplicate', note: 'two different people' }, env: withStore(ENV) })).json();
+  check('resolving one of a contact\'s two flags updates one', one.updated === 1 && one.cleared.length === 0, JSON.stringify(one));
+  const r1 = (await rowsOf('Duplicate Flags')).find((f) => f.Key === '900010|phone-conflict|112937');
+  check('...it is Resolved, with who, when, what and why', r1.Status === 'Resolved' && r1.Resolution === 'Not a duplicate' && r1['Resolved By'] && r1['Resolved At'] && r1['Resolution Note'] === 'two different people', JSON.stringify(r1));
+  check('...the contact keeps its mark, now only the flag still open', (await mark('900010')) === 'other-bd', String(await mark('900010')));
+
+  const two = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['900010|other-bd|112937'], resolution: 'Handled in Kylas' }, env: withStore(ENV) })).json();
+  check('resolving the last open flag clears the contact\'s mark', two.cleared?.[0] === '900010' && (await mark('900010')) === '', `${JSON.stringify(two)} mark=${JSON.stringify(await mark('900010'))}`);
+  check('...and leaves another contact\'s alone', (await mark('900011')) === 'email-conflict');
+
+  const again = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['900010|other-bd|112937'], resolution: 'Handled in Kylas' }, env: withStore(ENV) })).json();
+  check('resolving twice is harmless', again.updated === 1, JSON.stringify(again));
+  const res = await (await call('/dupe-flags?status=Resolved', { env: withStore(ENV) })).json();
+  check('the resolved tab lists them', res.flags.length === 2 && res.flags.every((f) => f.status === 'Resolved' && f.resolvedBy), JSON.stringify(res.flags.map((f) => f.status)));
+
+  const re = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['900010|phone-conflict|112937'], reopen: true }, env: withStore(ENV) })).json();
+  const r2 = (await rowsOf('Duplicate Flags')).find((f) => f.Key === '900010|phone-conflict|112937');
+  check('a flag can be reopened', re.updated === 1 && r2.Status === 'Open' && !r2.Resolution && !r2['Resolved By'], JSON.stringify(r2));
+  check('...and the contact is marked again', (await mark('900010')) === 'phone-conflict', String(await mark('900010')));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

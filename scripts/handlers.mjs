@@ -1316,6 +1316,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   /* One save, carried out: Kylas, then Airtable, then the call log. What the
      queue runs in the background, and what an older console still waits for. */
+  /* The Duplicate Flags table, as the console reads a row. */
+  const DUPE_RESOLUTIONS = ["Not a duplicate", "Handled in Kylas", "Acknowledged"];
+  const DUPE_NO_TABLE = /NOT_FOUND|INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND|Could not find table/i;
+  const flagOf = (rec) => {
+    const f = rec.fields || {};
+    return { key: f.Key || "", createdAt: f["Created At"] || "", kid: String(f["Kylas ID"] || ""), contact: f.Contact || "",
+             owner: f.Owner || "", kind: f.Kind || "", why: f.Why || "", otherKid: String(f["Other Kylas ID"] || ""),
+             status: f.Status || "Open", resolution: f.Resolution || "", note: f["Resolution Note"] || "",
+             resolvedBy: f["Resolved By"] || "", resolvedAt: f["Resolved At"] || "" };
+  };
+
   /* THE KEY THAT MAKES A RETRY SAFE, stated once because the duplicate check has
      to agree with it: a save that already has a Kylas id needs none; a new one is
      named by its local id (`lid`), or by name + number for a job queued by an
@@ -2723,6 +2734,77 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const gate = checkContact(raw, { allowNoPhone: true });
       const dv = await dupeVerdict(gate.contact || raw);
       return { ...dv, matches: dv.matches.slice(0, 5) };
+    },
+
+    /* THE ADMIN'S QUEUE OF POSSIBLE DUPLICATES (scripts/dedupe.mjs wrote them).
+       GET ?status=Open|Resolved|all. Admin only: it names who holds whose phone
+       number, and resolving one is a judgement about somebody else's contact. */
+    "/dupe-flags": async (url) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("Resolving duplicate flags is an admin action."), { status: 403 });
+      if (!airtable) return { configured: false, flags: [] };
+      const want = ["Open", "Resolved", "all"].includes(url.searchParams.get("status")) ? url.searchParams.get("status") : "Open";
+      try {
+        const recs = await airtable.listAll("Duplicate Flags", {
+          ...(want === "all" ? {} : { formula: `{Status} = '${want}'` }), pageSize: 100, maxPages: 60 });
+        const flags = recs.map(flagOf).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        return { configured: true, status: want, flags };
+      } catch (e) {
+        if (DUPE_NO_TABLE.test(e.message))
+          return { configured: true, flags: [], missingTable: true,
+                   note: 'There is no "Duplicate Flags" table in the base yet. Run: node scripts/repair-base.mjs' };
+        throw e;
+      }
+    },
+
+    /* RESOLVE (or reopen) flags by key. POST { keys: [...], resolution, note }
+       or { keys, reopen: true }. A key that is not in the table is reported and
+       never created — an upsert on a made-up key would otherwise make a row. */
+    "/dupe-flags-resolve": async (_url, body) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("Resolving duplicate flags is an admin action."), { status: 403 });
+      if (!airtable) throw Object.assign(new Error("Airtable is not configured, so there is nowhere to record this"), { status: 503 });
+      const keys = [...new Set((Array.isArray(body?.keys) ? body.keys : []).map(String))].filter((k) => /^[\w|. -]{1,120}$/.test(k));
+      if (!keys.length) throw Object.assign(new Error("keys is required"), { status: 400 });
+      if (keys.length > 50) throw Object.assign(new Error("Resolve at most 50 flags at a time"), { status: 400 });
+      const reopen = body?.reopen === true;
+      if (!reopen && !DUPE_RESOLUTIONS.includes(body?.resolution))
+        throw Object.assign(new Error(`resolution must be one of: ${DUPE_RESOLUTIONS.join(", ")}`), { status: 400 });
+
+      const found = await airtable.listAll("Duplicate Flags", {
+        formula: keys.length === 1 ? `{Key} = '${keys[0]}'` : `OR(${keys.map((k) => `{Key} = '${k}'`).join(", ")})`,
+        pageSize: 100, maxPages: 5 });
+      const have = new Map(found.map((r) => [r.fields?.Key, r.fields]));
+      const unknown = keys.filter((k) => !have.has(k));
+      const real = keys.filter((k) => have.has(k));
+      if (!real.length) return { updated: 0, unknown, cleared: [] };
+
+      const now = new Date().toISOString();
+      const by = userName(who) || who?.email || "an admin";
+      const note = String(body?.note || "").slice(0, 400);
+      const rows = real.map((Key) => reopen
+        ? { Key, Status: "Open", Resolution: null, "Resolution Note": "", "Resolved By": "", "Resolved At": null }
+        : { Key, Status: "Resolved", Resolution: body.resolution, "Resolution Note": note, "Resolved By": by, "Resolved At": now });
+      await upsertManyTolerant(airtable, "Duplicate Flags", "Key", rows);
+
+      /* THE CONTACT'S OWN MARK follows its flags: gone when none are left open,
+         back when one is reopened. Read AFTER the write, per contact, so two
+         flags on one contact are judged together. */
+      const kids = [...new Set(real.map((k) => String(have.get(k)["Kylas ID"] || "")).filter(Boolean))];
+      const cleared = [];
+      for (const kid of kids) {
+        const all = (await airtable.listAll("Duplicate Flags", { formula: `{Kylas ID} = '${kid}'`, pageSize: 100, maxPages: 5 })).map(flagOf);
+        const open = all.filter((f) => f.status === "Open");
+        await upsertTolerant(airtable, "Contacts", "Kylas Contact ID", {
+          "Kylas Contact ID": kid,
+          "Duplicate Flag": [...new Set(open.map((f) => f.kind))].join(", "),
+          "Duplicate Note": open.map((f) => f.why).join("\n").slice(0, 900) }).catch((e) => log(`! duplicate mark not updated on ${kid}: ${e.message.slice(0, 100)}`));
+        if (!open.length) cleared.push(kid);
+      }
+      log(`duplicate flags ${reopen ? "reopened" : `resolved (${body.resolution})`}: ${real.length} by ${by}`);
+      return { updated: real.length, unknown, cleared };
     },
 
     "/field-map": async () => {

@@ -91,7 +91,7 @@
        rejection here must show as a message rather than an empty panel and an
        unhandled rejection in the console. */
     wrap.innerHTML = `<p class="vnote">Loading…</p>`;
-    (which === "dashboard" ? Views.dashboard : Views.companies)(wrap)
+    (which === "dashboard" ? Views.dashboard : which === "flags" ? Flags.view : Views.companies)(wrap)
       .then(() => { if (which === "companies" && view === "companies") port.scrollTop = accountsTop; })
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
   }
@@ -109,11 +109,11 @@
   function paintBack() {
     if (!backBtn) return;
     backBtn.hidden = view === "dashboard";
-    backBtn.textContent = view === "companies" ? "← Dashboard" : "← Accounts";
-    backBtn.title = view === "companies" ? "Back to the dashboard" : "Back to the accounts list";
+    backBtn.textContent = view === "companies" || view === "flags" ? "← Dashboard" : "← Accounts";
+    backBtn.title = view === "companies" || view === "flags" ? "Back to the dashboard" : "Back to the accounts list";
   }
   if (backBtn) {
-    backBtn.onclick = () => showView(view === "companies" ? "dashboard" : "companies");
+    backBtn.onclick = () => showView(view === "companies" || view === "flags" ? "dashboard" : "companies");
     paintBack();
   }
 
@@ -677,6 +677,22 @@
   window.openLocalDash = openDash;
   const dashBtn = document.getElementById("dashBtn");
   if (dashBtn) dashBtn.onclick = () => showView("dashboard");
+
+  /* THE FLAGS BUTTON IS AN ADMIN'S. Shown only once the server has said this
+     person is one (state.role is set by /meta; before that it is unknown, and
+     unknown must not show an admin control — the server refuses a non-admin
+     anyway, this just keeps the button honest). The count is the number of
+     contacts with a flag still open, refreshed now and every few minutes. */
+  const flagsBtn = document.getElementById("flagsBtn");
+  if (flagsBtn) {
+    flagsBtn.onclick = () => showView("flags");
+    const paint = (n) => { flagsBtn.textContent = n ? `Flags ${n}` : "Flags"; flagsBtn.classList.toggle("warn", n > 0); };
+    window.Flags && Flags.onCount(paint);
+    const sync = () => { const admin = !!(API.state && API.state.online && API.state.user && API.state.role === "admin"); flagsBtn.hidden = !admin; if (admin) Flags.refreshCount(); };
+    if (window.API && API.onChange) API.onChange(sync);
+    sync();
+    setInterval(sync, 5 * 60 * 1000);
+  }
 
   /* Catch up on any days that ended while the console was closed. */
   Store.freezeDays();

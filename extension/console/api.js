@@ -353,6 +353,12 @@
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
+    /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a
+       403 for anybody else. status: Open | Resolved | all. */
+    dupeFlags: (status = "Open") => req(`/dupe-flags?status=${encodeURIComponent(status)}`, { timeout: 20000 }),
+    resolveDupeFlags: (keys, resolution, note = "") =>
+      req("/dupe-flags-resolve", { method: "POST", body: { keys, resolution, note }, timeout: 20000 }),
+    reopenDupeFlags: (keys) => req("/dupe-flags-resolve", { method: "POST", body: { keys, reopen: true }, timeout: 20000 }),
     /* How queued saves went: { jobs: { id: { state, result, error, retryAt } } }. */
     saveStatus: (ids) => req(`/save-status?ids=${encodeURIComponent(ids.join(","))}`, { timeout: 15000 }),
   };

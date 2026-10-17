@@ -1322,3 +1322,34 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .nc-overdue{color:var(--amber);font-weight:var(--w-strong)}
 .nc-today{color:var(--blue);font-weight:var(--w-strong)}
 .nc-none{color:var(--text3)}
+
+/* ── the admin's duplicate-flag queue (flags.js) ─────────────────────── */
+/* One card per contact. Amber is the flag colour, as on the RCA strip, and the
+   only colour here that is not the accent. No new token. */
+.fltabs{display:flex;gap:6px;margin:0 0 14px}
+.fltab{border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);padding:7px 14px;
+  font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);cursor:pointer}
+.fltab i{font-style:normal;font-variant-numeric:tabular-nums;color:var(--text3);margin-left:4px}
+.fltab[aria-pressed="true"]{background:var(--blueSoft);border-color:var(--blue);color:var(--blue)}
+.fltab[aria-pressed="true"] i{color:inherit}
+.flgrid{display:flex;flex-direction:column;gap:12px;max-width:880px}
+.flcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--sh)}
+.flcard.busy{opacity:.6}
+.flcard.done{opacity:.88}
+.flhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.flhead b{font-size:var(--t-body);font-weight:var(--w-strong)}
+.flhead em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+.fllist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.fllist li{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.flk{flex:none;font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--amber);background:var(--amberSoft);
+  border:1px solid var(--amberLine);border-radius:999px;padding:2px 9px}
+.flw{font-size:var(--t-label);color:var(--text);min-width:0;flex:1 1 280px}
+.fllink{color:var(--blue);font-size:var(--t-meta);text-decoration:underline dotted;text-underline-offset:3px}
+.flfoot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.flacts{display:flex;gap:7px;flex-wrap:wrap}
+.flnote{flex:1 1 200px;min-width:0;border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
+  padding:7px 10px;font:inherit;font-size:var(--t-label)}
+.flres{flex:1;min-width:0;font-size:var(--t-label);color:var(--text2)}
+.flres b{color:var(--text);font-weight:var(--w-strong)}
+.flempty{margin-top:12px}
+#flagsBtn.warn{border-color:var(--amber);color:var(--amber);background:var(--amberSoft)}

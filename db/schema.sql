@@ -281,6 +281,9 @@ CREATE TABLE IF NOT EXISTS "duplicate_flags" (
   -- The existing contact it collides with.
   , "other_kylas_id" TEXT
   , "status" TEXT CHECK ("status" IS NULL OR "status" IN ('Open', 'Resolved'))
+  -- What the admin decided. Not a duplicate: two real people. Handled in Kylas: merged, deleted or corrected there. Acknowledged: looked at, left as it is.
+  , "resolution" TEXT CHECK ("resolution" IS NULL OR "resolution" IN ('Not a duplicate', 'Handled in Kylas', 'Acknowledged'))
+  , "resolution_note" TEXT
   , "resolved_by" TEXT
   , "resolved_at" TEXT CHECK ("resolved_at" IS NULL OR "resolved_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
   , "detail" TEXT
