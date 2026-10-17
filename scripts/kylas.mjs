@@ -489,6 +489,20 @@ export function createClient(key, {
     user: (id) => call("GET", `/v1/users/${id}`),
     company: (id) => call("GET", `/v1/companies/${id}`),
 
+    /* CONTACTS THAT MENTION A PHONE NUMBER OR AN EMAIL, by Kylas' own free-text
+       search (`multi_field`, the same rule the company search box uses).
+       What this returns is CANDIDATES, never matches: whether the free text
+       reaches the phone and email columns is a property of the Kylas account that
+       this repo has not confirmed, and a fuzzy hit must not become "duplicate".
+       dedupe.mjs compares the real phoneNumbers / emails of every row it gets,
+       exactly, and the count it reports says how many rows the search returned
+       versus how many were a real match. */
+    async contactsMatching(text, size = 20) {
+      const r = await call("POST", `/v1/search/contact?sort=updatedAt,desc&page=0&size=${size}`,
+        { fields: CONTACT_FIELDS, jsonRule: freeText(String(text)) });
+      return rows(r);
+    },
+
     async contactsForCompany(companyId, size = 100) {
       const r = await call("POST", `/v1/search/contact?sort=updatedAt,desc&page=0&size=${size}`,
         { fields: CONTACT_FIELDS, jsonRule: rule("company", Number(companyId)) });

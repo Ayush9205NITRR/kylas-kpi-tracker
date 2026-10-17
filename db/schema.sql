@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS "contacts" (
   -- Set when the contact lands on a dead-end stage. Kept apart from KPI Rank so an exit cannot pull the funnel backwards.
   , "exit_reason" TEXT CHECK ("exit_reason" IS NULL OR "exit_reason" IN ('CLOSING_LOOPS_LOW_VALUE', 'GHOSTED', 'NOT_INTERESTED', 'INVALID_CONTACT', 'DISQUALIFIED_WRONG_POC', 'NOT_A_DECISION_MAKER_NDM', 'POC_ORGANIZATION_CHANGED'))
   , "flagged" INTEGER NOT NULL DEFAULT 0 CHECK ("flagged" IN (0, 1))
+  -- Written when a new contact was saved while somebody else already held its phone or email (dedupe.mjs). The kinds, comma separated. Blank means nobody did.
+  , "duplicate_flag" TEXT
+  -- One line per flag: who holds the phone or email, and where.
+  , "duplicate_note" TEXT
   -- was the Airtable link "Company" → Companies
   , "company_id" INTEGER REFERENCES "companies"("id") ON DELETE RESTRICT
   -- when this copy last changed, for the reconciler and for deltas
@@ -255,6 +259,30 @@ CREATE TABLE IF NOT EXISTS "push_log" (
   -- Every value was read back from Kylas and matched.
   , "verified" INTEGER NOT NULL DEFAULT 0 CHECK ("verified" IN (0, 1))
   -- Per-field outcome as JSON: key, Kylas field, status, value sent, value read back.
+  , "detail" TEXT
+  -- when this copy last changed, for the reconciler and for deltas
+  , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Possible duplicate contacts, one row per flag. Written by the console's save; resolved by an admin. Key is the new contact's Kylas id + kind + the other contact's id.
+CREATE TABLE IF NOT EXISTS "duplicate_flags" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+  -- the Airtable record id, so the backfill can re-run and the reconciler can join
+  , "airtable_id" TEXT UNIQUE
+  -- New contact's Kylas id | kind | other contact's Kylas id. The upsert key.
+  , "key" TEXT
+  , "created_at" TEXT CHECK ("created_at" IS NULL OR "created_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- The contact that was just added.
+  , "kylas_id" TEXT
+  , "contact" TEXT
+  , "owner" TEXT
+  , "kind" TEXT CHECK ("kind" IS NULL OR "kind" IN ('phone-conflict', 'email-conflict', 'other-company', 'other-bd', 'unverified', 'overridden'))
+  , "why" TEXT
+  -- The existing contact it collides with.
+  , "other_kylas_id" TEXT
+  , "status" TEXT CHECK ("status" IS NULL OR "status" IN ('Open', 'Resolved'))
+  , "resolved_by" TEXT
+  , "resolved_at" TEXT CHECK ("resolved_at" IS NULL OR "resolved_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
   , "detail" TEXT
   -- when this copy last changed, for the reconciler and for deltas
   , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

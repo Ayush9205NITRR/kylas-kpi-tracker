@@ -359,6 +359,21 @@ createServer(async (req, res) => {
 
     let out = CONTACTS;
     for (const r of rules) {
+      /* multi_field: free text across the record. MOCK_SEARCH_NO_PHONE=1 is a
+         Kylas whose free text does not reach the phone column, which is the case
+         dedupe.mjs must not be blind to. */
+      if (r.field === "multi_field") {
+        const q = String(r.value || "").toLowerCase().trim();
+        const qd = q.replace(/\D/g, "");
+        out = out.filter((c) => {
+          const name = `${c.firstName || ""} ${c.lastName || ""}`.toLowerCase();
+          const mail = (c.emails || []).map((e) => String(e.value).toLowerCase());
+          const tel = (c.phoneNumbers || []).map((p) => String(p.value).replace(/\D/g, ""));
+          return name.includes(q) || mail.some((m) => m.includes(q))
+            || (process.env.MOCK_SEARCH_NO_PHONE !== "1" && qd.length >= 7 && tel.some((t) => t.includes(qd)));
+        });
+        continue;
+      }
       /* company arrives either as a bare id or as an object, so match both. */
       if (r.field === "company")
         out = out.filter((c) => Number(c.company?.id ?? c.company) === Number(r.value));

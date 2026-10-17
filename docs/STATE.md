@@ -1672,6 +1672,90 @@ are the views for now); alerting between digests (the mail is daily).
 
 ---
 
+## 3m · The duplicate check (phone and email, against the whole account)
+
+Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
+notes, *"conflict checkups on the basis of email and phone no — if anything is
+incorrect, flag them up."* Built 2026-10-17.
+
+**What there was:** the console compared the last ten digits of a phone with the
+contacts open in the list, showed an "Already on X" pill, and nothing more.
+No email check, nothing past the list on screen, nothing recorded, nothing
+blocked or flagged.
+
+**What there is now** (`scripts/dedupe.mjs`, `dedupe-report.mjs`). One question —
+*is anybody already holding this phone number or email?* — asked of two sources,
+because each is blind somewhere the other is not:
+
+| source | sees | blind to |
+|---|---|---|
+| the Airtable copy of `Contacts` (the D1 mirror) | every contact the hourly sync has seen | anything created in Kylas in the last hour |
+| Kylas search (`multi_field`, `kylas.contactsMatching`) | live | whatever its free text does not index |
+
+A Kylas search hit is only a **candidate**: `classify()` compares the real
+`phoneNumbers` / `emails` of every row exactly (last ten digits; lower-cased
+email), so a fuzzy hit never becomes "duplicate". The verdict says which sources
+answered (`coverage: full / partial / none`); a check that could not look is
+`unverified`, never `clear`.
+
+**Verdicts, and what a save does:**
+
+| verdict | when | save |
+|---|---|---|
+| `existing` | same phone or email, same first name (last name not contradicting), same company or no company to disagree | **refused, 409.** The console offers *Open* and *Create anyway*. |
+| `flag` | somebody **else** holds the phone / email (`phone-conflict`, `email-conflict`); or the same person under another company (`other-company`); or the match sits with another BD (`other-bd`) | goes ahead; the flag is recorded |
+| `unverified` | nothing to check with, or neither source answered | goes ahead; flagged |
+| `clear` | nobody holds either and at least one source answered | goes ahead |
+
+*Create anyway* is allowed and is **kept**: the contact is created and a row of
+kind `overridden` is written, so a false positive (a shared landline, two people
+with one name) never traps an associate and never disappears either.
+
+**Where it runs.** `POST /check-contact` (read-only, any signed-in user) is what
+the console asks while a new contact is typed, once the number or email settles
+(600 ms, only when there is no Kylas id). `/save` asks again, authoritatively,
+before queueing — so "already in Kylas" is the answer in seconds, not a dead job
+minutes later — and `performSave` asks for a save that came in directly. The
+server decides whatever the console sent.
+
+**It must never refuse its own retry.** A save whose create already happened
+would find the contact it just made. The check therefore runs only when the
+journal (`journal.lookup`) has no entry for that save, and is skipped on an
+interrupted attempt (`findExisting` owns that case). Pinned in `demo-dedupe.mjs`
+steps 18-20.
+
+**What is kept.** Table `Duplicate Flags` (one row per flag, `Status` Open until
+an admin resolves it; never deleted) and, on the contact, `Contacts.Duplicate Flag`
+and `Duplicate Note`. `result.duplicate` rides on the save job, so the morning
+mail counts them ("N new contact(s) were saved as possible duplicates…").
+
+**Run it and read it:** `node scripts/demo-dedupe.mjs` — the real routes against
+the mocks, 22 scenarios, each printed as *what was checked / which sources
+answered and what each found / verdict / every match and why / what the save will
+do*, ending in one expected-vs-got table; exits non-zero if any differ.
+`node --env-file=.env.local scripts/dedupe.mjs --phone <n> --email <e> --name <n>`
+runs the same check against the **live** account, read-only.
+
+**NOT CONFIRMED, and the one thing to check on the live account:** whether
+Kylas' free-text search reaches the phone column. The mock says it does. Run the
+CLI above with a number you know is in Kylas and read the `Kylas search` line:
+*"0 real matches"* for a known number means it does not, and the Airtable copy is
+then the only thing catching phones (still correct, just not live to the minute).
+
+**To switch it on (Ayush):** `repair-base.mjs` (creates `Duplicate Flags` and the
+two `Contacts` columns — the same run that creates `Push Log` and `Field Map`),
+then `npm run deploy`. Until the table exists a flagged save still succeeds and
+logs *"no Duplicate Flags table — run repair-base.mjs"*; the check itself needs
+no new table. The console half ships with the next extension release; the
+extension version was **not** bumped, because 1.68.1 is in store review and the
+console warns when the extension and Worker versions differ.
+
+**Not built:** an admin screen for resolving flags (the table is the queue for
+now); matching on **name + company** with no phone or email (too many honest
+twins); a periodic sweep for duplicates that already exist.
+
+---
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current

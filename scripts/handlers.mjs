@@ -34,7 +34,7 @@ import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
-         readCompanies, readSyncState, listTolerant,
+         readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
          readRcaDue, writeRcaAnswer,
          readTeam, writeTeam, counter, nameKey,
          readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
@@ -54,6 +54,7 @@ import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { summarise, sendDigest, windowFor, yesterdayIn } from "./digest.mjs";
 import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
+import { checkContact as dedupeCheck } from "./dedupe.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
@@ -1315,6 +1316,59 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   /* One save, carried out: Kylas, then Airtable, then the call log. What the
      queue runs in the background, and what an older console still waits for. */
+  /* THE KEY THAT MAKES A RETRY SAFE, stated once because the duplicate check has
+     to agree with it: a save that already has a Kylas id needs none; a new one is
+     named by its local id (`lid`), or by name + number for a job queued by an
+     older build. See the long note in performSave. */
+  const idemKeyOf = (raw) => (raw.kid ? "" :
+    (raw.lid ? `lid:${raw.lid}`
+             : `poc:${(raw.pocName || "").trim().toLowerCase()}|` +
+               `${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`));
+
+  /* IS ANYBODY ALREADY HOLDING THIS PHONE NUMBER OR EMAIL (scripts/dedupe.mjs).
+     Never throws: a check that cannot run is an `unverified` verdict, not a lost
+     save — the associate's call is worth more than the lookup. */
+  async function dupeVerdict(card) {
+    try {
+      return await dedupeCheck({ card, airtable, kylas, log, ownerName });
+    } catch (e) {
+      log(`! duplicate check failed — ${e.message.slice(0, 120)}`);
+      return { verdict: "unverified", action: "create-and-flag", coverage: "none", matches: [], lookup: {},
+               flags: [{ kind: "unverified", why: "the duplicate check itself failed" }],
+               summary: "Could not check for duplicates." };
+    }
+  }
+
+  /* WHAT A FLAG LEAVES BEHIND. A row per flag in `Duplicate Flags` (the admin's
+     queue) and the kinds on the contact itself. Called once the contact exists,
+     so the row can name its Kylas id. Missing table or column is said once and
+     never fails the save. */
+  async function recordDuplicate(card, kid, dv, { overridden = false } = {}) {
+    if (!airtable || !kid) return { stored: false, why: "nothing to write to" };
+    const now = new Date().toISOString();
+    const flags = [...(dv.flags || []), ...(overridden ? [{ kind: "overridden", kid: dv.existing?.kid || "",
+      why: `saved anyway although ${dv.existing?.name || "the same person"} (id ${dv.existing?.kid || "?"}) already exists` }] : [])];
+    if (!flags.length) return { stored: false, why: "no flags" };
+    const name = card.pocName || "";
+    const rows = flags.map((f) => ({
+      Key: `${kid}|${f.kind}|${f.kid || ""}`, "Created At": now, "Kylas ID": String(kid), Contact: name,
+      Owner: card.owner || "", Kind: f.kind, Why: String(f.why).slice(0, 500), "Other Kylas ID": String(f.kid || ""),
+      Status: "Open", Detail: JSON.stringify({ verdict: dv.verdict, coverage: dv.coverage, checked: dv.checked }).slice(0, 2000) }));
+    try {
+      const { dropped } = await upsertManyTolerant(airtable, "Duplicate Flags", "Key", rows);
+      if (dropped?.length) log(`! Duplicate Flags has no column for: ${dropped.join(", ")} — run repair-base.mjs`);
+      await upsertTolerant(airtable, "Contacts", "Kylas Contact ID", {
+        "Kylas Contact ID": String(kid), "Duplicate Flag": [...new Set(flags.map((f) => f.kind))].join(", "),
+        "Duplicate Note": flags.map((f) => f.why).join("\n").slice(0, 900) });
+      return { stored: true, rows: rows.length };
+    } catch (e) {
+      const why = /NOT_FOUND|INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND/i.test(e.message)
+        ? 'no "Duplicate Flags" table in the base — run: node scripts/repair-base.mjs' : e.message.slice(0, 140);
+      log(`! duplicate flags not recorded — ${why}`);
+      return { stored: false, why };
+    }
+  }
+
   async function performSave(body) {
       const raw = body.contact;
       if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
@@ -1331,10 +1385,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
          A save that already HAS a kid needs no key: repeating a PUT writes the
          same record twice, which is the same record. */
-      const idemKey = raw.kid ? "" :
-        (raw.lid ? `lid:${raw.lid}`
-                 : `poc:${(raw.pocName || "").trim().toLowerCase()}|` +
-                   `${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`);
+      const idemKey = idemKeyOf(raw);
       /* Serialised per key: a double-click, or a drain racing a save, must not
          have two creates in the air at once — both would find the journal empty. */
       return journal.once(idemKey, async () => {
@@ -1362,6 +1413,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* The block is for a human reading the record, so use the name they know. */
       const stageLabel = STAGE_LABEL[c.stage] || c.stage || "";
       const result = { kid: c.kid || null, created: false, wrote: [] };
+      /* The duplicate verdict: handed over by /save when it asked before queueing, or
+         asked here for a save that came in directly. */
+      let dv = body.dupe || null;
 
       /* KYLAS AND AIRTABLE SIDE BY SIDE. Airtable needs only the contact's
          Kylas id, so for a contact that already has one it does not wait for
@@ -1519,6 +1573,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             } else {
               /* Written BEFORE the POST. If this process dies during it, the next
                  attempt finds an open entry and looks before it leaps. */
+              /* DUPLICATE CHECK, BEFORE ANYTHING IS CREATED. Only on a first attempt:
+                 an interrupted one is handled by findExisting above, and a retry
+                 of a create that already happened would find the contact it just
+                 made and refuse itself. */
+              if (!dv && known.state !== "open") dv = await dupeVerdict(c);
+              if (dv?.action === "open" && !raw.dupeOverride) {
+                log(`duplicate: ${c.pocName} is already ${dv.existing?.kid} — not created`);
+                throw Object.assign(new Error(dv.summary),
+                  { status: 409, duplicate: dv, problems: [{ field: "phone", why: dv.summary, blocking: true }] });
+              }
               await journal.open(idemKey);
               let made;
               try {
@@ -1571,6 +1635,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       }
       atP ||= airtableLeg();
       await Promise.all([atP, callLogLeg()]);
+      /* THE FLAG IS KEPT. Only for a contact this save CREATED — an update was
+         never at risk of being a second record. */
+      if (dv && result.created && result.kid) {
+        const overridden = dv.action === "open" && !!raw.dupeOverride;
+        if (dv.flags?.length || overridden) {
+          const kept = await recordDuplicate(c, result.kid, dv, { overridden });
+          result.duplicate = { verdict: dv.verdict, kinds: [...(dv.flags || []).map((f) => f.kind), ...(overridden ? ["overridden"] : [])],
+                               recorded: !!kept.stored };
+        }
+      }
       return result;
       });
   }
@@ -2482,6 +2556,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const key = raw.lid ? `lid:${raw.lid}` : raw.kid ? `kid:${raw.kid}`
         : `poc:${(raw.pocName || "").trim().toLowerCase()}|${((raw.phones || [])[0]?.value || "").replace(/\D/g, "")}`;
       const { queue: _q, ...job } = body;
+      /* THE DUPLICATE CHECK, ASKED NOW. A new contact is checked before it is
+         queued, so "already in Kylas" is the answer the associate sees in
+         seconds and not a dead job minutes later. Skipped when the journal says
+         this save already created its contact — a retry must not refuse itself. */
+      if (!raw.kid) {
+        const known = await journal.lookup(idemKeyOf(raw));
+        if (known.state === "absent") {
+          const dv = await dupeVerdict(gate.contact);
+          if (dv.action === "open" && !raw.dupeOverride) {
+            log(`! /save held ${raw.pocName}: ${dv.summary}`);
+            throw Object.assign(new Error(dv.summary),
+              { status: 409, duplicate: dv, problems: [{ field: "phone", why: dv.summary, blocking: true }] });
+          }
+          job.dupe = dv;
+        }
+      }
       const id = await saves.enqueue(key, job);
       inFlight(saves.run(id, performSave));
       log(`save queued ${id} for ${raw.pocName || raw.kid || "?"}`);
@@ -2623,6 +2713,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        account right now (scripts/field-map.mjs), and what the last pushes did
        with them. Admin: it names fields and counts, and the reader who needs it
        is whoever is fixing the mapping. */
+    /* IS THIS PHONE OR EMAIL ALREADY IN KYLAS — the console asks while a new
+       contact is being typed, so the answer is on screen before Save. Read-only.
+       Any signed-in user: it reveals who holds a number, which is what the
+       associate adding that number needs to know. */
+    "/check-contact": async (_url, body) => {
+      const raw = body?.contact;
+      if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });
+      const gate = checkContact(raw, { allowNoPhone: true });
+      const dv = await dupeVerdict(gate.contact || raw);
+      return { ...dv, matches: dv.matches.slice(0, 5) };
+    },
+
     "/field-map": async () => {
       const who = await whoami();
       if (roleOf(who) !== "admin")

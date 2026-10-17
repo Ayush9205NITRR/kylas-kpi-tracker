@@ -118,6 +118,8 @@ body.framed .ovOnly{display:inline-block}
   padding:4px 10px;font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);cursor:pointer;
 }
 .dupe button:hover{background:var(--amber);color:var(--panel)}
+/* The server's answer is a sentence, not a name: let it wrap. */
+.dupe.long span{overflow:visible;text-overflow:clip;white-space:normal}
 
 /* ── dial a number straight from its row ─────────────────────────────── */
 .dialbtn{

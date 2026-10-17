@@ -168,6 +168,9 @@ export const TABLES = [
       { name: "Exit Reason", type: "singleSelect", options: sel(...EXIT_STAGES),
         description: "Set when the contact lands on a dead-end stage. Kept apart from KPI Rank so an exit cannot pull the funnel backwards." },
       { name: "Flagged", type: "checkbox", options: check },
+      { name: "Duplicate Flag", type: "singleLineText",
+        description: "Written when a new contact was saved while somebody else already held its phone or email (dedupe.mjs). The kinds, comma separated. Blank means nobody did." },
+      { name: "Duplicate Note", type: "multilineText", description: "One line per flag: who holds the phone or email, and where." },
     ],
   },
   {
@@ -354,6 +357,29 @@ export const TABLES = [
       { name: "Reason", type: "multilineText", description: "Why, one line per data point." },
       { name: "Verified", type: "checkbox", options: check, description: "Every value was read back from Kylas and matched." },
       { name: "Detail", type: "multilineText", description: "Per-field outcome as JSON: key, Kylas field, status, value sent, value read back." },
+    ],
+  },
+  /* THE ADMIN'S QUEUE OF POSSIBLE DUPLICATES. One row per flag, written when a
+     new contact is saved while somebody else holds its phone or email
+     (scripts/dedupe.mjs). Open until an admin resolves it; never deleted, because
+     "we saw it and decided" is itself the record. Overridden means the associate
+     chose "Create anyway" over an exact match. */
+  {
+    name: "Duplicate Flags",
+    description: "Possible duplicate contacts, one row per flag. Written by the console's save; resolved by an admin. Key is the new contact's Kylas id + kind + the other contact's id.",
+    fields: [
+      { name: "Key", type: "singleLineText", description: "New contact's Kylas id | kind | other contact's Kylas id. The upsert key." },
+      { name: "Created At", type: "dateTime", options: dateTime },
+      { name: "Kylas ID", type: "singleLineText", description: "The contact that was just added." },
+      { name: "Contact", type: "singleLineText" },
+      { name: "Owner", type: "singleLineText" },
+      { name: "Kind", type: "singleSelect", options: sel("phone-conflict", "email-conflict", "other-company", "other-bd", "unverified", "overridden") },
+      { name: "Why", type: "multilineText" },
+      { name: "Other Kylas ID", type: "singleLineText", description: "The existing contact it collides with." },
+      { name: "Status", type: "singleSelect", options: sel("Open", "Resolved") },
+      { name: "Resolved By", type: "singleLineText" },
+      { name: "Resolved At", type: "dateTime", options: dateTime },
+      { name: "Detail", type: "multilineText" },
     ],
   },
   /* WHICH AIRTABLE FIELD GOES INTO WHICH KYLAS FIELD. One row per datum, from

@@ -350,6 +350,9 @@
        behind the reply (scripts/save-queue.mjs). A server without a queue
        ignores the flag and answers with the finished save, as before. */
     save: (contact, call) => req("/save", { method: "POST", body: { contact, call, queue: true }, timeout: 20000 }),
+    /* Is anybody already holding this phone number or email? Read-only; asked while a
+       new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
+    checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
     /* How queued saves went: { jobs: { id: { state, result, error, retryAt } } }. */
     saveStatus: (ids) => req(`/save-status?ids=${encodeURIComponent(ids.join(","))}`, { timeout: 15000 }),
   };

@@ -1160,11 +1160,51 @@ function findDupe(a){
   }
   return null;
 }
+/* THE SERVER'S ANSWER, FOR A NEW CONTACT. findDupe above only knows the contacts
+   open in this list. The proxy asks the Airtable copy and Kylas' own search for
+   anybody holding this phone number or email (scripts/dedupe.mjs), so a person
+   who sits in Kylas under another BD is found too. Asked once the number or email
+   settles, never on every keystroke, and only for a contact with no Kylas id. */
+const DV={sig:"",v:null,timer:0};
+const dupeSig=a=>[...(a.phones||[]).map(p=>digits(p.value)).filter(d=>d.length===10),
+  ...(a.emails||[]).map(e=>String(e.value||"").trim().toLowerCase()).filter(e=>/.+@.+\..+/.test(e))].sort().join("|");
+function askServerDupe(a){
+  if(!isNew||!(window.API&&API.checkContact))return;
+  const sig=dupeSig(a);
+  if(sig===DV.sig)return;
+  DV.sig=sig;DV.v=null;a.dupeOverride=false;clearTimeout(DV.timer);
+  if(!sig)return;
+  DV.timer=setTimeout(async()=>{
+    try{const v=await API.checkContact(a);if(DV.sig===sig){DV.v=v;renderDupe();}}
+    catch(e){/* offline or an older proxy: the local pill below still works */}
+  },600);
+}
 function renderDupe(){
   document.querySelectorAll(".dupe").forEach(n=>n.remove());
   const host=document.getElementById("f-ph")?.closest(".f");
   if(!host)return;
-  const d=findDupe(rec());
+  const a=rec();
+  askServerDupe(a);
+  const v=isNew?DV.v:null;
+  if(v&&(v.verdict==="existing"||v.verdict==="flag"||v.verdict==="unverified")){
+    const w=el("div","dupe long");
+    const exact=v.verdict==="existing";
+    w.appendChild(el("span",null,a.dupeOverride?"Will be created anyway. This is logged for an admin to review.":v.summary));
+    const at=exact&&v.existing?DATA.findIndex(x=>String(x.kid)===String(v.existing.kid)):-1;
+    if(at>=0&&!a.dupeOverride){
+      const go=el("button",null,"Open");go.type="button";
+      go.onclick=()=>{cur=at;isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+      w.appendChild(go);
+    }
+    if(exact){
+      const ov=el("button",null,a.dupeOverride?"Undo":"Create anyway");ov.type="button";
+      ov.onclick=()=>{a.dupeOverride=!a.dupeOverride;renderDupe();};
+      w.appendChild(ov);
+    }
+    host.appendChild(w);
+    return;
+  }
+  const d=findDupe(a);
   if(!d)return;
   const w=el("div","dupe");
   w.innerHTML=`<span>Already on <b>${esc(d.b.pocName||"another contact")}</b>${d.b.company?" · "+esc(d.b.company):""}</span>`;

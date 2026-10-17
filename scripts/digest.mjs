@@ -45,6 +45,10 @@ export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = ne
     /* Saves that left a value off because Kylas has no field for it. The save
        itself succeeded, which is why only a count can show it. */
     unmappedSaves: 0, unmappedWhat: [],
+    /* New contacts saved while somebody else held their phone or email, and the
+       ones saved over an exact match ("Create anyway"). The admin's queue is the
+       Duplicate Flags table; this is the count that says to go and look. */
+    dupeFlagged: 0, dupeOverridden: 0, dupeKinds: [],
   };
   for (const j of rows) {
     if (j.state === "failed") {
@@ -57,6 +61,11 @@ export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = ne
     if (wroteHas(j, "created contact")) out.contactsCreated++;
     else if (wroteHas(j, "updated contact") || wroteHas(j, "adopted")) out.contactsUpdated++;
     if (wroteHas(j, "logged call")) out.callsLogged++;
+    if (j.result?.duplicate?.kinds?.length) {
+      out.dupeFlagged++;
+      if (j.result.duplicate.kinds.includes("overridden")) out.dupeOverridden++;
+      for (const k of j.result.duplicate.kinds) if (!out.dupeKinds.includes(k)) out.dupeKinds.push(k);
+    }
     if (j.result?.unmapped?.length) {
       out.unmappedSaves++;
       for (const w of j.result.unmapped) if (!out.unmappedWhat.includes(w)) out.unmappedWhat.push(w);
@@ -112,6 +121,9 @@ export function renderText(s) {
    as "nothing needed pushing". */
 export function pushLines(s) {
   const out = [];
+  if (s.dupeFlagged)
+    out.push("", `${s.dupeFlagged} new contact(s) were saved as possible duplicates (${s.dupeKinds.join(", ")})` +
+      `${s.dupeOverridden ? `, ${s.dupeOverridden} over an exact match` : ""}. Review the Duplicate Flags table.`);
   if (s.push === undefined && !s.unmappedSaves) return out;
   out.push("", "Airtable → Kylas push");
   if (s.push === null) out.push("  Not tracked yet — the Push Log table does not exist. Run: node scripts/repair-base.mjs");
@@ -138,7 +150,7 @@ export function pushLines(s) {
 /* Anything in the push the reader must act on, for the subject line. */
 export function attention(s) {
   const p = s.push;
-  return (p ? p.partly + p.notPushed + p.mapProblems.length : 0) + (s.unmappedSaves ? 1 : 0);
+  return (p ? p.partly + p.notPushed + p.mapProblems.length : 0) + (s.unmappedSaves ? 1 : 0) + (s.dupeFlagged ? 1 : 0);
 }
 
 const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -154,8 +166,10 @@ export function renderHtml(s) {
     : `<p style="font:14px/1.5 system-ui;color:#4a4a57;margin:18px 0 0">Nothing failed.</p>`;
   const pl = pushLines(s);
   const pushHtml = pl.length
-    ? `<p style="font:600 14px/1.4 system-ui;color:${attention(s) ? "#b4232a" : "#111"};margin:22px 0 6px">${esc(pl[1])}</p>` +
-      `<div style="font:13px/1.6 system-ui;color:#4a4a57">${pl.slice(2).map((l) => l ? `<div>${esc(l).replace(/^ {2}/, "&nbsp;&nbsp;")}</div>` : `<div style="height:8px"></div>`).join("")}</div>`
+    ? `<div style="font:13px/1.6 system-ui;color:${attention(s) ? "#b4232a" : "#4a4a57"};margin-top:18px">` +
+      pl.map((l) => !l ? `<div style="height:8px"></div>`
+        : l === "Airtable → Kylas push" ? `<div style="font:600 14px/1.4 system-ui;color:#111;margin-top:6px">${esc(l)}</div>`
+        : `<div>${esc(l).replace(/^ {2}/, "&nbsp;&nbsp;")}</div>`).join("") + `</div>`
     : "";
   return `<div style="max-width:520px"><p style="font:600 15px/1.3 system-ui;color:#111;margin:0 0 14px">` +
     `BD console → Kylas · ${esc(s.day)}</p><table cellspacing="0" cellpadding="0">` +
