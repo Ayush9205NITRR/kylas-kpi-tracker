@@ -344,7 +344,7 @@ if (isMain) {
      node --env-file=.env.local scripts/field-map.mjs --store    # and write it to the Field Map table */
   const { createClient } = await import("./kylas.mjs");
   const { resolveWriteFields } = await import("./kylas-write-map.mjs");
-  const { findOptions } = await import("./push-kylas.mjs");
+  const { findOptions } = await import("./kylas-options.mjs");
   const env = process.env;
   if (!env.KYLAS_KEY) { console.error("KYLAS_KEY is not set"); process.exit(1); }
   const kylas = createClient(env.KYLAS_KEY, { log: () => {}, ...(env.KYLAS_BASE ? { base: env.KYLAS_BASE } : {}) });

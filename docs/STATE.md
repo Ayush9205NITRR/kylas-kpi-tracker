@@ -1670,6 +1670,15 @@ the same table in a terminal; `--store` also writes the Field Map table.
 `assumed`); a console view of the Field Map (the Airtable table and `/field-map`
 are the views for now); alerting between digests (the mail is daily).
 
+**The bug that was made here (2026-10-17): a CLI that imports its own importer.**
+`field-map.mjs --store` printed only `Warning: Detected unsettled top-level await`
+and exited 13. The CLI block did `await import("./push-kylas.mjs")` for
+`findOptions`, and `push-kylas.mjs` imports `field-map.mjs`: run as the entry
+point, the cycle waits on itself for ever. Every test imported the module, so none
+saw it. `findOptions` now lives in `kylas-options.mjs` (push-kylas re-exports it),
+and `test-push-track.mjs` §8 runs the CLI as a child process. A script that is both
+a module and a CLI may not reach back into a module that imports it.
+
 ---
 
 ## 3m · The duplicate check (phone and email, against the whole account)

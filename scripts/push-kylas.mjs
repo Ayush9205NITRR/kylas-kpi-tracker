@@ -35,6 +35,9 @@ import { offsiteOf } from "./offsite.mjs";
 import { tzMinOf } from "./day.mjs";
 import { resolveFieldMap, problemsOf, kindOfKylas, checkValue, verdict } from "./field-map.mjs";
 import { contactRow, runRow, recordPush, storeFieldMap, whyOf } from "./push-log.mjs";
+import { findOptions } from "./kylas-options.mjs";
+
+export { findOptions };
 
 export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, only = "" } = {}) {
   const TZ = tzMinOf(env);
@@ -234,19 +237,6 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
 }
 
 /* ── the pieces run() uses, out here so they are testable ──────────────── */
-
-/* Options are nested at a different depth per field type. */
-export function findOptions(f, d = 0) {
-  if (!f || d > 4) return null;
-  if (Array.isArray(f)) {
-    if (f.length && f.every((x) => x && typeof x === "object" && (x.name || x.displayName)))
-      return f.map((x) => ({ id: x.id, code: x.name || x.displayName, label: x.displayName || x.name }));
-    for (const x of f) { const h = findOptions(x, d + 1); if (h) return h; }
-    return null;
-  }
-  if (typeof f === "object") for (const k of Object.keys(f)) { const h = findOptions(f[k], d + 1); if (h) return h; }
-  return null;
-}
 
 /* An array is a MULTI-picklist, not an object with an id: mapped element by
    element, or it reads as "no value" and the field is dropped from a payload

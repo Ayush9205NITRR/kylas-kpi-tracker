@@ -177,5 +177,26 @@ console.log("\n7 · no Push Log table: said, and never fatal");
   ok("reading a missing log is null, which the digest prints as 'not tracked yet'", none === null);
 }
 
+console.log("\n8 · the CLIs, run as the entry point (not imported)");
+{
+  /* Imported, field-map.mjs worked; run from a terminal it hung on a circular
+     import with push-kylas.mjs ("Detected unsettled top-level await") and printed
+     nothing. Only a child process can see that. */
+  await kylasWith();
+  await reset();
+  const cli = (args) => new Promise((resolve) => {
+    const p = spawn(process.execPath, ["scripts/field-map.mjs", ...args], { env: { ...process.env, ...ENV } });
+    let out = "", err = "";
+    p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (err += d));
+    const t = setTimeout(() => { p.kill(); resolve({ code: "timeout", out, err }); }, 20000);
+    p.on("close", (code) => { clearTimeout(t); resolve({ code, out, err }); });
+  });
+  const a = await cli([]);
+  ok("field-map.mjs prints the map and exits", a.code === 0 && /DATUM/.test(a.out), `${a.code} ${a.err.slice(0, 200)}`);
+  ok("...with no unsettled top-level await", !/unsettled/.test(a.err), a.err.slice(0, 200));
+  const b = await cli(["--store"]);
+  ok("--store writes the Field Map table", /Field Map: \d+ row\(s\) written/.test(b.out) && (await rowsOf("Field Map")).length > 0, `${b.code} ${b.out.slice(-200)} ${b.err.slice(0, 200)}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
