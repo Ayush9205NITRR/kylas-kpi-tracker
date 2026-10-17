@@ -1328,8 +1328,19 @@ console.log('\n11. a copy that is short of the account is not the account');
   console.log('\n16. resolving duplicate flags');
   const AT = 'http://127.0.0.1:9901/v0/appMOCK';
   const H = { Authorization: 'Bearer x', 'content-type': 'application/json' };
-  const upsert = (table, on, fields) => fetch(`${AT}/${encodeURIComponent(table)}`, { method: 'PATCH', headers: H,
-    body: JSON.stringify({ performUpsert: { fieldsToMergeOn: [on] }, records: [{ fields }], typecast: true }) });
+  /* The mock rate-limits at five requests a second and a seed is a burst of
+     them: without the wait and the check, the last write is a silent 429 and the
+     test fails on a row that was never written. */
+  const upsert = async (table, on, fields) => {
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 260));
+      const r = await fetch(`${AT}/${encodeURIComponent(table)}`, { method: 'PATCH', headers: H,
+        body: JSON.stringify({ performUpsert: { fieldsToMergeOn: [on] }, records: [{ fields }], typecast: true }) });
+      if (r.ok) return r;
+      if (r.status !== 429) throw new Error(`seed ${table}: ${r.status}`);
+    }
+    throw new Error(`seed ${table}: still rate limited`);
+  };
   const tables = async () => (await fetch('http://127.0.0.1:9901/__writes', { headers: H }).then((r) => r.json())).tables;
   const rowsOf = async (t) => ((await tables())[t] || []).map((r) => r.fields);
   const flag = (kid, name, kind, why, other, at) => upsert('Duplicate Flags', 'Key', { Key: `${kid}|${kind}|${other}`,
