@@ -30,6 +30,13 @@ const up = async (url, headers) => { for (let i = 0; i < 50; i++) {
   await sleep(250); } return false; };
 const start = (script, port, env = {}) => { const p = spawn(process.execPath, [script], { env: { ...process.env, PORT: String(port), ...env }, stdio: ["ignore", "ignore", "inherit"] }); kids.push(p); return p; };
 
+/* OWN THE PORTS. A second run (or a stale dev stack) on the same ports does not
+   fail, it silently becomes the fixture — and then dies under you mid-demo, which
+   is exactly how an ECONNREFUSED half-way through was produced. Refuse instead. */
+for (const port of [KY, AT]) {
+  const taken = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(700) }).then(() => true).catch((e) => /timed out|abort/i.test(e.message));
+  if (taken) { console.error(`\n! Port ${port} is already in use — another demo or a dev stack is running.\n  ss -lptn 'sport = :${port}'   # find it, kill it, run this again\n`); process.exit(2); }
+}
 start("scripts/mock-kylas.mjs", KY);
 start("scripts/mock-airtable.mjs", AT);
 if (!await up(`http://127.0.0.1:${KY}/__writes`, { "api-key": "k" }) || !await up(`http://127.0.0.1:${AT}/__count`, { Authorization: "Bearer x" })) {
