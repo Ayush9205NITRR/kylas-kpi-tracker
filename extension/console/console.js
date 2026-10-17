@@ -1189,8 +1189,11 @@ function renderDupe(){
   if(v&&(v.verdict==="existing"||v.verdict==="flag"||v.verdict==="unverified")){
     const w=el("div","dupe long");
     const exact=v.verdict==="existing";
-    w.appendChild(el("span",null,a.dupeOverride?"Will be created anyway. This is logged for an admin to review.":v.summary));
     const at=exact&&v.existing?DATA.findIndex(x=>String(x.kid)===String(v.existing.kid)):-1;
+    /* The server's sentence tells the associate to "open" the contact. Say that
+       only when there is an Open button; otherwise point at the Accounts list. */
+    const said=at>=0?v.summary:String(v.summary).replace(/ Open it instead of adding a second record\.$/," Find them in Accounts instead of adding a second record.");
+    w.appendChild(el("span",null,a.dupeOverride?"Will be created anyway. This is logged for an admin to review.":said));
     if(at>=0&&!a.dupeOverride){
       const go=el("button",null,"Open");go.type="button";
       go.onclick=()=>{cur=at;isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
