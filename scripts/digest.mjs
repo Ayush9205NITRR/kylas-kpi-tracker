@@ -24,6 +24,7 @@
  * every test — nothing here can email anybody by accident.
  */
 import { dayOf, today as todayIn, IST_MIN } from "./day.mjs";
+import { auditLines } from "./offsite-audit.mjs";
 
 /* ── counting ──────────────────────────────────────────────────────────── */
 
@@ -31,7 +32,7 @@ const wroteHas = (j, what) => (j.result?.wrote || []).some((w) => w.startsWith(w
 
 /* rows: what saveQueue.finishedSince() returns.
    newCompanies / newContacts: ids first saved on this day, from the KPI base. */
-export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = new Set(), push } = {}) {
+export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = new Set(), push, offsite } = {}) {
   const out = {
     day,
     contactsUpdated: 0, contactsCreated: 0, callsLogged: 0,
@@ -42,6 +43,9 @@ export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = ne
        did not look. null: it looked and there is nowhere to read it from (the
        Push Log table does not exist). An object: what the last night did. */
     push,
+    /* The offsite quarter, contacts vs the company (offsite-audit.mjs). Only when
+       the caller looked and the Kylas company list was cached. */
+    offsite,
     /* Saves that left a value off because Kylas has no field for it. The save
        itself succeeded, which is why only a count can show it. */
     unmappedSaves: 0, unmappedWhat: [],
@@ -124,6 +128,7 @@ export function pushLines(s) {
   if (s.dupeFlagged)
     out.push("", `${s.dupeFlagged} new contact(s) were saved as possible duplicates (${s.dupeKinds.join(", ")})` +
       `${s.dupeOverridden ? `, ${s.dupeOverridden} over an exact match` : ""}. Review the Duplicate Flags table.`);
+  if (s.offsite && s.offsite.crawled) out.push("", "Offsite quarter: contacts vs the company in Kylas", ...auditLines(s.offsite));
   if (s.push === undefined && !s.unmappedSaves) return out;
   out.push("", "Airtable → Kylas push");
   if (s.push === null) out.push("  Not tracked yet — the Push Log table does not exist. Run: node scripts/repair-base.mjs");
@@ -168,7 +173,7 @@ export function renderHtml(s) {
   const pushHtml = pl.length
     ? `<div style="font:13px/1.6 system-ui;color:${attention(s) ? "#b4232a" : "#4a4a57"};margin-top:18px">` +
       pl.map((l) => !l ? `<div style="height:8px"></div>`
-        : l === "Airtable → Kylas push" ? `<div style="font:600 14px/1.4 system-ui;color:#111;margin-top:6px">${esc(l)}</div>`
+        : l === "Airtable → Kylas push" || l.startsWith("Offsite quarter:") ? `<div style="font:600 14px/1.4 system-ui;color:#111;margin-top:6px">${esc(l)}</div>`
         : `<div>${esc(l).replace(/^ {2}/, "&nbsp;&nbsp;")}</div>`).join("") + `</div>`
     : "";
   return `<div style="max-width:520px"><p style="font:600 15px/1.3 system-ui;color:#111;margin:0 0 14px">` +

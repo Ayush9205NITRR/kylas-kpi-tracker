@@ -55,6 +55,7 @@ import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas
 import { summarise, sendDigest, windowFor, yesterdayIn } from "./digest.mjs";
 import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
 import { checkContact as dedupeCheck } from "./dedupe.mjs";
+import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
@@ -767,6 +768,20 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (q.size) out.set(String(c.id), q);
     }
     return out;
+  }
+
+  /* THE OFFSITE QUARTER, CONTACTS vs THE COMPANY (scripts/offsite-audit.mjs).
+     Reads only what is already cached — the Kylas company crawl is never started
+     for this, so asking is cheap and a cold server answers "no crawl yet" rather
+     than spending ten minutes of Kylas requests on a report. */
+  async function offsiteAudit() {
+    const crawl = await kylasCompanies.peek().catch(() => null);
+    const companies = crawl?.companies || [];
+    const [airtableMap, kylasMap, listMap] = await Promise.all([offsiteByCompany(), kylasOffsite(companies), listOffsite()]);
+    const names = new Map(companies.map((c) => [String(c.id), c.name]));
+    return { ...auditOffsite({ airtable: airtableMap, kylas: kylasMap, list: listMap }, { names }),
+             crawled: companies.length,
+             ...(companies.length ? {} : { note: "The Kylas company list is not cached yet, so there is nothing on the Kylas side to compare against. Open the Accounts view once." }) };
   }
 
   async function offsiteByCompany() {
@@ -2315,7 +2330,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const companies = Array.isArray(body?.companies) ? body.companies : [];
       const ownerId = body?.ownerId;
       if (!body?.apply) return { dryRun: true, ...(await plan({ kylas, companies, ownerId, log })) };
-      const out = await apply({ kylas, companies, ownerId, log });
+      /* THREE AT A TIME by default; REASSIGN_CONCURRENCY=1 is the old behaviour. */
+      const out = await apply({ kylas, companies, ownerId, log, concurrency: Number(env.REASSIGN_CONCURRENCY || 3) });
       /* The copy now disagrees with Kylas about who owns these, and the pane
          reads the copy. Mark it stale rather than patching rows by hand: the
          maintenance run is a minute away and a hand-patched mirror that drifts
@@ -2807,6 +2823,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { updated: real.length, unknown, cleared };
     },
 
+    /* OFFSITE QUARTER: how often do the contacts and the company agree? Admin. */
+    "/offsite-audit": async () => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("The offsite audit is an admin view."), { status: 403 });
+      return offsiteAudit();
+    },
+
     "/field-map": async () => {
       const who = await whoami();
       if (roleOf(who) !== "admin")
@@ -3114,7 +3138,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                                       toIso: new Date(nowMs + 60000).toISOString() })
           .then(summarisePush).catch((e) => { log(`! digest: push log unreadable — ${e.message.slice(0, 100)}`); return null; })
       : null;
-    const s = summarise(rows, { day, seenCompanies: seen, push });
+    const offsite = await offsiteAudit().catch((e) => { log(`! digest: offsite audit failed — ${e.message.slice(0, 100)}`); return undefined; });
+    const s = summarise(rows, { day, seenCompanies: seen, push, offsite });
     const sent = await sendDigest(env, s, { log });
     return { day, jobs: rows.length, sent: sent.sent, why: sent.why };
   }

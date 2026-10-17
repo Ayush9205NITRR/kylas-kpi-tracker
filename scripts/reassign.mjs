@@ -171,7 +171,7 @@ export async function plan({ kylas, companies = [], ownerId, log = () => {} }) {
    Sequential on purpose: the Kylas client rate-limits at about five a second
    and a burst of parallel PUTs buys nothing but 429s. */
 export async function apply({ kylas, companies = [], ownerId, log = () => {},
-                              onProgress = () => {} }) {
+                              onProgress = () => {}, concurrency = 1 }) {
   const ids = [...new Set(companies.map(String).filter(Boolean))];
   const to = String(ownerId || "");
   if (!to) throw Object.assign(new Error("an owner to move them to is required"), { status: 400 });
@@ -183,9 +183,12 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
       `Re-assign them in smaller groups, so a mistake is a group and not the account.`),
       { status: 400 });
 
-  const moved = [], failed = [];
   let contactsMoved = 0, skipped = 0, done = 0, accountOwnersMoved = 0, ownerFailed = 0;
-  for (const id of ids) {
+
+  /* ONE ACCOUNT, START TO FINISH. Contacts in order inside it, the account's own
+     owner last. Accounts are independent of each other, which is the only thing
+     the concurrency below relies on: two workers never touch the same record. */
+  const oneAccount = async (id) => {
     try {
       /* The company is READ, never written — for its name, and to fail the
          account early if Kylas cannot serve it at all. See the header for what
@@ -196,6 +199,14 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
       let n = 0;
       for (const p of people) {
         try {
+          /* ALREADY THERE, FROM THE SEARCH ROW, WITHOUT A READ. The search that
+             just listed this account's people says who owns each of them, seconds
+             ago. Skipping a write on that is always safe (the worst case is a
+             contact that moved in the last few seconds being left alone), and it
+             spares the read that used to come first: a re-run of a half-finished
+             batch is mostly contacts already moved, and each cost a request to
+             be told so. */
+          if (String(idOf(p?.ownerId) ?? "") === to) { skipped++; continue; }
           /* READ IMMEDIATELY BEFORE THE WRITE. Not from the crawl, not from the
              Airtable copy: both can be an hour old, and an hour-old body written
              back over a fresh record silently reverts whatever moved in between. */
@@ -222,23 +233,60 @@ export async function apply({ kylas, companies = [], ownerId, log = () => {},
           ownerSet = true; accountOwnersMoved++;
         } catch (e) { ownerWhy = e.message.slice(0, 120); ownerFailed++; }
       }
-      moved.push({ id, name: co?.name || `Company ${id}`, contacts: n, ownerSet,
-                   ...(ownerWhy ? { ownerWhy } : {}),
-                   ...(stuck.length ? { contactsFailed: stuck } : {}) });
+      return { ok: { id, name: co?.name || `Company ${id}`, contacts: n, ownerSet,
+                     ...(ownerWhy ? { ownerWhy } : {}),
+                     ...(stuck.length ? { contactsFailed: stuck } : {}) } };
     } catch (e) {
-      failed.push({ id, why: e.message.slice(0, 160), status: e.status || 0 });
+      return { failed: { id, why: e.message.slice(0, 160), status: e.status || 0 } };
     }
-    done++;
-    onProgress({ done, total: ids.length });
+  };
+
+  /* THE POOL. `concurrency` accounts at a time, each keeping its own requests in
+     order. It only changes how many requests the Kylas client has in flight —
+     the client still starts them one gap apart, so this cannot exceed the rate
+     the sequential path was already held to, and the client drops back to one at
+     a time by itself on the first 429. Results are put back in the order the
+     accounts were given, whatever order they finished in. */
+  const k = Math.max(1, Math.min(Number(concurrency) || 1, ids.length));
+  const was = k > 1 && kylas.setConcurrency ? kylas.setConcurrency(k) : null;
+  const before = kylas.stats ? kylas.stats() : null;
+  const t0 = Date.now();
+  const results = new Array(ids.length);
+  try {
+    let next = 0;
+    await Promise.all(Array.from({ length: k }, async () => {
+      while (next < ids.length) {
+        const i = next++;
+        results[i] = await oneAccount(ids[i]);
+        done++;
+        onProgress({ done, total: ids.length });
+      }
+    }));
+  } finally {
+    if (was !== null) kylas.setConcurrency(was);
   }
+  const moved = results.filter((r) => r.ok).map((r) => r.ok);
+  const failed = results.filter((r) => r.failed).map((r) => r.failed);
+
+  /* WHAT IT COST, so "how fast is it" is a number and not a feeling. */
+  const ms = Date.now() - t0;
+  const after = kylas.stats ? kylas.stats() : null;
+  const timing = { ms, accounts: ids.length, concurrency: k,
+                   requests: after && before ? after.requests - before.requests : null,
+                   throttled: after && before ? after.throttles - before.throttles : null,
+                   perAccountMs: Math.round(ms / ids.length),
+                   perContactMs: contactsMoved ? Math.round(ms / contactsMoved) : null,
+                   ...(kylas.concurrency === 1 && k > 1 && after && before && after.throttles > before.throttles ? { backedOff: true } : {}) };
   log(`reassign: moved ${contactsMoved} contact(s) across ${moved.length} account(s) to owner ${to}` +
       (accountOwnersMoved ? `, and ${accountOwnersMoved} account owner(s)` : "") +
       (ownerFailed ? `, ${ownerFailed} account owner(s) REFUSED` : "") +
       (skipped ? `, ${skipped} already there` : "") +
-      (failed.length ? `, ${failed.length} FAILED` : ""));
+      (failed.length ? `, ${failed.length} FAILED` : "") +
+      ` — ${(ms / 1000).toFixed(1)}s, ${timing.requests ?? "?"} requests, ${k} at a time` +
+      (timing.backedOff ? " (Kylas throttled; went back to one)" : ""));
   return { moved: moved.length, contacts: contactsMoved, skipped, failed, accounts: moved,
            ownerId: to, accountOwners: accountOwnersMoved, accountOwnersFailed: ownerFailed,
-           accountOwnerMoves: true };
+           accountOwnerMoves: true, timing };
 }
 
 /* THE WHOLE CONTACT, with one field changed.

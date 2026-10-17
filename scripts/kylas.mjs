@@ -45,7 +45,7 @@ export function createClient(key, {
      instance — on a hosted runtime that is most requests — to space it from a
      request that never happened. */
   let last = 0;
-  const call = (method, path, body) => {
+  const serial = (method, path, body) => {
     const run = chain.then(() => {
       const wait = last + GAP - Date.now();
       return wait > 0 ? sleep(wait) : null;
@@ -54,6 +54,39 @@ export function createClient(key, {
     chain = Promise.race([run.then(() => {}, () => {}), sleep(STUCK_MS)]);
     return run;
   };
+
+  /* PIPELINED: THE SAME RATE, WITHOUT WAITING FOR THE ANSWER.
+     `serial` starts a request only after the previous one has FINISHED and then
+     leaves a gap, so its rate is 1 / max(latency, GAP). A bulk re-assign is
+     hundreds of independent requests; with Kylas answering in 600 ms that is
+     1.7 a second where the gap alone allows 2.2.
+
+     This starts requests GAP apart — the very same ceiling — but lets up to
+     `limit` be in flight, so the latency stops being on the critical path. It
+     cannot go faster than 1 / GAP, only stop going slower than it. The gain is
+     therefore latency / GAP at best (600 ms against 450 ms is 1.3x, 1.2 s is
+     2.7x), and none at all when Kylas already answers inside the gap. OFF by
+     default: only a caller that has asked (setConcurrency) is pipelined, and it
+     falls back to one at a time the first time Kylas answers 429, because
+     whether Kylas limits concurrency as well as rate is not known. */
+  let limit = 1, inflight = 0, requests = 0, throttles = 0;
+  const slots = [];
+  const pipelined = async (method, path, body) => {
+    if (inflight >= limit) await new Promise((r) => slots.push(r));
+    inflight++;
+    try {
+      const start = Math.max(Date.now(), last + GAP);
+      last = start;
+      const wait = start - Date.now();
+      if (wait > 0) await sleep(wait);
+      return await attempt(method, path, body);
+    } finally {
+      inflight--;
+      const next = slots.shift();
+      if (next) next();
+    }
+  };
+  const call = (method, path, body) => (limit > 1 ? pipelined(method, path, body) : serial(method, path, body));
 
   async function attempt(method, path, body, tries = 4) {
     for (let i = 0; i < tries; i++) {
@@ -66,7 +99,10 @@ export function createClient(key, {
         signal: AbortSignal.timeout(30_000),
       });
       const text = await res.text();
+      requests++;
       if (res.status === 429) {
+        throttles++;
+        if (limit > 1) { limit = 1; log(`429: Kylas is throttling, going back to one request at a time`); }
         const wait = 1200 * 2 ** i;
         log(`429 on ${path}, waiting ${wait}ms`);
         await sleep(wait);
@@ -485,6 +521,14 @@ export function createClient(key, {
 
   return {
     raw: call,
+    /* How many requests may be in flight at once. 1 (the default) is the
+       original behaviour. Returns the previous value, so a caller can put it
+       back. A 429 resets it to 1 by itself. */
+    setConcurrency(n) { const was = limit; limit = Math.max(1, Math.min(8, Math.floor(Number(n)) || 1)); return was; },
+    get concurrency() { return limit; },
+    /* Counted since the client was made: how many answers came back, and how many
+       of them were 429. A caller takes two readings and subtracts. */
+    stats: () => ({ requests, throttles }),
     me: () => call("GET", "/v1/users/me"),
     user: (id) => call("GET", `/v1/users/${id}`),
     company: (id) => call("GET", `/v1/companies/${id}`),
