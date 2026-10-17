@@ -22,9 +22,15 @@
  * most others accept ({from, to, subject, text, html}). With nothing set it
  * logs the digest and returns "not configured", which is also what it does in
  * every test — nothing here can email anybody by accident.
+ *
+ * OR A GMAIL APP PASSWORD (2026-10-17): with MAIL_SMTP_USER and MAIL_SMTP_PASS
+ * set, the mail goes out over SMTP instead (scripts/smtp.mjs). MAIL_FROM
+ * defaults to the user; MAIL_SMTP_HOST / MAIL_SMTP_PORT default to Gmail's
+ * smtp.gmail.com:465. If both are set, SMTP wins.
  */
 import { dayOf, today as todayIn, IST_MIN } from "./day.mjs";
 import { auditLines } from "./offsite-audit.mjs";
+import { sendMail, addressOf } from "./smtp.mjs";
 
 /* ── counting ──────────────────────────────────────────────────────────── */
 
@@ -185,15 +191,28 @@ export function renderHtml(s) {
 
 /* ── sending ───────────────────────────────────────────────────────────── */
 
-export async function sendDigest(env = {}, s, { log = () => {}, fetchImpl = fetch } = {}) {
-  const url = env.MAIL_URL, key = env.MAIL_KEY, to = env.MAIL_TO, from = env.MAIL_FROM;
+export async function sendDigest(env = {}, s, { log = () => {}, fetchImpl = fetch, connect } = {}) {
+  const url = env.MAIL_URL, key = env.MAIL_KEY, to = env.MAIL_TO;
+  const smtp = env.MAIL_SMTP_USER && env.MAIL_SMTP_PASS;
+  const from = env.MAIL_FROM || (smtp ? env.MAIL_SMTP_USER : "");
   const text = renderText(s);
-  if (!url || !to || !from) { log(`digest (not sent — set MAIL_URL, MAIL_KEY, MAIL_FROM, MAIL_TO):\n${text}`);
+  if (!(url || smtp) || !to || !from) { log(`digest (not sent — set MAIL_SMTP_USER + MAIL_SMTP_PASS, or MAIL_URL + MAIL_KEY, and MAIL_TO):\n${text}`);
     return { sent: false, why: "not configured", text }; }
   const body = { from, to: String(to).split(",").map((x) => x.trim()).filter(Boolean),
                  subject: `${attention(s) ? "⚠ " : ""}BD console → Kylas · ${s.day} · ${s.contactsUpdated} updated, ${s.contactsCreated} created` +
                     (attention(s) ? ` · ${attention(s)} need attention` : ""),
                  text, html: renderHtml(s) };
+  if (smtp) {
+    try {
+      await sendMail({ host: env.MAIL_SMTP_HOST || "smtp.gmail.com", port: Number(env.MAIL_SMTP_PORT) || 465,
+                       user: env.MAIL_SMTP_USER, pass: env.MAIL_SMTP_PASS, ...body }, { connect });
+    } catch (e) {
+      log(`! digest not sent — ${String(e.message).replace(env.MAIL_SMTP_PASS, "***").slice(0, 200)}`);
+      return { sent: false, why: String(e.message).slice(0, 120), text };
+    }
+    log(`digest sent to ${to} (smtp, as ${addressOf(from)})`);
+    return { sent: true, text };
+  }
   const res = await fetchImpl(url, { method: "POST",
     headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify(body) });

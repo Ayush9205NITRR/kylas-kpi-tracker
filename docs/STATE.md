@@ -752,6 +752,16 @@ Set `MAIL_URL`, `MAIL_KEY`, `MAIL_FROM`, `MAIL_TO` (Resend's shape, which most
 providers accept). With them unset it logs the digest and sends nothing, which
 is also what every test does — nothing here can email anybody by accident.
 
+**Or a Gmail app password (2026-10-17, Ayush).** Set `MAIL_SMTP_USER` (the Gmail
+address) and `MAIL_SMTP_PASS` (the 16-character app password, as a Worker secret)
+and the mail goes over SMTP instead (`scripts/smtp.mjs`, `cloudflare:sockets`,
+smtp.gmail.com:465, TLS from the first byte). `MAIL_FROM` defaults to the user;
+`MAIL_TO` is still required. If both this and `MAIL_URL` are set, SMTP wins. The
+conversation is tested against a mock SMTP server (`test-smtp.mjs`); the real
+Gmail handshake has not been run from here — the first mail is the live test.
+Gmail only lets the authenticated address (or an alias set up in Gmail) be the
+sender, so `MAIL_FROM` must be that address.
+
 ## 3bb · "120 allotted" — a synced-but-short copy served as the whole account
 
 **The worst bug of the session, and it reached Ayush.** The day the first real
