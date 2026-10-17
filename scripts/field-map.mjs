@@ -125,7 +125,7 @@ export const FIELD_MAP = [
     kylas: { name: "cfPipelineStageBd", entity: "contact", custom: true }, sends: "option", convert: "option id", how: "stage name to the picklist option's id" },
   { key: "source", via: ["save"], label: "Source of Data",
     airtable: { table: "Contacts", field: "Source of Data", type: "singleLineText" },
-    kylas: { name: "cfSourceOfData", entity: "contact", custom: true }, sends: "option", convert: "as typed", how: "sent as the console holds it" },
+    kylas: { name: "cfSourceOfData", entity: "contact", custom: true }, sends: "text", convert: "as typed", how: "sent as the console holds it" },
   { key: "nextCall", via: ["save", "push"], label: "Next call (call-back)",
     airtable: { table: "Contacts", field: "Next Call Date", type: "date" },
     /* A date-only field takes the day; a date-time field takes the instant. Both

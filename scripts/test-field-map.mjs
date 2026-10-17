@@ -107,7 +107,7 @@ console.log("\n5 · the registry resolved against an account");
   const base = [
     { name: "firstName", label: "First Name", type: "TEXT_FIELD" },
     { name: "cfPipelineStageBd", label: "Pipeline Stage - BD", type: "PICK_LIST" },
-    { name: "cfSourceOfData", label: "Source of Data", type: "PICK_LIST" },
+    { name: "cfSourceOfData", label: "Source of Data", type: "TEXT_FIELD" },
     { name: "cfNextCallDate", label: "Next Call Date", type: "DATE_PICKER" },
     { name: "cfOffsiteTimelineBdNew", label: "Offsite Timeline", type: "MULTI_PICKLIST" },
   ];

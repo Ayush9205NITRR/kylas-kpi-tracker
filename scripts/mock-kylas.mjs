@@ -522,12 +522,9 @@ createServer(async (req, res) => {
     const shape = (list) => list.filter((f) => f.name !== dropName)
       .map((f) => (f.name === retypeName && retypeTo ? { ...f, type: retypeTo } : f));
     return json(res, 200, { content: shape([
-      { name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
-        picklist: { picklistValues: [
-          { id: 9001, name: "Round-Robin", displayName: "Round-Robin" },
-          { id: 9002, name: "Apollo", displayName: "Apollo" },
-          { id: 9003, name: "Referral", displayName: "Referral" },
-        ] } },
+      /* A TEXT field on the live account (field-map.mjs --store, 2026-10-17), not
+         the picklist the first draft of the registry assumed. */
+      { name: "cfSourceOfData", displayName: "Source of Data", type: "TEXT_FIELD" },
       { name: "cfPipelineStageBd", displayName: "Pipeline Stage - BD", type: "PICK_LIST",
         picklist: { picklistValues: stages.map((s) => ({ id: s.id, name: s.code, displayName: s.label })) } },
       { name: "designation", displayName: "Designation", type: "TEXT_FIELD" },
