@@ -1400,6 +1400,24 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('...and the contact is marked again', (await mark('980010')) === 'phone-conflict', String(await mark('980010')));
 }
 
+/* ── §17 · the offsite audit, at the HTTP edge ─────────────────────────
+   Contacts vs the company's own field (scripts/offsite-audit.mjs). Admin only;
+   reads cached data and never starts a Kylas crawl for it. */
+{
+  console.log('\n17. the offsite audit');
+  const aw = await coldWorker(1790);
+  const forbidden = await aw.fetch(new Request('https://bd.enout.website/offsite-audit', { headers: { Origin: ORIGIN } }),
+    { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in' }, { waitUntil() {} });
+  check('an associate cannot read the offsite audit', forbidden.status === 403, `status ${forbidden.status}`);
+  const r = await call('/offsite-audit', { env: withStore(ENV) });
+  const j = await r.json();
+  check('an admin gets it', r.status === 200 && j.companies && j.counts && j.rates, `status ${r.status} ${JSON.stringify(j).slice(0, 120)}`);
+  check('...with every verdict counted', ['agree', 'partial', 'conflict', 'onlyAirtable', 'onlyKylas'].every((k) => typeof j.counts[k] === 'number'), JSON.stringify(j.counts));
+  check('...and a rate is a number or null, never a made-up zero',
+        Object.values(j.rates).every((v) => v === null || (typeof v === 'number' && v >= 0 && v <= 100)), JSON.stringify(j.rates));
+  check('...saying how many companies it could compare against', typeof j.crawled === 'number', String(j.crawled));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

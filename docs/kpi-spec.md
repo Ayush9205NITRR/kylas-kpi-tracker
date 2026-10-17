@@ -414,6 +414,14 @@ silently withhold the credit from someone who did fill budget, timeline and pax.
 > **SETTLED 2026-09-18 — Mode of Meeting values.** `In Person | Virtual |
 > Calls | Text` is the real list; see §6. The dashboard spec's
 > `Video | Audio | In-Person` is superseded.
+>
+> **RE-CONFIRMED 2026-10-17 (Ayush, asked directly).** The notes said "physical,
+> virtual, (to be added)". Asked whether `In Person` should be renamed `Physical` and
+> what the third value was, the answer was: **keep `In Person`, and `Calls` and `Text`
+> are enough — nothing to add.** So the list does not change, no migration runs, and
+> "Physical" in those notes was `In Person`. If a value is ever added, it is one
+> line in `MEETING_MODES` (scripts/schema.mjs) and one in `MODE_OF_MEETING`
+> (extension/console/console.js), plus the select option in the Airtable base.
 
 ---
 

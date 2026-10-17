@@ -1770,6 +1770,102 @@ twins); a periodic sweep for duplicates that already exist.
 
 ---
 
+## 3n · Offsite contact vs company, and the speed of a bulk re-assign
+
+Both from Ayush's 2026-10-16 notes ("Offsite Timeline -> contact <-> company,
+Airtable to company is it being mapped (error rate to be determined)" and "Bulk
+allotment — UI se fast nahi hai"). Built 2026-10-17.
+
+### The offsite audit (`scripts/offsite-audit.mjs`)
+
+The quarter is typed on a **contact's** event row and written to the **contact** in
+Kylas (every save, and the nightly push — the Push Log verifies that half). The
+**company's** own offsite field is only ever *read*: nothing writes a company, by
+design. So "is Airtable mapped to the company" is a *comparison*, per company, of
+three sets of quarters: the contacts' (`offsiteByCompany`), the company's field in
+Kylas (`kylasOffsite`), and the team's Company List copy of it (`listOffsite`).
+
+| verdict | meaning |
+|---|---|
+| `agree` | both have a quarter and it is the same set |
+| `partial` | both have one and share some, not all |
+| `conflict` | both have one and share none |
+| `onlyAirtable` | the contacts say a quarter, the company field is empty — **the mapping gap** |
+| `onlyKylas` | the company says one, no contact does |
+
+Rates, each over its own denominator: **mapped** = agree / companies Airtable has a
+quarter for; **error** = (partial + conflict) / companies *both* have one for (null,
+never 0%, when there is no company with both); **notWritten** = onlyAirtable /
+companies Airtable has one for. The Company List vs Kylas comparison is counted
+apart — it is the sync's fault, not the mapping's.
+
+`GET /offsite-audit` (admin) and a paragraph in the morning mail. **It reads cached
+data only and never starts a Kylas crawl**: on a cold server it says "the Kylas
+company list is not cached yet" rather than spending ten minutes of requests on a
+report. Open the Accounts view once and ask again. `test-offsite-audit.mjs` counts
+the rates by hand on cases of three or four companies.
+
+**What it will most likely say:** a large `notWritten` — nothing writes the company
+field — and a small `error`. The first is not a bug; it is the answer to "is it
+being mapped". Writing the company field would be a separate decision (the company
+PUT that replaces the record is fenced for a reason, §3e; the owner endpoint is the
+only company write that is known safe).
+
+### Bulk re-assign speed
+
+**Why it was slow.** Per contact two Kylas requests (read it, PUT it back — the PUT
+replaces the record, so the read cannot be skipped), per account one to set its
+owner, and the Kylas client sent them **one at a time**: the next began only after
+the last had *answered*, then waited out a 450 ms gap. Rate = 1 / max(latency, gap).
+
+**What changed.**
+1. The client can keep several requests in flight, **started the same 450 ms
+   apart** (`setConcurrency`; opt-in, off by default). The ceiling does not move;
+   only the wait for each answer comes off the critical path. It drops back to one
+   at a time **by itself on the first 429**, because whether Kylas limits
+   concurrency as well as rate has not been measured.
+2. `apply()` takes a `concurrency` (`REASSIGN_CONCURRENCY`, default **3** on the
+   Worker; `1` is the old behaviour), putting results back in the order the
+   accounts were given.
+3. A contact the search row already shows on the target is skipped **without the
+   read** that used to precede the skip (a re-run of a half-finished batch).
+4. `apply()` returns `timing` — ms, accounts, requests, 429s, per contact — and
+   logs it, so "how fast" is a number.
+
+**What it buys, measured** (`node scripts/bench-reassign.mjs`, 8 accounts, 16
+contacts, against the mock with injected latency):
+
+| Kylas answers in | one at a time | three at a time | |
+|---|---|---|---|
+| 700 ms | 39.4 s | 25.5 s | **1.55x** |
+| 250 ms | 25.0 s | 25.0 s | 1.00x — no gain |
+
+The gain is **latency / gap at best**: it hides latency, it does not raise Kylas'
+rate. If the live account answers inside 450 ms it buys nothing, and that is the
+number to get first.
+
+**Measure the live account (read-only):**
+`node --env-file=.env.local scripts/probe-throughput.mjs` sends ~100 `GET
+/v1/users/me`, stops a setting at its first 429, and prints the median answer
+time, whether overlapping was accepted, and what to set `REASSIGN_CONCURRENCY` to.
+Run it before believing the table above applies to Kylas.
+
+**Not done, deliberately:** skipping the per-contact read before the PUT (a
+search row does not carry every field, and the PUT replaces the record — §3
+cont.); lowering `KYLAS_GAP` (speeds everything, and the one data point for the
+450 is "a burst of 8 drew three 429s").
+
+---
+
+### Meeting type — decided, nothing to build (2026-10-17)
+
+Asked whether `In Person` should become `Physical` and what the "(to be added)"
+value was, Ayush answered: keep `In Person`; `Calls` and `Text` are enough. See
+`docs/kpi-spec.md` §7. The per-company meeting-mode count the dashboard already
+makes (`co.modes` in views.js) is the view; it needs no change.
+
+---
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current
