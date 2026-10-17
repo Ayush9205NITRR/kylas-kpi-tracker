@@ -31,13 +31,20 @@ const wroteHas = (j, what) => (j.result?.wrote || []).some((w) => w.startsWith(w
 
 /* rows: what saveQueue.finishedSince() returns.
    newCompanies / newContacts: ids first saved on this day, from the KPI base. */
-export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = new Set() } = {}) {
+export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = new Set(), push } = {}) {
   const out = {
     day,
     contactsUpdated: 0, contactsCreated: 0, callsLogged: 0,
     accountsTouched: seenCompanies.size, accountsFirstSaved: newCompanies,
     accountsCreatedInKylas: 0,          /* by design — see the header */
     failed: 0, partial: 0, failures: [],
+    /* THE AIRTABLE -> KYLAS PUSH (scripts/push-log.mjs). undefined: the caller
+       did not look. null: it looked and there is nowhere to read it from (the
+       Push Log table does not exist). An object: what the last night did. */
+    push,
+    /* Saves that left a value off because Kylas has no field for it. The save
+       itself succeeded, which is why only a count can show it. */
+    unmappedSaves: 0, unmappedWhat: [],
   };
   for (const j of rows) {
     if (j.state === "failed") {
@@ -50,6 +57,10 @@ export function summarise(rows = [], { day, newCompanies = 0, seenCompanies = ne
     if (wroteHas(j, "created contact")) out.contactsCreated++;
     else if (wroteHas(j, "updated contact") || wroteHas(j, "adopted")) out.contactsUpdated++;
     if (wroteHas(j, "logged call")) out.callsLogged++;
+    if (j.result?.unmapped?.length) {
+      out.unmappedSaves++;
+      for (const w of j.result.unmapped) if (!out.unmappedWhat.includes(w)) out.unmappedWhat.push(w);
+    }
     /* A save whose Kylas half landed and whose Airtable half did not is not a
        failure and is not a clean success either. It is the one that silently
        costs a KPI, so it is counted and named. */
@@ -91,7 +102,43 @@ export function renderText(s) {
   } else {
     body.push("Nothing was saved yesterday.");
   }
+  body.push(...pushLines(s));
   return body.join("\n");
+}
+
+/* THE PUSH SECTION, SHARED BY THE TEXT AND HTML RENDERERS. Returns plain lines;
+   empty when the caller did not look (older callers, every test that predates
+   this). A missing Push Log table is said, not shown as zero: zero would read
+   as "nothing needed pushing". */
+export function pushLines(s) {
+  const out = [];
+  if (s.push === undefined && !s.unmappedSaves) return out;
+  out.push("", "Airtable → Kylas push");
+  if (s.push === null) out.push("  Not tracked yet — the Push Log table does not exist. Run: node scripts/repair-base.mjs");
+  else if (s.push) {
+    const p = s.push;
+    if (!p.contacts && !p.runs) out.push("  No push ran in the last 24 hours.");
+    else {
+      out.push(`  ${String(p.pushed).padStart(5)}  pushed, and read back from Kylas`);
+      out.push(`  ${String(p.partly).padStart(5)}  partly pushed`);
+      out.push(`  ${String(p.notPushed).padStart(5)}  NOT pushed`);
+      for (const f of p.problems.slice(0, 15)) out.push(`  · ${f.what} — ${f.why}`);
+      if (p.problems.length > 15) out.push(`  · …and ${p.problems.length - 15} more`);
+    }
+    if (p.mapProblems.length) {
+      out.push("", "Field map — these will not reach Kylas until fixed:");
+      for (const m of p.mapProblems) out.push(`  · ${m.label}: ${m.note}`);
+    }
+  }
+  if (s.unmappedSaves)
+    out.push("", `${s.unmappedSaves} save(s) left a value off because Kylas has no field for it: ${s.unmappedWhat.join(", ")}.`);
+  return out;
+}
+
+/* Anything in the push the reader must act on, for the subject line. */
+export function attention(s) {
+  const p = s.push;
+  return (p ? p.partly + p.notPushed + p.mapProblems.length : 0) + (s.unmappedSaves ? 1 : 0);
 }
 
 const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -105,11 +152,16 @@ export function renderHtml(s) {
       `${s.failed} failed, ${s.partial} landed only halfway</p><ul style="font:13px/1.6 system-ui;color:#4a4a57;margin:0;padding-left:18px">` +
       s.failures.slice(0, 20).map((f) => `<li>${esc(f.what)} — ${esc(f.why)}</li>`).join("") + `</ul>`
     : `<p style="font:14px/1.5 system-ui;color:#4a4a57;margin:18px 0 0">Nothing failed.</p>`;
+  const pl = pushLines(s);
+  const pushHtml = pl.length
+    ? `<p style="font:600 14px/1.4 system-ui;color:${attention(s) ? "#b4232a" : "#111"};margin:22px 0 6px">${esc(pl[1])}</p>` +
+      `<div style="font:13px/1.6 system-ui;color:#4a4a57">${pl.slice(2).map((l) => l ? `<div>${esc(l).replace(/^ {2}/, "&nbsp;&nbsp;")}</div>` : `<div style="height:8px"></div>`).join("")}</div>`
+    : "";
   return `<div style="max-width:520px"><p style="font:600 15px/1.3 system-ui;color:#111;margin:0 0 14px">` +
     `BD console → Kylas · ${esc(s.day)}</p><table cellspacing="0" cellpadding="0">` +
     LINES.map(([label, k]) => row(label, s[k])).join("") +
     row("Accounts created in Kylas (never — the console does not create companies)", 0, true) +
-    `</table>${fails}</div>`;
+    `</table>${fails}${pushHtml}</div>`;
 }
 
 /* ── sending ───────────────────────────────────────────────────────────── */
@@ -120,7 +172,8 @@ export async function sendDigest(env = {}, s, { log = () => {}, fetchImpl = fetc
   if (!url || !to || !from) { log(`digest (not sent — set MAIL_URL, MAIL_KEY, MAIL_FROM, MAIL_TO):\n${text}`);
     return { sent: false, why: "not configured", text }; }
   const body = { from, to: String(to).split(",").map((x) => x.trim()).filter(Boolean),
-                 subject: `BD console → Kylas · ${s.day} · ${s.contactsUpdated} updated, ${s.contactsCreated} created`,
+                 subject: `${attention(s) ? "⚠ " : ""}BD console → Kylas · ${s.day} · ${s.contactsUpdated} updated, ${s.contactsCreated} created` +
+                    (attention(s) ? ` · ${attention(s)} need attention` : ""),
                  text, html: renderHtml(s) };
   const res = await fetchImpl(url, { method: "POST",
     headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },

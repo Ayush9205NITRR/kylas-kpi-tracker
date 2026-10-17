@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS "contacts" (
   , "service_offering" INTEGER NOT NULL DEFAULT 0 CHECK ("service_offering" IN (0, 1))
   -- Set true the first time a non-CNC stage is seen, never unset. This is what makes Phone Picked monotonic.
   , "ever_picked" INTEGER NOT NULL DEFAULT 0 CHECK ("ever_picked" IN (0, 1))
+  -- Set true the first time any event row carries budget, timeline or pax. Never unset.
+  , "ever_right_poc" INTEGER NOT NULL DEFAULT 0 CHECK ("ever_right_poc" IN (0, 1))
+  -- Set true the first time one event row carries all three. Never unset.
+  , "ever_discovery" INTEGER NOT NULL DEFAULT 0 CHECK ("ever_discovery" IN (0, 1))
   -- Highest rung ever reached. Written as MAX(existing, computed). Never decreases.
   , "kpi_rank" INTEGER
   -- When KPI Rank last increased — the last qualitative update.
@@ -89,6 +93,8 @@ CREATE TABLE IF NOT EXISTS "event_rows" (
   , "timeline" TEXT
   , "pax" TEXT
   , "remarks" TEXT
+  -- Set when the console removes this row. Blank means live. A marked row counts for nothing but is never destroyed.
+  , "removed_at" TEXT CHECK ("removed_at" IS NULL OR "removed_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
   -- was the Airtable link "Contact" → Contacts
   , "contact_id" INTEGER REFERENCES "contacts"("id") ON DELETE RESTRICT
   -- derived on this row only; a child-dependent field would belong in a view
@@ -189,11 +195,12 @@ CREATE TABLE IF NOT EXISTS "call_rollup" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT
   -- the Airtable record id, so the backfill can re-run and the reconciler can join
   , "airtable_id" TEXT UNIQUE
-  -- day|owner|outcome. The upsert key, so re-running a day overwrites rather than adds.
+  -- day|owner|outcome|stage. The upsert key, so re-running a day overwrites rather than adds.
   , "key" TEXT
   , "day" TEXT
   , "owner" TEXT
   , "outcome" TEXT
+  , "stage_set" TEXT
   , "calls" INTEGER
   , "talk_seconds" INTEGER
   , "rolled_at" TEXT CHECK ("rolled_at" IS NULL OR "rolled_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
@@ -201,6 +208,86 @@ CREATE TABLE IF NOT EXISTS "call_rollup" (
   , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   -- the key the application upserts on: a duplicate is a failed write, not a report
   , UNIQUE ("key")
+);
+
+-- One row per call placed through the Kylas dialler app, imported by import-dialler-calls.mjs. The only source of real talk time: the console's own stopwatch runs only when a call is dialled from its button. Append-only — Kylas owns these rows.
+CREATE TABLE IF NOT EXISTS "dialler_calls" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+  -- the Airtable record id, so the backfill can re-run and the reconciler can join
+  , "airtable_id" TEXT UNIQUE
+  -- The Kylas call log id. The upsert key, so re-importing a window overwrites rather than adds.
+  , "key" TEXT
+  , "called_at" TEXT CHECK ("called_at" IS NULL OR "called_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- The associate Kylas says placed the call — the dialler app records the real person, unlike the console's own logs.
+  , "owner" TEXT
+  -- Seconds of talk time, as the dialler measured it.
+  , "duration" INTEGER
+  , "contact_kylas_id" TEXT
+  , "call_type" TEXT
+  , "device" TEXT
+  , "recording" TEXT
+  , "imported_at" TEXT CHECK ("imported_at" IS NULL OR "imported_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- when this copy last changed, for the reconciler and for deltas
+  , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- One row per contact per Airtable-to-Kylas push, plus one "(run)" row per run. Status says Pushed only when the value was read back from Kylas. Written by push-kylas.mjs; read by the daily digest. Old rows can be deleted freely.
+CREATE TABLE IF NOT EXISTS "push_log" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+  -- the Airtable record id, so the backfill can re-run and the reconciler can join
+  , "airtable_id" TEXT UNIQUE
+  -- Run id + Kylas contact id (or "run"). The upsert key, so recording the same run twice overwrites.
+  , "key" TEXT
+  -- push-YYYYMMDDHHMM, the minute the run started.
+  , "run" TEXT
+  , "at" TEXT CHECK ("at" IS NULL OR "at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  , "source" TEXT CHECK ("source" IS NULL OR "source" IN ('Nightly push', 'Save'))
+  , "kylas_id" TEXT
+  -- The contact's name, or "(run)" on the per-run row.
+  , "contact" TEXT
+  , "status" TEXT CHECK ("status" IS NULL OR "status" IN ('Pushed', 'Partly pushed', 'Not pushed'))
+  -- The data points that landed and were read back. On a "(run)" row, how many contacts pushed.
+  , "pushed" TEXT
+  -- The data points that did not. On a "(run)" row, how many contacts did not.
+  , "not_pushed" TEXT
+  -- Why, one line per data point.
+  , "reason" TEXT
+  -- Every value was read back from Kylas and matched.
+  , "verified" INTEGER NOT NULL DEFAULT 0 CHECK ("verified" IN (0, 1))
+  -- Per-field outcome as JSON: key, Kylas field, status, value sent, value read back.
+  , "detail" TEXT
+  -- when this copy last changed, for the reconciler and for deltas
+  , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Which Airtable field is sent to which Kylas field, and whether the type matches. One row per datum, rewritten at each check. Generated from scripts/field-map.mjs; do not edit by hand.
+CREATE TABLE IF NOT EXISTS "field_map" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+  -- the Airtable record id, so the backfill can re-run and the reconciler can join
+  , "airtable_id" TEXT UNIQUE
+  -- The registry key (stage, offsite, phoneNumbers...). The upsert key.
+  , "key" TEXT
+  , "datum" TEXT
+  -- save, push, or save + push.
+  , "flow" TEXT
+  , "entity" TEXT CHECK ("entity" IS NULL OR "entity" IN ('contact', 'call-log'))
+  , "airtable_table" TEXT
+  , "airtable_field" TEXT
+  , "airtable_type" TEXT
+  -- The field name on this Kylas account. Blank when there is none.
+  , "kylas_field" TEXT
+  , "kylas_type" TEXT
+  -- The kind of value the code sends. The constant the Kylas type is held to.
+  , "sends" TEXT
+  , "status" TEXT CHECK ("status" IS NULL OR "status" IN ('mapped', 'unmapped', 'type', 'unknown', 'assumed'))
+  , "note" TEXT
+  , "last_checked" TEXT CHECK ("last_checked" IS NULL OR "last_checked" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- The last push that read this datum back from Kylas.
+  , "last_pushed_at" TEXT CHECK ("last_pushed_at" IS NULL OR "last_pushed_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- Why the last push of this datum failed. Blank when it did not.
+  , "last_error" TEXT
+  -- when this copy last changed, for the reconciler and for deltas
+  , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 -- One row per company a BD has picked or dropped. The CURRENT state only — every change is also appended to Focus History, which is what makes 'who dropped this and why' answerable a month later.

@@ -498,7 +498,15 @@ createServer(async (req, res) => {
   }
 
   if (p === "/v1/entities/contact/fields") {
-    return json(res, 200, { content: [
+    /* MOCK_NO_FIELD=<name> leaves one field out of the list, which is an account
+       that never created it (the UNMAPPED case in field-map.mjs).
+       MOCK_FIELD_TYPE=<name>:<TYPE> retypes one, which is an admin changing a
+       field in Kylas settings (the TYPE case). */
+    const dropName = process.env.MOCK_NO_FIELD || "";
+    const [retypeName, retypeTo] = String(process.env.MOCK_FIELD_TYPE || "").split(":");
+    const shape = (list) => list.filter((f) => f.name !== dropName)
+      .map((f) => (f.name === retypeName && retypeTo ? { ...f, type: retypeTo } : f));
+    return json(res, 200, { content: shape([
       { name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
         picklist: { picklistValues: [
           { id: 9001, name: "Round-Robin", displayName: "Round-Robin" },
@@ -522,7 +530,7 @@ createServer(async (req, res) => {
           { id: 9103, name: "JUL_SEP", displayName: "Jul - Sep" },
           { id: 9104, name: "OCT_DEC", displayName: "Oct - Dec" },
         ] } },
-    ] });
+    ]) });
   }
 
   /* No list endpoint exists on the real API, which is the whole reason the
@@ -630,7 +638,18 @@ createServer(async (req, res) => {
       return json(res, 400, { code: "002008", message: "Invalid Mobile Number.", errorDetails: [] });
     const at = CONTACTS.findIndex((c) => String(c.id) === put[1]);
     if (at < 0) return json(res, 404, { message: "no such contact" });
+    /* MOCK_PUT_REFUSE=<contact id> answers 400 for that contact, the way Kylas
+       refuses a whole contact over one bad value. */
+    if (process.env.MOCK_PUT_REFUSE && String(process.env.MOCK_PUT_REFUSE) === put[1])
+      return json(res, 400, { code: "002008", message: "Invalid value.", errorDetails: [] });
     CONTACTS[at] = { ...CONTACTS[at], ...body, updatedAt: new Date().toISOString() };
+    /* MOCK_DROP_FIELD=<custom field name> answers 200 and stores NOTHING for
+       that field — the DROPPED case probe-write.mjs exists to catch, and the
+       reason "Kylas said OK" is not an end state. */
+    if (process.env.MOCK_DROP_FIELD && CONTACTS[at].customFieldValues) {
+      const { [process.env.MOCK_DROP_FIELD]: _gone, ...rest } = CONTACTS[at].customFieldValues;
+      CONTACTS[at].customFieldValues = rest;
+    }
     WRITES.push({ kind: "update", id: Number(put[1]), body });
     return json(res, 200, CONTACTS[at]);
   }

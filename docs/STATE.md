@@ -1582,6 +1582,96 @@ between that and every associate opening a dead panel.** Dropping it would make
 a wrangler.toml typo fatal in a way it currently is not. Check that the
 published id is one of the two in `ALLOWED_ORIGIN` before ever reconsidering.
 
+## 3l · What was pushed to Kylas, what was not, and the field map
+
+Ayush, 2026-10-17: *"have existing data points, let us start tracking everything
+… data push hone ke baad: successfully pushed / yeh data push nahi hua"*, and
+*"Field mapper — which Airtable field is mapped to which Kylas field, and the
+data type constant — end state to be checked."*
+
+**Before this, the nightly push kept nothing.** It wrote to the live CRM, counted
+its writes in one number, and the number scrolled away in `wrangler tail`. A
+`200` from the contact endpoint was treated as "done", which this repo has been
+bitten by before (§3e, `probe-write.mjs` DROPPED).
+
+**The Push Log** (`scripts/push-log.mjs`, table `Push Log`). After every real
+run, one row per contact the push touched, plus a `(run)` row. Each says one of:
+
+| Status | means |
+|---|---|
+| **Pushed** | every value was sent, Kylas accepted it, and a **read-back** of the record shows it there. `Verified` is ticked. |
+| **Partly pushed** | some landed, some did not; `Pushed` and `Not Pushed` name both, `Reason` says why. |
+| **Not pushed** | nothing landed — Kylas refused the contact, or the value was held back for its type. |
+
+The read-back is one extra `GET /v1/contacts/{id}` per contact written, so at
+`PUSH_LIMIT = 100` it is at most 100 more requests a night. Per-field outcome
+(`pushed` / `dropped` / `mismatch` / `type` / `refused` / `unread`) is in `Detail`
+as JSON. One row per contact per run, **not** per field: the table grows by at
+most `PUSH_LIMIT` a day. Old rows can be deleted freely.
+
+**The Field Map** (`scripts/field-map.mjs`, table `Field Map`). One list, as data,
+of every datum that leaves for Kylas: the Airtable table and field, its type, the
+Kylas field it goes into, and the **kind** of value the code sends. The Kylas
+field's type is read into the same vocabulary, and the map holds when they are
+equal. Resolved against the live account:
+
+| Status | means |
+|---|---|
+| `mapped` | the Kylas field exists and is the kind we send |
+| `unmapped` | **no such field on this account.** The write leaves the value off and the save still succeeds — the failure that used to be invisible |
+| `type` | the field exists but takes a different kind (a name sent to an id-picklist, a day to a date-time…) |
+| `unknown` | a Kylas type this file does not read — reported, never guessed |
+| `assumed` | a core field the list does not describe; its type is fixed by the API |
+
+Two guards keep the registry honest, both in `test-field-map.mjs`: every Airtable
+field it names must exist in `schema.mjs` with that type, and **every field
+`toKylasContact` / `toKylasCallLog` actually writes must be on the map.** A field
+added to a save and not to the map fails the test.
+
+**Before a send, the type is checked.** `checkValue` holds a value back, and
+names it, if it is not the kind its Kylas field takes — so one bad value no longer
+costs the contact its write. A *name* sent where a picklist takes an *id* is
+reported but not held (`soft`): that is what `cfSourceOfData` has always been sent
+as, and changing a live save path is not part of tracking it. **Open question
+this surfaces:** `Source of Data` is sent as the console holds it, not as an
+option id. If Kylas stores it, nothing is wrong; if it does not, the next
+`probe-write.mjs` run says DROPPED. The Field Map row for `source` carries the
+note.
+
+**Saves are tracked more lightly, on purpose.** No read-back per save (that is
+200 more Kylas requests a day against a tight rate limit). A save whose card holds
+a call-back or an offsite quarter that this account has no field for records
+`result.unmapped` on its job row, and the digest counts it.
+
+**The morning mail** (`digest.mjs`) now has an "Airtable → Kylas push" section:
+pushed / partly / NOT pushed with each contact named, the field-map problems, and
+the count of saves that left a value off. The subject gets `⚠` and a count when
+anything needs attention. If the `Push Log` table does not exist it says *"Not
+tracked yet — run repair-base.mjs"*, never a zero. The window is the **last 24
+hours**, not yesterday: the push runs at 02:45 IST, which is *after* the day the
+digest reports.
+
+**`GET /field-map`** (admin only) returns the resolved map, the problems, and the
+last three days of pushes. `node --env-file=.env.local scripts/field-map.mjs` prints
+the same table in a terminal; `--store` also writes the Field Map table.
+
+**To switch it on (Ayush):**
+1. `node scripts/repair-base.mjs --dry-run`, then without `--dry-run` — creates
+   `Push Log` and `Field Map`. Needs the schema-scoped token (§3j). Until then a
+   push still runs and says so in its log; it records nothing.
+2. `node --env-file=.env.local scripts/field-map.mjs --store` — fills the Field
+   Map now, so the first thing you see is which data points have no Kylas field.
+3. `npm run deploy`, so the Worker's nightly push and digest are the new ones.
+4. The mail needs `MAIL_URL` `MAIL_KEY` `MAIL_FROM` `MAIL_TO` as Worker secrets
+   (`npx wrangler secret list`). Without them the digest is logged, not sent.
+
+**Not built, said plainly:** a per-save read-back; tracking the **call log** writes
+(the Kylas call-log entity is not in the contact field list, so its fields are
+`assumed`); a console view of the Field Map (the Airtable table and `/field-map`
+are the views for now); alerting between digests (the mail is daily).
+
+---
+
 ## 4 · Invariants that look arbitrary and are not
 
 - **The account's stage label is the RUNG's name, not the contact's current
@@ -1664,6 +1754,10 @@ published id is one of the two in `ALLOWED_ORIGIN` before ever reconsidering.
 
 ## 6 · Ayush's to-do, outside this repo
 
+- **Switch on push tracking (§3l).** `repair-base.mjs` (creates `Push Log` and
+  `Field Map`), then `field-map.mjs --store`, then `npm run deploy`. Check that
+  `MAIL_*` are Worker secrets (`npx wrangler secret list`) or the morning mail is
+  only logged.
 - **Run the Kylas sync once from the laptop** (DEPLOY.md part 9). The live
   base held 3 companies and 4 contacts on 2026-09-24 — the sync had never
   filled it. Check the dry run's counts against the Airtable plan's

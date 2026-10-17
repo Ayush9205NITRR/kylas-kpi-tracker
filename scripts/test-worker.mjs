@@ -1289,6 +1289,33 @@ console.log('\n11. a copy that is short of the account is not the account');
         `status ${bad.status}`);
 }
 
+/* ── §13 · the field map, at the HTTP edge ─────────────────────────────
+   Which Airtable field goes into which Kylas field (scripts/field-map.mjs),
+   resolved against the account the mock stands for. Admin-only, like the other
+   views that name fields and counts. */
+{
+  console.log('\n13. the field map');
+  const assocEnv = { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in' };
+  const asAssociate = await (await coldWorker(1301)).fetch(
+    new Request('https://bd.enout.website/field-map', { headers: { Origin: ORIGIN } }),
+    assocEnv, { waitUntil() {} });
+  check('an associate cannot read the field map', asAssociate.status === 403, `status ${asAssociate.status}`);
+
+  const r = await call('/field-map', { env: withStore(ENV) });
+  const j = await r.json();
+  check('an admin gets it', r.status === 200 && Array.isArray(j.rows), `status ${r.status}`);
+  const row = (k) => (j.rows || []).find((x) => x.key === k) || {};
+  check('...the call-back resolves to this account\'s own field name',
+        row('nextCall').kylasField === 'cfNextCallDate' && row('nextCall').status === 'mapped', JSON.stringify(row('nextCall')));
+  check('...the offsite quarter likewise, as a multi-picklist',
+        row('offsite').kylasField === 'cfOffsiteTimelineBdNew' && row('offsite').status === 'mapped', JSON.stringify(row('offsite')));
+  check('...the stage is mapped to its picklist', row('stage').kylasField === 'cfPipelineStageBd' && row('stage').status === 'mapped');
+  check('...every row says what Airtable field it comes from',
+        (j.rows || []).every((x) => 'airtableField' in x && 'sends' in x), '');
+  check('...and a whole account has no problems', j.whole === true && j.problems.length === 0, JSON.stringify(j.problems));
+  check('...option lists are not sent to the client', !(j.rows || []).some((x) => 'options' in x), '');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 done();
 process.exit(fail ? 1 : 0);

@@ -53,6 +53,8 @@ import { accountProgress, focusStanding, median } from "./progress.mjs";
 import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { summarise, sendDigest, windowFor, yesterdayIn } from "./digest.mjs";
+import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
+import { readPushLog, summarisePush } from "./push-log.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -1467,6 +1469,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           const map = await writeMap();
           extra = extraCustomFields(map, c, { tzMin: TZ_MIN, quarters: offsiteOf(c) });
         } catch (e) { log(`  write map unavailable (${e.message.slice(0, 60)}) — stage and remarks only`); }
+        /* THE FIELD MAP, ON A SAVE (scripts/field-map.mjs). A value the card
+           holds and this account has no Kylas field for is left off the write
+           and the save still succeeds — so the job row says so, and the daily
+           digest counts it. Silence here is how a call-back goes missing for a
+           month. */
+        try {
+          const lacking = lackingOnSave(await writeMap(), c, offsiteOf(c));
+          if (lacking.length) {
+            result.unmapped = lacking;
+            log(`! ${c.pocName}: no Kylas field for ${lacking.join(", ")} — left off the write`);
+          }
+        } catch { /* the map being unreadable is already logged above */ }
         const payload = toKylasContact(c, { remarks, extra, base });
 
         if (!c.kid) {
@@ -2605,6 +2619,28 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        rather than looking like it saved everywhere. */
     "/targets": async () => ({ kylas: true, airtable: !!airtable, base: AT_BASE || null }),
 
+    /* WHICH AIRTABLE FIELD GOES INTO WHICH KYLAS FIELD, resolved against this
+       account right now (scripts/field-map.mjs), and what the last pushes did
+       with them. Admin: it names fields and counts, and the reader who needs it
+       is whoever is fixing the mapping. */
+    "/field-map": async () => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("The field map is an admin view."), { status: 403 });
+      const m = await meta();
+      const rows = resolveFieldMap({ kylasFields: m.fields, writeMap: await writeMap(), picklists: m.picklists });
+      const problems = problemsOf(rows);
+      let pushed = null;
+      if (airtable) {
+        const now = Date.now();
+        pushed = await readPushLog(airtable, { fromIso: new Date(now - 3 * 86400000).toISOString(),
+                                               toIso: new Date(now + 60000).toISOString() })
+          .then(summarisePush).catch(() => null);
+      }
+      return { rows: rows.map(({ options: _o, ...r }) => r), problems, whole: !problems.length, pushed,
+               tracked: !!airtable };
+    },
+
     /* WHAT WAS SAID ON EARLIER CALLS — the notes on every Kylas call log for
        this contact, newest first. Ayush, 2026-10-09: "Previous remarks fetch
        nahi ho rahe hai." The "Said before" strip only ever read the contact's
@@ -2885,7 +2921,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const { from, to } = windowFor(day, TZ_MIN);
     const rows = await saves.finishedSince(from, to);
     const seen = new Set(rows.map((r) => r.result?.airtable?.companyRecordId).filter(Boolean));
-    const s = summarise(rows, { day, seenCompanies: seen });
+    /* The push ran at 02:45 the morning after `day`, so it is in the LAST 24
+       HOURS, not in `day`'s own window. null when there is nowhere to read it
+       from — said in the mail, never shown as zero. */
+    const nowMs = Date.now();
+    const push = airtable
+      ? await readPushLog(airtable, { fromIso: new Date(nowMs - 86400000).toISOString(),
+                                      toIso: new Date(nowMs + 60000).toISOString() })
+          .then(summarisePush).catch((e) => { log(`! digest: push log unreadable — ${e.message.slice(0, 100)}`); return null; })
+      : null;
+    const s = summarise(rows, { day, seenCompanies: seen, push });
     const sent = await sendDigest(env, s, { log });
     return { day, jobs: rows.length, sent: sent.sent, why: sent.why };
   }

@@ -333,6 +333,57 @@ export const TABLES = [
       { name: "Imported At", type: "dateTime", options: dateTime },
     ],
   },
+  /* WHAT WAS PUSHED TO KYLAS, AND WHAT WAS NOT. Written by push-kylas.mjs after
+     every real run (scripts/push-log.mjs). One row per contact per run, plus a
+     "(run)" row carrying what the field map found wrong before any contact was
+     touched. Pushed means a READ-BACK of the Kylas record shows the value —
+     never merely that Kylas answered 200. Read by the daily digest. */
+  {
+    name: "Push Log",
+    description: "One row per contact per Airtable-to-Kylas push, plus one \"(run)\" row per run. Status says Pushed only when the value was read back from Kylas. Written by push-kylas.mjs; read by the daily digest. Old rows can be deleted freely.",
+    fields: [
+      { name: "Key", type: "singleLineText", description: "Run id + Kylas contact id (or \"run\"). The upsert key, so recording the same run twice overwrites." },
+      { name: "Run", type: "singleLineText", description: "push-YYYYMMDDHHMM, the minute the run started." },
+      { name: "At", type: "dateTime", options: dateTime },
+      { name: "Source", type: "singleSelect", options: sel("Nightly push", "Save") },
+      { name: "Kylas ID", type: "singleLineText" },
+      { name: "Contact", type: "singleLineText", description: "The contact's name, or \"(run)\" on the per-run row." },
+      { name: "Status", type: "singleSelect", options: sel("Pushed", "Partly pushed", "Not pushed") },
+      { name: "Pushed", type: "singleLineText", description: "The data points that landed and were read back. On a \"(run)\" row, how many contacts pushed." },
+      { name: "Not Pushed", type: "singleLineText", description: "The data points that did not. On a \"(run)\" row, how many contacts did not." },
+      { name: "Reason", type: "multilineText", description: "Why, one line per data point." },
+      { name: "Verified", type: "checkbox", options: check, description: "Every value was read back from Kylas and matched." },
+      { name: "Detail", type: "multilineText", description: "Per-field outcome as JSON: key, Kylas field, status, value sent, value read back." },
+    ],
+  },
+  /* WHICH AIRTABLE FIELD GOES INTO WHICH KYLAS FIELD. One row per datum, from
+     the registry in field-map.mjs, resolved against the live Kylas account and
+     overwritten each time it is checked (field-map.mjs --store, and every real
+     push). Status is the point: Mapped, Unmapped (no such Kylas field — the value
+     is silently left off every write), Type (the field takes a different kind of
+     value than we send), Unknown, Assumed (a core field the list does not
+     describe). */
+  {
+    name: "Field Map",
+    description: "Which Airtable field is sent to which Kylas field, and whether the type matches. One row per datum, rewritten at each check. Generated from scripts/field-map.mjs; do not edit by hand.",
+    fields: [
+      { name: "Key", type: "singleLineText", description: "The registry key (stage, offsite, phoneNumbers...). The upsert key." },
+      { name: "Datum", type: "singleLineText" },
+      { name: "Flow", type: "singleLineText", description: "save, push, or save + push." },
+      { name: "Entity", type: "singleSelect", options: sel("contact", "call-log") },
+      { name: "Airtable Table", type: "singleLineText" },
+      { name: "Airtable Field", type: "singleLineText" },
+      { name: "Airtable Type", type: "singleLineText" },
+      { name: "Kylas Field", type: "singleLineText", description: "The field name on this Kylas account. Blank when there is none." },
+      { name: "Kylas Type", type: "singleLineText" },
+      { name: "Sends", type: "singleLineText", description: "The kind of value the code sends. The constant the Kylas type is held to." },
+      { name: "Status", type: "singleSelect", options: sel("mapped", "unmapped", "type", "unknown", "assumed") },
+      { name: "Note", type: "multilineText" },
+      { name: "Last Checked", type: "dateTime", options: dateTime },
+      { name: "Last Pushed At", type: "dateTime", options: dateTime, description: "The last push that read this datum back from Kylas." },
+      { name: "Last Error", type: "multilineText", description: "Why the last push of this datum failed. Blank when it did not." },
+    ],
+  },
   /* WHY AN ACCOUNT STOPPED MOVING, in the associate's own words, at the moment
      it is still fresh enough to remember.
 

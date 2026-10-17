@@ -15,6 +15,7 @@ import { createAirtable } from "./airtable.mjs";
 import { createShadow, splitStatements } from "./shadow.mjs";
 import { sqlSchema } from "./sql-schema.mjs";
 import { sqlDerived } from "./sql-derived.mjs";
+import { TABLES } from "./schema.mjs";
 
 const PORT = 9932, BASE_URL = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
@@ -46,7 +47,7 @@ const stmts = splitStatements(sqlSchema() + "\n" + sqlDerived());
 ok("every statement is non-empty", stmts.every((s) => s.length > 0));
 ok("none carries a stray semicolon", stmts.every((s) => !s.includes(";")));
 ok("the tables and both views are all there",
-  stmts.filter((s) => /^CREATE TABLE/.test(s)).length === 13 &&
+  stmts.filter((s) => /^CREATE TABLE/.test(s)).length === TABLES.length &&
   stmts.filter((s) => /^CREATE VIEW/.test(s)).length === 2,
   `${stmts.filter((s) => /^CREATE TABLE/.test(s)).length} tables, ${stmts.filter((s) => /^CREATE VIEW/.test(s)).length} views`);
 

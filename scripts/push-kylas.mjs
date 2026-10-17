@@ -33,6 +33,8 @@ import { createClient } from "./kylas.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { offsiteOf } from "./offsite.mjs";
 import { tzMinOf } from "./day.mjs";
+import { resolveFieldMap, problemsOf, kindOfKylas, checkValue, verdict } from "./field-map.mjs";
+import { contactRow, runRow, recordPush, storeFieldMap, whyOf } from "./push-log.mjs";
 
 export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, only = "" } = {}) {
   const TZ = tzMinOf(env);
@@ -51,11 +53,27 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   const rawFields = Array.isArray(fieldList) ? fieldList : fieldList?.content || fieldList?.data || [];
   const picklists = {};
   for (const f of rawFields) { const o = findOptions(f); if (o && (f.name || f.displayName)) picklists[f.name || f.displayName] = o; }
-  const map = resolveWriteFields(rawFields.map((f) => ({ name: f.name, label: f.displayName, type: f.type })), picklists);
+  const kylasFields = rawFields.map((f) => ({ name: f.name, label: f.displayName, type: f.type }));
+  const map = resolveWriteFields(kylasFields, picklists);
   describeWriteMap(map).forEach((l) => log(`  ${l}`));
+
+  /* THE FIELD MAP, CHECKED BEFORE ANYTHING IS TOUCHED (scripts/field-map.mjs).
+     A datum with no Kylas field is not an error anywhere downstream — the value
+     is simply left off the write — so this is the one place it can be said out
+     loud, and the run row below is where the digest reads it from. */
+  const resolved = resolveFieldMap({ kylasFields, writeMap: map, picklists });
+  const mapProblems = problemsOf(resolved);
+  mapProblems.forEach((p) => log(`  ! field map: ${p.label} — ${p.status}: ${p.note}`));
+  const stamp = new Date().toISOString();
+  const runId = `push-${stamp.slice(0, 16).replace(/[-:T]/g, "")}`;
   if (!map.nextCall && !map.offsite) {
     log("  neither field exists on this account — nothing to push.");
-    return { checked: 0, changed: 0, wrote: 0, failed: 0, skipped: 0, reason: "no fields" };
+    let tracked = { stored: false, why: "dry run — nothing is recorded" };
+    if (apply) {
+      tracked = await recordPush(at, [runRow({ run: runId, at: stamp, totals: {}, mapProblems })], { log });
+      await storeFieldMap(at, resolved, { log, now: stamp });
+    }
+    return { checked: 0, changed: 0, wrote: 0, failed: 0, skipped: 0, reason: "no fields", mapProblems, tracked };
   }
 
   /* ── what the console knows ────────────────────────────────────────── */
@@ -72,22 +90,31 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
 
   /* The card shape offsite.js reads. Past and Now are the same question here —
      an offsite held last February is the best guess for this year's. */
-  const wantedFor = (rec) => {
-    const evs = (rowsByContact.get(rec.id) || [])
-      .map((f) => ({ eventType: f["Event Type"] || "", timeline: f.Timeline || "" }));
-    return extraCustomFields(map, { nextCallDate: rec.fields?.["Next Call Date"] || "",
-                                    nextCallTime: rec.fields?.["Next Call Time"] || "" },
-                             { tzMin: TZ, quarters: offsiteOf({ past: [], current: evs }) });
-  };
+  const quartersFor = (rec) => offsiteOf({ past: [], current: (rowsByContact.get(rec.id) || [])
+    .map((f) => ({ eventType: f["Event Type"] || "", timeline: f.Timeline || "" })) });
+  const wantedFor = (rec) => extraCustomFields(map, { nextCallDate: rec.fields?.["Next Call Date"] || "",
+                                                      nextCallTime: rec.fields?.["Next Call Time"] || "" },
+                                               { tzMin: TZ, quarters: quartersFor(rec) });
+
+  /* Which registry key a Kylas field name is, and the resolved field behind it. */
+  const keyOf = new Map(), fieldOf = {};
+  if (map.nextCall) { keyOf.set(map.nextCall.name, "nextCall"); fieldOf.nextCall = map.nextCall; }
+  if (map.offsite) { keyOf.set(map.offsite.name, "offsite"); fieldOf.offsite = map.offsite; }
+  const labelOf = (k) => resolved.find((r) => r.key === keyOf.get(k))?.label || keyOf.get(k) || k;
 
   /* ── the pass ──────────────────────────────────────────────────────── */
-  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0, gone = 0;
+  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0, gone = 0, unmapped = 0, held = 0;
   const examples = [];
+  const track = [];           /* one entry per contact the pass tried to write */
   for (const rec of contacts) {
     const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
     if (!kid) { skipped++; continue; }
     if (only && kid !== only) continue;
     const want = wantedFor(rec);
+    /* A value the console HAS and no Kylas field to put it in. Counted, not
+       listed per contact: it is one fact about the account, and the run row
+       carries it. */
+    if ((!map.nextCall && rec.fields?.["Next Call Date"]) || (!map.offsite && quartersFor(rec).length)) unmapped++;
     if (!Object.keys(want).length) { skipped++; continue; }
     if (checked >= limit) break;
     checked++;
@@ -114,22 +141,96 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
     if (!diff.length) continue;
     changed++;
+
+    /* THE TYPE IS CHECKED BEFORE THE SEND. A value of the wrong kind for its
+       Kylas field either fails the whole contact (a 400 that names no field) or
+       is answered 200 and stored as nothing. Held back and named instead, so
+       the rest of the contact still goes. `soft` is a name sent where an id is
+       taken — reported, not held, because that is what a save has always done. */
+    const outcomes = [], send = {}, putBody = { ...want };
+    for (const [k, v] of diff) {
+      const f = fieldOf[keyOf.get(k)];
+      const chk = checkValue(kindOfKylas(f?.type), v, { options: f?.options });
+      if (chk.ok || chk.soft) { send[k] = v; continue; }
+      delete putBody[k];
+      outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v,
+                      got: idOf(have[k]) ?? null, status: "type", why: chk.why });
+    }
+    if (outcomes.length) held++;
+
     if (examples.length < 12)
       examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${diff.map(([k, v]) =>
-        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}`).join(" · ")}`);
+        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}${k in send ? "" : "  [held back: type]"}`).join(" · ")}`);
     if (!apply) continue;
 
-    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, want)); wrote++; }
-    catch (e) { failed++; log(`  ! ${rec.fields?.Name || kid}: write refused — ${e.message.slice(0, 120)}`); }
+    const name = rec.fields?.Name || "";
+    if (!Object.keys(send).length) { track.push({ kid, name, outcomes }); continue; }
+
+    let landed = false;
+    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody)); wrote++; landed = true; }
+    catch (e) {
+      failed++; log(`  ! ${name || kid}: write refused — ${e.message.slice(0, 120)}`);
+      for (const [k, v] of Object.entries(send))
+        outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: idOf(have[k]) ?? null,
+                        status: "refused", why: e.message.slice(0, 140) });
+    }
+
+    /* THE END STATE. Read the record back and see whether each value is there.
+       A 200 means the request was well formed — never that anything was stored. */
+    if (landed) {
+      let after = null;
+      try { after = await kylas.contact(kid); } catch { after = null; }
+      for (const [k, v] of Object.entries(send)) {
+        if (!after) { outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: null,
+                                      status: "unread", why: whyOf("unread") }); continue; }
+        const got = idOf(after.customFieldValues?.[k]);
+        const vd = verdict({ sent: v, got });
+        outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: got ?? null,
+                        status: vd.status, why: vd.why || "" });
+      }
+    }
+    track.push({ kid, name, outcomes });
   }
+
+  /* ── what the night amounted to ────────────────────────────────────── */
+  const allPushed = (t) => t.outcomes.length > 0 && t.outcomes.every((o) => o.status === "pushed");
+  const nonePushed = (t) => !t.outcomes.some((o) => o.status === "pushed");
+  const pushed = track.filter(allPushed).length;
+  const notPushed = track.filter(nonePushed).length;
+  const partly = track.length - pushed - notPushed;
 
   log(`\n  ${checked} checked · ${changed} differ · ${skipped} had nothing to push` +
       (gone ? ` · ${gone} no longer in Kylas` : ""));
   if (gone > 5) log(`    …and ${gone - 5} more that Kylas no longer has`);
   examples.forEach((e) => log(`    ${e}`));
   if (examples.length && changed > examples.length) log(`    …and ${changed - examples.length} more`);
-  log(apply ? `\n  ${wrote} written, ${failed} failed.` : `\n  Dry run — nothing written. Add --apply.`);
-  return { checked, changed, wrote, failed, skipped, gone };
+  if (unmapped) log(`  ! ${unmapped} contact(s) have a value the console holds and this account has no Kylas field for`);
+  if (apply) {
+    log(`\n  ${wrote} written, ${failed} failed.`);
+    log(`  ${pushed} pushed and verified · ${partly} partly pushed · ${notPushed} not pushed` +
+        (held ? ` · ${held} held back for type` : ""));
+    for (const t of track.filter((x) => !allPushed(x)).slice(0, 8))
+      log(`    · ${t.name || t.kid}: ${t.outcomes.filter((o) => o.status !== "pushed")
+        .map((o) => `${o.label} — ${o.why || whyOf(o.status)}`).join("; ")}`);
+  } else log(`\n  Dry run — nothing written. Add --apply.`);
+
+  /* ── and it is kept ────────────────────────────────────────────────── */
+  const totals = { checked, changed, wrote, failed, gone, unmapped, held, pushed, partly, notPushed };
+  let tracked = { stored: false, why: "dry run — nothing was written, so nothing is recorded" };
+  if (apply) {
+    const lines = track.map((t) => contactRow({ run: runId, at: stamp, kid: t.kid, name: t.name, outcomes: t.outcomes }));
+    lines.push(runRow({ run: runId, at: stamp, totals, mapProblems }));
+    tracked = await recordPush(at, lines, { log });
+    const last = {};
+    for (const t of track) for (const o of t.outcomes) {
+      const l = (last[o.key] ||= { error: "" });
+      if (o.status === "pushed") l.at = stamp;
+      else if (!l.error) l.error = o.why || whyOf(o.status);
+    }
+    await storeFieldMap(at, resolved, { log, now: stamp, last });
+    log(tracked.stored ? `  recorded in Push Log (${tracked.rows} row(s)).` : `  not recorded — ${tracked.why}`);
+  }
+  return { ...totals, skipped, mapProblems, tracked };
 }
 
 /* ── the pieces run() uses, out here so they are testable ──────────────── */
@@ -195,6 +296,6 @@ if (isMain) {
     const out = await run({ env: process.env, log: (...x) => console.log(...x),
                             apply: argv.includes("--apply"),
                             limit: Number(a("limit", "0")) || Infinity, only: a("contact", "") });
-    process.exit(out.failed ? 1 : 0);
+    process.exit(out.failed || out.notPushed ? 1 : 0);
   } catch (e) { console.error(`\npush failed: ${e.message}`); process.exit(1); }
 }
