@@ -1750,8 +1750,22 @@ no new table. The console half ships with the next extension release; the
 extension version was **not** bumped, because 1.68.1 is in store review and the
 console warns when the extension and Worker versions differ.
 
-**Not built:** an admin screen for resolving flags (the table is the queue for
-now); matching on **name + company** with no phone or email (too many honest
+**The admin screen** (`extension/console/flags.js`, built 2026-10-17). A **Flags**
+button in the top bar, shown only to an admin (hidden until `/meta` says so; the
+server answers 403 to anybody else) and turning amber with the open count. It
+opens one card per contact: each flag with its kind and reason and a link to the
+other contact's Kylas record, three answers — *Not a duplicate* (two real people),
+*Handled in Kylas* (merged, deleted or fixed there), *Acknowledged* (looked, leaving
+it) — and an optional note. The answer applies to **every open flag on the card**.
+A Resolved tab shows who, when, what and why, with **Reopen**. Routes:
+`GET /dupe-flags?status=Open|Resolved|all`, `POST /dupe-flags-resolve`
+(`{keys, resolution, note}` or `{keys, reopen: true}`), both admin-only. A key that
+is not in the table is reported and never created; the contact's own
+`Duplicate Flag` mark clears when its last flag is resolved and returns on reopen.
+`Duplicate Flags` gained `Resolution` and `Resolution Note` (run `repair-base.mjs`).
+Checked in a real Chrome in both themes; worker tests §16.
+
+**Not built:** matching on **name + company** with no phone or email (too many honest
 twins); a periodic sweep for duplicates that already exist.
 
 ---
