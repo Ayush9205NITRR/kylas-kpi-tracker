@@ -76,12 +76,15 @@ export function contactRow({ run, at, source = "Nightly push", kid, name = "", o
 /* The run row: what the map found wrong before any contact was touched, and
    the totals, so one row answers "how did the night go". */
 export function runRow({ run, at, source = "Nightly push", totals = {}, mapProblems = [] }) {
-  const status = mapProblems.length || totals.notPushed ? (totals.pushed ? "Partly pushed" : "Not pushed") : "Pushed";
+  /* A contact that was only PARTLY pushed makes the night partly pushed — the run
+     row is what the morning mail and a glance at the table trust. */
+  const short_ = (totals.notPushed || 0) + (totals.partly || 0);
+  const status = mapProblems.length || short_ ? (totals.pushed ? "Partly pushed" : "Not pushed") : "Pushed";
   return {
     Key: `${run}|run`, Run: run, At: at, Source: source, "Kylas ID": "", Contact: "(run)", Status: status,
-    Pushed: String(totals.pushed ?? 0), "Not Pushed": String((totals.notPushed ?? 0) + (totals.gone ?? 0)),
+    Pushed: String(totals.pushed ?? 0), "Not Pushed": String(short_ + (totals.gone ?? 0)),
     Reason: short(mapProblems.map((p) => `${p.label}: ${p.note}`).join("\n"), 900),
-    Verified: !(mapProblems.length || totals.notPushed),
+    Verified: !(mapProblems.length || short_),
     Detail: short(JSON.stringify({ totals, mapProblems }), 9000),
   };
 }

@@ -183,6 +183,9 @@ console.log("\n7 · the log rows");
   const run = runRow({ run: "push-1", at: "x", totals: { pushed: 1, notPushed: 1 },
                        mapProblems: [{ key: "source", label: "Source of Data", status: "unmapped", note: "cfSourceOfData is not in this account's field list" }] });
   is("the run row is marked (run)", run.Contact, "(run)");
+  const partlyRun = runRow({ run: "p", at: "x", totals: { pushed: 1, partly: 1, notPushed: 0 }, mapProblems: [] });
+  is("a night with a partly pushed contact is Partly pushed, not Pushed", [partlyRun.Status, partlyRun.Verified], ["Partly pushed", false]);
+  is("a clean night is Pushed and Verified", [runRow({ run: "p", at: "x", totals: { pushed: 2 } }).Status, runRow({ run: "p", at: "x", totals: { pushed: 2 } }).Verified], ["Pushed", true]);
   const sum = summarisePush([all, part, run].map((r) => r));
   is("the summary counts contacts, not the run row", [sum.contacts, sum.pushed, sum.partly, sum.notPushed], [2, 1, 1, 0]);
   ok("...carries the map problem from the run row", sum.mapProblems.length === 1 && sum.mapProblems[0].key === "source");
