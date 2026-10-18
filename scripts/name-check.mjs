@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* IS THE FULL NAME IN KYLAS, AND WHICH PART DOES THE FORM SHOW? Read-only.
+/* HOW KYLAS HOLDS A CONTACT'S NAME AND NOTES. Read-only. (Started as the name check.)
  *
  *   node --env-file=.env.local scripts/name-check.mjs --contact 5363366 [--contact <id> ...]
  *
@@ -13,6 +13,9 @@
  * guessing. Nothing is written.
  */
 import { createClient } from "./kylas.mjs";
+/* The second question, 2026-10-18: the push wrote the remarks block, Kylas answered
+   200, and a read-back showed remarks null. So where does a note live on this
+   account? The field definitions and the record, side by side, answer it. */
 
 const env = process.env;
 if (!env.KYLAS_KEY) { console.error("KYLAS_KEY is not set"); process.exit(1); }
@@ -23,7 +26,8 @@ const r = await kylas.raw("GET", "/v1/entities/contact/fields?entityType=contact
 const list = Array.isArray(r) ? r : r?.content || r?.data || [];
 console.log("\nTHE NAME FIELDS, as this Kylas account defines them");
 console.log("  name           label            type         active  required  standard");
-for (const f of list.filter((x) => /^(salutation|salutationName|firstName|lastName)$/.test(x.name || ""))) {
+const NOTE = /remark|note|comment/i;
+for (const f of list.filter((x) => /^(salutation|salutationName|firstName|lastName)$/.test(x.name || "") || NOTE.test(`${x.name} ${x.displayName}`))) {
   const yes = (v) => (v === true ? "yes" : v === false ? "no" : "?");
   console.log(`  ${String(f.name).padEnd(14)} ${String(f.displayName || "").padEnd(16)} ${String(f.type || "").padEnd(12)} ${yes(f.active).padEnd(7)} ${yes(f.required).padEnd(9)} ${yes(f.standard)}`);
 }
@@ -36,6 +40,12 @@ for (const id of ids) {
     console.log(`  firstName  ${JSON.stringify(c.firstName ?? null)}`);
     console.log(`  lastName   ${JSON.stringify(c.lastName ?? null)}`);
     console.log(`  together   ${JSON.stringify([c.firstName, c.lastName].filter(Boolean).join(" "))}`);
+    /* WHERE DOES A NOTE LIVE? Every place on the record that could hold one. */
+    const peek = (v) => JSON.stringify(typeof v === "string" ? v.slice(0, 160) + (v.length > 160 ? "…" : "") : v ?? null);
+    console.log(`  top-level keys: ${Object.keys(c).join(", ")}`);
+    for (const k of Object.keys(c).filter((k) => NOTE.test(k))) console.log(`  ${k.padEnd(18)} ${peek(c[k])}`);
+    for (const [k, v] of Object.entries(c.customFieldValues || {}).filter(([k]) => NOTE.test(k)))
+      console.log(`  customFieldValues.${k}  ${peek(v)}`);
   } catch (e) { console.log(`\nCONTACT ${id}: could not read — ${e.message.slice(0, 100)}`); }
 }
 console.log("");
