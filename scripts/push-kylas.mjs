@@ -28,8 +28,10 @@
  * It writes the two derived fields AND THE REMARKS BLOCK (Ayush, 2026-10-18:
  * "I need all the data to be pushed in remarks"): stage, owner, next call, every
  * event row (past and current, with budget, timeline, pax and its note), vendor,
- * mode and offering. The block is cut out and rewritten between its two markers;
- * whatever a human typed outside it is kept. It does not push a stage, a name or
+ * mode and offering. The block goes in the team's custom Remarks field
+ * (cfRemarks): Kylas keeps no built-in `remarks` on this account (a PUT answers
+ * 200 and a read-back shows null, which is how this was found). It is cut out and
+ * rewritten between its two markers; whatever a human typed outside it is kept. It does not push a stage, a name or
  * a phone from Airtable into Kylas as FIELDS: Kylas is the system of record for
  * those, and a nightly job that overwrites them from a copy is how a CRM loses
  * an edit somebody made in the CRM. The stage in the block is context for the
@@ -43,7 +45,7 @@
  * everyone.
  */
 import { createAirtable, listTolerant } from "./airtable.mjs";
-import { createClient, renderRemarks, mergeRemarks, MARK_A, MARK_B } from "./kylas.mjs";
+import { createClient, renderRemarks, mergeNote, noteText, clipBlock, MARK_A, MARK_B } from "./kylas.mjs";
 import { STAGE_LABEL } from "./stages.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { offsiteOf } from "./offsite.mjs";
@@ -135,6 +137,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   const keyOf = new Map(), fieldOf = {};
   if (map.nextCall) { keyOf.set(map.nextCall.name, "nextCall"); fieldOf.nextCall = map.nextCall; }
   if (map.offsite) { keyOf.set(map.offsite.name, "offsite"); fieldOf.offsite = map.offsite; }
+  if (map.remarks) { keyOf.set(map.remarks.name, "remarks"); fieldOf.remarks = map.remarks; }
   const labelOf = (k) => resolved.find((r) => r.key === keyOf.get(k))?.label || keyOf.get(k) || k;
 
   /* ── the pass ──────────────────────────────────────────────────────── */
@@ -151,7 +154,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     /* A value the console HAS and no Kylas field to put it in. Counted, not
        listed per contact: it is one fact about the account, and the run row
        carries it. */
-    if ((!map.nextCall && rec.fields?.["Next Call Date"]) || (!map.offsite && quartersFor(rec).length)) unmapped++;
+    if ((!map.nextCall && rec.fields?.["Next Call Date"]) || (!map.offsite && quartersFor(rec).length) || (!map.remarks && blockFor(rec))) unmapped++;
     if (!Object.keys(wantedFor(rec)).length && !blockFor(rec)) { skipped++; continue; }
     candidates.push(rec);
   }
@@ -191,14 +194,17 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     }
 
     const have = base?.customFieldValues || {};
-    if (only) showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf });
-    const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
-    /* THE REMARKS BLOCK, rewritten between its markers over whatever Kylas holds
-       (a human's text outside the block is kept). Compared the way a read-back is,
-       so a trailing newline Kylas trims is not a difference. */
-    const wantRemarks = block ? mergeRemarks(base?.remarks || "", block) : null;
-    const remarksDiffer = wantRemarks !== null && textOf(wantRemarks) !== textOf(base?.remarks);
-    if (!diff.length && !remarksDiffer) continue;
+    if (only) showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf, map });
+    const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));   /* the two derived fields */
+    /* THE REMARKS BLOCK, rewritten between its markers over whatever the team's
+       Remarks field holds (a human's text outside the block is kept). Compared as
+       text a person reads, so markup or a trimmed newline is not a difference. */
+    if (map.remarks && block) {
+      const nk = map.remarks.name, wantNote = mergeNote(idOf(have[nk]) ?? "", clipBlock(block));
+      want[nk] = wantNote;
+      if (noteText(wantNote) !== noteText(idOf(have[nk]))) diff.push([nk, wantNote]);
+    }
+    if (!diff.length) continue;
     changed++;
 
     /* THE TYPE IS CHECKED BEFORE THE SEND. A value of the wrong kind for its
@@ -218,23 +224,20 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     if (outcomes.length) held++;
 
     if (examples.length < 12)
-      examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${[...diff.map(([k, v]) =>
-        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}${k in send ? "" : "  [held back: type]"}`),
-        ...(remarksDiffer ? [`remarks: +${block.split("\n").length} line(s) (${block.split("\n").map((l) => l.split(/\s/)[0]).join(", ")})`] : [])].join(" · ")}`);
+      examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${diff.map(([k, v]) => k === map.remarks?.name
+        ? `remarks: ${noteText(idOf(have[k])) ? "block rewritten" : "block added"} (${block.split("\n").map((l) => l.split(/\s/)[0]).join(", ")})`
+        : `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}${k in send ? "" : "  [held back: type]"}`).join(" · ")}`);
     if (!apply) continue;
 
     const name = rec.fields?.Name || "";
-    if (!Object.keys(send).length && !remarksDiffer) { track.push({ kid, name, outcomes }); continue; }
+    if (!Object.keys(send).length) { track.push({ kid, name, outcomes }); continue; }
 
     let landed = false;
-    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody, remarksDiffer ? { remarks: wantRemarks } : {})); wrote++; landed = true; }
+    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody)); wrote++; landed = true; }
     catch (e) {
       failed++; log(`  ! ${name || kid}: write refused — ${e.message.slice(0, 120)}`);
       for (const [k, v] of Object.entries(send))
         outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: idOf(have[k]) ?? null,
-                        status: "refused", why: e.message.slice(0, 140) });
-      if (remarksDiffer)
-        outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: base?.remarks ?? null,
                         status: "refused", why: e.message.slice(0, 140) });
     }
 
@@ -247,19 +250,11 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
         if (!after) { outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: null,
                                       status: "unread", why: whyOf("unread") }); continue; }
         const got = idOf(after.customFieldValues?.[k]);
-        const vd = verdict({ sent: v, got });
+        const isNote = map.remarks && k === map.remarks.name;
+        const vd = isNote ? verdict({ sent: noteText(v), got: noteText(got) }) : verdict({ sent: v, got });
+        if (isNote && vd.status === "pushed") remarksPushed++;
         outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: got ?? null,
                         status: vd.status, why: vd.why || "" });
-      }
-      if (remarksDiffer) {
-        if (!after) outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: null,
-                                    status: "unread", why: whyOf("unread") });
-        else {
-          const vd = verdict({ sent: textOf(wantRemarks), got: textOf(after.remarks) });
-          if (vd.status === "pushed") remarksPushed++;
-          outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: after.remarks ?? null,
-                          status: vd.status, why: vd.why || "" });
-        }
       }
     }
     track.push({ kid, name, outcomes });
@@ -321,7 +316,7 @@ const same = (a, b) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) ===
 /* THE WHOLE CONTACT, because the PUT replaces it. Anything left out of this
    object is deleted from the record — see the header of toKylasContact, which
    was learned the expensive way. */
-export function bodyFor(base, extra, { remarks } = {}) {
+export function bodyFor(base, extra) {
   const body = {
     firstName: base.firstName, lastName: base.lastName || "Unknown",
     designation: base.designation, linkedin: base.linkedin,
@@ -337,7 +332,6 @@ export function bodyFor(base, extra, { remarks } = {}) {
     if (id !== undefined && id !== null && id !== "") body.customFieldValues[k] = id;
   }
   Object.assign(body.customFieldValues, extra);
-  if (remarks !== undefined && remarks !== null) body.remarks = remarks;
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
   return body;
 }
@@ -345,7 +339,7 @@ export function bodyFor(base, extra, { remarks } = {}) {
 /* `--contact <id>`: what Airtable wants on this contact, what Kylas holds, side by
    side, field by field. The answer to "is the offsite really on the contact in
    Kylas" without having to open Kylas. */
-function showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf }) {
+function showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf, map }) {
   const nice = (k, v) => {
     const opts = fieldOf[keyOf.get(k)]?.options || [];
     const one = (x) => { const o = opts.find((y) => String(y.id) === String(x)); return o ? `${o.label || o.code} [${x}]` : String(x); };
@@ -357,20 +351,18 @@ function showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, l
     log(`    ${labelOf(k).padEnd(18)} Airtable wants ${nice(k, v).padEnd(34)} Kylas holds ${nice(k, held).padEnd(34)} ${same(held, v) ? "SAME" : "DIFFERENT"}`);
   }
   if (!Object.keys(want).length) log("    (no call-back or offsite quarter on this contact in Airtable)");
-  const mine = base?.remarks || "";
-  const wanted = block ? `${MARK_A}\n${block}\n${MARK_B}` : "";
-  log(`    ${"Remarks block".padEnd(18)} Airtable wants ${block ? `${block.split("\n").length} line(s)` : "(none: nothing captured in the console)"}`);
-  if (block) {
-    const held = mine.includes(MARK_A) ? mine.slice(mine.indexOf(MARK_A), mine.indexOf(MARK_B) + MARK_B.length) : "";
-    log(`    ${"".padEnd(18)} Kylas holds ${held ? (textOf(held) === textOf(wanted) ? "the same block" : "an OLDER block") : "no block"}`);
-    if (held && textOf(held) !== textOf(wanted)) held.split("\n").forEach((l) => log(`        kylas   | ${l}`));
-    block.split("\n").forEach((l) => log(`        wanted  | ${l}`));
+  const nk = map?.remarks?.name;
+  const mine = nk ? String(idOf(have[nk]) ?? "") : "";
+  log(`    ${"Remarks block".padEnd(18)} Airtable wants ${block ? `${block.split("\n").length} line(s)` : "(none: nothing captured in the console)"}` +
+      `${nk ? `   → into ${map.remarks.label} (${nk}, ${map.remarks.type})` : "   → NO Remarks field on this account"}`);
+  if (block && nk) {
+    const same_ = noteText(mergeNote(mine, clipBlock(block))) === noteText(mine);
+    const hasBlock = noteText(mine).includes(noteText(MARK_A));
+    log(`    ${"".padEnd(18)} Kylas holds ${same_ ? "the same block" : hasBlock ? "an OLDER block" : "no block"}` +
+        `${mine && !hasBlock ? ` (the field holds ${noteText(mine).length} characters somebody typed — they are kept)` : ""}`);
+    clipBlock(block).split("\n").forEach((l) => log(`        wanted  | ${l}`));
   }
 }
-
-/* Remarks compared as text a person reads: Windows line endings and trailing
-   space are not a difference. */
-const textOf = (s) => String(s ?? "").replace(/\r\n/g, "\n").trim();
 
 /* ── from a terminal ───────────────────────────────────────────────────── */
 const isMain = (() => {

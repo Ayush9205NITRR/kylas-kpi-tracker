@@ -26,7 +26,7 @@
  * the other is the bug this guards.
  */
 import { readFileSync } from "node:fs";
-import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes, kylasRemarksOf, toConsoleContact, logIsAbout } from "./kylas.mjs";
+import { mergeRemarks, stripAuto, MARK_A, MARK_B, callNotes, kylasRemarksOf, toConsoleContact, logIsAbout, mergeNote, noteText, clipBlock, renderRemarks } from "./kylas.mjs";
 
 let pass = 0, fail = 0;
 const eq = (what, got, want) => {
@@ -170,6 +170,46 @@ console.log("\nwhich call logs belong to the contact");
   eq("saying nothing is accepted — there is no way to tell", logIsAbout({ id: 1 }, "5815757"), true);
   eq("a note under `note` is read", callNotes([{ startTime: "2026-10-06T09:40:40Z", note: "Call after Diwali" }])[0]?.text,
      "Call after Diwali");
+}
+
+
+/* ── THE BLOCK LIVES IN THE TEAM'S REMARKS FIELD (cfRemarks), 2026-10-18 ──
+   Kylas stores nothing in the contact's built-in `remarks` on this account, so
+   the event details never showed. The block now goes in the custom field people
+   type in — which makes "never replace what they wrote" the whole job. */
+console.log("\nthe block in the Remarks custom field");
+{
+  const blk = "Stage      MQL\nCurrent    Employee offsites | Budget 8L | Timeline Aug | Pax 120 | Note: Goa";
+  const plain = mergeNote("Spoke in March, call after the 20th.", blk);
+  eq("plain text: the person's note stays first, the block follows", plain.startsWith("Spoke in March, call after the 20th.\n\n" + MARK_A), true);
+  eq("...writing it twice changes nothing", mergeNote(plain, blk), plain);
+  eq("...a new block replaces the old one, not stacks", (mergeNote(plain, blk.replace("MQL", "SQL")).match(/BD CONSOLE/g) || []).length, 1);
+  eq("an empty field gets just the block", mergeNote("", blk), `${MARK_A}\n${blk}\n${MARK_B}`);
+
+  const rich = "<p>Spoke in <b>March</b> — budget sits with the CFO.</p>";
+  const html = mergeNote(rich, blk);
+  eq("rich text: the person's markup is untouched", html.startsWith(rich), true);
+  eq("...the block follows as paragraphs", /<p>--- BD CONSOLE[^<]*<\/p><p>Stage: MQL<\/p><p>Current: Employee offsites \| Budget 8L/.test(html), true);
+  eq("...writing it twice changes nothing", mergeNote(html, blk), html);
+  eq("...a person's note typed UNDER the block is kept", mergeNote(html + "<p>Ravi decides.</p>", blk).includes("Ravi decides."), true);
+  eq("...markup in a value is escaped", mergeNote(rich, "Current    A <b>&</b> B").includes("A &lt;b&gt;&amp;&lt;/b&gt; B"), true);
+  eq("compared as text, markup and padding are not differences", noteText(html), noteText(html.replace(/<p>/g, "<p> ")));
+
+  const long = Array.from({ length: 80 }, (_, i) => `Current    Event ${i} | Budget ${"x".repeat(30)}`).join("\n");
+  const clipped = clipBlock(long, 1800);
+  eq("a block too long for a text field is cut, saying so", clipped.length <= 1830 && clipped.endsWith("\n(more in the BD console)"), true);
+  eq("...at a whole line, never in the middle of one", /Budget x{30}$/.test(clipped.split("\n").slice(-2)[0]), true);
+
+  eq("\"Said before\" shows what people wrote, not the console's block",
+     kylasRemarksOf({ customFieldValues: { cfRemarks: html + "<p>Ravi decides.</p>" } }), "Spoke in March — budget sits with the CFO.\n\nRavi decides.");
+  eq("...and an empty note with only the block reads as nothing",
+     kylasRemarksOf({ customFieldValues: { cfRemarks: mergeNote("", blk) } }), "");
+
+  const card = { stage: "MQL", owner: "Ayush", past: [{ eventType: "Sales conference", budget: "40L", timeline: "Feb", pax: "300", remarks: "Held in Goa" }],
+                 current: [{ eventType: "Offsite", remarks: "Wants Goa" }], vendorInfo: "Vendor Exists", modeOfMeeting: "Virtual", serviceOffering: true };
+  const out = renderRemarks(card, { stageLabel: "MQL (Marketing Qualified Lead)" });
+  eq("the block names every field of a past event, with its own note", /Past\s+Sales conference \| Budget 40L \| Timeline Feb \| Pax 300 \| Note: Held in Goa/.test(out), true);
+  eq("...and a current event with only a note", /Current\s+Offsite \| Note: Wants Goa/.test(out), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -198,71 +198,70 @@ console.log("\n8 · the CLIs, run as the entry point (not imported)");
   ok("--store writes the Field Map table", /Field Map: \d+ row\(s\) written/.test(b.out) && (await rowsOf("Field Map")).length > 0, `${b.code} ${b.out.slice(-200)} ${b.err.slice(0, 200)}`);
 }
 
-console.log("\n9 · the remarks block: every detail the console holds, in the contact's Remarks");
+console.log("\n9 · the remarks block: every detail the console holds, in the team's Remarks field");
 {
-  /* Ayush, 2026-10-18: remarks held the stage and nothing else. The nightly push
-     wrote two fields and never touched remarks, and the block a save writes left
-     the Past rows' notes out. Now the push rewrites the block from Airtable. */
+  /* Ayush, 2026-10-18: Remarks held nothing. Found by the read-back: the push wrote
+     the block to the contact's built-in `remarks`, Kylas answered 200, and the
+     record showed null — that field is stored nowhere on this account. The box the
+     team sees is the custom field cfRemarks. */
   const kylasContact = async (id) => (await fetch(`http://127.0.0.1:${KY}/v1/contacts/${id}`, { headers: { "api-key": "k" } })).json();
+  const noteOf = async (id) => String((await kylasContact(id)).customFieldValues?.cfRemarks || "");
   await kylasWith();
   await reset();
   const a = await at.upsert("Contacts", "Kylas Contact ID", { Name: "Hema Bharathi", "Kylas Contact ID": "112936", Owner: "Ayush Tiwari",
     "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD", "Vendor Info": "Vendor Exists", "Mode of Meeting": "In Person", "Service Offering": true,
     "Next Call Date": "2026-10-20", "Next Call Time": "10:00" });
-  /* Shipra: nothing the console ever captured, only a name and an id. */
-  await at.upsert("Contacts", "Kylas Contact ID", { Name: "Shipra Gupta", "Kylas Contact ID": "112937", Owner: "Ayush Tiwari", "Current Stage": "DISCOVERY_CALL_BOOKED" });
+  const b = await at.upsert("Contacts", "Kylas Contact ID", { Name: "Shipra Gupta", "Kylas Contact ID": "112937", Owner: "Ayush Tiwari", "Current Stage": "DISCOVERY_CALL_BOOKED" });
   await at.upsert("Event Rows", "Row Key", { "Row Key": "p1", Contact: [a.id], Period: "Past", "Event Type": "Sales conference / dealer meet",
     Budget: "Approx 40L, signed off by CFO", Timeline: "Feb", Pax: "300", Remarks: "Held in Goa" });
   await at.upsert("Event Rows", "Row Key", { "Row Key": "c1", Contact: [a.id], Period: "Current", "Event Type": "Employee offsites",
     Budget: "8L", Timeline: "Aug, week 2", Pax: "120", Remarks: "Wants a Goa venue" });
   await at.upsert("Event Rows", "Row Key", { "Row Key": "x1", Contact: [a.id], Period: "Current", "Event Type": "Product launch",
     Budget: "1Cr", "Removed At": "2026-10-01T00:00:00.000Z" });
-  /* a human's own note, typed in Kylas, under no block at all */
-  const before = await kylasContact(112936);
-  for (let i = 0; i < 12; i++) {
-    await sleep(350);
-    const put = await fetch(`http://127.0.0.1:${KY}/v1/contacts/112936`, { method: "PUT", headers: { "api-key": "k", "content-type": "application/json" },
-      body: JSON.stringify({ ...before, remarks: "Ravi is the decision maker." }) });
-    if (put.status !== 429) break;
-  }
+  /* Shipra: one event row, and no note typed by anybody. A different shape from Hema's, whose field holds rich text. */
+  await at.upsert("Event Rows", "Row Key", { "Row Key": "s1", Contact: [b.id], Period: "Current", "Event Type": "Product launch", Budget: "5L" });
 
   const r = await go();
-  const after = await kylasContact(112936);
-  const rem = String(after.remarks || "");
-  ok("the push wrote Hema, and read the remarks back", r.out.wrote >= 1 && (await rowsOf("Push Log")).find((x) => x["Kylas ID"] === "112936")?.Pushed.includes("Remarks"), JSON.stringify(r.out));
-  ok("...the stage and owner are in it", /Stage\s+MQL/.test(rem) && /Owner\s+Ayush Tiwari/.test(rem), rem);
-  ok("...the call-back", /Next call\s+2026-10-20 10:00/.test(rem), rem);
-  ok("...the PAST event with budget, timeline, pax and its own note", /Past\s+Sales conference \/ dealer meet \| Budget Approx 40L, signed off by CFO \| Timeline Feb \| Pax 300 \| Note: Held in Goa/.test(rem), rem);
-  ok("...the CURRENT event the same way", /Current\s+Employee offsites \| Budget 8L \| Timeline Aug, week 2 \| Pax 120 \| Note: Wants a Goa venue/.test(rem), rem);
-  ok("...vendor, mode and offering", /Vendor\s+Vendor Exists/.test(rem) && /Mode\s+In Person/.test(rem) && /Offering\s+pitched on this call/.test(rem), rem);
-  ok("...a row the console removed is NOT in it", !/Product launch/.test(rem), rem);
-  ok("...the human's own note survived, above the block", rem.startsWith("Ravi is the decision maker.") && rem.indexOf("Ravi") < rem.indexOf("BD CONSOLE"), rem);
-  const shipra = await kylasContact(112937);
-  ok("a contact the console never touched gets no block", !shipra.remarks, JSON.stringify(shipra.remarks));
+  const hema = await noteOf(112936);
+  const text = hema.replace(/<\/p><p>/g, "\n").replace(/<[^>]+>/g, "");
+  ok("the push wrote both, and read the note back", r.out.wrote >= 2 && (await rowsOf("Push Log")).find((x) => x["Kylas ID"] === "112936")?.Pushed.includes("Remarks"), JSON.stringify(r.out));
+  ok("Hema's field held rich text: what the team wrote is untouched, first", hema.startsWith("<p>Spoke in March"), hema);
+  ok("...the stage and owner are in the block", /Stage: MQL/.test(text) && /Owner: Ayush Tiwari/.test(text), text);
+  ok("...the call-back", /Next call: 2026-10-20 10:00/.test(text), text);
+  ok("...the PAST event with budget, timeline, pax and its own note", /Past: Sales conference \/ dealer meet \| Budget Approx 40L, signed off by CFO \| Timeline Feb \| Pax 300 \| Note: Held in Goa/.test(text), text);
+  ok("...the CURRENT event the same way", /Current: Employee offsites \| Budget 8L \| Timeline Aug, week 2 \| Pax 120 \| Note: Wants a Goa venue/.test(text), text);
+  ok("...vendor, mode and offering", /Vendor: Vendor Exists/.test(text) && /Mode: In Person/.test(text) && /Offering: pitched on this call/.test(text), text);
+  ok("...a row the console removed is NOT in it", !/Product launch/.test(text), text);
+  const shipra = await noteOf(112937);
+  ok("Shipra's field was empty: a plain-text block, no markup", shipra.startsWith("--- BD CONSOLE") && !/<p>/.test(shipra) && /Current\s+Product launch \| Budget 5L/.test(shipra), shipra);
+  const core = await kylasContact(112936);
+  ok("nothing is sent to the built-in remarks Kylas ignores", core.remarks === undefined, JSON.stringify(core.remarks));
 
   const again = await go();
   ok("a second night changes nothing (the block is stable)", again.out.changed === 0 && again.out.wrote === 0, JSON.stringify(again.out));
 
-  const sawAll = await go({ apply: false });
-  ok("a dry run reports the same: nothing to do", sawAll.out.changed === 0);
+  /* a person adds to the field under the block: kept, and the block is still one */
+  await sleep(1200);
+  const snap = await kylasContact(112936);
+  let put;
+  for (let i = 0; i < 12; i++) {
+    await sleep(700);
+    put = await fetch(`http://127.0.0.1:${KY}/v1/contacts/112936`, { method: "PUT", headers: { "api-key": "k", "content-type": "application/json" },
+      body: JSON.stringify({ ...snap, customFieldValues: { ...snap.customFieldValues, cfRemarks: hema + "<p>Ravi is the decision maker.</p>" } }) });
+    if (put.status !== 429) break;
+  }
+  ok("(setup) somebody typed under the block in Kylas", put.status === 200, String(put.status));
+  await at.upsert("Event Rows", "Row Key", { "Row Key": "c1", Contact: [a.id], Period: "Current", "Event Type": "Employee offsites",
+    Budget: "9L", Timeline: "Aug, week 2", Pax: "120", Remarks: "Wants a Goa venue" });
+  await go();
+  const edited = await noteOf(112936);
+  ok("an event edited in the console reaches the block", /Budget 9L/.test(edited) && !/Budget 8L/.test(edited), edited);
+  ok("...the block is still one, and the note typed under it survived", (edited.match(/BD CONSOLE \(auto/g) || []).length === 1 && /Ravi is the decision maker\./.test(edited), edited);
 
   /* --contact: the side-by-side an admin reads to answer "is it really on the contact in Kylas". */
   const one = await go({ apply: false, only: "112936" });
   ok("--contact shows the offsite quarter by name, and that Kylas agrees", /Offsite quarter\s+Airtable wants Jul - Sep.*Kylas holds Jul - Sep.*SAME/.test(one.text), one.text);
-  ok("...and that the remarks block is the same", /Kylas holds the same block/.test(one.text), one.text);
-  /* the Kylas mock rate-limits at four a second, as Kylas does */
-  let lost;
-  await sleep(1200);
-  const snap = await kylasContact(112936);
-  for (let i = 0; i < 12; i++) {
-    await sleep(700);
-    lost = await fetch(`http://127.0.0.1:${KY}/v1/contacts/112936`, { method: "PUT", headers: { "api-key": "k", "content-type": "application/json" },
-      body: JSON.stringify({ ...snap, customFieldValues: {}, remarks: "Ravi is the decision maker." }) });
-    if (lost.status !== 429) break;
-  }
-  ok("(setup) Kylas lost the offsite and the block", lost.status === 200, String(lost.status));
-  const off = await go({ apply: false, only: "112936" });
-  ok("...a contact Kylas has lost it on says DIFFERENT, and shows the older block", /DIFFERENT/.test(off.text) && /Kylas holds no block/.test(off.text), off.text);
+  ok("...and names the field the block goes into", /into Remarks \(cfRemarks, PARAGRAPH_TEXT\)/.test(one.text) && /Kylas holds the same block/.test(one.text), one.text);
 }
 
 console.log("\n10 · the caps: writes are capped by `limit`, reading is windowed by `reads`");

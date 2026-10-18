@@ -61,6 +61,25 @@ function scoreOffsite(f) {
   return s;
 }
 
+/* THE TEAM'S "REMARKS" FIELD (Ayush, 2026-10-18). Kylas keeps no built-in
+   `remarks` on a contact on this account — a PUT of one answers 200 and a
+   read-back shows null — so the box the team sees in the contact form is the
+   custom text field called Remarks (cfRemarks, PARAGRAPH_TEXT). That is where
+   the console's block has to go. Found by label, like the other two. */
+const isText = (f) => /TEXT|PARAGRAPH|STRING|RICH/.test(typeOf(f)) && !isPick(f) && !isDate(f);
+function scoreRemarks(f) {
+  if (!isText(f) || !/^cf/i.test(nameOf(f))) return 0;
+  const l = labelOf(f).trim().toLowerCase(), n = nameOf(f).toLowerCase();
+  if (/previous|offsite|call|last|old/.test(`${l} ${n}`)) return 0;
+  let s = 0;
+  if (l === "remarks" || l === "remark") s += 20;
+  else if (/remark/.test(l)) s += 10;
+  else if (/remark/.test(n)) s += 8;
+  if (!s) return 0;
+  if (/PARAGRAPH|RICH/.test(typeOf(f))) s += 2;      /* room for several lines */
+  return s;
+}
+
 const best = (fields, score) => (fields || [])
   .map((f) => ({ f, s: score(f) })).filter((x) => x.s > 0)
   .sort((a, b) => b.s - a.s)[0]?.f || null;
@@ -72,7 +91,7 @@ export function resolveWriteFields(fields, picklists = {}) {
   const offsite = best(fields, scoreOffsite);
   const withOpts = (f) => (f ? { name: nameOf(f), label: labelOf(f), type: typeOf(f),
                                  multi: isMulti(f), options: picklists[nameOf(f)] || [] } : null);
-  return { nextCall: withOpts(nextCall), offsite: withOpts(offsite) };
+  return { nextCall: withOpts(nextCall), offsite: withOpts(offsite), remarks: withOpts(best(fields, scoreRemarks)) };
 }
 
 /* ── the values ────────────────────────────────────────────────────────── */
@@ -186,8 +205,11 @@ export function offsiteValue(field, quarters) {
 
 /* Everything the map can add to a contact write, as customFieldValues. Empty
    when the account has neither field, which is the case this must survive. */
-export function extraCustomFields(map, c, { tzMin = 330, quarters = [] } = {}) {
+export function extraCustomFields(map, c, { tzMin = 330, quarters = [], note } = {}) {
   const out = {};
+  /* `note` is the Remarks field's whole new value, already merged with what is
+     there (kylas.mjs mergeNote). Left off when the account has no such field. */
+  if (note !== undefined && note !== null && map?.remarks) out[map.remarks.name] = note;
   const nc = nextCallValue(map?.nextCall, c?.nextCallDate, c?.nextCallTime, tzMin);
   if (nc !== undefined) out[map.nextCall.name] = nc;
   const off = offsiteValue(map?.offsite, quarters);
@@ -199,5 +221,5 @@ export function extraCustomFields(map, c, { tzMin = 330, quarters = [] } = {}) {
 export function describeWriteMap(map) {
   const one = (k, f) => `${k}: ${f ? `${f.label} (${f.name}, ${f.type}${f.multi ? ", multi" : ""}` +
     `${f.options?.length ? `, ${f.options.length} options` : ""})` : "no field on this account"}`;
-  return [one("next call", map?.nextCall), one("offsite timeline", map?.offsite)];
+  return [one("next call", map?.nextCall), one("offsite timeline", map?.offsite), one("remarks", map?.remarks)];
 }

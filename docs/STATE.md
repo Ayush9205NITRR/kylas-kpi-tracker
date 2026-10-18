@@ -631,7 +631,7 @@ zero by design**, and the digest says so rather than printing a number.
 
 | | fields |
 |---|---|
-| Contact, every save | `firstName` `lastName` `designation` `linkedin` `emails[]` `phoneNumbers[]` `company` `ownerId` `remarks` (between the markers only) `cfPipelineStageBd` `cfSourceOfData` |
+| Contact, every save | `firstName` `lastName` `designation` `linkedin` `emails[]` `phoneNumbers[]` `company` `ownerId` `cfPipelineStageBd` `cfSourceOfData`, and **the console's block in the team's Remarks custom field (`cfRemarks`)**. The built-in `remarks` is still sent and is **stored nowhere** (see below). |
 | Contact, since 1.29 | the **call-back date** and the **offsite quarter**, under whatever this account calls those fields |
 | Call log | `outcome` `callType` `startTime` `duration` `phoneNumber` `notes[]` `relatedTo` |
 
@@ -715,6 +715,17 @@ then the id 404s for ever. Those are counted as *gone* and named, not as
 failures — a nightly job that exits non-zero every night is one nobody reads.
 A rising `gone` count is the real signal: the two stores are drifting apart.
 
+**THE BUILT-IN `remarks` IS A DEAD FIELD ON THIS ACCOUNT (found 2026-10-18).** The
+block was written to the contact's `remarks` for a month, and the first live
+`--apply` showed why nobody ever saw it: Kylas answered 200 and a read-back
+returned null — the GET of a contact has no `remarks` key at all. The box people
+see in the form is the custom field **Remarks (`cfRemarks`, PARAGRAPH_TEXT)**,
+the same one "Said before" reads. The Push Log caught it as "Not pushed", which
+is what the read-back exists for. The block now goes into that field, found by
+label (`kylas-write-map.mjs` `remarks`); what people typed there is kept and, if
+it holds rich text, so is their markup (`mergeNote`). A save that Kylas refuses
+with the block in it is retried without it and says so (`noteLeftOff`).
+
 **Since 2026-10-18 it also rewrites the contact's Remarks block** (Ayush: "I need
 all the data to be pushed in remarks"). Before, a save wrote the block and the
 nightly push never touched it, so contacts saved before the console had event
@@ -722,8 +733,8 @@ details showed only a stage. Now, for every contact the console holds something
 on (event rows, vendor, mode, offering or a call-back), the push renders the
 same block a save does — stage, owner, next call, every event row **past and
 current with budget, timeline, pax and its note**, vendor, mode, offering — and
-cuts it into the Kylas remarks between its two markers; what a human typed
-outside the block is kept. A contact the console never touched gets no block.
+cuts it into the Kylas Remarks field (`cfRemarks`) between its two markers; what a
+human typed outside the block is kept. A contact the console never touched gets no block.
 Rows marked `Removed At` count for nothing, in the block and in the offsite
 quarter. Read back like the other two (`Remarks` in the Push Log).
 

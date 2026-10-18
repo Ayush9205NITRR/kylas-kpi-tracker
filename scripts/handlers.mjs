@@ -27,7 +27,7 @@
  * Request. A handler that does not need one simply ignores it.
  */
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes, kylasRemarksOf,
-         toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks } from "./kylas.mjs";
+         toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks, mergeNote, clipBlock } from "./kylas.mjs";
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
@@ -1544,10 +1544,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
            left off entirely when the account has neither. A field map that
            cannot be read must never fail a save: the associate's call is not
            lost over a lookup. */
-        let extra = {};
+        let extra = {}, noteKey = null;
         try {
           const map = await writeMap();
-          extra = extraCustomFields(map, c, { tzMin: TZ_MIN, quarters: offsiteOf(c) });
+          /* THE BLOCK GOES IN THE TEAM'S REMARKS FIELD (cfRemarks), found by label.
+             The built-in `remarks` is answered 200 and stored nowhere on this
+             account, which is why event details never showed in Kylas. What a person
+             typed in that field is kept; only the block between the markers changes. */
+          const block = renderRemarks(c, { stageLabel });
+          const note = map.remarks && block
+            ? mergeNote(idOf(base?.customFieldValues?.[map.remarks.name]) ?? "", clipBlock(block)) : undefined;
+          noteKey = note !== undefined ? map.remarks.name : null;
+          extra = extraCustomFields(map, c, { tzMin: TZ_MIN, quarters: offsiteOf(c), note });
         } catch (e) { log(`  write map unavailable (${e.message.slice(0, 60)}) — stage and remarks only`); }
         /* THE FIELD MAP, ON A SAVE (scripts/field-map.mjs). A value the card
            holds and this account has no Kylas field for is left off the write
@@ -1562,6 +1570,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           }
         } catch { /* the map being unreadable is already logged above */ }
         const payload = toKylasContact(c, { remarks, extra, base });
+        /* THE NOTE MUST NEVER COST THE ASSOCIATE THEIR SAVE. A text field has a size
+           limit this code cannot read from the field list, and Kylas answers an
+           over-long value with a 400 that fails the whole contact. So a refusal of
+           a write that carried the note is tried again without it, and said. */
+        const send = async (go) => {
+          try { return await go(payload); }
+          catch (e) {
+            if (!noteKey || !/\b400\b/.test(e.message)) throw e;
+            const lean = { ...payload, customFieldValues: { ...payload.customFieldValues } };
+            delete lean.customFieldValues[noteKey];
+            result.noteLeftOff = e.message.slice(0, 120);
+            log(`! ${c.pocName}: Kylas refused the write with the remarks block (${e.message.slice(0, 80)}) — saved without it`);
+            return go(lean);
+          }
+        };
 
         if (!c.kid) {
           /* CREATE EXACTLY ONCE PER KEY. See journal.mjs: a retry of a save whose
@@ -1572,7 +1595,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             c.kid = known.kid;
             result.kid = known.kid;
             result.deduped = true;
-            await kylas.updateContact(c.kid, payload);
+            await send((p) => kylas.updateContact(c.kid, p));
             result.wrote.push("updated contact (already created by an earlier attempt)");
             log(`deduped: ${c.pocName} was already created as ${c.kid} — updated instead`);
           } else {
@@ -1593,7 +1616,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
               result.kid = c.kid;
               result.deduped = true;
               await journal.done(idemKey, c.kid);
-              await kylas.updateContact(c.kid, payload);
+              await send((p) => kylas.updateContact(c.kid, p));
               result.wrote.push("adopted the contact an interrupted attempt had created");
               log(`recovered: ${c.pocName} already existed as ${c.kid} — updated instead of duplicating`);
             } else {
@@ -1612,7 +1635,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
               await journal.open(idemKey);
               let made;
               try {
-                made = await kylas.createContact(payload);
+                made = await send((p) => kylas.createContact(p));
               } catch (e) {
                 /* Refused means nothing was made, so the key goes back to unused —
                    otherwise every later retry pays for a lookup of a contact that
@@ -1628,7 +1651,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             }
           }
         } else {
-          await kylas.updateContact(c.kid, payload);
+          await send((p) => kylas.updateContact(c.kid, p));
           result.wrote.push("updated contact");
           log(`updated contact ${c.kid} (${c.pocName})`);
         }

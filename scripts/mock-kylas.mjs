@@ -525,6 +525,8 @@ createServer(async (req, res) => {
       /* A TEXT field on the live account (field-map.mjs --store, 2026-10-17), not
          the picklist the first draft of the registry assumed. */
       { name: "cfSourceOfData", displayName: "Source of Data", type: "TEXT_FIELD" },
+      /* The team's Remarks box: a custom PARAGRAPH_TEXT field. The contact has NO built-in `remarks` (live, 2026-10-18). */
+      { name: "cfRemarks", displayName: "Remarks", type: "PARAGRAPH_TEXT" },
       { name: "cfPipelineStageBd", displayName: "Pipeline Stage - BD", type: "PICK_LIST",
         picklist: { picklistValues: stages.map((s) => ({ id: s.id, name: s.code, displayName: s.label })) } },
       { name: "designation", displayName: "Designation", type: "TEXT_FIELD" },

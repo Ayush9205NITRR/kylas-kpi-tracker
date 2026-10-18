@@ -824,7 +824,9 @@ export function kylasRemarksOf(c) {
     || Object.keys(cf).find((k) => /^cf.*remark/i.test(k) && cf[k] != null && cf[k] !== "");
   const v = key ? cf[key] : "";
   const text = Array.isArray(v) ? v.map((x) => x?.value ?? x?.name ?? x).join("\n") : String(v ?? "");
-  return stripHtml(text);
+  /* What the PEOPLE wrote: the console's own block, now kept in this same field,
+     is not "said before". */
+  return stripAuto(stripHtml(text));
 }
 
 /* Whether a call log says it is about this contact — or says nothing either
@@ -903,6 +905,41 @@ export function mergeRemarks(existing, block) {
   const before = stripAuto(existing);
   if (!block) return before;
   return `${before}${before ? "\n\n" : ""}${MARK_A}\n${block}\n${MARK_B}`;
+}
+
+/* ── THE BLOCK IN THE TEAM'S REMARKS FIELD (cfRemarks) ──────────────────
+   The block used to be written to the contact's built-in `remarks`, which Kylas
+   answers 200 and stores nowhere on this account. It now goes into the custom
+   Remarks field. That field is typed in by people, so (a) what they wrote is
+   never replaced — only the block between the markers is — and (b) it may hold
+   HTML, if somebody pasted rich text into it: then their markup is kept and the
+   block is added as paragraphs, instead of flattening it to plain text. */
+const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const noteIsHtml = (s) => /<\/?(p|br|div|ul|ol|li|strong|em|b|i|u|span|a)\b/i.test(String(s || ""));
+
+/* A field's text as a person reads it, for comparing what was sent with what
+   Kylas returned: markup, entities and runs of whitespace are not differences. */
+export const noteText = (s) => stripHtml(String(s ?? "")).replace(/\s+/g, " ").trim();
+
+/* The block, kept to a size a text field takes. Event rows can be many; what is
+   cut is still whole in Airtable. */
+export function clipBlock(block, max = 1800) {
+  const b = String(block || "");
+  if (b.length <= max) return b;
+  const cut = b.slice(0, max).replace(/\n[^\n]*$/, "");
+  return `${cut}\n(more in the BD console)`;
+}
+
+export function mergeNote(existing, block) {
+  const ex = String(existing ?? "");
+  if (!noteIsHtml(ex)) return mergeRemarks(ex, block);
+  const span = new RegExp(`(?:<(?:p|div)[^>]*>\\s*)?${reEsc(MARK_A)}[\\s\\S]*?${reEsc(MARK_B)}(?:\\s*</(?:p|div)>)?`, "i");
+  const human = ex.replace(span, "").trim();
+  if (!block) return human;
+  /* In rich text a run of spaces collapses, so the label padding becomes a colon. */
+  const lines = [MARK_A, ...block.split("\n").map((l) => l.replace(/^(\S+(?: \S+)?)\s{2,}/, "$1: ")), MARK_B];
+  return `${human}${lines.map((l) => `<p>${escHtml(l)}</p>`).join("")}`;
 }
 
 const line = (label, value) => (value ? `${label.padEnd(10)} ${value}` : null);

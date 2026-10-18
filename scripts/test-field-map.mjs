@@ -110,6 +110,7 @@ console.log("\n5 · the registry resolved against an account");
     { name: "cfSourceOfData", label: "Source of Data", type: "TEXT_FIELD" },
     { name: "cfNextCallDate", label: "Next Call Date", type: "DATE_PICKER" },
     { name: "cfOffsiteTimelineBdNew", label: "Offsite Timeline", type: "MULTI_PICKLIST" },
+    { name: "cfRemarks", label: "Remarks", type: "PARAGRAPH_TEXT" },
   ];
   const picks = { cfOffsiteTimelineBdNew: [{ id: 9103, code: "JUL_SEP", label: "Jul - Sep" }] };
   const go = (fields) => resolveFieldMap({ kylasFields: fields, writeMap: resolveWriteFields(fields, picks), picklists: picks });
@@ -123,6 +124,16 @@ console.log("\n5 · the registry resolved against an account");
   is("...a core field it does not describe is assumed, not claimed", st(whole, "lastName"), "assumed");
   is("...and nothing is flagged", problemsOf(whole), []);
   ok("the call-back field resolved to the right name", whole.find((r) => r.key === "nextCall").kylasField === "cfNextCallDate");
+
+  is("...the event-details block resolves to the team's Remarks field", whole.find((r) => r.key === "note")?.kylasField, "cfRemarks");
+  is("...and is mapped (a paragraph field takes text)", st(whole, "note"), "mapped");
+  const noRemarks = go(base.filter((f) => f.name !== "cfRemarks"));
+  is("an account with no Remarks field: the block is UNMAPPED, said, not silent", st(noRemarks, "note"), "unmapped");
+  const lookalikes = resolveWriteFields([
+    { name: "cfPreviousOffsiteNotes", label: "Previous offsite notes", type: "PARAGRAPH_TEXT" },
+    { name: "cfCallRemarks", label: "Call remarks", type: "PARAGRAPH_TEXT" },
+    { name: "cfRemarks", label: "Remarks", type: "TEXT_FIELD" }], {});
+  is("a field about calls or the previous offsite is never mistaken for it", lookalikes.remarks?.name, "cfRemarks");
 
   const noOffsite = go(base.filter((f) => f.name !== "cfOffsiteTimelineBdNew"));
   is("no offsite field: UNMAPPED", st(noOffsite, "offsite"), "unmapped");
