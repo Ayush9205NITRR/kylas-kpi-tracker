@@ -744,6 +744,25 @@ used to be one number counting reads, so once the first hundred contacts agreed
 with Kylas every night re-read the same hundred and nothing past them was pushed
 (seen live: `checked 100, changed 0` on the first night).
 
+**BULK CATCH-UP** (the same `run()` the cron uses, from a terminal, supervised).
+Only contacts the console holds something on are candidates, so it is thousands,
+not 37,000; the run prints the count and how long reading and writing them takes.
+Stages, each one a decision to go on:
+
+```
+node --env-file=.env.local scripts/push-kylas.mjs                    # dry run over everyone: counts, examples
+node --env-file=.env.local scripts/push-kylas.mjs --apply --limit 20   # 20 writes, read back
+node --env-file=.env.local scripts/push-kylas.mjs --apply --limit 300
+node --env-file=.env.local scripts/push-kylas.mjs --apply              # the rest
+```
+It is safe to stop and run again: a contact that already agrees is skipped, and
+Ctrl-C finishes the contact in hand and keeps what was pushed. The Push Log is
+written every 250 contacts, not once at the end. **A circuit breaker** (nightly
+too): once 20 contacts have been written, more than one in ten not fully pushed
+stops the run and the run row says "Run stopped". `PUSH_LIMIT` (writes) and
+`PUSH_READS` (contacts looked at) stay at 100 / 600 for the nightly cron until a
+real night's Push Log has been read; then raise them.
+
 `node --env-file=.env.local scripts/push-kylas.mjs --contact <kylas id>` prints
 what Airtable wants against what Kylas holds, field by field (call-back, offsite
 quarter by name, the remarks block), and says SAME or DIFFERENT. Dry run unless

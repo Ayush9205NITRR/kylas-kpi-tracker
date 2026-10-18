@@ -56,7 +56,8 @@ import { findOptions } from "./kylas-options.mjs";
 
 export { findOptions };
 
-export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, reads = Infinity, only = "", now = Date.now() } = {}) {
+export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, reads = Infinity, only = "", now = Date.now(),
+                            signal = null, breakerMin = 20, flushEvery = 250 } = {}) {
   const TZ = tzMinOf(env);
   const { KYLAS_KEY, AIRTABLE_PAT, AIRTABLE_BASE } = env;
   if (!KYLAS_KEY || !AIRTABLE_PAT || !AIRTABLE_BASE)
@@ -145,6 +146,29 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   const examples = [];
   const track = [];           /* one entry per contact the pass tried to write */
 
+  const allPushed = (t) => t.outcomes.length > 0 && t.outcomes.every((o) => o.status === "pushed");
+  const nonePushed = (t) => !t.outcomes.some((o) => o.status === "pushed");
+  let flushed = 0, stopped = "";
+  /* A BIG RUN KEEPS ITS WORK AS IT GOES, AND STOPS ITSELF WHEN IT IS WRONG.
+     The Push Log used to be written once, at the end — so a laptop that slept
+     halfway through a bulk run lost the record of everything it had pushed. Rows
+     are keyed run|contact, so writing a slice now and the rest later is safe.
+     And a run whose first twenty contacts mostly fail is not going to improve on
+     the next three thousand: past `breakerMin` tracked contacts, more than one in
+     ten not fully pushed stops it, and says so. */
+  const afterTrack = async () => {
+    if (!apply) return;
+    if (track.length - flushed >= flushEvery) {
+      const part = track.slice(flushed).map((t) => contactRow({ run: runId, at: stamp, kid: t.kid, name: t.name, outcomes: t.outcomes }));
+      const w = await recordPush(at, part, { log });
+      if (w.stored) flushed = track.length;
+    }
+    if (!stopped && track.length >= breakerMin) {
+      const bad = track.filter((t) => !allPushed(t)).length;
+      if (bad / track.length > 0.1) stopped = `${bad} of the first ${track.length} contacts written were not fully pushed — stopped before it went further`;
+    }
+  };
+
   /* WHO THERE IS SOMETHING TO PUSH FOR, then the window of them looked at tonight. */
   const candidates = [];
   for (const rec of contacts) {
@@ -162,6 +186,10 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
      start each day where the last stopped: day N looks at [N*reads, (N+1)*reads)
      of the list, wrapping. Nothing is stored, so there is nothing to lose, and
      every contact is reached every ceil(n/reads) days. */
+  /* A Kylas call is about half a second (the client keeps a gap between them). */
+  const mins = (n) => Math.max(1, Math.round(n / 60));
+  log(`  ${candidates.length} contact(s) have something to push · reading them all takes about ${mins(candidates.length * 0.5)} min,` +
+      ` and writing every one about ${mins(candidates.length * 1.5)} min`);
   let order = candidates;
   if (!only && Number.isFinite(reads) && candidates.length > reads) {
     const start = (Math.floor(now / 86400000) * reads) % candidates.length;
@@ -173,7 +201,9 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     const want = wantedFor(rec);
     const block = blockFor(rec);
     if (checked >= reads || changed >= limit) break;
+    if (signal?.aborted) { stopped = "interrupted — what was pushed so far is kept"; break; }
     checked++;
+    if (checked % 100 === 0) log(`  … ${checked} looked at · ${changed} differ · ${wrote} written${failed ? ` · ${failed} failed` : ""}`);
 
     let base;
     try { base = await kylas.contact(kid); }
@@ -230,7 +260,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     if (!apply) continue;
 
     const name = rec.fields?.Name || "";
-    if (!Object.keys(send).length) { track.push({ kid, name, outcomes }); continue; }
+    if (!Object.keys(send).length) { track.push({ kid, name, outcomes }); await afterTrack(); if (stopped) break; continue; }
 
     let landed = false;
     try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody)); wrote++; landed = true; }
@@ -258,11 +288,11 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
       }
     }
     track.push({ kid, name, outcomes });
+    await afterTrack();
+    if (stopped) break;
   }
 
   /* ── what the night amounted to ────────────────────────────────────── */
-  const allPushed = (t) => t.outcomes.length > 0 && t.outcomes.every((o) => o.status === "pushed");
-  const nonePushed = (t) => !t.outcomes.some((o) => o.status === "pushed");
   const pushed = track.filter(allPushed).length;
   const notPushed = track.filter(nonePushed).length;
   const partly = track.length - pushed - notPushed;
@@ -273,6 +303,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   examples.forEach((e) => log(`    ${e}`));
   if (examples.length && changed > examples.length) log(`    …and ${changed - examples.length} more`);
   if (unmapped) log(`  ! ${unmapped} contact(s) have a value the console holds and this account has no Kylas field for`);
+  if (stopped) log(`\n  !! STOPPED: ${stopped}`);
   if (apply) {
     log(`\n  ${wrote} written, ${failed} failed.`);
     log(`  ${pushed} pushed and verified (${remarksPushed} with the remarks block) · ${partly} partly pushed · ${notPushed} not pushed` +
@@ -286,8 +317,9 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   const totals = { checked, changed, wrote, failed, gone, unmapped, held, pushed, partly, notPushed, remarks: remarksPushed };
   let tracked = { stored: false, why: "dry run — nothing was written, so nothing is recorded" };
   if (apply) {
-    const lines = track.map((t) => contactRow({ run: runId, at: stamp, kid: t.kid, name: t.name, outcomes: t.outcomes }));
-    lines.push(runRow({ run: runId, at: stamp, totals, mapProblems }));
+    const lines = track.slice(flushed).map((t) => contactRow({ run: runId, at: stamp, kid: t.kid, name: t.name, outcomes: t.outcomes }));
+    lines.push(runRow({ run: runId, at: stamp, totals,
+                        mapProblems: [...mapProblems, ...(stopped ? [{ key: "stopped", label: "Run stopped", status: "stopped", note: stopped }] : [])] }));
     tracked = await recordPush(at, lines, { log });
     const last = {};
     for (const t of track) for (const o of t.outcomes) {
@@ -298,7 +330,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     await storeFieldMap(at, resolved, { log, now: stamp, last });
     log(tracked.stored ? `  recorded in Push Log (${tracked.rows} row(s)).` : `  not recorded — ${tracked.why}`);
   }
-  return { ...totals, skipped, mapProblems, tracked };
+  return { ...totals, skipped, mapProblems, tracked, ...(stopped ? { stopped } : {}) };
 }
 
 /* ── the pieces run() uses, out here so they are testable ──────────────── */
@@ -375,11 +407,14 @@ const isMain = (() => {
 if (isMain) {
   const argv = process.argv;
   const a = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i > -1 && argv[i + 1] ? argv[i + 1] : d; };
+  /* Ctrl-C finishes the contact in hand, keeps what was pushed, and says so. */
+  const ctl = new AbortController();
+  process.once("SIGINT", () => { console.log("\n  Ctrl-C: finishing this contact, then stopping…"); ctl.abort(); });
   try {
-    const out = await run({ env: process.env, log: (...x) => console.log(...x),
+    const out = await run({ env: process.env, log: (...x) => console.log(...x), signal: ctl.signal,
                             apply: argv.includes("--apply"),
                             limit: Number(a("limit", "0")) || Infinity,
                             reads: Number(a("reads", "0")) || Infinity, only: a("contact", "") });
-    process.exit(out.failed || out.notPushed ? 1 : 0);
+    process.exit(out.failed || out.notPushed || out.stopped ? 1 : 0);
   } catch (e) { console.error(`\npush failed: ${e.message}`); process.exit(1); }
 }

@@ -289,5 +289,31 @@ console.log("\n10 · the caps: writes are capped by `limit`, reading is windowed
   ok("...a different two each day, so the list is walked", new Set(seen.flat()).size >= 4, JSON.stringify(seen));
 }
 
+console.log("\n11 · a big run keeps its work as it goes, and stops itself when it is wrong");
+{
+  await kylasWith({ MOCK_PUT_REFUSE: "112936" });
+  await seed();
+  const r = await go({ breakerMin: 1 });
+  ok("the first contact is refused, so the run STOPS before the next one", r.out.stopped && /not fully pushed/.test(r.out.stopped) && r.out.wrote === 0 && r.out.failed === 1, JSON.stringify(r.out));
+  ok("...and says so out loud", /STOPPED/.test(r.text), r.text);
+  const log = await rowsOf("Push Log");
+  ok("...the second contact was never touched", !log.some((x) => x["Kylas ID"] === "112937"), JSON.stringify(log.map((x) => x["Kylas ID"])));
+  const run = log.find((x) => x.Contact === "(run)");
+  ok("...the run row is flagged and carries the reason", run?.Status !== "Pushed" && /Run stopped/.test(run?.Reason || ""), JSON.stringify(run));
+
+  await kylasWith();
+  await seed();
+  const all = await go({ flushEvery: 1 });
+  ok("flushing after every contact loses nothing: both rows, once each", all.out.wrote === 2 && (await rowsOf("Push Log")).filter((x) => x.Contact !== "(run)").length === 2, JSON.stringify(all.out));
+  ok("...and no stop", !all.out.stopped);
+
+  await kylasWith();
+  await seed();
+  const ctl = new AbortController();
+  ctl.abort();
+  const cut = await go({ signal: ctl.signal });
+  ok("Ctrl-C before the first contact: nothing written, and it says why", cut.out.wrote === 0 && /interrupted/.test(cut.out.stopped || ""), JSON.stringify(cut.out));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
