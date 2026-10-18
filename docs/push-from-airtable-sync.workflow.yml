@@ -1,0 +1,54 @@
+# ALTERNATIVE: RUN THE BULK PUSH FROM kylas-airtable-sync, WHERE THE KEYS ALREADY ARE.
+#
+# GitHub secrets cannot be copied between repositories or read back; they can only
+# be used inside a run of the repository that holds them. kylas-airtable-sync has
+# KYLAS_API_KEY and AIRTABLE_PAT. Paste this into that repo as
+# .github/workflows/push_bd_console_to_kylas.yml and it checks the BD console's
+# code out and runs the same push with those two secrets. (If AIRTABLE_PAT there
+# cannot see the KPI base, the first call says so and nothing is written.)
+name: Push BD console to Kylas
+
+on:
+  schedule:
+    - cron: '47 21 * * *'          # 03:17 IST, after the Worker's 02:45 push
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write to Kylas. "false" is a dry run.'
+        default: 'false'
+      limit:
+        description: 'Most WRITES this run makes. 0 = no limit.'
+        default: '0'
+      contact:
+        description: 'One Kylas contact id only (blank = everyone).'
+        default: ''
+
+concurrency:
+  group: push-bd-console-to-kylas
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Ayush9205NITRR/kylas-kpi-tracker
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Push
+        env:
+          KYLAS_KEY: ${{ secrets.KYLAS_API_KEY }}
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          AIRTABLE_BASE: appEwJu0bleHh9b8t
+          APPLY: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.apply }}
+          LIMIT: ${{ github.event.inputs.limit || '0' }}
+          CONTACT: ${{ github.event.inputs.contact || '' }}
+        run: |
+          ARGS="--limit $LIMIT --reads 0"
+          if [ "$APPLY" = "true" ]; then ARGS="$ARGS --apply"; fi
+          if [ -n "$CONTACT" ]; then ARGS="$ARGS --contact $CONTACT"; fi
+          echo "node scripts/push-kylas.mjs $ARGS"
+          node scripts/push-kylas.mjs $ARGS

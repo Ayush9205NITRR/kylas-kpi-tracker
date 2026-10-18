@@ -12,11 +12,12 @@
 # stops itself if more than one in ten of the first twenty written is not fully
 # pushed (the circuit breaker), and the job then goes red, which GitHub emails.
 #
-# NEEDS THREE REPOSITORY SECRETS (Settings -> Secrets and variables -> Actions):
+# NEEDS TWO REPOSITORY SECRETS (Settings -> Secrets and variables -> Actions):
 #   KYLAS_KEY       the same Kylas API key as the Worker's
 #   AIRTABLE_PAT    the same Airtable token
-#   AIRTABLE_BASE   the base id, appEwJu0bleHh9b8t
-# Without them the run fails in its first second and says which one is missing.
+# The base id is not a secret (it is in wrangler.toml) and defaults to the KPI base;
+# set a repository SECRET named AIRTABLE_BASE only to point it somewhere else.
+# Without the two the run fails in its first second and says which one is missing.
 name: Push Airtable to Kylas
 
 on:
@@ -58,7 +59,7 @@ jobs:
         env:
           KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
           AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
-          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE || 'appEwJu0bleHh9b8t' }}
         run: |
           for v in KYLAS_KEY AIRTABLE_PAT AIRTABLE_BASE; do
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
@@ -68,7 +69,7 @@ jobs:
         env:
           KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
           AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
-          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE || 'appEwJu0bleHh9b8t' }}
           # A scheduled run writes; a hand-started one writes only if asked to.
           APPLY: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.apply }}
           LIMIT: ${{ github.event.inputs.limit || '0' }}
