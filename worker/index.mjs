@@ -236,6 +236,7 @@ const JOBS = {
     env, log,
     apply: String(env.PUSH_APPLY || "") === "1",
     limit: Number(env.PUSH_LIMIT || 0) || Infinity,
+    reads: Number(env.PUSH_READS || 0) || Infinity,
   }),
   /* HOURLY, AND IT HAS TO BE. The Kylas dialler app is the only place a real
      call length exists, and `GET /v1/call-logs?size=N` is the only read that

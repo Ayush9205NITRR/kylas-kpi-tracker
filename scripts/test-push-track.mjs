@@ -198,5 +198,97 @@ console.log("\n8 · the CLIs, run as the entry point (not imported)");
   ok("--store writes the Field Map table", /Field Map: \d+ row\(s\) written/.test(b.out) && (await rowsOf("Field Map")).length > 0, `${b.code} ${b.out.slice(-200)} ${b.err.slice(0, 200)}`);
 }
 
+console.log("\n9 · the remarks block: every detail the console holds, in the contact's Remarks");
+{
+  /* Ayush, 2026-10-18: remarks held the stage and nothing else. The nightly push
+     wrote two fields and never touched remarks, and the block a save writes left
+     the Past rows' notes out. Now the push rewrites the block from Airtable. */
+  const kylasContact = async (id) => (await fetch(`http://127.0.0.1:${KY}/v1/contacts/${id}`, { headers: { "api-key": "k" } })).json();
+  await kylasWith();
+  await reset();
+  const a = await at.upsert("Contacts", "Kylas Contact ID", { Name: "Hema Bharathi", "Kylas Contact ID": "112936", Owner: "Ayush Tiwari",
+    "Current Stage": "MQL_MARKETING_QUALIFIED_LEAD", "Vendor Info": "Vendor Exists", "Mode of Meeting": "In Person", "Service Offering": true,
+    "Next Call Date": "2026-10-20", "Next Call Time": "10:00" });
+  /* Shipra: nothing the console ever captured, only a name and an id. */
+  await at.upsert("Contacts", "Kylas Contact ID", { Name: "Shipra Gupta", "Kylas Contact ID": "112937", Owner: "Ayush Tiwari", "Current Stage": "DISCOVERY_CALL_BOOKED" });
+  await at.upsert("Event Rows", "Row Key", { "Row Key": "p1", Contact: [a.id], Period: "Past", "Event Type": "Sales conference / dealer meet",
+    Budget: "Approx 40L, signed off by CFO", Timeline: "Feb", Pax: "300", Remarks: "Held in Goa" });
+  await at.upsert("Event Rows", "Row Key", { "Row Key": "c1", Contact: [a.id], Period: "Current", "Event Type": "Employee offsites",
+    Budget: "8L", Timeline: "Aug, week 2", Pax: "120", Remarks: "Wants a Goa venue" });
+  await at.upsert("Event Rows", "Row Key", { "Row Key": "x1", Contact: [a.id], Period: "Current", "Event Type": "Product launch",
+    Budget: "1Cr", "Removed At": "2026-10-01T00:00:00.000Z" });
+  /* a human's own note, typed in Kylas, under no block at all */
+  const before = await kylasContact(112936);
+  for (let i = 0; i < 12; i++) {
+    await sleep(350);
+    const put = await fetch(`http://127.0.0.1:${KY}/v1/contacts/112936`, { method: "PUT", headers: { "api-key": "k", "content-type": "application/json" },
+      body: JSON.stringify({ ...before, remarks: "Ravi is the decision maker." }) });
+    if (put.status !== 429) break;
+  }
+
+  const r = await go();
+  const after = await kylasContact(112936);
+  const rem = String(after.remarks || "");
+  ok("the push wrote Hema, and read the remarks back", r.out.wrote >= 1 && (await rowsOf("Push Log")).find((x) => x["Kylas ID"] === "112936")?.Pushed.includes("Remarks"), JSON.stringify(r.out));
+  ok("...the stage and owner are in it", /Stage\s+MQL/.test(rem) && /Owner\s+Ayush Tiwari/.test(rem), rem);
+  ok("...the call-back", /Next call\s+2026-10-20 10:00/.test(rem), rem);
+  ok("...the PAST event with budget, timeline, pax and its own note", /Past\s+Sales conference \/ dealer meet \| Budget Approx 40L, signed off by CFO \| Timeline Feb \| Pax 300 \| Note: Held in Goa/.test(rem), rem);
+  ok("...the CURRENT event the same way", /Current\s+Employee offsites \| Budget 8L \| Timeline Aug, week 2 \| Pax 120 \| Note: Wants a Goa venue/.test(rem), rem);
+  ok("...vendor, mode and offering", /Vendor\s+Vendor Exists/.test(rem) && /Mode\s+In Person/.test(rem) && /Offering\s+pitched on this call/.test(rem), rem);
+  ok("...a row the console removed is NOT in it", !/Product launch/.test(rem), rem);
+  ok("...the human's own note survived, above the block", rem.startsWith("Ravi is the decision maker.") && rem.indexOf("Ravi") < rem.indexOf("BD CONSOLE"), rem);
+  const shipra = await kylasContact(112937);
+  ok("a contact the console never touched gets no block", !shipra.remarks, JSON.stringify(shipra.remarks));
+
+  const again = await go();
+  ok("a second night changes nothing (the block is stable)", again.out.changed === 0 && again.out.wrote === 0, JSON.stringify(again.out));
+
+  const sawAll = await go({ apply: false });
+  ok("a dry run reports the same: nothing to do", sawAll.out.changed === 0);
+
+  /* --contact: the side-by-side an admin reads to answer "is it really on the contact in Kylas". */
+  const one = await go({ apply: false, only: "112936" });
+  ok("--contact shows the offsite quarter by name, and that Kylas agrees", /Offsite quarter\s+Airtable wants Jul - Sep.*Kylas holds Jul - Sep.*SAME/.test(one.text), one.text);
+  ok("...and that the remarks block is the same", /Kylas holds the same block/.test(one.text), one.text);
+  /* the Kylas mock rate-limits at four a second, as Kylas does */
+  let lost;
+  await sleep(1200);
+  const snap = await kylasContact(112936);
+  for (let i = 0; i < 12; i++) {
+    await sleep(700);
+    lost = await fetch(`http://127.0.0.1:${KY}/v1/contacts/112936`, { method: "PUT", headers: { "api-key": "k", "content-type": "application/json" },
+      body: JSON.stringify({ ...snap, customFieldValues: {}, remarks: "Ravi is the decision maker." }) });
+    if (lost.status !== 429) break;
+  }
+  ok("(setup) Kylas lost the offsite and the block", lost.status === 200, String(lost.status));
+  const off = await go({ apply: false, only: "112936" });
+  ok("...a contact Kylas has lost it on says DIFFERENT, and shows the older block", /DIFFERENT/.test(off.text) && /Kylas holds no block/.test(off.text), off.text);
+}
+
+console.log("\n10 · the caps: writes are capped by `limit`, reading is windowed by `reads`");
+{
+  await kylasWith();
+  await seed();                                  /* two contacts, both with a call-back */
+  const one = await go({ limit: 1 });
+  ok("limit counts WRITES: one contact written, the other left for tomorrow", one.out.wrote === 1 && one.out.changed === 1, JSON.stringify(one.out));
+  const two = await go({ limit: 1 });
+  ok("...and the next night reaches the one that was left (it used to re-read the first forever)", two.out.wrote === 1, JSON.stringify(two.out));
+  const three = await go({ limit: 1 });
+  ok("...then everything agrees", three.out.wrote === 0 && three.out.changed === 0, JSON.stringify(three.out));
+
+  /* The window moves a day at a time. Contacts Kylas does not have (404) are the
+     cheapest way to see WHICH were looked at: each one is logged by its id. */
+  await reset();
+  for (let i = 0; i < 5; i++) await at.upsert("Contacts", "Kylas Contact ID", { Name: `Ghost ${i}`, "Kylas Contact ID": String(990000 + i), "Next Call Date": "2026-10-20" });
+  const seen = [];
+  for (const day of [0, 1, 2]) {
+    const lines = [];
+    await run({ env: ENV, log: (...x) => lines.push(x.join(" ")), apply: false, reads: 2, now: day * 86400000 });
+    seen.push(lines.join("\n").match(/\((99000\d)\)/g)?.map((m) => m.slice(1, -1)) || []);
+  }
+  ok("each day looks at two contacts, no more", seen.every((d) => d.length === 2), JSON.stringify(seen));
+  ok("...a different two each day, so the list is walked", new Set(seen.flat()).size >= 4, JSON.stringify(seen));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

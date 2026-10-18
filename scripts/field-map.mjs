@@ -117,7 +117,7 @@ export const FIELD_MAP = [
   { key: "ownerId", via: ["save"], label: "Owner",
     airtable: { table: "Contacts", field: "Kylas Owner ID", type: "singleLineText" },
     kylas: { name: "ownerId", entity: "contact" }, sends: "lookup", how: "the owner's Kylas user id, as a number" },
-  { key: "remarks", via: ["save"], label: "Remarks",
+  { key: "remarks", via: ["save", "push"], label: "Remarks",
     airtable: { table: "Contacts", field: "Remarks", type: "multilineText" },
     kylas: { name: "remarks", entity: "contact" }, sends: "text", how: "the console's block, merged between its markers" },
   { key: "stage", via: ["save"], label: "Pipeline stage",

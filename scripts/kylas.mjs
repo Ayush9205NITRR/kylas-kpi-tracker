@@ -906,7 +906,12 @@ export function mergeRemarks(existing, block) {
 }
 
 const line = (label, value) => (value ? `${label.padEnd(10)} ${value}` : null);
-const row = (r) => [r.eventType, r.budget, r.timeline, r.pax].filter(Boolean).join(" | ");
+/* ONE EVENT ROW, WITH EVERYTHING ON IT (Ayush, 2026-10-18: "I need all the data
+   to be pushed in remarks"). Labelled, because "Employee offsites | 8L | Q3 |
+   200" is four values with no names, and the row's own note used to be left out
+   of the Past rows entirely. */
+const row = (r) => [r.eventType, r.budget && `Budget ${r.budget}`, r.timeline && `Timeline ${r.timeline}`,
+                    r.pax && `Pax ${r.pax}`, r.remarks && `Note: ${r.remarks}`].filter(Boolean).join(" | ");
 
 /* What a Kylas user sees on the record. Readable, not parsed back — the numbers
    come from Airtable, this is context for whoever opens the contact. */
@@ -922,7 +927,6 @@ export function renderRemarks(c, { stageLabel } = {}) {
     line("Vendor", c.vendorInfo),
     line("Mode", c.modeOfMeeting),
     line("Offering", c.serviceOffering ? "pitched on this call" : ""),
-    line("Notes", (c.current || []).map((r) => r.remarks).filter(Boolean).join(" · ")),
   ].filter(Boolean);
   return out.join("\n");
 }

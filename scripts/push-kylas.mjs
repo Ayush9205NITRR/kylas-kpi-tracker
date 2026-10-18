@@ -3,7 +3,9 @@
  *
  *   node --env-file=.env.local scripts/push-kylas.mjs              # dry run
  *   node --env-file=.env.local scripts/push-kylas.mjs --apply
- *   node --env-file=.env.local scripts/push-kylas.mjs --apply --limit 200
+ *   node --env-file=.env.local scripts/push-kylas.mjs --apply --limit 200   # at most 200 WRITES
+ *   node --env-file=.env.local scripts/push-kylas.mjs --reads 3000          # look at 3000 contacts
+ *   node --env-file=.env.local scripts/push-kylas.mjs --contact 6326286     # one contact
  *
  * A save writes the call-back and the offsite quarter to Kylas from 1.29. This
  * is the other half: every contact saved BEFORE that, and every contact whose
@@ -23,13 +25,26 @@
  * Kylas currently holds it with the two fields changed. Read the header of
  * toKylasContact before touching this; it was learned the expensive way.
  *
- * It writes ONLY the two derived fields. It does not push a stage, a name or a
- * phone from Airtable into Kylas: Kylas is the system of record for those, and
- * a nightly job that overwrites them from a copy is how a CRM loses an edit
- * somebody made in the CRM.
+ * It writes the two derived fields AND THE REMARKS BLOCK (Ayush, 2026-10-18:
+ * "I need all the data to be pushed in remarks"): stage, owner, next call, every
+ * event row (past and current, with budget, timeline, pax and its note), vendor,
+ * mode and offering. The block is cut out and rewritten between its two markers;
+ * whatever a human typed outside it is kept. It does not push a stage, a name or
+ * a phone from Airtable into Kylas as FIELDS: Kylas is the system of record for
+ * those, and a nightly job that overwrites them from a copy is how a CRM loses
+ * an edit somebody made in the CRM. The stage in the block is context for the
+ * person reading the record.
+ *
+ * TWO CAPS, because they guard different things. `limit` caps WRITES (what a
+ * mistake can damage). `reads` caps contacts LOOKED AT (how long the run takes).
+ * They used to be one number counting reads, so once the first hundred contacts
+ * agreed with Kylas every night re-read the same hundred and nothing past them
+ * was ever pushed. A window that moves a day at a time (see `rotate`) now reaches
+ * everyone.
  */
 import { createAirtable, listTolerant } from "./airtable.mjs";
-import { createClient } from "./kylas.mjs";
+import { createClient, renderRemarks, mergeRemarks, MARK_A, MARK_B } from "./kylas.mjs";
+import { STAGE_LABEL } from "./stages.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { offsiteOf } from "./offsite.mjs";
 import { tzMinOf } from "./day.mjs";
@@ -39,7 +54,7 @@ import { findOptions } from "./kylas-options.mjs";
 
 export { findOptions };
 
-export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, only = "" } = {}) {
+export async function run({ env = {}, log = () => {}, apply = false, limit = Infinity, reads = Infinity, only = "", now = Date.now() } = {}) {
   const TZ = tzMinOf(env);
   const { KYLAS_KEY, AIRTABLE_PAT, AIRTABLE_BASE } = env;
   if (!KYLAS_KEY || !AIRTABLE_PAT || !AIRTABLE_BASE)
@@ -69,26 +84,21 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   mapProblems.forEach((p) => log(`  ! field map: ${p.label} — ${p.status}: ${p.note}`));
   const stamp = new Date().toISOString();
   const runId = `push-${stamp.slice(0, 16).replace(/[-:T]/g, "")}`;
-  if (!map.nextCall && !map.offsite) {
-    log("  neither field exists on this account — nothing to push.");
-    let tracked = { stored: false, why: "dry run — nothing is recorded" };
-    if (apply) {
-      tracked = await recordPush(at, [runRow({ run: runId, at: stamp, totals: {}, mapProblems })], { log });
-      await storeFieldMap(at, resolved, { log, now: stamp });
-    }
-    return { checked: 0, changed: 0, wrote: 0, failed: 0, skipped: 0, reason: "no fields", mapProblems, tracked };
-  }
-
   /* ── what the console knows ────────────────────────────────────────── */
   const [contacts, rows] = await Promise.all([
-    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Next Call Date", "Next Call Time"],
+    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Next Call Date", "Next Call Time", "Current Stage", "Owner",
+                                            "Vendor Info", "Mode of Meeting", "Service Offering"],
                                    pageSize: 100, maxPages: 5000 }),
-    listTolerant(at, "Event Rows", { fields: ["Contact", "Event Type", "Timeline"], pageSize: 100, maxPages: 5000 }),
+    listTolerant(at, "Event Rows", { fields: ["Contact", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks", "Removed At"],
+                                     pageSize: 100, maxPages: 5000 }),
   ]);
   const rowsByContact = new Map();
-  for (const r of rows)
+  for (const r of rows) {
+    /* A row the console removed counts for nothing (schema: Removed At). */
+    if (r.fields?.["Removed At"]) continue;
     for (const id of r.fields?.Contact || [])
       (rowsByContact.get(id) || rowsByContact.set(id, []).get(id)).push(r.fields);
+  }
   log(`  ${contacts.length} contact(s), ${rows.length} event row(s)`);
 
   /* The card shape offsite.js reads. Past and Now are the same question here —
@@ -99,6 +109,28 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
                                                       nextCallTime: rec.fields?.["Next Call Time"] || "" },
                                                { tzMin: TZ, quarters: quartersFor(rec) });
 
+  /* THE CARD, AS AIRTABLE HOLDS IT: what renderRemarks prints. A contact the
+     console never touched has no event rows, vendor, mode, offering or call-back,
+     and its block would be only the stage and owner Kylas already knows — noise
+     on tens of thousands of records. So the block is written only where the
+     console has something to say. */
+  const cardFor = (rec) => {
+    const f = rec.fields || {}, past = [], current = [];
+    for (const e of rowsByContact.get(rec.id) || []) {
+      const r = { eventType: e["Event Type"] || "", budget: e.Budget || "", timeline: e.Timeline || "",
+                  pax: e.Pax || "", remarks: e.Remarks || "" };
+      (e.Period === "Past" ? past : current).push(r);
+    }
+    return { stage: f["Current Stage"] || "", owner: f.Owner || "", nextCallDate: f["Next Call Date"] || "",
+             nextCallTime: f["Next Call Time"] || "", past, current, vendorInfo: f["Vendor Info"] || "",
+             modeOfMeeting: f["Mode of Meeting"] || "", serviceOffering: !!f["Service Offering"] };
+  };
+  const blockFor = (rec) => {
+    const c = cardFor(rec);
+    if (!c.past.length && !c.current.length && !c.vendorInfo && !c.modeOfMeeting && !c.serviceOffering && !c.nextCallDate) return "";
+    return renderRemarks(c, { stageLabel: STAGE_LABEL[c.stage] || c.stage });
+  };
+
   /* Which registry key a Kylas field name is, and the resolved field behind it. */
   const keyOf = new Map(), fieldOf = {};
   if (map.nextCall) { keyOf.set(map.nextCall.name, "nextCall"); fieldOf.nextCall = map.nextCall; }
@@ -106,20 +138,38 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   const labelOf = (k) => resolved.find((r) => r.key === keyOf.get(k))?.label || keyOf.get(k) || k;
 
   /* ── the pass ──────────────────────────────────────────────────────── */
-  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0, gone = 0, unmapped = 0, held = 0;
+  let checked = 0, changed = 0, wrote = 0, failed = 0, skipped = 0, gone = 0, unmapped = 0, held = 0, remarksPushed = 0;
   const examples = [];
   const track = [];           /* one entry per contact the pass tried to write */
+
+  /* WHO THERE IS SOMETHING TO PUSH FOR, then the window of them looked at tonight. */
+  const candidates = [];
   for (const rec of contacts) {
     const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
     if (!kid) { skipped++; continue; }
     if (only && kid !== only) continue;
-    const want = wantedFor(rec);
     /* A value the console HAS and no Kylas field to put it in. Counted, not
        listed per contact: it is one fact about the account, and the run row
        carries it. */
     if ((!map.nextCall && rec.fields?.["Next Call Date"]) || (!map.offsite && quartersFor(rec).length)) unmapped++;
-    if (!Object.keys(want).length) { skipped++; continue; }
-    if (checked >= limit) break;
+    if (!Object.keys(wantedFor(rec)).length && !blockFor(rec)) { skipped++; continue; }
+    candidates.push(rec);
+  }
+  /* ROTATE, WITHOUT STATE. When there are more candidates than the read budget,
+     start each day where the last stopped: day N looks at [N*reads, (N+1)*reads)
+     of the list, wrapping. Nothing is stored, so there is nothing to lose, and
+     every contact is reached every ceil(n/reads) days. */
+  let order = candidates;
+  if (!only && Number.isFinite(reads) && candidates.length > reads) {
+    const start = (Math.floor(now / 86400000) * reads) % candidates.length;
+    order = [...candidates.slice(start), ...candidates.slice(0, start)];
+    log(`  ${candidates.length} contact(s) have something to push; tonight looks at ${reads} of them, from #${start + 1}`);
+  }
+  for (const rec of order) {
+    const kid = String(rec.fields?.["Kylas Contact ID"] || "").trim();
+    const want = wantedFor(rec);
+    const block = blockFor(rec);
+    if (checked >= reads || changed >= limit) break;
     checked++;
 
     let base;
@@ -141,8 +191,14 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     }
 
     const have = base?.customFieldValues || {};
+    if (only) showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf });
     const diff = Object.entries(want).filter(([k, v]) => !same(idOf(have[k]), v));
-    if (!diff.length) continue;
+    /* THE REMARKS BLOCK, rewritten between its markers over whatever Kylas holds
+       (a human's text outside the block is kept). Compared the way a read-back is,
+       so a trailing newline Kylas trims is not a difference. */
+    const wantRemarks = block ? mergeRemarks(base?.remarks || "", block) : null;
+    const remarksDiffer = wantRemarks !== null && textOf(wantRemarks) !== textOf(base?.remarks);
+    if (!diff.length && !remarksDiffer) continue;
     changed++;
 
     /* THE TYPE IS CHECKED BEFORE THE SEND. A value of the wrong kind for its
@@ -162,19 +218,23 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
     if (outcomes.length) held++;
 
     if (examples.length < 12)
-      examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${diff.map(([k, v]) =>
-        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}${k in send ? "" : "  [held back: type]"}`).join(" · ")}`);
+      examples.push(`${(rec.fields?.Name || kid).padEnd(26)} ${[...diff.map(([k, v]) =>
+        `${k}: ${JSON.stringify(idOf(have[k]) ?? null)} → ${JSON.stringify(v)}${k in send ? "" : "  [held back: type]"}`),
+        ...(remarksDiffer ? [`remarks: +${block.split("\n").length} line(s) (${block.split("\n").map((l) => l.split(/\s/)[0]).join(", ")})`] : [])].join(" · ")}`);
     if (!apply) continue;
 
     const name = rec.fields?.Name || "";
-    if (!Object.keys(send).length) { track.push({ kid, name, outcomes }); continue; }
+    if (!Object.keys(send).length && !remarksDiffer) { track.push({ kid, name, outcomes }); continue; }
 
     let landed = false;
-    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody)); wrote++; landed = true; }
+    try { await kylas.raw("PUT", `/v1/contacts/${kid}`, bodyFor(base, putBody, remarksDiffer ? { remarks: wantRemarks } : {})); wrote++; landed = true; }
     catch (e) {
       failed++; log(`  ! ${name || kid}: write refused — ${e.message.slice(0, 120)}`);
       for (const [k, v] of Object.entries(send))
         outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: idOf(have[k]) ?? null,
+                        status: "refused", why: e.message.slice(0, 140) });
+      if (remarksDiffer)
+        outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: base?.remarks ?? null,
                         status: "refused", why: e.message.slice(0, 140) });
     }
 
@@ -190,6 +250,16 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
         const vd = verdict({ sent: v, got });
         outcomes.push({ key: keyOf.get(k), label: labelOf(k), kylasField: k, sent: v, got: got ?? null,
                         status: vd.status, why: vd.why || "" });
+      }
+      if (remarksDiffer) {
+        if (!after) outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: null,
+                                    status: "unread", why: whyOf("unread") });
+        else {
+          const vd = verdict({ sent: textOf(wantRemarks), got: textOf(after.remarks) });
+          if (vd.status === "pushed") remarksPushed++;
+          outcomes.push({ key: "remarks", label: "Remarks", kylasField: "remarks", sent: wantRemarks, got: after.remarks ?? null,
+                          status: vd.status, why: vd.why || "" });
+        }
       }
     }
     track.push({ kid, name, outcomes });
@@ -210,7 +280,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   if (unmapped) log(`  ! ${unmapped} contact(s) have a value the console holds and this account has no Kylas field for`);
   if (apply) {
     log(`\n  ${wrote} written, ${failed} failed.`);
-    log(`  ${pushed} pushed and verified · ${partly} partly pushed · ${notPushed} not pushed` +
+    log(`  ${pushed} pushed and verified (${remarksPushed} with the remarks block) · ${partly} partly pushed · ${notPushed} not pushed` +
         (held ? ` · ${held} held back for type` : ""));
     for (const t of track.filter((x) => !allPushed(x)).slice(0, 8))
       log(`    · ${t.name || t.kid}: ${t.outcomes.filter((o) => o.status !== "pushed")
@@ -218,7 +288,7 @@ export async function run({ env = {}, log = () => {}, apply = false, limit = Inf
   } else log(`\n  Dry run — nothing written. Add --apply.`);
 
   /* ── and it is kept ────────────────────────────────────────────────── */
-  const totals = { checked, changed, wrote, failed, gone, unmapped, held, pushed, partly, notPushed };
+  const totals = { checked, changed, wrote, failed, gone, unmapped, held, pushed, partly, notPushed, remarks: remarksPushed };
   let tracked = { stored: false, why: "dry run — nothing was written, so nothing is recorded" };
   if (apply) {
     const lines = track.map((t) => contactRow({ run: runId, at: stamp, kid: t.kid, name: t.name, outcomes: t.outcomes }));
@@ -251,7 +321,7 @@ const same = (a, b) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) ===
 /* THE WHOLE CONTACT, because the PUT replaces it. Anything left out of this
    object is deleted from the record — see the header of toKylasContact, which
    was learned the expensive way. */
-export function bodyFor(base, extra) {
+export function bodyFor(base, extra, { remarks } = {}) {
   const body = {
     firstName: base.firstName, lastName: base.lastName || "Unknown",
     designation: base.designation, linkedin: base.linkedin,
@@ -267,9 +337,40 @@ export function bodyFor(base, extra) {
     if (id !== undefined && id !== null && id !== "") body.customFieldValues[k] = id;
   }
   Object.assign(body.customFieldValues, extra);
+  if (remarks !== undefined && remarks !== null) body.remarks = remarks;
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
   return body;
 }
+
+/* `--contact <id>`: what Airtable wants on this contact, what Kylas holds, side by
+   side, field by field. The answer to "is the offsite really on the contact in
+   Kylas" without having to open Kylas. */
+function showContact({ log, rec, kid, base, want, have, block, keyOf, fieldOf, labelOf }) {
+  const nice = (k, v) => {
+    const opts = fieldOf[keyOf.get(k)]?.options || [];
+    const one = (x) => { const o = opts.find((y) => String(y.id) === String(x)); return o ? `${o.label || o.code} [${x}]` : String(x); };
+    return v === undefined || v === null || v === "" ? "(empty)" : Array.isArray(v) ? v.map(one).join(", ") : one(v);
+  };
+  log(`\n  CONTACT ${rec.fields?.Name || ""} · Kylas ${kid}`);
+  for (const [k, v] of Object.entries(want)) {
+    const held = idOf(have[k]);
+    log(`    ${labelOf(k).padEnd(18)} Airtable wants ${nice(k, v).padEnd(34)} Kylas holds ${nice(k, held).padEnd(34)} ${same(held, v) ? "SAME" : "DIFFERENT"}`);
+  }
+  if (!Object.keys(want).length) log("    (no call-back or offsite quarter on this contact in Airtable)");
+  const mine = base?.remarks || "";
+  const wanted = block ? `${MARK_A}\n${block}\n${MARK_B}` : "";
+  log(`    ${"Remarks block".padEnd(18)} Airtable wants ${block ? `${block.split("\n").length} line(s)` : "(none: nothing captured in the console)"}`);
+  if (block) {
+    const held = mine.includes(MARK_A) ? mine.slice(mine.indexOf(MARK_A), mine.indexOf(MARK_B) + MARK_B.length) : "";
+    log(`    ${"".padEnd(18)} Kylas holds ${held ? (textOf(held) === textOf(wanted) ? "the same block" : "an OLDER block") : "no block"}`);
+    if (held && textOf(held) !== textOf(wanted)) held.split("\n").forEach((l) => log(`        kylas   | ${l}`));
+    block.split("\n").forEach((l) => log(`        wanted  | ${l}`));
+  }
+}
+
+/* Remarks compared as text a person reads: Windows line endings and trailing
+   space are not a difference. */
+const textOf = (s) => String(s ?? "").replace(/\r\n/g, "\n").trim();
 
 /* ── from a terminal ───────────────────────────────────────────────────── */
 const isMain = (() => {
@@ -285,7 +386,8 @@ if (isMain) {
   try {
     const out = await run({ env: process.env, log: (...x) => console.log(...x),
                             apply: argv.includes("--apply"),
-                            limit: Number(a("limit", "0")) || Infinity, only: a("contact", "") });
+                            limit: Number(a("limit", "0")) || Infinity,
+                            reads: Number(a("reads", "0")) || Infinity, only: a("contact", "") });
     process.exit(out.failed || out.notPushed ? 1 : 0);
   } catch (e) { console.error(`\npush failed: ${e.message}`); process.exit(1); }
 }

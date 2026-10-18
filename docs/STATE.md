@@ -715,7 +715,30 @@ then the id 404s for ever. Those are counted as *gone* and named, not as
 failures — a nightly job that exits non-zero every night is one nobody reads.
 A rising `gone` count is the real signal: the two stores are drifting apart.
 
-It writes **only those two fields**. Not the stage, the name or the phone:
+**Since 2026-10-18 it also rewrites the contact's Remarks block** (Ayush: "I need
+all the data to be pushed in remarks"). Before, a save wrote the block and the
+nightly push never touched it, so contacts saved before the console had event
+details showed only a stage. Now, for every contact the console holds something
+on (event rows, vendor, mode, offering or a call-back), the push renders the
+same block a save does — stage, owner, next call, every event row **past and
+current with budget, timeline, pax and its note**, vendor, mode, offering — and
+cuts it into the Kylas remarks between its two markers; what a human typed
+outside the block is kept. A contact the console never touched gets no block.
+Rows marked `Removed At` count for nothing, in the block and in the offsite
+quarter. Read back like the other two (`Remarks` in the Push Log).
+
+**The two caps are now two.** `PUSH_LIMIT` caps WRITES; `PUSH_READS` (600) caps
+contacts LOOKED AT, in a window that moves a day at a time (no state kept). It
+used to be one number counting reads, so once the first hundred contacts agreed
+with Kylas every night re-read the same hundred and nothing past them was pushed
+(seen live: `checked 100, changed 0` on the first night).
+
+`node --env-file=.env.local scripts/push-kylas.mjs --contact <kylas id>` prints
+what Airtable wants against what Kylas holds, field by field (call-back, offsite
+quarter by name, the remarks block), and says SAME or DIFFERENT. Dry run unless
+`--apply` is added.
+
+It still writes **no other fields** as values. Not the stage, the name or the phone:
 Kylas is the system of record for those, and a nightly job that overwrites them
 from a copy is how a CRM loses an edit somebody made in the CRM. Every write is
 the whole contact (the PUT replaces), and a contact whose values already agree

@@ -171,6 +171,10 @@ CRON_PUSH = "15 21 * * *"
 # with `npx wrangler tail` and the daily write-back email agrees with it.
 PUSH_APPLY = "1"
 PUSH_LIMIT = "100"
+# How many contacts one night LOOKS AT (each is a Kylas read, about half a second).
+# PUSH_LIMIT above caps what is WRITTEN. The window moves a day at a time, so a
+# list longer than this is walked over several nights.
+PUSH_READS = "600"
 # Every minute: keeps the D1 copy of Airtable and the Kylas company list
 # current (scripts/mirror.mjs), and retries saves. Every minute rather than
 # every five so a first build is ready in two or three minutes, not ten. Idle,
