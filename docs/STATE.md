@@ -763,6 +763,17 @@ stops the run and the run row says "Run stopped". `PUSH_LIMIT` (writes) and
 `PUSH_READS` (contacts looked at) stay at 100 / 600 for the nightly cron until a
 real night's Push Log has been read; then raise them.
 
+**THE BULK RUN AS A SCHEDULED JOB.** `.github/workflows/push_to_kylas.yml` runs the
+same script nightly at 03:17 IST on a GitHub runner (6-hour limit, not a Worker's
+minutes), writing with no cap and the circuit breaker on; a red run is emailed by
+GitHub. It needs three repository secrets — `KYLAS_KEY`, `AIRTABLE_PAT`,
+`AIRTABLE_BASE` — and can be started by hand (Actions -> Push Airtable to Kylas ->
+Run workflow) with `apply`, `limit`, `reads` and `contact`; `apply` defaults to a
+dry run. The Worker's 02:45 push stays as the small incremental; the two cannot
+hurt each other, since whoever runs second finds every contact already agreeing.
+Scheduled workflows run from the default branch (it is this one) and GitHub turns
+them off after 60 days without a push to the repo.
+
 `node --env-file=.env.local scripts/push-kylas.mjs --contact <kylas id>` prints
 what Airtable wants against what Kylas holds, field by field (call-back, offsite
 quarter by name, the remarks block), and says SAME or DIFFERENT. Dry run unless
