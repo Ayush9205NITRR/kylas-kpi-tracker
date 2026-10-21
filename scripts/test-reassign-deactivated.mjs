@@ -121,5 +121,19 @@ await startMock({ MOCK_OWNER_ENDPOINT: "ignore" });
   ok("an owner that does not read back STOPS the run", r.code === 1 && /STOPPED at 903: its owner reads back as 74727/.test(r.out), r.out.trim().split("\n").slice(-3).join(" | "));
 }
 
+console.log("\n6 · --follow-contacts: an account whose contacts an active BD holds goes to THAT BD");
+await startMock();
+{
+  const d = run("--to", TEAM, "--follow-contacts");
+  ok("the plan says so, and names the BD outside --to", d.code === 0 && /1 account\(s\) go to the active BD already holding their contacts \(BD id: accounts\) 74726: 1 — 1 of those BDs are outside --to \(74726\)/.test(d.out) && /Round robin: the other 2/.test(d.out),
+     d.out.split("\n").filter((l) => /follow-contacts/.test(l)).join(""));
+  ok("...and the other two are round robin from the first name", /1778327 .*-> sejal\s+80001/.test(d.out) && /1810449 .*-> anjali\s+80002/.test(d.out),
+     d.out.split("\n").filter((l) => /->/.test(l)).join(" | "));
+  const r = run("--to", TEAM, "--follow-contacts", "--apply", "--all");
+  ok("903 goes to Priya (74726), who already holds its contact", r.code === 0 && (await owner(903)) === 74726 && /follows its contacts/.test(r.out), r.out.trim().split("\n").slice(-5).join(" | "));
+  ok("...the contact stays exactly where it was", (await contactOwner(38470)) === 74726);
+  ok("...the other two round robin", (await owner(1778327)) === 80001 && (await owner(1810449)) === 80002);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -24,10 +24,10 @@ on:
         description: 'active BDs, comma separated (first names, emails or Kylas user ids)'
         default: 'sejal,anjali,muskan,arshdeep,mayra'
       contacts:
-        description: 'which contacts follow the account'
+        description: 'follow-active-bd: an account whose contacts an active BD holds goes to THAT BD (Ayush, 2026-10-21); all: every contact follows the round robin; leave-active-bd: round robin, those contacts stay'
         type: choice
-        default: 'all'
-        options: [all, leave-active-bd]
+        default: 'follow-active-bd'
+        options: [follow-active-bd, all, leave-active-bd]
       step:
         description: 'dry-run, first-one, or all (all also tags the moved accounts)'
         type: choice
@@ -48,7 +48,7 @@ jobs:
       VIEW: ${{ github.event.inputs.view }}
       TO: ${{ github.event.inputs.to }}
       STEP: ${{ github.event.inputs.step }}
-      LEAVE: ${{ github.event.inputs.contacts == 'leave-active-bd' && '--leave-active-contacts' || '' }}
+      LEAVE: ${{ github.event.inputs.contacts == 'leave-active-bd' && '--leave-active-contacts' || github.event.inputs.contacts == 'follow-active-bd' && '--follow-contacts' || '' }}
       BULK_TAG_IDS_ONLY: '1'
     steps:
       - uses: actions/checkout@v4

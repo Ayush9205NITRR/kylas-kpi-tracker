@@ -1823,6 +1823,13 @@ stops. Round robin over ids sorted, starting with whoever holds fewest of the
 view's companies, so a re-run after a stop keeps the split even. One-way by
 nature: nothing can be handed back to a deactivated user.
 
+The live dry run (2026-10-21): 178 accounts from 74753 (69), 74754 (59), 74756
+(19), 82993 (19), 76689 (12); 482 contacts — 381 on deactivated users, **92 in
+16 accounts already with an active BD**. Ayush: those 16 accounts go to **the
+active BD who already holds their contacts** (contacts stay), not the round
+robin — `--follow-contacts`, the workflow's default `contacts: follow-active-bd`.
+The other accounts round robin with their contacts.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

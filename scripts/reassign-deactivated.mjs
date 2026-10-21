@@ -53,6 +53,12 @@ if (!NAMES.length) { console.error("--to name1,name2,... (the active BDs to shar
    holds stays with them; only contacts on a deactivated user or the API user
    follow the account. Default: every contact of the account moves. */
 const LEAVE_ACTIVE = has("leave-active-contacts");
+/* --follow-contacts (Ayush, 2026-10-21, for the 16 accounts whose contacts an
+   ACTIVE BD already holds): such an account is NOT in the round robin — it goes
+   to the active BD who holds most of its contacts, those contacts stay where
+   they are, and only its contacts on a deactivated user / the API user / nobody
+   follow it to that BD. That BD may be outside --to. */
+const FOLLOW = has("follow-contacts");
 if (!VIEW && !IDS_FILE) { console.error("--view <Company List view> or --ids <file>"); process.exit(1); }
 
 const kylas = createClient(KEY, { log: () => {}, base: BASE });
@@ -188,8 +194,29 @@ for (const id of ids) {
    --limit 1) keeps the split even instead of starting again from the first name. */
 targets.sort((a, b) => holds[a.id] - holds[b.id] || NAMES.indexOf(a.key) - NAMES.indexOf(b.key));
 console.log(`\nTargets (round robin, in this order): ${targets.map((t) => `${t.key} = ${t.id} (holds ${holds[t.id]} here now)`).join(" · ")}`);
-plan.forEach((p, i) => { p.to = targets[i % targets.length].id; p.toKey = targets[i % targets.length].key; });
-const perTarget = Object.fromEntries(targets.map((t) => [t.key, plan.filter((p) => p.to === t.id).length]));
+/* An active BD (not the API user) holding a contact = somebody already working it. */
+const activeBd = async (id) => !!id && id !== API_USER && (await userOf(id))?.active !== false && !!(await userOf(id));
+if (FOLLOW) {
+  for (const p of plan) {
+    p.cs = await contactsOf(p.id);
+    const tally = {};
+    for (const c of p.cs) if (await activeBd(c.owner)) tally[c.owner] = (tally[c.owner] || 0) + 1;
+    const best = Object.entries(tally).sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))[0];
+    if (best) { p.to = best[0]; p.follow = true; p.toKey = `contacts' BD`; }
+  }
+}
+const rr = plan.filter((p) => !p.follow);
+rr.forEach((p, i) => { p.to = targets[i % targets.length].id; p.toKey = targets[i % targets.length].key; });
+for (const p of plan) if (p.to === API_USER) { console.error(`${p.id} would go to the API user — refusing. Nothing written.`); process.exit(1); }
+const perTarget = Object.fromEntries(targets.map((t) => [t.key, rr.filter((p) => p.to === t.id).length]));
+const followers = plan.filter((p) => p.follow);
+if (FOLLOW) {
+  const by = {};
+  for (const p of followers) by[p.to] = (by[p.to] || 0) + 1;
+  const outside = Object.keys(by).filter((id) => !targets.some((t) => t.id === id));
+  console.log(`\n--follow-contacts: ${followers.length} account(s) go to the active BD already holding their contacts (BD id: accounts) ${Object.entries(by).map(([k, n]) => `${k}: ${n}`).join(" · ") || "-"}` +
+    `${outside.length ? ` — ${outside.length} of those BDs are outside --to (${outside.join(", ")})` : ""}. Round robin: the other ${rr.length}.`);
+}
 console.log(`\n${plan.length} companies with a DEACTIVATED owner · ${activeOwner} with an active owner (left alone) · ${noOwner} no owner found · ${unreadable} unreadable`);
 console.log(`Split: ${Object.entries(perTarget).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
 const fromCount = {};
@@ -200,7 +227,7 @@ if (!has("apply")) {
   /* The contacts that would follow — counted, with who holds them now. */
   let contacts = 0, withActiveOther = 0, withDead = 0, withApi = 0, accountsActiveOther = 0;
   for (const p of plan) {
-    const cs = await contactsOf(p.id);
+    const cs = p.cs || await contactsOf(p.id);
     p.contacts = cs.length;
     contacts += cs.length;
     let other = 0;
@@ -236,7 +263,7 @@ for (const p of plan) {
   const stuck = [];
   for (const c of cs) {
     if (c.owner === p.to) continue;
-    if (LEAVE_ACTIVE && c.owner && c.owner !== API_USER && (await userOf(c.owner))?.active !== false) { kept++; continue; }
+    if ((LEAVE_ACTIVE || p.follow) && (await activeBd(c.owner))) { kept++; continue; }
     try {
       await call("PUT", `/v1/contacts/${c.id}/owner`, { ownerId: Number(p.to) });
       const back = await call("GET", `/v1/contacts/${c.id}`);
@@ -257,7 +284,7 @@ for (const p of plan) {
     process.exit(1);
   }
   done++;
-  console.log(`  ${String(done).padStart(3)}  ${p.id.padEnd(9)} ${p.from} -> ${p.toKey} ${p.to} ✓ · contacts ${moved}/${cs.length} moved${kept ? ` (${kept} left with their active BD)` : ""}` +
+  console.log(`  ${String(done).padStart(3)}  ${p.id.padEnd(9)} ${p.from} -> ${p.toKey} ${p.to}${p.follow ? " (follows its contacts)" : ""} ✓ · contacts ${moved}/${cs.length} moved${kept ? ` (${kept} left with their active BD)` : ""}` +
     `${stuck.length ? ` · NOT MOVED: ${stuck.join(", ")}` : ""}`);
 }
 console.log(`\nOWNER CHECK: ${done} account(s) read back with their new owner. Contacts moved: ${contactsMoved}${contactsKept ? ` · ${contactsKept} left with an active BD` : ""}${contactsFailed ? ` · ${contactsFailed} NOT moved (listed above)` : ""}.`);
