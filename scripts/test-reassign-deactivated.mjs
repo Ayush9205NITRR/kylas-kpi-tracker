@@ -146,13 +146,39 @@ await startMock({ MOCK_DEAD_COMPANIES: "", MOCK_COMPANY_OWNERS: "1776620:80007,1
   ok("...round robin from the first name", /1778327 .*-> sejal\s+80001/.test(d.out) && /1810449 .*-> anjali\s+80002/.test(d.out),
      d.out.split("\n").filter((l) => /->/.test(l)).join(" | "));
   const bad = run("--to", "sejal,rubal", "--from", "rubal");
-  ok("the person they move FROM can never be a target", bad.code === 1 && /also in --to/.test(bad.out), bad.out.trim());
+  ok("the person they move FROM can never be a target", bad.code === 1 && /also a target/.test(bad.out), bad.out.trim());
   const r = run("--to", TEAM, "--from", "rubal", "--lifetime-only", "--follow-contacts", "--apply", "--all");
   ok("both move and read back", r.code === 0 && /OWNER CHECK: 2 account/.test(r.out), r.out.trim().split("\n").slice(-4).join(" | "));
   ok("...to Sejal and Anjali", (await owner(1778327)) === 80001 && (await owner(1810449)) === 80002);
   ok("...and the non-lifetime one is still Rubal's", (await owner(1776620)) === 80007);
   const again = run("--to", TEAM, "--from", "rubal", "--lifetime-only");
   ok("a re-run finds nothing left", /0 companies to move from rubal/.test(again.out));
+}
+
+console.log("\n8 · several owners, only the listed ids, split 40/60 (Ayush: Gaurav & co., 40% Sejal, rest Mayra)");
+await startMock({ MOCK_DEAD_COMPANIES: "903", MOCK_COMPANY_OWNERS: "1776620:80007,1778327:74725,1810449:80007" });
+{
+  /* 903 on a deactivated user, 1778327 on the API user, 1776620 + 1810449 on Rubal;
+     the list leaves 1810449 out, so it must stay where it is. */
+  const list = join(dir, "picked.txt");
+  writeFileSync(list, "903\n1778327\n1776620\n");
+  const runL = (...a) => {
+    const r = spawnSync(process.execPath, [SCRIPT, "--ids", list, ...a],
+      { cwd: dir, env: { ...process.env, KYLAS_KEY: "k", KYLAS_BASE: BASE }, encoding: "utf8" });
+    return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+  };
+  const FROMS = "rubal,74725,74727";
+  const d = runL("--from", FROMS, "--split", "sejal:40,mayra:60");
+  ok("only the listed ids on those owners are planned — the API user's too", d.code === 0 && /3 companies to move from/.test(d.out),
+     d.out.split("\n").filter((l) => /companies to move|From:|Only the/.test(l)).join(" | "));
+  ok("...split by weight: 40% of 3 rounds to 1 Sejal, 2 Mayra", /Split: sejal 1 · mayra 2/.test(d.out), d.out.split("\n").filter((l) => /Split/.test(l)).join(""));
+  ok("--split names are the targets; Enout Super Admin still refused as one", runL("--from", "rubal", "--split", "sejal:40,enout:60").code === 1);
+  const r = runL("--from", FROMS, "--split", "sejal:40,mayra:60", "--apply", "--all");
+  const o = [await owner(903), await owner(1778327), await owner(1776620)];
+  ok("all three move, to Sejal and Mayra only", r.code === 0 && o.every((x) => x === 80001 || x === 80005) && o.filter((x) => x === 80005).length === 2,
+     `${JSON.stringify(o)} | ${r.out.trim().split("\n").slice(-3).join(" | ")}`);
+  ok("...the id left off the list stays with Rubal", (await owner(1810449)) === 80007);
+  ok("...903's contact (held by an active BD outside the move) follows its account", (await contactOwner(38470)) === (await owner(903)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

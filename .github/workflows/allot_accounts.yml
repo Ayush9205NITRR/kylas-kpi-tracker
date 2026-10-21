@@ -1,0 +1,85 @@
+# ALLOT THE ACCOUNTS A CONSOLE FILTER SHOWS — by owner and offsite quarter —
+# to BDs by percentage, contacts with them.
+#
+# Ayush, 2026-10-21: All accounts, Offsite Q1 + Q2 + Q3, owners Gaurav Kumar,
+# Enout Super Admin, Shreya Bodwal, Rubal Sansanwal, Tanay Kumar, Devansh
+# Shukla, keshav Kumar, Charu Rathi → 40% Sejal, the rest Mayra.
+#
+#   1. scripts/select-accounts.mjs runs the console's own /companies code and
+#      keeps the ids the screen would show (owner + offsite quarter);
+#   2. scripts/reassign-deactivated.mjs --ids --from --split moves each one —
+#      re-read from Kylas first, contacts then the account, every owner read
+#      back, never to the API user; the first mismatch stops the run.
+#
+# Steps: dry-run (the plan, nothing written) -> first-one -> all.
+# Logs print ids and BD names only: this repository's Actions logs are public.
+name: Allot filtered accounts (split by %)
+
+on:
+  workflow_dispatch:
+    inputs:
+      owners:
+        description: 'the owners whose accounts move, as the console names them (comma separated)'
+        default: 'Gaurav Kumar,Enout Super Admin,Shreya Bodwal,Rubal Sansanwal,Tanay Kumar,Devansh Shukla,keshav Kumar,Charu Rathi'
+      offsite:
+        description: 'offsite quarters (APR_JUN = Q1, JUL_SEP = Q2, OCT_DEC = Q3, JAN_MAR = Q4); empty = any'
+        default: 'APR_JUN,JUL_SEP,OCT_DEC'
+      split:
+        description: 'who gets what share, name:weight'
+        default: 'sejal:40,mayra:60'
+      contacts:
+        description: 'leave-active-bd: contacts an active BD (not one of the owners above) already holds stay with them; all: every contact follows its account'
+        type: choice
+        default: 'leave-active-bd'
+        options: [leave-active-bd, all]
+      step:
+        description: 'dry-run, first-one, or all'
+        type: choice
+        default: 'dry-run'
+        options: [dry-run, first-one, all]
+
+concurrency:
+  group: tag-company-source
+  cancel-in-progress: false
+
+jobs:
+  allot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      OWNERS: ${{ github.event.inputs.owners }}
+      OFFSITE: ${{ github.event.inputs.offsite }}
+      SPLIT: ${{ github.event.inputs.split }}
+      LEAVE: ${{ github.event.inputs.contacts == 'leave-active-bd' && '--leave-active-contacts' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check the secrets are there
+        run: |
+          for v in KYLAS_KEY AIRTABLE_PAT; do
+            if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
+          done
+      - name: Pick the accounts the console's filter shows (reads only)
+        run: node scripts/select-accounts.mjs --owners "$OWNERS" --offsite "$OFFSITE" --out picked.txt
+      - name: Plan (writes nothing)
+        run: node scripts/reassign-deactivated.mjs --ids picked.txt --from "$OWNERS" --split "$SPLIT" $LEAVE
+      - name: First account
+        if: ${{ github.event.inputs.step == 'first-one' }}
+        run: node scripts/reassign-deactivated.mjs --ids picked.txt --from "$OWNERS" --split "$SPLIT" $LEAVE --apply --limit 1
+      - name: All accounts
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/reassign-deactivated.mjs --ids picked.txt --from "$OWNERS" --split "$SPLIT" $LEAVE --apply --all
+      - name: Keep the before-images (ids and old owners only — for an undo)
+        if: ${{ always() && github.event.inputs.step != 'dry-run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allot-snapshot-${{ github.run_id }}
+          path: |
+            reassign-snapshot-*.json
+            picked.txt
+          if-no-files-found: ignore
+          retention-days: 90
