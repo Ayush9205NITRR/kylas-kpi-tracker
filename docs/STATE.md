@@ -1841,6 +1841,16 @@ a deactivated user); the 92 already with an active BD stayed. Then the month tag
 companies tagged in Kylas; the other 2 are deleted (1773237, 1783882).
 Before-images: the run artifacts `reassign-snapshot-<run id>` (90 days).
 
+**Rubal's lifetime MQL-SQL accounts, 2026-10-21 (run 39659760292).** Ayush:
+"Rubal ke saare companies jinme lifetime MQL-SQL set hai, round robin among
+BDs." `--from rubal --lifetime-only` (workflow inputs `from`, `lifetime_only`):
+Rubal (74752, active) held 2,195 companies in Kylas; **118** carry lifetime
+MQL-SQL in Source of Data and all 118 moved and read back — Sejal 27 (4 of them
+following their contacts, already hers), Anjali 23, Muskan 23, Arshdeep 23,
+Mayra 22 — with **317 contacts** (every one Rubal held on them). The other
+2,077 stay with Rubal. Kylas will not filter the company search by owner on
+this account, so `--from` reads the whole account (~20 min) before planning.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
