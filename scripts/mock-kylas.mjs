@@ -641,6 +641,12 @@ createServer(async (req, res) => {
       : mode === "replace-keep-owner"
         ? { id: prev.id, ownerId: prev.ownerId, ...rest, updatedAt: new Date().toISOString() }
         : { ...prev, ...body, updatedAt: new Date().toISOString() };
+    /* What the live account does on every update (2026-10-21): it stamps WHO
+       updated it — "Universal API Key" — on fields that were absent before. Audit
+       metadata, not data; a check that reads it as "a field changed" stops a safe
+       write (it stopped the first --view canary). */
+    if (!process.env.MOCK_NO_UPDATED_VIA)
+      Object.assign(COMPANIES[coPut[1]], { updatedViaId: "universal-app-key", updatedViaName: "Universal API Key", updatedViaType: "API Key" });
     WRITES.push({ kind: "company-update", id: Number(coPut[1]), body });
     return json(res, 200, COMPANIES[coPut[1]]);
   }

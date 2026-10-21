@@ -105,6 +105,11 @@ const SERVER_KEYS = new Set([
   "convertedBy", "pipeline", "stageUpdatedAt", "associatedContacts",
   "metaData", "idNameStore", "companyStage", "lastActivityAt",
   "nextActivityAt", "score", "duplicateOf", "ownerName",
+  /* WHO created / last updated it — Kylas stamps these itself on every write
+     ("Universal API Key"). Never sent back, never compared: reading them as a
+     changed field failed the first live --view canary on 2026-10-21 with the
+     owner intact. */
+  "createdViaId", "createdViaName", "createdViaType", "updatedViaId", "updatedViaName", "updatedViaType",
 ]);
 const OWNER_KEYS = new Set(["ownerId", "owner", "ownedBy", "ownerDetails", "assignedTo", "recordOwner"]);
 const cfOf = (v) => (Array.isArray(v) ? v.map(cfOf) : v && typeof v === "object" ? (v.id ?? v.value) : v);
