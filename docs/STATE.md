@@ -1851,6 +1851,41 @@ Mayra 22 — with **317 contacts** (every one Rubal held on them). The other
 2,077 stay with Rubal. Kylas will not filter the company search by owner on
 this account, so `--from` reads the whole account (~20 min) before planning.
 
+## 3l3 · Allot — accounts AND contacts, split by %, in the console (1.69.0)
+
+Ayush, 2026-10-21: *"Yeh account allotment ka process UI pe move kar do —
+account ke saath contact bhi allot ho sake, and it should be fast, with
+progress bar, taki majje aaye karne mein."*
+
+**Console (admins):** tick rows (or *Select these N*) → **Allot**: one or more
+people, each with a share (40/60, *split evenly*), a preview of who gets how
+many → one confirm → 5 accounts a request, a bar with per-person counts, an
+ETA and **Stop**. Moved rows untick, failures stay ticked, and the table shows
+the new owner at once (the list is the Airtable copy, which learns it at the
+next sync — `applyAllotted()` lays the read-back owner over it until then).
+It replaces "Move their contacts to"; one person at 100% is that.
+
+**Server:** `POST /allot` → `reassign.mjs allot()`: one person per account,
+decided in the console; **one-field writes only** — `PUT /contacts/{id}/owner`
+for each contact, then `PUT /companies/{id}/owner` — never a whole-record PUT
+(refused on retired picklist values, and a read per contact); each account's
+owner **read back**. Contacts an active BD already holds can stay ("Keep
+contacts another active BD already holds", on by default); the previous
+owner's, the API user's and deactivated users' always move. Never to the API
+user. `GET /allot-people`: active users only. The old `/reassign` stays for
+older builds. Tests: `test-allot` 14, `test-allot-live` 13 (real Chrome).
+
+**The same split from a script:** `select-accounts.mjs` runs the console's own
+`/companies` code and keeps the ids a filter shows (owners + offsite quarter);
+`reassign-deactivated.mjs --ids --from a,b,c --split sejal:40,mayra:60`; workflow
+`allot_accounts.yml`. First use, 2026-10-21: Offsite Q1+Q2+Q3, eight owners
+(Gaurav 236, Super Admin 54, Shreya 21, Rubal 12, Tanay 12, Devansh 8, keshav 2,
+Charu 1 — the screenshot's counts) → 346 accounts, Sejal 138 / Mayra 208.
+**Done (run 39672745871): 346 of 346 read back on their new owner; 180
+contacts moved with them** (every one on those owners or a deactivated user);
+**320 contacts in 101 accounts stayed with the active BD already working
+them.** Before-images + the picked ids: artifact `allot-snapshot-39672745871`.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
