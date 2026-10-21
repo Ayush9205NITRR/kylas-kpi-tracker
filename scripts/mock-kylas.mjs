@@ -79,7 +79,8 @@ const COMPANIES = {
     createdBy: 74725, updatedBy: { id: 74726, name: "Priya Deshmukh" },
     metaData: { idNameStore: { createdBy: { 74725: "Enout Super Admin" } } },
   },
-  903: { id: 903, name: "Shorehouse Retail", ownerId: 74726, customFieldValues: {} },
+  /* MOCK_COMPANY_DEAD_OWNER=903 parks it on 74727 "Gone Away", who is deactivated. */
+  903: { id: 903, name: "Shorehouse Retail", ownerId: process.env.MOCK_COMPANY_DEAD_OWNER === "903" ? 74727 : 74726, customFieldValues: {} },
   /* Allotted, never worked: no contacts point at it. A companies list derived
      from contacts cannot show this row, which is the whole reason /companies
      searches companies directly. */
@@ -265,6 +266,8 @@ createServer(async (req, res) => {
 
   const p = url.pathname;
   if (p === "/v1/users/me") return json(res, 200, USERS[74725]);
+  { const um = p.match(/^\/v1\/users\/(\d+)$/);
+    if (um && req.method === "GET") return USERS[um[1]] ? json(res, 200, USERS[um[1]]) : json(res, 404, { message: "no such user" }); }
   /* The documented per-id lookup — the floor the client falls back to. */
   const oneUser = p.match(/^\/v1\/users\/(\d+)$/);
   if (oneUser) {
@@ -635,8 +638,18 @@ createServer(async (req, res) => {
        bulk-tag-companies.mjs' canary is tested against all three. */
     const mode = process.env.MOCK_COMPANY_PUT || "merge";
     const prev = COMPANIES[coPut[1]];
+    /* MOCK_COMPANY_PUT_REFUSE=<id>: Kylas' answer for a company it will not take
+       back (live, 2026-10-21, company 1773567): 400, generic, no field named. */
+    if (process.env.MOCK_COMPANY_PUT_REFUSE === coPut[1])
+      return json(res, 400, { errorCode: "02803002", code: "02803002", message: "generic.error" });
     const { ownerId: _o, owner: _ow, ...rest } = body;
-    COMPANIES[coPut[1]] = mode === "replace-drop-owner"
+    /* replace-api-owner: the body replaces the record and the owner becomes the
+       API user (74725) — what kylas-airtable-sync recorded live on 2026-07-01:
+       "Kylas IGNORES ownerId in the full company PUT body and reassigns the
+       record to the API user". Only PUT /{id}/owner puts it back. */
+    COMPANIES[coPut[1]] = mode === "replace-api-owner"
+      ? { id: prev.id, ...rest, ownerId: 74725, updatedAt: new Date().toISOString() }
+      : mode === "replace-drop-owner"
       ? { id: prev.id, ...rest, updatedAt: new Date().toISOString() }
       : mode === "replace-keep-owner"
         ? { id: prev.id, ownerId: prev.ownerId, ...rest, updatedAt: new Date().toISOString() }

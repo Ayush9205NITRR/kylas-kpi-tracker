@@ -23,6 +23,16 @@ const ok = (what, c, d = "") => { (c ? pass++ : fail++); console.log(`  ${c ? "P
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const H = { "api-key": "k" };
 
+/* spawnSync blocks this process's event loop while the script runs — longer than
+   the mock's keep-alive timeout now that the canary does more — so the socket a
+   later fetch reuses may already be closed on the other side. Retry once. */
+const fetchR = async (...a) => {
+  for (let i = 0; ; i++) {
+    try { return await fetch(...a); }
+    catch (e) { if (i >= 2) throw e; await sleep(150); }
+  }
+};
+
 let mock = null;
 async function startMock(mode, extra = {}) {
   /* Wait for the old one to be GONE: a new mock that cannot bind the port
@@ -31,7 +41,7 @@ async function startMock(mode, extra = {}) {
   mock = spawn(process.execPath, ["scripts/mock-kylas.mjs"], {
     env: { ...process.env, PORT: String(PORT), MOCK_COMPANY_PUT: mode, ...extra }, stdio: ["ignore", "ignore", "inherit"] });
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(`${BASE}/v1/companies/903`, { headers: H })).ok) return; } catch { /* not yet */ }
+    try { if ((await fetchR(`${BASE}/v1/companies/903`, { headers: H })).ok) return; } catch { /* not yet */ }
     await sleep(100);
   }
   throw new Error("mock did not start");
@@ -40,13 +50,13 @@ process.on("exit", () => mock?.kill());
 /* The mock throttles above 4 req/s, as Kylas does — a read here waits it out. */
 const co = async (id) => {
   for (let i = 0; i < 10; i++) {
-    const r = await fetch(`${BASE}/v1/companies/${id}`, { headers: H });
+    const r = await fetchR(`${BASE}/v1/companies/${id}`, { headers: H });
     if (r.status !== 429) return r.json();
     await sleep(400);
   }
   throw new Error("still throttled");
 };
-const writes = async () => (await (await fetch(`${BASE}/__writes`, { headers: H })).json());
+const writes = async () => (await (await fetchR(`${BASE}/__writes`, { headers: H })).json());
 
 const dir = mkdtempSync(join(tmpdir(), "bulktag-"));
 const ids = join(dir, "ids.txt");
@@ -58,8 +68,10 @@ const run = (...a) => {
 };
 const clearCanary = () => { try { writeFileSync(join(dir, ".bulk-tag-canary.json"), "{}"); } catch { /* none */ } };
 
-console.log("\n1 · a Kylas that erases the owner (what happened to lucidity)");
-await startMock("replace-drop-owner");
+console.log("\n1 · a Kylas that erases the owner, and an owner endpoint that cannot put it back");
+/* Before 2026-10-15 nothing could put an owner back (lucidity). Now the owner
+   endpoint can — so the case that must still refuse is the one where it can't. */
+await startMock("replace-drop-owner", { MOCK_OWNER_ENDPOINT: "ignore" });
 {
   const dry = run();
   ok("the dry run lists both and writes nothing", dry.code === 0 && /2 to tag/.test(dry.out), dry.out.split("\n").slice(-3).join(" | "));
@@ -110,7 +122,7 @@ console.log("\n3 · the canary passed, then Kylas starts erasing owners mid-run"
 {
   /* The canary file from section 2 still says "passed". The live behaviour
      changes underneath it — the per-company check is what has to catch it. */
-  await startMock("replace-drop-owner");
+  await startMock("replace-drop-owner", { MOCK_OWNER_ENDPOINT: "ignore" });
   const r = run("--apply", "--all");
   const a = await co(1776620), b = await co(903);
   ok("it stops at the FIRST company that comes back wrong", r.code === 1 && /STOPPED at 1776620/.test(r.out) && /OWNER IS GONE/.test(r.out),
@@ -135,7 +147,7 @@ clearCanary();
 /* The owner as the search sees it, whatever a single read does with it. */
 const ownerBySearch = async (id) => {
   for (let i = 0; i < 10; i++) {
-    const r = await fetch(`${BASE}/v1/search/company?page=0&size=5`, { method: "POST",
+    const r = await fetchR(`${BASE}/v1/search/company?page=0&size=5`, { method: "POST",
       headers: { ...H, "content-type": "application/json" },
       body: JSON.stringify({ fields: ["id", "ownerId"], jsonRule: { condition: "AND", valid: true,
         rules: [{ id: "id", field: "id", type: "long", input: "number", operator: "equal", value: id }] } }) });
@@ -188,11 +200,11 @@ clearCanary();
   const AT_PORT = 9953, AT = `http://127.0.0.1:${AT_PORT}`, AH = { authorization: "Bearer x", "content-type": "application/json" };
   const at = spawn(process.execPath, ["scripts/mock-airtable.mjs"], { env: { ...process.env, PORT: String(AT_PORT) }, stdio: ["ignore", "ignore", "inherit"] });
   process.on("exit", () => at.kill());
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(`${AT}/__count`, { headers: AH })).ok) break; } catch { /* not yet */ } await sleep(100); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetchR(`${AT}/__count`, { headers: AH })).ok) break; } catch { /* not yet */ } await sleep(100); }
   const seed = [["1776620", "lifetime-MQL-SQL October, November"], ["1776620", "lifetime-MQL-SQL December"],
                 ["903", "lifetime-MQL-SQL November"], ["", "lifetime-MQL-SQL October"], ["777", "GPTW"]];
   for (const [kid, src] of seed) {
-    await fetch(`${AT}/v0/appCO/Company%20List`, { method: "POST", headers: AH,
+    await fetchR(`${AT}/v0/appCO/Company%20List`, { method: "POST", headers: AH,
       body: JSON.stringify({ records: [{ fields: { "Kylas Company Id": kid, "Source (MQL-SQL)": src } }] }) });
     await sleep(250);
   }
@@ -224,7 +236,7 @@ clearCanary();
   /* Kylas holds the tag with more after it: the months go right after the tag. */
   const cur = await co(903);
   for (let i = 0; i < 10; i++) {
-    const r = await fetch(`${BASE}/v1/companies/903`, { method: "PUT", headers: { ...H, "content-type": "application/json" },
+    const r = await fetchR(`${BASE}/v1/companies/903`, { method: "PUT", headers: { ...H, "content-type": "application/json" },
       body: JSON.stringify({ name: cur.name, customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL + Lost Deal (25 Oct | 40 lac)" } }) });
     if (r.status !== 429) break;
     await sleep(400);
@@ -235,6 +247,49 @@ clearCanary();
      z.customFieldValues.cfSourceOfData === "lifetime-MQL-SQL November + Lost Deal (25 Oct | 40 lac)", z.customFieldValues.cfSourceOfData);
   ok("...owner still unchanged", z.ownerId === before903.ownerId);
   at.kill();
+}
+
+console.log("\n9 · LIVE KYLAS: a company PUT hands the record to the API user");
+/* What kylas-airtable-sync saw live (2026-07-01) and the first --view canary
+   could not see: its test company already belonged to the API user. */
+await startMock("replace-api-owner");
+clearCanary();
+{
+  const c = run("--canary");
+  ok("the canary gives its test company to a REAL owner first", /owner 74726 \(a real BD user; the API user is 74725\)/.test(c.out), c.out.trim().split("\n").slice(0, 4).join(" | "));
+  ok("...sees Kylas move it, gives it back, and passes", c.code === 0 && /owner endpoint gave it back/.test(c.out) && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
+  const b0 = await co(903);
+  const r = run("--apply", "--all");
+  const b1 = await co(903);
+  ok("the real company's owner is the one it had before", b1.ownerId === b0.ownerId && b1.ownerId === 74726, `${b0.ownerId} -> ${b1.ownerId}`);
+  ok("...the write took", b1.customFieldValues.cfSourceOfData === TAG, b1.customFieldValues.cfSourceOfData);
+  ok("...and the run says the owner was given back", /given back/.test(r.out) && /OWNER CHECK: 2 of 2/.test(r.out), r.out.trim().split("\n").slice(-3).join(" | "));
+}
+
+console.log("\n10 · an owner who has been DEACTIVATED: never written");
+await startMock("replace-api-owner", { MOCK_COMPANY_DEAD_OWNER: "903" });
+clearCanary();
+{
+  const dry = run();
+  ok("the dry run names it", /903 .*owner 74727 is DEACTIVATED/.test(dry.out) && /1 with a deactivated owner/.test(dry.out), dry.out.split("\n").filter((l) => /DEACTIV|deactivated/.test(l)).join(" | "));
+  run("--canary");
+  const r = run("--apply", "--all");
+  const b = await co(903);
+  ok("it is skipped: not written, owner untouched", !b.customFieldValues?.cfSourceOfData && b.ownerId === 74727, JSON.stringify(b).slice(0, 160));
+  ok("...the other company still goes", /1 tagged/.test(r.out) && /1 with a deactivated owner/.test(r.out), r.out.trim().split("\n").slice(-3).join(" | "));
+}
+
+console.log("\n11 · Kylas refuses one company (400, as 1773567 did live)");
+await startMock("replace-api-owner", { MOCK_COMPANY_PUT_REFUSE: "1776620" });
+clearCanary();
+{
+  run("--canary");
+  const a0 = await co(1776620);
+  const r = run("--apply", "--all");
+  const a1 = await co(1776620), b1 = await co(903);
+  ok("the refused one is skipped, unchanged, owner checked", /1776620 — Kylas refused the write/.test(r.out) && JSON.stringify(a1.customFieldValues) === JSON.stringify(a0.customFieldValues) && a1.ownerId === a0.ownerId,
+     r.out.split("\n").filter((l) => /refused/.test(l)).join(" | "));
+  ok("...and the run goes on to the next", b1.customFieldValues.cfSourceOfData === TAG && b1.ownerId === 74726 && r.code === 0, `${r.code} ${b1.customFieldValues.cfSourceOfData}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -59,8 +59,26 @@
  * Airtable: it is read from Kylas before the write, the write keeps it (proved
  * by --canary first), it is read back after, and the FIRST company whose owner
  * differs STOPS the run. Contacts are never touched — company only.
+ *
+ * WHAT KYLAS ACTUALLY DOES TO THE OWNER (2026-10-21). A company PUT takes no
+ * owner and hands the record to the API user (kylas-airtable-sync saw it live on
+ * 2026-07-01). The first canaries passed only because a company the API creates
+ * is ALREADY the API user's, so "owner unchanged" proved nothing. Now:
+ *   - the canary first gives its test company to a real, active owner, so the
+ *     reset would show;
+ *   - every write is PUT, then, if the owner moved, PUT /{id}/owner with the
+ *     owner Kylas had before (the endpoint proven live 2026-10-15), then a
+ *     read-back. Only if the owner is the one it had before does the run go on.
+ *     For about a second the record may sit with the API user.
+ *   - a company whose owner is DEACTIVATED is skipped: Kylas cannot give a
+ *     record back to an inactive user (400 "user is not active"), so writing it
+ *     would change its owner for good. Listed, never written.
+ *   - a company Kylas refuses (400 — 1773567 on 2026-10-21, "generic.error") is
+ *     skipped, its owner checked, and the run goes on; ten refusals and more
+ *     refusals than writes stops it.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { toUser } from "./kylas.mjs";
 
 const KEY = process.env.KYLAS_KEY;
 const BASE = process.env.KYLAS_BASE || "https://api.kylas.io";
@@ -236,53 +254,29 @@ function differences(before, after, newSource, ownerBefore, ownerAfter) {
   return diff;
 }
 
-/* ── 2 · the canary ──────────────────────────────────────────────── */
-if (has("canary")) {
-  console.log(`\nCANARY — a throwaway company goes through the exact write, before any real one.\n`);
-  const tried = [];
-  let passed = null;
-  for (const mode of ["omit", "same"]) {
-    const name = `ZZ ENOUT TEST — delete me ${new Date().toISOString().slice(0, 16)} ${mode}`;
-    let id = null;
-    try {
-      const made = await call("POST", "/v1/companies", { name, customFieldValues: { [FIELD]: "canary" } });
-      id = made?.id;
-      if (!id) throw new Error("Kylas created no id");
-      const before = await call("GET", `/v1/companies/${id}`);
-      const ownerBefore = await ownerOf(id, before);
-      if (!ownerBefore) {
-        tried.push({ mode, ok: false, why: "no owner found on the new company — the test proves nothing", fields: ownerishKeys(before) });
-        console.log(`  ${mode.padEnd(5)} cannot test: no owner found on the new company. Owner-like fields: ${JSON.stringify(ownerishKeys(before))}`);
-        continue;
-      }
-      console.log(`  ${mode.padEnd(5)} test company ${id}, owner ${ownerBefore.id} (read from ${ownerBefore.from})`);
-      const target = VIEW ? monthSource(textOf(before.customFieldValues?.[FIELD]), ["October"])
-                          : withTag(textOf(before.customFieldValues?.[FIELD]));
-      await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
-      const after = await call("GET", `/v1/companies/${id}`);
-      const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
-      tried.push({ mode, ok: !diff.length, diff });
-      console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : "kept the owner and every field"}` +
-        (diff.length ? `\n         ${diff.join("\n         ")}` : ""));
-      if (!diff.length) { passed = mode; break; }
-    } catch (e) {
-      tried.push({ mode, ok: false, why: e.message });
-      console.log(`  ${mode.padEnd(5)} error: ${e.message.slice(0, 200)}`);
-    } finally {
-      if (id) {
-        try { await call("DELETE", `/v1/companies/${id}`); console.log(`        deleted the test company ${id}`); }
-        catch (e) { console.log(`        ! could not delete test company ${id} ("${name}") — delete it in Kylas. ${e.message.slice(0, 120)}`); }
-      }
-    }
+/* Is this owner still an active user? null when Kylas will not say. */
+const userCache = new Map();
+async function ownerActive(ownerId) {
+  if (userCache.has(ownerId)) return userCache.get(ownerId);
+  let v = null;
+  try { v = toUser(await call("GET", `/v1/users/${ownerId}`)).active; } catch { v = null; }
+  userCache.set(ownerId, v);
+  return v;
+}
+
+/* After a write: read back; if the owner moved, give it back with the owner
+   endpoint and read again. -> { after, ownerAfter, restored } */
+async function keepOwner(id, ownerBefore) {
+  let after = await call("GET", `/v1/companies/${id}`);
+  let ownerAfter = await ownerOf(id, after);
+  let restored = false;
+  if (ownerAfter?.id !== ownerBefore.id) {
+    await call("PUT", `/v1/companies/${id}/owner`, { ownerId: Number(ownerBefore.id) });
+    restored = true;
+    after = await call("GET", `/v1/companies/${id}`);
+    ownerAfter = await ownerOf(id, after);
   }
-  writeFileSync(CANARY_FILE, JSON.stringify({ at: new Date().toISOString(), base: BASE, passed, tried }, null, 2));
-  if (passed) {
-    console.log(`\nPASSED with ownerMode "${passed}". Next: --apply --limit 1, then look at that company in Kylas.\n`);
-    process.exit(0);
-  }
-  console.log(`\nNO WRITE KEPT THE OWNER. --apply will refuse to run. Send this output back —` +
-              `\nthe tag has to go in through Kylas' own bulk edit instead.\n`);
-  process.exit(1);
+  return { after, ownerAfter, restored };
 }
 
 /* ── the list ────────────────────────────────────────────────────── */
@@ -329,10 +323,82 @@ if (VIEW) {
   if (ids.some((x) => !/^\d+$/.test(x))) { console.error(`${IDS_FILE}: every line must be a Kylas company id`); process.exit(1); }
 }
 
+/* ── 2 · the canary ──────────────────────────────────────────────── */
+if (has("canary")) {
+  console.log(`\nCANARY — a throwaway company goes through the exact write, before any real one.\n`);
+  const tried = [];
+  let passed = null;
+  for (const mode of ["omit", "same"]) {
+    const name = `ZZ ENOUT TEST — delete me ${new Date().toISOString().slice(0, 16)} ${mode}`;
+    let id = null;
+    try {
+      const made = await call("POST", "/v1/companies", { name, customFieldValues: { [FIELD]: "canary" } });
+      id = made?.id;
+      if (!id) throw new Error("Kylas created no id");
+      const before = await call("GET", `/v1/companies/${id}`);
+      const ownerBefore = await ownerOf(id, before);
+      if (!ownerBefore) {
+        tried.push({ mode, ok: false, why: "no owner found on the new company — the test proves nothing", fields: ownerishKeys(before) });
+        console.log(`  ${mode.padEnd(5)} cannot test: no owner found on the new company. Owner-like fields: ${JSON.stringify(ownerishKeys(before))}`);
+        continue;
+      }
+      /* A company the API creates is the API user's already — so a reset to the
+         API user could not show. Give it to a real, active owner first. */
+      const apiUser = ownerBefore.id;
+      let realOwner = null;
+      for (const rid of ids.slice(0, 25)) {
+        try {
+          const o = await ownerOf(rid, await call("GET", `/v1/companies/${rid}`));
+          if (o && o.id !== apiUser && (await ownerActive(o.id)) === true) { realOwner = o.id; break; }
+        } catch { /* try the next */ }
+      }
+      if (!realOwner) {
+        tried.push({ mode, ok: false, why: "no active owner other than the API user found to test with" });
+        console.log(`  ${mode.padEnd(5)} cannot test: no active owner other than the API user (${apiUser}) found among the companies`);
+        continue;
+      }
+      await call("PUT", `/v1/companies/${id}/owner`, { ownerId: Number(realOwner) });
+      const given = await call("GET", `/v1/companies/${id}`);
+      const ownerGiven = await ownerOf(id, given);
+      if (ownerGiven?.id !== realOwner) {
+        tried.push({ mode, ok: false, why: `could not give the test company to ${realOwner}` });
+        console.log(`  ${mode.padEnd(5)} cannot test: the owner endpoint did not move the test company to ${realOwner}`);
+        continue;
+      }
+      console.log(`  ${mode.padEnd(5)} test company ${id}, owner ${ownerGiven.id} (a real BD user; the API user is ${apiUser})`);
+      const target = VIEW ? monthSource(textOf(given.customFieldValues?.[FIELD]), ["October"])
+                          : withTag(textOf(given.customFieldValues?.[FIELD]));
+      await call("PUT", `/v1/companies/${id}`, bodyFor(given, target, mode, ownerGiven));
+      const { after, ownerAfter, restored } = await keepOwner(id, ownerGiven);
+      const diff = differences(given, after, target, ownerGiven, ownerAfter);
+      tried.push({ mode, ok: !diff.length, diff, restored });
+      console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : `kept the owner and every field${restored ? " (Kylas moved the owner on the write; the owner endpoint gave it back)" : ""}`}` +
+        (diff.length ? `\n         ${diff.join("\n         ")}` : ""));
+      if (!diff.length) { passed = mode; break; }
+    } catch (e) {
+      tried.push({ mode, ok: false, why: e.message });
+      console.log(`  ${mode.padEnd(5)} error: ${e.message.slice(0, 200)}`);
+    } finally {
+      if (id) {
+        try { await call("DELETE", `/v1/companies/${id}`); console.log(`        deleted the test company ${id}`); }
+        catch (e) { console.log(`        ! could not delete test company ${id} ("${name}") — delete it in Kylas. ${e.message.slice(0, 120)}`); }
+      }
+    }
+  }
+  writeFileSync(CANARY_FILE, JSON.stringify({ at: new Date().toISOString(), base: BASE, passed, tried }, null, 2));
+  if (passed) {
+    console.log(`\nPASSED with ownerMode "${passed}". Next: --apply --limit 1, then look at that company in Kylas.\n`);
+    process.exit(0);
+  }
+  console.log(`\nNO WRITE KEPT THE OWNER. --apply will refuse to run. Send this output back —` +
+              `\nthe tag has to go in through Kylas' own bulk edit instead.\n`);
+  process.exit(1);
+}
+
 /* ── 1 · dry run ─────────────────────────────────────────────────── */
 if (!has("apply")) {
   console.log(`\nDRY RUN — ${ids.length} companies, ${VIEW ? `months from the view "${VIEW}"` : `tag "${TAG}"`}. Nothing is written.\n`);
-  let todo = 0, done = 0, missing = 0, noOwner = 0, shown = false;
+  let todo = 0, done = 0, missing = 0, noOwner = 0, inactive = 0, shown = false;
   const fromCount = {};
   for (const id of ids) {
     let rec;
@@ -343,11 +409,16 @@ if (!has("apply")) {
     const owner = await ownerOf(id, rec);
     if (!owner) noOwner++; else fromCount[owner.from] = (fromCount[owner.from] || 0) + 1;
     if (isDone(id, src)) { done++; continue; }
+    if (owner && (await ownerActive(owner.id)) === false) {
+      inactive++;
+      console.log(`  ${id.padEnd(9)} owner ${owner.id} is DEACTIVATED — will be skipped (the write would change its owner for good)`);
+      continue;
+    }
     todo++;
     console.log(`  ${id.padEnd(9)} ${nameOf(rec).slice(0, 28).padEnd(28)} owner ${String(owner?.id ?? "NONE").padEnd(7)}` +
       `  "${src.slice(0, 40)}" -> "${want(id, src).slice(-50)}"`);
   }
-  console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner found`);
+  console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner found · ${inactive} with a deactivated owner (skipped)`);
   console.log(`owner read from: ${JSON.stringify(fromCount)}`);
   if (noOwner) console.log(`! ${noOwner} with no owner found. --apply skips those; if it is most of them, send this output back.`);
   console.log(`Next: --canary (creates and deletes one test company; no real company is touched).\n`);
@@ -368,7 +439,7 @@ const snapFile = `bulk-tag-snapshot-${new Date().toISOString().replace(/[:.]/g, 
 const snaps = [];
 const keep = () => writeFileSync(snapFile, JSON.stringify(snaps, null, 2));
 console.log(`\nAPPLY — up to ${LIMIT === Infinity ? "all" : LIMIT} of ${ids.length}, ownerMode "${mode}". Before-images: ${snapFile}\n`);
-let wrote = 0, skipped = 0;
+let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0;
 for (const id of ids) {
   if (wrote >= LIMIT) break;
   const before = await call("GET", `/v1/companies/${id}`);
@@ -376,19 +447,42 @@ for (const id of ids) {
   if (isDone(id, src)) { skipped++; continue; }
   const ownerBefore = await ownerOf(id, before);
   if (!ownerBefore) { console.log(`  ${id} — no owner found, skipped (cannot prove it survives)`); skipped++; continue; }
+  if ((await ownerActive(ownerBefore.id)) === false) {
+    console.log(`  ${id} — owner ${ownerBefore.id} is deactivated, skipped (a write would change its owner for good)`);
+    skipped++; inactive++; continue;
+  }
   const target = want(id, src);
   snaps.push({ id, owner: ownerBefore, before }); keep();
-  await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
-  const after = await call("GET", `/v1/companies/${id}`);
-  const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
+  try {
+    await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
+  } catch (e) {
+    if (e.status !== 400 && e.status !== 422) throw e;
+    refused++;
+    const chk = await keepOwner(id, ownerBefore);
+    if (chk.ownerAfter?.id !== ownerBefore.id) {
+      console.log(`\n  STOPPED at ${id}: Kylas refused the write AND its owner is no longer ${ownerBefore.id}. Before-image in ${snapFile}.\n`);
+      process.exit(1);
+    }
+    console.log(`  ${id} — Kylas refused the write (${e.message.slice(-90)}); nothing changed, owner ${ownerBefore.id} checked`);
+    if (refused >= 10 && refused > wrote) {
+      console.log(`\n  STOPPED: Kylas refused ${refused} writes and took ${wrote}. Send this output back.\n`);
+      process.exit(1);
+    }
+    continue;
+  }
+  const { after, ownerAfter, restored } = await keepOwner(id, ownerBefore);
+  if (restored) reasserted++;
+  const diff = differences(before, after, target, ownerBefore, ownerAfter);
   if (diff.length) {
     console.log(`\n  STOPPED at ${id} (${nameOf(before)}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
       `\n  Its before-image is in ${snapFile}. Nothing after it was touched.\n`);
     process.exit(1);
   }
   wrote++;
-  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept · "${target.slice(-60)}"`);
+  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept${restored ? " (given back)" : ""} · "${target.slice(-60)}"`);
 }
-console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back with the owner they had before.`);
+console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back with the owner they had before` +
+  `${reasserted ? ` (${reasserted} were moved by Kylas on the write and given back at once)` : ""}.`);
+if (inactive || refused) console.log(`Skipped: ${inactive} with a deactivated owner · ${refused} Kylas refused. None of them was changed.`);
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");
