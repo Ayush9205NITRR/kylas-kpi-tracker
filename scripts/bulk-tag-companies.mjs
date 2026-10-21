@@ -76,6 +76,20 @@
  *   - a company Kylas refuses (400 — 1773567 on 2026-10-21, "generic.error") is
  *     skipped, its owner checked, and the run goes on; ten refusals and more
  *     refusals than writes stops it.
+ *
+ * AND THEN THE PUT WAS NOT NEEDED AT ALL (2026-10-21, --probe 1773567). Every
+ * real company refused the whole-record PUT: Kylas sends picklists as {id,name}
+ * and will not take some of them back in ANY shape (Pipeline Stage - BD holds a
+ * retired option — 02801014 "Invalid Custom Field Value"). The probe then tried
+ * one-field writes on a throwaway with a real owner:
+ *     PATCH application/json-patch+json  [{op:"add"|"replace", path:"/customFieldValues/cfSourceOfData"}]
+ *        -> 200, the field took, every other field kept, OWNER NEVER MOVED
+ *     PATCH merge-patch / plain JSON     -> 415
+ *     PUT {name, the field}              -> took it, ERASED the other fields, owner -> API user
+ * So the canary tries "patch" first and the run uses it. The owner is not in
+ * the write at all; it is still read before and after, and a PATCH that ever
+ * moves it stops the run. With the PATCH, --include-deactivated may tag the
+ * companies of deactivated owners too (read back, the first change stops).
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { toUser } from "./kylas.mjs";
@@ -91,6 +105,10 @@ const VIEW = arg("view", "");
 /* In a public repository's Actions log a company name is published. --ids-only
    (or BULK_TAG_IDS_ONLY=1) prints ids and owners, no names. */
 const IDS_ONLY = has("ids-only") || process.env.BULK_TAG_IDS_ONLY === "1";
+/* With the one-field PATCH the owner is never part of the write, so a
+   company whose owner has been deactivated can be tagged too — opt-in, and
+   read back like every other (2026-10-21: 178 of 517 in "Oct/Nov/Dec"). */
+const INCLUDE_DEAD = has("include-deactivated");
 const nameOf = (rec) => (IDS_ONLY ? "" : String(rec?.name || ""));
 const FIELD = "cfSourceOfData";
 const CANARY_FILE = ".bulk-tag-canary.json";
@@ -100,13 +118,13 @@ if (!KEY) { console.error("Set KYLAS_KEY (or use --env-file=.env.local)."); proc
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const H = { "api-key": KEY, "content-type": "application/json" };
 /* A 429 is a wait, not a failure — Kylas throttles at about five a second. */
-async function call(method, path, body, tries = 0) {
-  const r = await fetch(`${BASE}${path}`, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
+async function call(method, path, body, headers = {}, tries = 0) {
+  const r = await fetch(`${BASE}${path}`, { method, headers: { ...H, ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text();
   let json = null; try { json = text ? JSON.parse(text) : null; } catch { /* not json */ }
   if (r.status === 429 && tries < 6) {
     await sleep(Number(r.headers.get("retry-after") || 0) * 1000 || 500 * 2 ** tries);
-    return call(method, path, body, tries + 1);
+    return call(method, path, body, headers, tries + 1);
   }
   if (!r.ok) { const e = new Error(`${method} ${path} -> ${r.status} ${text.slice(0, 300)}`); e.status = r.status; throw e; }
   await sleep(250);
@@ -196,6 +214,16 @@ function bodyFor(rec, newSource, ownerMode, owner) {
   if (ownerMode === "same" && owner?.id) body.ownerId = Number(owner.id);
   return body;
 }
+/* THE WRITE. "patch" (2026-10-21, found by --probe on the live account): a
+   JSON Patch on the one field. Kylas changes Source of Data and NOTHING else —
+   the owner is never moved, no other field is sent, so a value Kylas would
+   refuse back (a retired picklist option: 1773567's Pipeline Stage) cannot
+   block it. "omit"/"same" are the old whole-record PUTs, kept only as the
+   canary's fallback for an account without the PATCH. */
+const patchOps = (v) => [{ op: "add", path: `/customFieldValues/${FIELD}`, value: v }];
+const writeSource = (id, rec, target, mode, owner) => (mode === "patch"
+  ? call("PATCH", `/v1/companies/${id}`, patchOps(target), { "content-type": "application/json-patch+json" })
+  : call("PUT", `/v1/companies/${id}`, bodyFor(rec, target, mode, owner)));
 const withTag = (src) => {
   const s = String(src || "").trim();
   return !s ? TAG : `${s} + ${TAG}`;
@@ -483,7 +511,7 @@ if (has("canary")) {
   console.log(`\nCANARY — a throwaway company goes through the exact write, before any real one.\n`);
   const tried = [];
   let passed = null;
-  for (const mode of ["omit", "same"]) {
+  for (const mode of ["patch", "omit", "same"]) {
     const name = `ZZ ENOUT TEST — delete me ${new Date().toISOString().slice(0, 16)} ${mode}`;
     let id = null;
     try {
@@ -523,16 +551,18 @@ if (has("canary")) {
       console.log(`  ${mode.padEnd(5)} test company ${id}, owner ${ownerGiven.id} (a real BD user; the API user is ${apiUser})`);
       const target = VIEW ? monthSource(textOf(given.customFieldValues?.[FIELD]), ["October"])
                           : withTag(textOf(given.customFieldValues?.[FIELD]));
-      await call("PUT", `/v1/companies/${id}`, bodyFor(given, target, mode, ownerGiven));
+      await writeSource(id, given, target, mode, ownerGiven);
       const { after, ownerAfter, restored } = await keepOwner(id, ownerGiven);
       const diff = differences(given, after, target, ownerGiven, ownerAfter);
+      /* The PATCH is chosen BECAUSE it never moves the owner: if it did, it is not that write. */
+      if (mode === "patch" && restored) diff.unshift("the PATCH moved the owner (given back) — not the write it claimed to be");
       tried.push({ mode, ok: !diff.length, diff, restored });
-      console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : `kept the owner and every field${restored ? " (Kylas moved the owner on the write; the owner endpoint gave it back)" : ""}`}` +
+      console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : `kept the owner and every field${restored ? " (Kylas moved the owner on the write; the owner endpoint gave it back)" : mode === "patch" ? " — the owner was never moved" : ""}`}` +
         (diff.length ? `\n         ${diff.join("\n         ")}` : ""));
       if (!diff.length) { passed = mode; break; }
     } catch (e) {
       tried.push({ mode, ok: false, why: e.message });
-      console.log(`  ${mode.padEnd(5)} error: ${e.message.slice(0, 200)}`);
+      console.log(`  ${mode.padEnd(5)} error: ${codeOf(e).slice(0, 200)}`);
     } finally {
       if (id) {
         try { await call("DELETE", `/v1/companies/${id}`); console.log(`        deleted the test company ${id}`); }
@@ -566,7 +596,7 @@ if (!has("apply")) {
     if (isDone(id, src)) { done++; continue; }
     if (owner && (await ownerActive(owner.id)) === false) {
       inactive++;
-      console.log(`  ${id.padEnd(9)} owner ${owner.id} is DEACTIVATED — will be skipped (the write would change its owner for good)`);
+      console.log(`  ${id.padEnd(9)} owner ${owner.id} is DEACTIVATED — skipped unless --include-deactivated (one-field PATCH only; read back, first change stops)`);
       continue;
     }
     todo++;
@@ -594,7 +624,7 @@ const snapFile = `bulk-tag-snapshot-${new Date().toISOString().replace(/[:.]/g, 
 const snaps = [];
 const keep = () => writeFileSync(snapFile, JSON.stringify(snaps, null, 2));
 console.log(`\nAPPLY — up to ${LIMIT === Infinity ? "all" : LIMIT} of ${ids.length}, ownerMode "${mode}". Before-images: ${snapFile}\n`);
-let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0;
+let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0, deadWrote = 0;
 for (const id of ids) {
   if (wrote >= LIMIT) break;
   const before = await call("GET", `/v1/companies/${id}`);
@@ -602,14 +632,31 @@ for (const id of ids) {
   if (isDone(id, src)) { skipped++; continue; }
   const ownerBefore = await ownerOf(id, before);
   if (!ownerBefore) { console.log(`  ${id} — no owner found, skipped (cannot prove it survives)`); skipped++; continue; }
-  if ((await ownerActive(ownerBefore.id)) === false) {
-    console.log(`  ${id} — owner ${ownerBefore.id} is deactivated, skipped (a write would change its owner for good)`);
+  const dead = (await ownerActive(ownerBefore.id)) === false;
+  if (dead && !(mode === "patch" && INCLUDE_DEAD)) {
+    console.log(`  ${id} — owner ${ownerBefore.id} is deactivated, skipped (${mode === "patch" ? "--include-deactivated writes these" : "a write would change its owner for good"})`);
     skipped++; inactive++; continue;
   }
   const target = want(id, src);
   snaps.push({ id, owner: ownerBefore, before }); keep();
+  if (dead) {
+    /* Nothing can give a record back to a deactivated user, so there is no
+       keepOwner here: read back, and the first owner that is not the one it
+       had STOPS the run. */
+    await writeSource(id, before, target, mode, ownerBefore);
+    const after = await call("GET", `/v1/companies/${id}`);
+    const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
+    if (diff.length) {
+      console.log(`\n  STOPPED at ${id} (deactivated owner ${ownerBefore.id}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
+        `\n  Its before-image is in ${snapFile}. Nothing after it was touched.\n`);
+      process.exit(1);
+    }
+    wrote++; deadWrote++;
+    console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} (deactivated) kept · "${clip(target, 60)}"`);
+    continue;
+  }
   try {
-    await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
+    await writeSource(id, before, target, mode, ownerBefore);
   } catch (e) {
     if (e.status !== 400 && e.status !== 422) throw e;
     refused++;
@@ -618,7 +665,7 @@ for (const id of ids) {
       console.log(`\n  STOPPED at ${id}: Kylas refused the write AND its owner is no longer ${ownerBefore.id}. Before-image in ${snapFile}.\n`);
       process.exit(1);
     }
-    console.log(`  ${id} — Kylas refused the write (${e.message.slice(-90)}); nothing changed, owner ${ownerBefore.id} checked`);
+    console.log(`  ${id} — Kylas refused the write (${codeOf(e).slice(0, 140)}); nothing changed, owner ${ownerBefore.id} checked`);
     if (refused >= 10 && refused > wrote) {
       console.log(`\n  STOPPED: Kylas refused ${refused} writes and took ${wrote}. Send this output back.\n`);
       process.exit(1);
@@ -628,16 +675,19 @@ for (const id of ids) {
   const { after, ownerAfter, restored } = await keepOwner(id, ownerBefore);
   if (restored) reasserted++;
   const diff = differences(before, after, target, ownerBefore, ownerAfter);
+  if (mode === "patch" && restored) diff.unshift(`the PATCH moved the owner (given back to ${ownerBefore.id}) — it never did on the canary; stopping`);
   if (diff.length) {
     console.log(`\n  STOPPED at ${id} (${nameOf(before)}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
       `\n  Its before-image is in ${snapFile}. Nothing after it was touched.\n`);
     process.exit(1);
   }
   wrote++;
-  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept${restored ? " (given back)" : ""} · "${target.slice(-60)}"`);
+  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept${restored ? " (given back)" : ""} · "${clip(target, 60)}"`);
 }
 console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back with the owner they had before` +
-  `${reasserted ? ` (${reasserted} were moved by Kylas on the write and given back at once)` : ""}.`);
+  `${reasserted ? ` (${reasserted} were moved by Kylas on the write and given back at once)` : ""}.` +
+  `${deadWrote ? ` ${deadWrote} of them belong to a deactivated user and were read back unchanged.` : ""}` +
+  `${mode === "patch" ? " Written with the one-field PATCH: no owner was ever moved." : ""}`);
 if (inactive || refused) console.log(`Skipped: ${inactive} with a deactivated owner · ${refused} Kylas refused. None of them was changed.`);
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");

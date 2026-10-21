@@ -664,6 +664,31 @@ createServer(async (req, res) => {
     return json(res, 200, COMPANIES[coPut[1]]);
   }
 
+  /* A company PATCH. Live (probe, 2026-10-21): application/json-patch+json with
+     add/replace on /customFieldValues/<field> changes THAT field and nothing
+     else, and never moves the owner; plain JSON and merge-patch answer 415.
+     Off unless MOCK_COMPANY_PATCH says so, so the PUT paths stay tested:
+       json-patch             the live behaviour
+       json-patch-drop-owner  the same, but the owner is erased (the strict
+                              stop in bulk-tag-companies.mjs must catch it) */
+  if (coPut && req.method === "PATCH") {
+    const mode = process.env.MOCK_COMPANY_PATCH || "";
+    const ctype = String(req.headers["content-type"] || "");
+    if (!mode || !/json-patch\+json/.test(ctype)) return json(res, 415, { message: "Unsupported Media Type" });
+    const prev = COMPANIES[coPut[1]];
+    if (!prev) return json(res, 404, { message: "no such company" });
+    const ops = JSON.parse(await text(req));
+    for (const op of Array.isArray(ops) ? ops : []) {
+      const m = String(op.path || "").match(/^\/customFieldValues\/(\w+)$/);
+      if (!m || !["add", "replace"].includes(op.op)) return json(res, 400, { errorCode: "02803002", message: "generic.error" });
+      prev.customFieldValues = { ...(prev.customFieldValues || {}), [m[1]]: op.value };
+    }
+    if (mode === "json-patch-drop-owner") delete prev.ownerId;
+    prev.updatedAt = new Date().toISOString();
+    WRITES.push({ kind: "company-patch", id: Number(coPut[1]), body: ops });
+    return json(res, 200, prev);
+  }
+
   const put = p.match(/^\/v1\/contacts\/(\d+)$/);
   if (put && req.method === "PUT") {
     const body = JSON.parse(await text(req));

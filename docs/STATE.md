@@ -1773,6 +1773,27 @@ re-assigns it from Airtable's stale copy. Here the owner is read from Kylas, the
 write keeps it (canary first, every run), it is read back, and the first company
 that differs stops the run. Company only; contacts untouched.
 
+**THE WRITE IS A ONE-FIELD JSON PATCH, NOT A PUT (found 2026-10-21).** The first
+first-one run had every real company refused: 400 02803002 "generic.error".
+`--probe 1773567` (workflow step `probe`, throwaway companies only) named why:
+the whole-record PUT sends picklists back, Kylas sends them as `{id,name}` and
+refuses a bare id (`numberOfEmployees`, `cfAccountHealthBd`), and **one value it
+refuses in every shape** — `cfPipelineStageBd` holds a retired option (02801014
+"Invalid Custom Field Value"). So no whole-record write could ever land. On a
+throwaway with a real owner:
+
+| write | result |
+|---|---|
+| `PATCH` `application/json-patch+json` `[{op:"add", path:"/customFieldValues/cfSourceOfData", value}]` | 200 · field took · every other field kept · **owner never moved** |
+| `PATCH` merge-patch, or plain JSON | 415 |
+| `PUT {name, the field}` | took it · **erased every other field** · owner → API user |
+
+The canary now tries `patch` first and the run uses it. Companies whose owner is
+**deactivated** (178 of 517) are still skipped by default; `--include-deactivated`
+(workflow checkbox) tags them with the same PATCH, reading each back and stopping
+at the first change. Nothing can give a record back to a deactivated user, so
+that one is Ayush's call.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

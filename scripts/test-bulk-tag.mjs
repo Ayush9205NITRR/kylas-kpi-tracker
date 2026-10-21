@@ -300,5 +300,55 @@ clearCanary();
   ok("...and the run goes on to the next", b1.customFieldValues.cfSourceOfData === TAG && b1.ownerId === 74726 && r.code === 0, `${r.code} ${b1.customFieldValues.cfSourceOfData}`);
 }
 
+console.log("\n12 · LIVE KYLAS 2026-10-21: the one-field PATCH — the PUT refused, the owner never moved");
+await startMock("replace-api-owner", { MOCK_COMPANY_PATCH: "json-patch", MOCK_COMPANY_PUT_REFUSE: "1776620" });
+clearCanary();
+{
+  const c = run("--canary");
+  ok("the canary passes with the PATCH, first", c.code === 0 && /PASSED with ownerMode "patch"/.test(c.out) && /the owner was never moved/.test(c.out),
+     c.out.trim().split("\n").slice(-4).join(" | "));
+  const a0 = await co(1776620), b0 = await co(903);
+  const r = run("--apply", "--all");
+  const a1 = await co(1776620), b1 = await co(903);
+  ok("the company whose PUT Kylas refuses is tagged through the PATCH", a1.customFieldValues.cfSourceOfData === `COLD_CALLING + ${TAG}`, a1.customFieldValues.cfSourceOfData);
+  ok("OWNERS NEVER MOVED — nothing given back", a1.ownerId === a0.ownerId && b1.ownerId === b0.ownerId && !/given back/.test(r.out) && /no owner was ever moved/.test(r.out),
+     r.out.trim().split("\n").slice(-4).join(" | "));
+  const { cfSourceOfData: _x, ...restBefore } = a0.customFieldValues, { cfSourceOfData: _y, ...restAfter } = a1.customFieldValues;
+  ok("every other field exactly as it was", JSON.stringify(restBefore) === JSON.stringify(restAfter) && a1.name === a0.name);
+  let w;
+  for (let i = 0; i < 10 && !Array.isArray(w); i++) { w = (await writes()).writes; if (!Array.isArray(w)) await sleep(400); }  /* a 429 */
+  ok("only PATCHes went out — no company PUT at all", w.some((x) => x.kind === "company-patch") && !w.some((x) => x.kind === "company-update"),
+     JSON.stringify(w.map((x) => x.kind)));
+  ok("...each carrying Source of Data alone", w.filter((x) => x.kind === "company-patch").every((x) => x.body.length === 1 && x.body[0].path === "/customFieldValues/cfSourceOfData"));
+}
+
+console.log("\n13 · a DEACTIVATED owner with the PATCH: skipped unless --include-deactivated");
+await startMock("replace-api-owner", { MOCK_COMPANY_PATCH: "json-patch", MOCK_COMPANY_DEAD_OWNER: "903" });
+clearCanary();
+{
+  for (let i = 0; i < 10; i++) {
+    const r = await fetchR(`${BASE}/v1/companies/1776620/owner`, { method: "PUT", headers: { ...H, "content-type": "application/json" }, body: JSON.stringify({ ownerId: 74726 }) });
+    if (r.status !== 429) break;
+    await sleep(400);
+  }
+  const c = run("--canary");
+  ok("the canary passes with the PATCH", /PASSED with ownerMode "patch"/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
+  const r1 = run("--apply", "--all");
+  ok("without the flag it is skipped, and says how to include it", !(await co(903)).customFieldValues?.cfSourceOfData && /--include-deactivated writes these/.test(r1.out),
+     r1.out.split("\n").filter((l) => /903/.test(l)).join(" | "));
+  const r2 = run("--apply", "--all", "--include-deactivated");
+  const b = await co(903);
+  ok("with it: tagged, and the deactivated owner is still the owner", b.customFieldValues.cfSourceOfData === TAG && b.ownerId === 74727 && /1 of them belong to a deactivated user/.test(r2.out),
+     `${b.ownerId} ${b.customFieldValues.cfSourceOfData} | ${r2.out.trim().split("\n").slice(-3).join(" | ")}`);
+}
+
+console.log("\n14 · a PATCH that erases the owner is never used");
+await startMock("replace-api-owner", { MOCK_COMPANY_PATCH: "json-patch-drop-owner" });
+clearCanary();
+{
+  const c = run("--canary");
+  ok("the canary rejects the PATCH", /patch\s+FAILED/.test(c.out) && !/PASSED with ownerMode "patch"/.test(c.out), c.out.trim().split("\n").slice(0, 8).join(" | "));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

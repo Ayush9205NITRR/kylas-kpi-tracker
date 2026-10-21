@@ -7,7 +7,14 @@
 # STRICT: THE OWNER MUST NOT CHANGE. The owner is never read from Airtable. It is
 # read from Kylas before each write, kept by the write (a --canary on a throwaway
 # company proves that first, every run), read back after — and the first company
-# whose owner (or any other field) differs STOPS the run. Do NOT use
+# whose owner (or any other field) differs STOPS the run.
+#
+# THE WRITE IS A ONE-FIELD JSON PATCH (2026-10-21). The whole-record PUT was
+# refused for every real company (a retired picklist value Kylas will not take
+# back) and hands the record to the API user. --probe found that
+# PATCH application/json-patch+json on /customFieldValues/cfSourceOfData
+# changes that field only and never moves the owner. The canary proves it on
+# a throwaway with a real owner before every run. Do NOT use
 # kylas-airtable-sync's "Assign Companies from Airtable -> Kylas" for this: it
 # re-assigns owners from Airtable's copy.
 #
@@ -33,6 +40,10 @@ on:
         type: choice
         default: 'dry-run'
         options: [dry-run, first-one, all, probe]
+      include_deactivated:
+        description: 'also tag companies whose owner is DEACTIVATED (one-field PATCH only; owner read back, first change stops)'
+        type: boolean
+        default: false
       company:
         description: 'probe only: the Kylas company id'
         default: '1773567'
@@ -51,6 +62,7 @@ jobs:
       VIEW: ${{ github.event.inputs.view }}
       STEP: ${{ github.event.inputs.step }}
       COMPANY: ${{ github.event.inputs.company }}
+      DEAD: ${{ github.event.inputs.include_deactivated == 'true' && '--include-deactivated' || '' }}
       BULK_TAG_IDS_ONLY: '1'
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +85,7 @@ jobs:
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary
       - name: First company
         if: ${{ github.event.inputs.step == 'first-one' }}
-        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --limit 1
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --limit 1 $DEAD
       - name: All companies
         if: ${{ github.event.inputs.step == 'all' }}
-        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --all
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --all $DEAD
