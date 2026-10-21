@@ -1830,6 +1830,17 @@ active BD who already holds their contacts** (contacts stay), not the round
 robin — `--follow-contacts`, the workflow's default `contacts: follow-active-bd`.
 The other accounts round robin with their contacts.
 
+**Done, 2026-10-21 (runs 39585836142 first-one, 39587652033 all):** all 178
+accounts moved and read back with their new owner — Sejal (85880) 44 (12 of
+them following their contacts), Mayra (74755) 34 (2 following), Arshdeep
+(82866) 33, Anjali (83129) 32, Muskan (82867) 31, and 4 to the active BD already
+holding their contacts outside the five (74752: 1, 82978: 1, 82994: 2). None to
+the API user. **381 contacts** moved with their accounts (every one that sat on
+a deactivated user); the 92 already with an active BD stayed. Then the month tag:
+**178 of 178 tagged**, owners unchanged. Oct/Nov/Dec is complete: **515 of 517**
+companies tagged in Kylas; the other 2 are deleted (1773237, 1783882).
+Before-images: the run artifacts `reassign-snapshot-<run id>` (90 days).
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
