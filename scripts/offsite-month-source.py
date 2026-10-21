@@ -161,28 +161,75 @@ def kid_of(r):
 
 def match(company, by_label, by_name):
     """-> (status, kylas_id, rows, how). status: matched | ambiguous | none | no-kylas-id.
-    A short name or domain label ('te', 'aam') is a coincidence waiting to happen, so it
-    only counts when it agrees with the other key."""
+
+    An exact company name (against the Kylas company name) is the strongest thing
+    we have, so it decides on its own — even when the email domain is shared with
+    another Kylas company (a group's sites, a parent and its subsidiary). With no
+    name hit the email domain decides, and a domain on two Kylas companies is
+    AMBIGUOUS: listed with its candidates, never guessed. A short name or label
+    ('te', 'aam') is a coincidence waiting to happen, so it only counts beside the
+    other key."""
     key, lab = norm_name(company["name"]), company["label"]
     by_n = by_name.get(key, []) if len(key) >= 4 else []
     by_l = by_label.get(lab, []) if len(lab) >= 5 else []
-    if len(lab) < 5 and len(lab) >= 2 and by_n:           # a short label counts only beside a name hit
+    if 2 <= len(lab) < 5 and by_n:                      # a short label counts only beside a name hit
         by_l = [r for r in by_label.get(lab, []) if r in by_n]
-    cand = {}
-    for how, rs in (("name", by_n), ("email-domain", by_l)):
-        for r in rs:
-            cand.setdefault(r["id"], [r, set()])[1].add(how)
-    if not cand:
-        return "none", "", [], ""
-    ids = {kid_of(r) for r, _ in cand.values()}
-    rows = [r for r, _ in cand.values()]
-    how = "+".join(sorted({h for _, hs in cand.values() for h in hs}))
-    if "" in ids and len(ids) == 1:
-        return "no-kylas-id", "", rows, how
-    ids.discard("")
-    if len(ids) > 1:
-        return "ambiguous", ",".join(sorted(ids)), rows, how
-    return "matched", ids.pop(), [r for r in rows if kid_of(r)], how
+
+    def ids(rs):
+        return {kid_of(r) for r in rs} - {""}
+
+    ids_n, ids_l = ids(by_n), ids(by_l)
+    if len(ids_n) == 1:                                  # the name settles it
+        kid = next(iter(ids_n))
+        how = "name" + ("+email-domain" if kid in ids_l else "")
+        return "matched", kid, [r for r in by_n + by_l if kid_of(r) == kid], how
+    if len(ids_n) > 1:
+        return "ambiguous", ",".join(sorted(ids_n)), by_n, "name"
+    if len(ids_l) == 1:
+        kid = next(iter(ids_l))
+        return "matched", kid, [r for r in by_l if kid_of(r) == kid], "email-domain"
+    if len(ids_l) > 1:
+        return "ambiguous", ",".join(sorted(ids_l)), by_l, "email-domain"
+    if by_n or by_l:                                     # rows exist, none has a Kylas id
+        return "no-kylas-id", "", by_n + by_l, "+".join(h for h, rs in (("name", by_n), ("email-domain", by_l)) if rs)
+    return "none", "", [], ""
+
+
+def suggestions(company, rows, limit=3):
+    """For a company that did not match cleanly: the nearest Company List companies,
+    one per Kylas id, so a person can pick. Scored on the name against the Kylas
+    company name and the site's label."""
+    import difflib
+    key, lab = norm_name(company["name"]), company["label"]
+    if not key:
+        return []
+    best = {}
+    for r in rows:
+        kid = kid_of(r)
+        if not kid:
+            continue
+        f = r["fields"]
+        for cand in {norm_name(f.get("Company Name - Kylas")), host_label(f.get("Website")) or host_label(f.get("Name"))}:
+            if not cand or cand[0] != key[0]:           # cheap pre-filter: same first letter
+                continue
+            score = difflib.SequenceMatcher(None, key, cand).ratio()
+            if lab and cand == lab:
+                score = max(score, 0.9)
+            if score >= 0.72 and score > best.get(kid, (0,))[0]:
+                best[kid] = (score, f.get("Company Name - Kylas") or "", f.get("Name") or f.get("Website") or "")
+    top = sorted(best.items(), key=lambda kv: -kv[1][0])[:limit]
+    return [f"{kid} | {n} | {u} | {sc:.2f}" for kid, (sc, n, u) in top]
+
+
+def candidates_of(rows):
+    """One line per Kylas id among `rows` — for the ambiguous ones."""
+    seen = {}
+    for r in rows:
+        kid = kid_of(r)
+        if kid and kid not in seen:
+            f = r["fields"]
+            seen[kid] = f"{kid} | {f.get('Company Name - Kylas') or ''} | {f.get('Name') or f.get('Website') or ''}"
+    return list(seen.values())[:5]
 
 
 # ── Airtable ──────────────────────────────────────────────────────────────
@@ -225,27 +272,62 @@ class Airtable:
 
 # ── the run ───────────────────────────────────────────────────────────────
 
-def plan(companies, rows):
-    """-> (changes, review). changes: one per Company List row to write."""
+def plan(companies, rows, decisions=None):
+    """-> (changes, review). changes: one per Company List row to write.
+
+    Two sheet companies can be ONE Kylas company ("Smytten" and "Smytten Pvt Ltd"),
+    each with its own months. Their months are merged per Kylas id before anything
+    is written; otherwise whichever came first would claim the rows and the other's
+    months would be lost without a word.
+    `decisions` is {sheet company (lowercase): kylas id} — a person's picks from the
+    review file."""
+    decisions = decisions or {}
     by_label, by_name = build_index(rows)
-    changes, review, seen = [], [], set()
+    by_kid = collections.defaultdict(list)
+    for r in rows:
+        if kid_of(r):
+            by_kid[kid_of(r)].append(r)
+    groups, review = {}, []
     for c in companies:
-        status, kid, hit, how = match(c, by_label, by_name)
+        pick = decisions.get(c["name"].lower())
+        if pick and pick in by_kid:
+            status, kid, hit, how = "matched", pick, by_kid[pick], "your pick"
+        else:
+            status, kid, hit, how = match(c, by_label, by_name)
         if status != "matched":
-            review.append({"company": c["name"], "months": ", ".join(c["months"]), "status": status,
-                           "kylas_company_ids": kid, "matched_by": how, "rows": len(hit)})
+            sug = candidates_of(hit) if status == "ambiguous" else suggestions(c, rows)
+            row = {"company": c["name"], "months": ", ".join(c["months"]), "status": status, "kylas_company_ids": kid,
+                   "matched_by": how, "choose": ""}
+            for i in range(3):
+                row[f"candidate_{i + 1}"] = sug[i] if i < len(sug) else ""
+            review.append(row)
             continue
-        # every Company List row of this Kylas company: duplicates share one Kylas value
-        for r in rows:
-            if kid_of(r) != kid or r["id"] in seen:
-                continue
-            seen.add(r["id"])
+        g = groups.setdefault(kid, {"months": set(), "names": [], "how": set()})
+        g["months"].update(c["months"])
+        g["names"].append(c["name"])
+        g["how"].add(how)
+    changes = []
+    for kid, g in groups.items():
+        months = sorted(g["months"], key=MONTHS.index)
+        for r in by_kid[kid]:
             cur = r["fields"].get(TARGET) or ""
-            new = new_source(cur, c["months"])
-            changes.append({"record": r["id"], "company": c["name"], "kylas_company_id": kid, "months": ", ".join(c["months"]),
-                            "matched_by": how, "current": cur, "new": new, "changes": new != cur,
+            new = new_source(cur, months)
+            changes.append({"record": r["id"], "company": " / ".join(g["names"]), "kylas_company_id": kid, "months": ", ".join(months),
+                            "matched_by": "+".join(sorted(g["how"])), "current": cur, "new": new, "changes": new != cur,
                             "source_of_data_untouched": r["fields"].get("Source of Data") or ""})
     return changes, review
+
+
+def read_decisions(path):
+    """The review file, with a person's picks in its `choose` column: a Kylas company
+    id (digits), copied from a candidate, or anything else to leave it out."""
+    out = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            v = (row.get("choose") or "").strip()
+            if re.fullmatch(r"\d+", v):
+                out[(row.get("company") or "").strip().lower()] = v
+    return out
 
 
 def write_csv(path, rows, cols):
@@ -260,6 +342,7 @@ def main(argv=None):
     ap.add_argument("--xlsx")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--undo")
+    ap.add_argument("--decisions", help="the review CSV with a Kylas company id typed in its `choose` column for the ones you settled")
     ap.add_argument("--base", default=os.environ.get("AIRTABLE_COMPANY_BASE_ID", BASE_DEFAULT))
     ap.add_argument("--out", default=".", help="where the CSV and undo files go")
     a = ap.parse_args(argv)
@@ -282,11 +365,14 @@ def main(argv=None):
     rows = at.list_all(TABLE, READ_FIELDS)
     print(f"Company List: {len(rows)} rows read")
 
-    changes, review = plan(companies, rows)
+    decisions = read_decisions(a.decisions) if a.decisions else {}
+    if decisions:
+        print(f"Decisions: {len(decisions)} pick(s) read from {a.decisions}")
+    changes, review = plan(companies, rows, decisions)
     todo = [c for c in changes if c["changes"]]
     already = len(changes) - len(todo)
-    matched = len({c["company"] for c in changes})
-    print(f"\n  matched   {matched} of {len(companies)} companies  ({len(changes)} Company List rows, duplicates included)")
+    kylas_cos = len({c["kylas_company_id"] for c in changes})
+    print(f"\n  matched   {len(companies) - len(review)} of {len(companies)} companies -> {kylas_cos} Kylas companies  ({len(changes)} Company List rows, duplicates included)")
     print(f"  to change {len(todo)} row(s) · already correct {already}")
     print(f"  for review {len(review)}: " + ", ".join(f"{k} {v}" for k, v in
           collections.Counter(r['status'] for r in review).most_common()))
@@ -297,9 +383,11 @@ def main(argv=None):
 
     os.makedirs(a.out, exist_ok=True)
     pv, rv = os.path.join(a.out, "offsite-source-preview.csv"), os.path.join(a.out, "offsite-source-review.csv")
+    if a.decisions and os.path.abspath(a.decisions) == os.path.abspath(rv):
+        rv = os.path.join(a.out, "offsite-source-review-remaining.csv")   # never overwrite the file the picks are typed in
     write_csv(pv, changes, ["company", "months", "kylas_company_id", "record", "matched_by", "current", "new", "changes", "source_of_data_untouched"])
-    write_csv(rv, review, ["company", "months", "status", "kylas_company_ids", "matched_by", "rows"])
-    print(f"\n  wrote {pv}\n  wrote {rv}  (companies NOT written: ambiguous, no match, or no Kylas id)")
+    write_csv(rv, review, ["company", "months", "status", "kylas_company_ids", "matched_by", "candidate_1", "candidate_2", "candidate_3", "choose"])
+    print(f"\n  wrote {pv}\n  wrote {rv}  (NOT written: ambiguous, no match, or no Kylas id.\n  Type the right Kylas company id from a candidate into its `choose` column, then run again with --decisions {rv})")
 
     if not a.apply:
         print("\nDry run. Nothing was changed. Add --apply to write.")

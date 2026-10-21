@@ -75,6 +75,34 @@ eq("a 2-letter label alone is a coincidence, not a match", oms.match(C("Tech Edg
 eq("no row at all", oms.match(C("Nobody Ltd", "nobody"), bl, bn)[0], "none")
 eq("a row with no Kylas id cannot be pushed", oms.match(C("No Kylas", "nokylasid"), bl, bn)[0], "no-kylas-id")
 
+print("\n3b · the other companies: merging, names that win, and picks")
+R2 = lambda i, name, kid, kname="", src="": {"id": i, "fields": {"Name": name, "Kylas Company Id": kid, "Company Name - Kylas": kname, oms.TARGET: src}}
+rows2 = [R2("a1", "https://smytten.com", "100", "Smytten", "lifetime-MQL-SQL"),
+         R2("b1", "https://groupco.com", "200", "Group Co Hotels"), R2("b2", "https://groupco.in", "201", "Group Co Foods"),
+         R2("c1", "https://hitechradiators.com", "300", "Hi-Tech Radiators Pvt Ltd", "lifetime-MQL-SQL"),
+         R2("d1", "https://zzz-a.com", "400", "Zeta Alpha Pvt"), R2("d2", "https://zzz-b.com", "401", "Zeta Alpha Ltd")]
+comps = [{"name": "Smytten", "months": ["October"], "label": "smytten"},
+         {"name": "Smytten Pvt Ltd", "months": ["December"], "label": "smytten"},          # the SAME Kylas company, other months
+         {"name": "Group Co Foods", "months": ["November"], "label": "groupco"},            # the domain is shared, the name is not
+         {"name": "Hi-Tech Radiators Private Limited", "months": ["October"], "label": "gmail"},
+         {"name": "Zeta Alpha", "months": ["October"], "label": ""},                       # two Kylas companies, one name: ambiguous
+         {"name": "Wholly Unknown", "months": ["November"], "label": ""}]
+ch, rv = oms.plan(comps, rows2)
+by = {c["record"]: c for c in ch}
+eq("two sheet companies that are one Kylas company: months MERGED, not lost", by["a1"]["new"], "lifetime-MQL-SQL October, December")
+eq("the exact name wins over a shared domain", (by.get("b2") or {}).get("kylas_company_id"), "201")
+eq("...and the other company on that domain is not touched", "b1" in by, False)
+eq("'Pvt Ltd' vs 'Private Limited' is the same company", (by.get("c1") or {}).get("new"), "lifetime-MQL-SQL October")
+st = {r["company"]: r for r in rv}
+eq("two Kylas companies with the same name are ambiguous", st["Zeta Alpha"]["status"], "ambiguous")
+ok("...with both candidates listed for a person to choose", "400" in st["Zeta Alpha"]["candidate_1"] + st["Zeta Alpha"]["candidate_2"] and "401" in st["Zeta Alpha"]["candidate_1"] + st["Zeta Alpha"]["candidate_2"], str(st["Zeta Alpha"]))
+eq("an unknown company has no suggestion and no guess", (st["Wholly Unknown"]["status"], st["Wholly Unknown"]["candidate_1"]), ("none", ""))
+ch2, rv2 = oms.plan(comps, rows2, {"zeta alpha": "401"})
+eq("a person's pick settles it", {c["record"]: c["new"] for c in ch2}["d2"], "lifetime-MQL-SQL October")
+eq("...and it leaves the review list", "Zeta Alpha" in {r["company"] for r in rv2}, False)
+near = oms.suggestions({"name": "Hitech Radiator", "months": [], "label": ""}, rows2)
+ok("a near name is SUGGESTED for review (not applied)", bool(near) and near[0].startswith("300"), str(near))
+
 print("\n4 · a whole run against the mock Airtable")
 try:
     import openpyxl
