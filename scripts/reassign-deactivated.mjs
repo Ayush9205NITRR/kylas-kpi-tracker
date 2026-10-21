@@ -49,6 +49,10 @@ const VIEW = arg("view", "");
 const IDS_FILE = arg("ids", "");
 const NAMES = String(arg("to", "")).split(",").map((s) => s.trim()).filter(Boolean);
 if (!NAMES.length) { console.error("--to name1,name2,... (the active BDs to share the accounts between)"); process.exit(1); }
+/* --leave-active-contacts: a contact an ACTIVE BD (not the API user) already
+   holds stays with them; only contacts on a deactivated user or the API user
+   follow the account. Default: every contact of the account moves. */
+const LEAVE_ACTIVE = has("leave-active-contacts");
 if (!VIEW && !IDS_FILE) { console.error("--view <Company List view> or --ids <file>"); process.exit(1); }
 
 const kylas = createClient(KEY, { log: () => {}, base: BASE });
@@ -209,7 +213,9 @@ if (!has("apply")) {
     if (other) accountsActiveOther++;
     console.log(`  ${p.id.padEnd(9)} owner ${p.from.padEnd(6)} (deactivated) -> ${p.toKey.padEnd(9)} ${p.to}   ${cs.length} contact(s)`);
   }
-  console.log(`\nContacts that move with their accounts: ${contacts} — now held by: ${withDead} a deactivated user · ${withApi} the API user · ${withActiveOther} an ACTIVE BD (across ${accountsActiveOther} accounts)`);
+  console.log(`\nContacts on these accounts: ${contacts} — now held by: ${withDead} a deactivated user · ${withApi} the API user · ${withActiveOther} an ACTIVE BD (across ${accountsActiveOther} accounts)`);
+  console.log(LEAVE_ACTIVE ? `--leave-active-contacts: the ${withActiveOther} with an active BD STAY; the rest follow their account.`
+                           : `All of them follow their account (--leave-active-contacts keeps the ${withActiveOther} with their active BD).`);
   console.log(`DRY RUN — nothing written. Next: --apply --limit 1, look at that account in Kylas, then --apply --all.\n`);
   process.exit(0);
 }
@@ -220,16 +226,17 @@ if (!(LIMIT > 0)) { console.error("Say how many: --limit 1 for the first one, --
 const snapFile = `reassign-snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
 const snaps = [];
 console.log(`\nAPPLY — up to ${LIMIT === Infinity ? "all" : LIMIT} of ${plan.length}. Before-images: ${snapFile}\n`);
-let done = 0, contactsMoved = 0, contactsFailed = 0;
+let done = 0, contactsMoved = 0, contactsFailed = 0, contactsKept = 0;
 for (const p of plan) {
   if (done >= LIMIT) break;
   const cs = await contactsOf(p.id);
   snaps.push({ company: p.id, owner: p.from, to: p.to, contacts: cs });
   writeFileSync(snapFile, JSON.stringify(snaps, null, 2));
-  let moved = 0;
+  let moved = 0, kept = 0;
   const stuck = [];
   for (const c of cs) {
     if (c.owner === p.to) continue;
+    if (LEAVE_ACTIVE && c.owner && c.owner !== API_USER && (await userOf(c.owner))?.active !== false) { kept++; continue; }
     try {
       await call("PUT", `/v1/contacts/${c.id}/owner`, { ownerId: Number(p.to) });
       const back = await call("GET", `/v1/contacts/${c.id}`);
@@ -237,7 +244,7 @@ for (const p of plan) {
       else moved++;
     } catch (e) { stuck.push(`${c.id} (${String(e.message).replace(/^\S+ \S+ -> /, "").slice(0, 90)})`); }
   }
-  contactsMoved += moved; contactsFailed += stuck.length;
+  contactsMoved += moved; contactsFailed += stuck.length; contactsKept += kept;
   try { await call("PUT", `/v1/companies/${p.id}/owner`, { ownerId: Number(p.to) }); }
   catch (e) {
     console.log(`\n  STOPPED at ${p.id}: Kylas refused the account's owner — ${String(e.message).replace(/^\S+ \S+ -> /, "").slice(0, 160)}` +
@@ -250,10 +257,10 @@ for (const p of plan) {
     process.exit(1);
   }
   done++;
-  console.log(`  ${String(done).padStart(3)}  ${p.id.padEnd(9)} ${p.from} -> ${p.toKey} ${p.to} ✓ · contacts ${moved}/${cs.length} moved` +
+  console.log(`  ${String(done).padStart(3)}  ${p.id.padEnd(9)} ${p.from} -> ${p.toKey} ${p.to} ✓ · contacts ${moved}/${cs.length} moved${kept ? ` (${kept} left with their active BD)` : ""}` +
     `${stuck.length ? ` · NOT MOVED: ${stuck.join(", ")}` : ""}`);
 }
-console.log(`\nOWNER CHECK: ${done} account(s) read back with their new owner. Contacts moved: ${contactsMoved}${contactsFailed ? ` · ${contactsFailed} NOT moved (listed above)` : ""}.`);
+console.log(`\nOWNER CHECK: ${done} account(s) read back with their new owner. Contacts moved: ${contactsMoved}${contactsKept ? ` · ${contactsKept} left with an active BD` : ""}${contactsFailed ? ` · ${contactsFailed} NOT moved (listed above)` : ""}.`);
 console.log(`This run gave: ${targets.map((t) => `${t.key} ${plan.slice(0, done).filter((p) => p.to === t.id).length}`).join(" · ")}`);
 if (done && done < plan.length && LIMIT !== Infinity) console.log(`Open that account in Kylas (owner, contacts), then --apply --all.`);
 console.log("");

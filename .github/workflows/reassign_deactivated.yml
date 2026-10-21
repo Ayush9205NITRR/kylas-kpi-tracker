@@ -23,6 +23,11 @@ on:
       to:
         description: 'active BDs, comma separated (first names, emails or Kylas user ids)'
         default: 'sejal,anjali,muskan,arshdeep,mayra'
+      contacts:
+        description: 'which contacts follow the account'
+        type: choice
+        default: 'all'
+        options: [all, leave-active-bd]
       step:
         description: 'dry-run, first-one, or all (all also tags the moved accounts)'
         type: choice
@@ -43,6 +48,7 @@ jobs:
       VIEW: ${{ github.event.inputs.view }}
       TO: ${{ github.event.inputs.to }}
       STEP: ${{ github.event.inputs.step }}
+      LEAVE: ${{ github.event.inputs.contacts == 'leave-active-bd' && '--leave-active-contacts' || '' }}
       BULK_TAG_IDS_ONLY: '1'
     steps:
       - uses: actions/checkout@v4
@@ -55,13 +61,21 @@ jobs:
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
       - name: Plan (always first; writes nothing)
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO"
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE
       - name: First account
         if: ${{ github.event.inputs.step == 'first-one' }}
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" --apply --limit 1
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE --apply --limit 1
       - name: All accounts
         if: ${{ github.event.inputs.step == 'all' }}
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" --apply --all
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE --apply --all
+      - name: Keep the before-images (ids and old owners only — for an undo)
+        if: ${{ always() && github.event.inputs.step != 'dry-run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: reassign-snapshot-${{ github.run_id }}
+          path: reassign-snapshot-*.json
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Month tag on the moved accounts — canary
         if: ${{ github.event.inputs.step == 'all' }}
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary

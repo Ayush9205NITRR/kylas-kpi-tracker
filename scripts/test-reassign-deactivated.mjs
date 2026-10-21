@@ -64,8 +64,8 @@ await startMock();
   ok("round robin over ids sorted: 903 -> sejal, 1778327 -> anjali, 1810449 -> muskan",
      /903 .*-> sejal\s+80001/.test(d.out) && /1778327 .*-> anjali\s+80002/.test(d.out) && /1810449 .*-> muskan\s+80003/.test(d.out),
      d.out.split("\n").filter((l) => /->/.test(l)).join(" | "));
-  ok("the contacts that would follow are counted, with who holds them", /Contacts that move with their accounts: 1 — now held by: 0 a deactivated user · 0 the API user · 1 an ACTIVE BD/.test(d.out),
-     d.out.split("\n").filter((l) => /Contacts that move/.test(l)).join(""));
+  ok("the contacts that would follow are counted, with who holds them", /Contacts on these accounts: 1 — now held by: 0 a deactivated user · 0 the API user · 1 an ACTIVE BD/.test(d.out),
+     d.out.split("\n").filter((l) => /Contacts on these/.test(l)).join(""));
   ok("the dry run writes nothing", (await owner(903)) === 74727 && (await contactOwner(38470)) === 74726);
   ok("no company or contact names in the output", !/seats|Shorehouse|bbb|Temp|Devanshi/.test(d.out));
 }
@@ -82,6 +82,14 @@ console.log("\n2 · the names must be right, and never the super admin");
   ok("user ids work too", e.code === 0 && /80002/.test(e.out) && /80003/.test(e.out));
   ok("...and nothing was written by any of these", (await owner(903)) === 74727);
 }
+
+console.log("\n2b · --leave-active-contacts: a contact an active BD holds stays");
+{
+  const r = run("--to", TEAM, "--apply", "--limit", "1", "--leave-active-contacts");
+  ok("the account moves, its active-BD contact does not", r.code === 0 && (await owner(903)) === 80001 && (await contactOwner(38470)) === 74726 && /1 left with their active BD/.test(r.out),
+     r.out.trim().split("\n").slice(-4).join(" | "));
+}
+await startMock();
 
 console.log("\n3 · the first account");
 {
