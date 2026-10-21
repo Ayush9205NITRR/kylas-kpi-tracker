@@ -354,7 +354,9 @@ if (has("probe")) {
   let defs = [];
   try { const r = await call("GET", "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200"); defs = r?.content || r || []; }
   catch (e) { console.log(`    (field definitions not readable: ${codeOf(e)})`); }
-  const defOf = (n) => defs.find((d) => d.name === n);
+  if (!Array.isArray(defs)) defs = defs?.data || defs?.fields || [];
+  console.log(`    (${defs.length} field definitions read; one carries: ${Object.keys(defs[0] || {}).join(",")})`);
+  const defOf = (n) => defs.find((d) => d.name === n || d.fieldName === n || d.internalName === n);
   for (const [k, v] of Object.entries(body.customFieldValues || {})) {
     const d = defOf(k);
     const opts = d?.picklist?.picklistValues || d?.picklistValues || [];
@@ -379,10 +381,34 @@ if (has("probe")) {
     for (const [k, v] of Object.entries(body)) {
       if (k === "name") continue;
       if (k === "customFieldValues") {
-        for (const [kk, vv] of Object.entries(v)) { const r = await tryCreate({ customFieldValues: { [kk]: vv } }); if (r) culprits.push(`cf ${kk} — ${r}`); }
-      } else { const r = await tryCreate({ [k]: v }); if (r) culprits.push(`${k} — ${r}`); }
+        for (const [kk, vv] of Object.entries(v)) { const r = await tryCreate({ customFieldValues: { [kk]: vv } }); if (r) culprits.push({ cf: true, k: kk, r }); }
+      } else { const r = await tryCreate({ [k]: v }); if (r) culprits.push({ cf: false, k, r }); }
     }
-    console.log(culprits.length ? `    refused on its own:\n      ${culprits.join("\n      ")}` : "    every key is accepted on its own — it is a combination, or the update path");
+    console.log(culprits.length ? `    refused on its own:\n      ${culprits.map((c) => `${c.cf ? "cf " : ""}${c.k} — ${c.r}`).join("\n      ")}`
+      : "    every key is accepted on its own — it is a combination, or the update path");
+    /* Each refused one in the other shapes a lookup could go in as, on a
+       throwaway — and only a shape that READS BACK as the same value counts. */
+    const raw = (c) => (c.cf ? rec.customFieldValues?.[c.k] : rec[c.k]);
+    for (const c of culprits) {
+      const r0 = raw(c);
+      const variants = [["as Kylas sent it", r0], ["its name", textOf(r0)], ["its id as text", idOf(r0) == null ? undefined : String(idOf(r0))],
+        ["{id} only", idOf(r0) == null ? undefined : { id: idOf(r0) }]];
+      const out = [];
+      for (const [label, val] of variants) {
+        if (val === undefined || val === "") continue;
+        const b = c.cf ? { customFieldValues: { [c.k]: val } } : { [c.k]: val };
+        let res;
+        try {
+          const made = await call("POST", "/v1/companies", { ...b, name: testName });
+          let same = "?";
+          try { const got = await call("GET", `/v1/companies/${made.id}`); same = JSON.stringify(cfOf(c.cf ? got.customFieldValues?.[c.k] : got[c.k])) === JSON.stringify(cfOf(r0)) ? "reads back the same" : "reads back DIFFERENT"; }
+          finally { try { await call("DELETE", `/v1/companies/${made.id}`); } catch { console.log(`    ! could not delete test company ${made.id} — delete "${testName}" in Kylas.`); } }
+          res = `accepted, ${same}`;
+        } catch (e) { res = `refused ${codeOf(e).slice(0, 90)}`; }
+        out.push(`${label}: ${res}`);
+      }
+      console.log(`    ${c.cf ? "cf " : ""}${c.k}:\n      ${out.join("\n      ")}`);
+    }
   }
   if (has("probe-write")) {
     console.log(`\n3 · the real write, owner ${owner?.id} IN the body ("same"):`);
