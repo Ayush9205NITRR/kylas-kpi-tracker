@@ -100,6 +100,13 @@ ALLOWED_EMAIL_DOMAIN = "enout.in"
 # unless there is a name that has to be here.
 # ALLOWED_EMAILS = ""
 
+# Who sees EVERYONE (the team view: every owner's queue, accounts and numbers)
+# rather than only their own. Matched against the Google sign-in email. This
+# REPLACES the built-in list in handlers.mjs (crmadmin@, ayush@), so those two
+# stay named here. Lakshaya added by Ayush, 2026-10-21. Read when the Worker
+# starts, so a change needs `npx wrangler deploy`.
+ADMIN_EMAILS = "ayush@enout.in,crmadmin@enout.in,lakshaya.sharma@enout.in"
+
 # Which Airtable base holds the KPIs. Not a secret — the token is.
 AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 
