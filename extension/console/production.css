@@ -549,6 +549,18 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
   font-size:var(--t-meta);color:var(--text2)}
 .exbulk .exbto select{max-width:220px;border:1px solid var(--line2);background:var(--panel);
   color:var(--text);border-radius:var(--r);padding:5px 8px;font:inherit}
+/* Quiet actions in the bar ("+ add person", "remove", "Forget them"): text in
+   the accent, not buttons competing with Allot. */
+.exbulk .linkbtn{background:transparent;border:0;padding:2px 0;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--blue);cursor:pointer;text-underline-offset:3px}
+.exbulk .linkbtn:hover{text-decoration:underline}
+.exbulk .allotp .linkbtn{color:var(--text3)}
+/* Allot: a person and their share, as many rows as there are people. */
+.exbulk .allotp{flex-wrap:nowrap}
+.exbulk .allotpct{width:58px;border:1px solid var(--line2);background:var(--panel);color:var(--text);
+  border-radius:var(--r);padding:5px 6px;font:inherit;text-align:right}
+/* Shares that do not add to 100 are still used, as proportions — said, in the flag colour. */
+.exbulk .allotwarn{color:var(--amber)}
 /* Ticks left behind by an earlier, wider list. Amber marks flags. */
 .exbulk .exbaway{font-size:var(--t-meta);color:var(--text2);background:var(--amberSoft)}
 .exbulk .exbmsg{font-size:var(--t-meta);color:var(--text);font-weight:var(--w-med);

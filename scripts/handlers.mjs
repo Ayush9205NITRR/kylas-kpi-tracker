@@ -27,7 +27,7 @@
  * Request. A handler that does not need one simply ignores it.
  */
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes, kylasRemarksOf,
-         toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks, mergeNote, clipBlock } from "./kylas.mjs";
+         toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks, mergeNote, clipBlock, toUser } from "./kylas.mjs";
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
@@ -2361,6 +2361,47 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          is worse than one that is briefly behind. */
       if (mirror) await mirror.markStale().catch((e) => log(`! mirror: ${e.message}`));
       return out;
+    },
+
+    /* ALLOTTING ACCOUNTS, EACH TO ITS OWN PERSON, WITH THEIR CONTACTS.
+       POST { assignments: [{ company, ownerId }…], leaveActive } — the console
+       decides the split (40/60, round robin) where the person sees it and
+       sends a few accounts at a time for its progress bar. scripts/reassign.mjs
+       allot() holds the rules. Admins only, as /reassign. */
+    "/allot": async (_url, body) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("Allotting accounts is an admin action."), { status: 403 });
+      const { allot } = await import("./reassign.mjs");
+      const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+      const { users } = await kylasUsers().catch(() => ({ users: [] }));
+      const active = new Map(users.map((u) => [String(u.id), u.active]));
+      const isActive = async (id) => {
+        if (!active.has(String(id))) {
+          try { active.set(String(id), toUser(await kylas.user(id)).active); } catch { active.set(String(id), null); }
+        }
+        return active.get(String(id));
+      };
+      const out = await allot({ kylas, assignments: body?.assignments, leaveActive: body?.leaveActive !== false,
+                                apiUser, isActive, log, concurrency: Number(env.REASSIGN_CONCURRENCY || 3) });
+      /* The pane reads the copy, which now disagrees with Kylas — see /reassign. */
+      if (mirror) await mirror.markStale().catch((e) => log(`! mirror: ${e.message}`));
+      return out;
+    },
+
+    /* WHO AN ACCOUNT CAN BE ALLOTTED TO: active Kylas users, never the API
+       user. The console's owner list has everyone who ever owned an account —
+       deactivated people included, and Kylas refuses to hand a record to them. */
+    "/allot-people": async () => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("Allotting accounts is an admin action."), { status: 403 });
+      const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+      const { users } = await kylasUsers().catch(() => ({ users: [] }));
+      const people = users.filter((u) => u.id && u.active !== false && String(u.id) !== apiUser && !/super\s*admin/i.test(u.name || ""))
+        .map((u) => ({ id: String(u.id), name: u.name || u.email || String(u.id) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { people };
     },
 
     /* A BD picking an account, or dropping it with a reason. */

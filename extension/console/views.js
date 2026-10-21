@@ -657,6 +657,23 @@
     try { if (sel && sel[0] != null) back.setSelectionRange(sel[0], sel[1]); } catch { /* not a text box */ }
   }
 
+  /* ALLOTTED, NOT YET IN THE COPY. The list is read from the Airtable copy,
+     which learns a new owner at the next sync — so straight after an allot the
+     table still named the old owner of every account that had just moved, and
+     read as "nothing happened". Each account the server READ BACK on its new
+     owner is held here and laid over the list until the copy agrees (or six
+     hours pass), so the screen says what Kylas says. */
+  function applyAllotted(list) {
+    const held = CACHE.allotted;
+    if (!held || !held.size) return;
+    const now = Date.now();
+    for (const c of list || []) {
+      const a = held.get(String(c.id));
+      if (!a) continue;
+      if (now - a.at > 6 * 3600 * 1000 || String(c.ownerId) === a.ownerId) { held.delete(String(c.id)); continue; }
+      c.ownerId = a.ownerId; c.owner = a.owner;
+    }
+  }
   function ensureCompanies(_owner, onReady, force) {
     if (inflight) return true;
     const fresh = CACHE.at && Date.now() - CACHE.at < FRESH_MS;
@@ -687,6 +704,7 @@
         CACHE.building = false;
         retryAt = 0; retryGap = 0;
         CACHE.companies = r.companies || [];
+        applyAllotted(CACHE.companies);
         CACHE.owners = r.owners || [];
         CACHE.error = "";
         CACHE.at = Date.now();
@@ -2237,6 +2255,9 @@
                    and an index would silently come to mean a different
                    company. Survives a repaint for the same reason. */
                 picked: new Set(), busy: "", adding: false, moving: false, prog: null, moveTo: "",
+                /* ALLOT: who gets these accounts, and what share. One row is
+                   "all to one person"; two rows at 40/60 is Ayush's split. */
+                allot: [{ id: "", pct: 100 }], allotKeep: true, allotting: false, allotStop: false,
                 sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
@@ -3014,6 +3035,8 @@
         <span class="pbar"><i style="width:${Math.round((ACC.prog.done / Math.max(1, ACC.prog.total)) * 100)}%"></i></span>
         <span class="exbh">${ACC.prog.done} of ${ACC.prog.total} ${
           ACC.prog.unit || "accounts"}${ACC.prog.note ? ` \u00b7 ${esc(ACC.prog.note)}` : ""}</span>
+        ${ACC.allotting ? `<button class="gbtn sm" id="accAllotStop" type="button"${ACC.allotStop ? " disabled" : ""}>${
+          ACC.allotStop ? "Stopping after this batch…" : "Stop"}</button>` : ""}
       </div>` : "";
     const awayRow = away > 0 ? `<div class="exbrow exbaway">
         <span>${away} more ticked earlier ${away === 1 ? "is" : "are"} not in this list — left out of everything below.</span>
@@ -3021,7 +3044,7 @@
     if (!n) return `<div class="exbulk idle">
       <div class="exbrow">
         <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
-        <span class="exbh">…or tick rows, to add them to your Focus list${API.isAdmin ? ", or move their contacts to somebody else" : ""}.</span>
+        <span class="exbh">…or tick rows, to add them to your Focus list${API.isAdmin ? ", or allot them — with their contacts — to your BDs" : ""}.</span>
       </div>${awayRow}${prog}${msg}</div>`;
     const batches = Math.ceil(n / focusBulk());
     return `<div class="exbulk">
@@ -3044,23 +3067,7 @@
            of this button erased one instead of moving it. The contacts are
            what move, and a person about to click needs to know that here,
            not in a release note. */ ""}
-      ${API.isAdmin ? `<div class="exbrow">
-        <span class="exbk">Re-assign</span>
-        <label class="exbto">Move their contacts to
-          <select id="accTo" aria-label="Move the contacts on these accounts to">
-            <option value="">choose a person…</option>
-            ${/* THE CHOICE SURVIVES A REDRAW. The bar is re-rendered on every
-                  focus-list change and after every batch, and the select came
-                  back empty each time — which disabled Move again, mid-flow,
-                  for no reason the person could see. */ ""}
-            ${ownerOptions().map((o) =>
-              `<option value="${esc(o.id)}"${String(ACC.moveTo) === String(o.id) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}
-          </select></label>
-        <button class="gbtn sm" id="accGo" type="button"${ACC.moveTo && !ACC.moving ? "" : " disabled"}>${ACC.moving ? "Moving…" : "Move contacts"}</button>
-      </div>
-      <p class="exbnote">Moves the <b>contacts</b> on these accounts. Kylas does
-        not let this tool change an account's own owner — do that in Kylas.
-        Nothing is written until you have seen the count.</p>` : ""}
+      ${API.isAdmin ? allotRows(mine) : ""}
       ${prog}
       ${msg}
     </div>`;
@@ -3072,6 +3079,78 @@
     const seen = new Map();
     for (const o of CACHE.owners || []) if (o?.id && o?.name) seen.set(String(o.id), o.name);
     return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /* ── ALLOT: accounts AND their contacts, split between people ──────────
+     Ayush, 2026-10-21: "account allotment ka process UI pe — account ke saath
+     contact bhi allot ho sake, and it should be fast, with progress bar, taki
+     majje aaye karne mein". It replaces "Move their contacts to": one row at
+     100% is that, and the account's own owner moves too (it has since
+     2026-10-15 — the note that said otherwise was wrong).
+
+     WHO CAN RECEIVE: active Kylas users only, never the API user — the
+     server's /allot-people says who, because the owner list on screen has
+     everybody who ever owned an account, deactivated ones included, and Kylas
+     refuses to hand a record to them.
+
+     THE SPLIT IS DECIDED HERE, where the person sees it: smooth weighted round
+     robin over the accounts sorted by id, so 40/60 interleaves (S M S M M …)
+     and a stop part-way leaves both with their share of what moved. The server
+     is told each account's person; it does not re-decide. */
+  const ALLOT_BATCH = 5;
+  /* Fetched once by the accounts view when it wires its events (it holds the
+     redraw); null until then, and the select says it is loading. */
+  const allotPeople = () => CACHE.allotPeople || null;
+  const allotRowsOk = () => ACC.allot.filter((r) => r.id && Number(r.pct) > 0);
+  function allotSplit(ids) {
+    const rows = allotRowsOk();
+    if (!rows.length) return [];
+    const total = rows.reduce((a, r) => a + Number(r.pct), 0);
+    const w = rows.map((r) => ({ id: String(r.id), weight: Number(r.pct), cur: 0 }));
+    return [...ids].sort((a, b) => Number(a) - Number(b)).map((company) => {
+      for (const x of w) x.cur += x.weight;
+      const best = w.reduce((a, b) => (b.cur > a.cur ? b : a));
+      best.cur -= total;
+      return { company, ownerId: best.id };
+    });
+  }
+  const personName = (id) => ((CACHE.allotPeople || []).find((p) => String(p.id) === String(id))
+    || ownerOptions().find((o) => String(o.id) === String(id)) || {}).name || String(id);
+  function allotRows(mine) {
+    const people = allotPeople();
+    const ids = mine.map((r) => String(r.id));
+    const plan = allotSplit(ids);
+    const per = {};
+    for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
+    const total = allotRowsOk().reduce((a, r) => a + Number(r.pct), 0);
+    const preview = plan.length ? Object.entries(per).map(([id, n]) => `${esc(personName(id))} <b class="tnum">${n}</b>`).join(" \u00b7 ") : "";
+    const rowHTML = ACC.allot.map((r, i) => `<span class="exbto allotp">
+        <select data-allot-who="${i}" aria-label="Person ${i + 1}">
+          <option value="">${people ? "choose a person…" : "loading people…"}</option>
+          ${(people || []).map((p) => `<option value="${esc(p.id)}"${String(r.id) === String(p.id) ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+        </select>
+        <input class="allotpct tnum" data-allot-pct="${i}" type="number" min="1" max="100" step="1" inputmode="numeric"
+          value="${esc(r.pct)}" aria-label="Share for person ${i + 1}, percent"><span>%</span>
+        ${ACC.allot.length > 1 ? `<button class="linkbtn" data-allot-del="${i}" type="button" aria-label="Remove person ${i + 1}">remove</button>` : ""}
+      </span>`).join("");
+    const ready = plan.length && !ACC.allotting;
+    return `<div class="exbrow">
+        <span class="exbk">Allot</span>
+        ${rowHTML}
+        <button class="linkbtn" id="accAllotAdd" type="button">+ add person</button>
+        ${ACC.allot.length > 1 ? `<button class="linkbtn" id="accAllotEven" type="button">split evenly</button>` : ""}
+      </div>
+      <div class="exbrow">
+        <span class="exbk"></span>
+        <label class="exbto"><input type="checkbox" id="accAllotKeep"${ACC.allotKeep ? " checked" : ""}>
+          Keep contacts another active BD already holds with them</label>
+        <span class="exbh">${preview ? `${preview}${total !== 100 ? ` <span class="allotwarn">(shares add to ${total}% — used as proportions)</span>` : ""}` : "Choose who gets them."}</span>
+        <button class="gbtn sm pri" id="accAllotGo" type="button"${ready ? "" : " disabled"}>${
+          ACC.allotting ? "Allotting…" : `Allot ${plan.length || ""} account${plan.length === 1 ? "" : "s"}`}</button>
+      </div>
+      <p class="exbnote">The <b>account</b> and its <b>contacts</b> move to the person shown, ${ALLOT_BATCH} at a time.
+        Every account's owner is read back from Kylas. Stop whenever you like — what has moved stays moved,
+        the rest stay ticked.</p>`;
   }
 
   function ownerPicker(all) {
@@ -4687,107 +4766,102 @@
       }
       redraw();
     });
-    on("accTo", "change", (e) => {
-      ACC.moveTo = e.target.value || "";
-      const go = document.getElementById("accGo");
-      if (go) go.disabled = !ACC.moveTo;
-    });
-    on("accGo", "click", async () => {
-      const ownerId = ACC.moveTo || document.getElementById("accTo")?.value || "";
-      if (!ownerId || ACC.moving) return;
-      const toName = (ownerOptions().find((o) => String(o.id) === String(ownerId)) || {}).name || "them";
+    /* ── ALLOT ──────────────────────────────────────────────────────── */
+    if (API.isAdmin && !CACHE.allotPeople && !CACHE.allotPeopleAsked) {
+      CACHE.allotPeopleAsked = true;
+      API.allotPeople().then((r) => { CACHE.allotPeople = r.people || []; redraw(); })
+        .catch(() => { CACHE.allotPeopleAsked = false; });
+    }
+    /* The bar is redrawn on every change (the preview counts follow the
+       shares), so its inputs are wired by data attribute, not id. */
+    host.querySelectorAll("[data-allot-who]").forEach((n) => n.addEventListener("change", (e) => {
+      ACC.allot[Number(n.dataset.allotWho)].id = e.target.value; redraw();
+    }));
+    host.querySelectorAll("[data-allot-pct]").forEach((n) => n.addEventListener("change", (e) => {
+      ACC.allot[Number(n.dataset.allotPct)].pct = Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))); redraw();
+    }));
+    host.querySelectorAll("[data-allot-del]").forEach((n) => n.addEventListener("click", () => {
+      ACC.allot.splice(Number(n.dataset.allotDel), 1); redraw();
+    }));
+    const evenly = () => {
+      const n = ACC.allot.length, base = Math.floor(100 / n);
+      ACC.allot.forEach((r, i) => { r.pct = base + (i < 100 - base * n ? 1 : 0); });
+    };
+    on("accAllotAdd", "click", () => { ACC.allot.push({ id: "", pct: 0 }); evenly(); redraw(); });
+    on("accAllotEven", "click", () => { evenly(); redraw(); });
+    on("accAllotKeep", "change", (e) => { ACC.allotKeep = !!e.target.checked; });
+    on("accAllotStop", "click", () => { ACC.allotStop = true; redraw(); });
+    on("accAllotGo", "click", async () => {
+      if (ACC.allotting) return;
       const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
-      if (!ids.length) return;
-      const batches = inBatches(ids, REASSIGN_BATCH);
-      ACC.moving = true;
-      try {
-        /* STEP ONE: COUNT, WRITING NOTHING, A BATCH AT A TIME. The number put
-           in front of the person comes from the same reads the write will use,
-           never the row count on screen. Batched because counting 276 accounts
-           is ~550 Kylas reads, and asking for all of them in one request is
-           what was timing out. */
-        const plan = { contacts: 0, moving: 0, already: 0, problems: [] };
-        for (const [i, batch] of batches.entries()) {
-          ACC.busy = "";
-          ACC.prog = { done: i * REASSIGN_BATCH, total: ids.length,
-                       label: `Counting ${i + 1}/${batches.length}`,
-                       note: plan.contacts ? `${plan.contacts} contacts so far` : "" };
-          redraw();
-          const p = await API.reassignPlan(batch, ownerId);
-          plan.contacts += p.contacts || 0;
-          plan.moving += p.moving || 0;
-          plan.already += p.already || 0;
-          plan.problems.push(...(p.problems || []));
-        }
-        ACC.prog = null;
-        const bad = plan.problems.length
-          ? `\n\n${plan.problems.length} account(s) could not be read and will be skipped.` : "";
-        const same = plan.already ? `\n${plan.already} contact(s) are already theirs.` : "";
-        if (!plan.contacts) {
-          ACC.busy = `Nothing to move — every contact on these ${ids.length} is already ${toName}'s.`;
-          redraw(); return;
-        }
-        /* STEP TWO: ONE AGREEMENT, TO THE WHOLE RUN. How it is batched is
-           stated rather than asked — it is the method, not the decision. */
-        const yes = confirm(
-          `Move ${plan.contacts} contact${plan.contacts === 1 ? "" : "s"} across ` +
-          `${plan.moving} account${plan.moving === 1 ? "" : "s"} to ${toName}?${same}${bad}\n\n` +
-          `This goes in ${batches.length} batch${batches.length === 1 ? "" : "es"} of up to ${REASSIGN_BATCH}. ` +
-          `Each batch is final as it lands, so if one fails the earlier ones stay moved and ` +
-          `the rest stay ticked for another go.\n\n` +
-          `The accounts' own owner does NOT change — Kylas does not allow that through the ` +
-          `API. Set it in Kylas if you need it.\n\n` +
-          `This writes to Kylas and cannot be undone from here.`);
-        if (!yes) { ACC.busy = ""; redraw(); return; }
+      const plan = allotSplit(ids);
+      if (!plan.length) return;
+      const per = {};
+      for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
+      const lines = Object.entries(per).map(([id, n]) => `  ${personName(id)}: ${n}`).join("\n");
+      /* ONE AGREEMENT, TO THE WHOLE RUN, with the split in front of it. */
+      const yes = confirm(
+        `Allot ${plan.length} account${plan.length === 1 ? "" : "s"}:\n${lines}\n\n` +
+        `Each account's contacts go to the same person` +
+        (ACC.allotKeep ? ` — except contacts another active BD already holds, which stay with them.` : `.`) +
+        `\n\nIt goes ${ALLOT_BATCH} accounts at a time and every account's owner is read back from Kylas. ` +
+        `You can stop at any point: what has moved stays moved, the rest stay ticked.\n\n` +
+        `This writes to Kylas and cannot be undone from here.`);
+      if (!yes) return;
 
-        /* STEP THREE: THE WRITE, batch by batch, each unticked as it lands so
-           a stop is a resume and never a restart. */
-        let moved = 0, contacts = 0, skipped = 0, failed = 0, doneAccounts = 0, owners = 0, ownersFailed = 0;
-        for (const [i, batch] of batches.entries()) {
-          ACC.prog = { done: doneAccounts, total: ids.length,
-                       label: `Moving ${i + 1}/${batches.length}`,
-                       note: `${contacts} of ${plan.contacts} contacts moved` };
-          redraw();
-          try {
-            const r = await API.reassign(batch, ownerId);
-            moved += r.moved || 0; contacts += r.contacts || 0;
-            skipped += r.skipped || 0; failed += (r.failed || []).length;
-            owners += r.accountOwners || 0; ownersFailed += r.accountOwnersFailed || 0;
-            batch.forEach((id) => ACC.picked.delete(id));
-            doneAccounts += batch.length;
-          } catch (e) {
-            ACC.prog = null;
-            ACC.busy = `Stopped at batch ${i + 1} of ${batches.length} — ${
-              String(e.message || e).slice(0, 110)}. ${contacts} contact(s) across ${moved
-              } account(s) already moved to ${toName}; the other ${ids.length - doneAccounts
-              } accounts are still ticked, so press Move contacts again to carry on.`;
-            ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
-            redraw(); return;
+      ACC.allotting = true; ACC.allotStop = false; ACC.busy = "";
+      const t0 = Date.now();
+      let done = 0, contacts = 0, kept = 0;
+      const got = {}, failed = [];
+      const batches = inBatches(plan, ALLOT_BATCH);
+      const progress = () => {
+        const spent = Date.now() - t0;
+        const left = done ? Math.round(((spent / done) * (plan.length - done)) / 1000) : null;
+        const eta = left == null ? "" : left >= 90 ? ` · ~${Math.round(left / 60)} min left` : ` · ~${left}s left`;
+        ACC.prog = { done, total: plan.length, label: "Allotting",
+          note: `${contacts} contact${contacts === 1 ? "" : "s"} moved` +
+            (Object.keys(got).length ? ` · ${Object.entries(got).map(([id, n]) => `${personName(id)} ${n}`).join(", ")}` : "") +
+            (failed.length ? ` · ${failed.length} not moved` : "") + eta };
+        redraw();
+      };
+      progress();
+      try {
+        for (const batch of batches) {
+          if (ACC.allotStop) break;
+          let r;
+          try { r = await API.allot(batch, ACC.allotKeep); }
+          catch (e) {
+            /* A WHOLE BATCH REFUSED (network, timeout, 5xx): those accounts stay
+               ticked and the run goes on — one bad request is not the run. */
+            for (const a of batch) failed.push({ id: a.company, why: String(e.message || e).slice(0, 100) });
+            done += batch.length; progress(); continue;
           }
+          for (const x of r.results || []) {
+            if (x.ok) {
+              ACC.picked.delete(String(x.id)); got[x.to] = (got[x.to] || 0) + 1;
+              (CACHE.allotted ||= new Map()).set(String(x.id), { ownerId: String(x.to), owner: personName(x.to), at: Date.now() });
+            }
+            else failed.push({ id: x.id, why: x.why || "" });
+            contacts += x.contactsMoved || 0; kept += x.contactsKept || 0;
+          }
+          done += batch.length;
+          applyAllotted(CACHE.companies);
+          progress();
         }
-        ACC.prog = null;
-        ACC.busy = `Moved ${contacts} contact(s) across ${moved} account(s) to ${toName}` +
-          (skipped ? ` · ${skipped} were already theirs` : "") +
-          (failed ? ` · ${failed} contact(s) failed` : "") +
-          /* THE ACCOUNT'S OWNER MOVES TOO, SINCE 2026-10-15. This said the
-             opposite for a fortnight — "Kylas drops ownerId, change it in
-             Kylas itself" — and it was wrong. PUT /companies/{id}/owner with
-             {"ownerId"} works and always did; what was broken was the readback
-             that checked it (GET /companies/{id} does not return the owner on
-             this account), and a blind check turned a write that had landed
-             into a confident refusal. Ayush pushed back three times. He was
-             right each time. See STATE.md §3e. */
-          (owners ? ` · ${owners} account owner(s) moved too` : "") +
-          (ownersFailed ? ` · ${ownersFailed} account owner(s) Kylas refused` : "");
+      } finally {
+        const secs = Math.round((Date.now() - t0) / 1000);
+        const moved = Object.values(got).reduce((a, n) => a + n, 0);
+        ACC.prog = null; ACC.allotting = false;
+        ACC.busy = `${ACC.allotStop ? "Stopped. " : ""}Allotted ${moved} account${moved === 1 ? "" : "s"} with ${contacts} contact${contacts === 1 ? "" : "s"} in ${
+          secs >= 90 ? `${Math.round(secs / 60)} min` : `${secs}s`}` +
+          (moved ? ` — ${Object.entries(got).map(([id, n]) => `${personName(id)} ${n}`).join(", ")}` : "") +
+          (kept ? ` · ${kept} contact(s) left with the BD already working them` : "") +
+          (failed.length ? ` · ${failed.length} NOT moved and still ticked (${failed.slice(0, 3).map((f) => `${f.id}: ${f.why}`).join("; ")}${failed.length > 3 ? "; …" : ""})` : "") +
+          (ACC.allotStop && done < plan.length ? ` · ${plan.length - done} not tried, still ticked` : "") + ".";
+        ACC.allotStop = false;
         /* Kylas is right and the copy is not, until the sync catches up. */
         ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
         redraw();
-      } catch (e) {
-        ACC.prog = null;
-        ACC.busy = `Could not re-assign — ${String(e.message || e).slice(0, 160)}`;
-        redraw();
-      } finally {
-        ACC.moving = false;
       }
     });
 

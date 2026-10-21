@@ -305,3 +305,130 @@ export function contactBody(base, ownerId) {
   body.ownerId = Number(ownerId);
   return body;
 }
+
+/* ── ALLOT: EACH ACCOUNT TO ITS OWN PERSON, WITH ITS PEOPLE ─────────────
+   Ayush, 2026-10-21: "account allotment ka process UI pe — account ke saath
+   contact bhi allot ho sake, and it should be fast, with progress bar". And
+   the run that asked for it: 40% of a filtered list to Sejal, the rest to
+   Mayra.
+
+   What apply() above does not, and why this is separate rather than a flag:
+     - ONE PERSON PER ACCOUNT, not one for the whole batch: the split (40/60,
+       round robin) is decided in the console, where the person sees it, and
+       each assignment arrives here already decided.
+     - ONE-FIELD WRITES ONLY. PUT /v1/contacts/{id}/owner and
+       PUT /v1/companies/{id}/owner. apply() reads each contact whole and PUTs
+       it back, and a whole-record PUT is refused outright when the record
+       holds a picklist value Kylas has since retired (bulk-tag found that on
+       every real company, 2026-10-21) — and costs a read per contact besides.
+       The owner endpoints touch nothing else and need no read first.
+     - THE ACCOUNT'S OWNER IS READ BACK. An owner endpoint that answers 200 and
+       does nothing is the trap this file's header is about; every account
+       reports the owner Kylas has AFTER the write, and only that counts.
+     - A CONTACT AN ACTIVE BD ALREADY HOLDS can stay with them (leaveActive):
+       somebody is working it. The account's previous owner, the API user and
+       a deactivated user are not "somebody working it" — theirs always move.
+
+   No plan step: the console shows the split it computed and the person agrees
+   to that; the reads a separate count would cost are what made the old path
+   slow (two per account before anything moved). Small batches — the console
+   sends a few accounts a request, so its progress bar moves and a failure
+   costs a few accounts, not a run. */
+export const MAX_ALLOT = 25;
+const ownerKeys = ["ownerId", "owner", "ownedBy", "ownerDetails", "assignedTo", "recordOwner"];
+const lookupId = (v) => (v && typeof v === "object" ? v.id : v) ?? null;
+function ownerOnRecord(rec) {
+  for (const k of ownerKeys) {
+    const v = lookupId(rec?.[k]);
+    if (v !== null && v !== undefined && v !== "") return String(v);
+  }
+  return "";
+}
+/* The single GET carries the owner as ownedBy on this account today; it did
+   not once (see the header), so the search by id stays as the fallback. */
+async function companyOwnerOf(kylas, id, rec) {
+  const on = ownerOnRecord(rec);
+  if (on) return on;
+  try {
+    const r = await kylas.raw("POST", "/v1/search/company?page=0&size=5", { fields: ["id", "ownerId"],
+      jsonRule: { condition: "AND", valid: true, rules: [{ id: "id", field: "id", type: "long", input: "number", operator: "equal", value: Number(id) }] } });
+    const row = (r?.content || r?.data || []).find((x) => String(x.id) === String(id));
+    return row ? String(lookupId(row.ownerId) ?? "") : "";
+  } catch { return ""; }
+}
+
+/* Every contact on the account, paged — an account with more than one page of
+   people must not have its second page left behind. Only rows that name this
+   company: a filter Kylas ignored must never move strangers. */
+async function contactsOfCompany(kylas, companyId) {
+  const out = [];
+  for (let p = 0; p < 20; p++) {
+    const r = await kylas.raw("POST", `/v1/search/contact?page=${p}&size=100`, { fields: ["id", "ownerId", "company"],
+      jsonRule: { condition: "AND", valid: true, rules: [{ id: "company", field: "company", type: "long", input: "select", operator: "equal", value: Number(companyId) }] } });
+    const rows = r?.content || r?.data || [];
+    out.push(...rows.filter((c) => String(lookupId(c.company) ?? companyId) === String(companyId)));
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
+export async function allot({ kylas, assignments = [], leaveActive = true, apiUser = "",
+                              isActive = async () => null, log = () => {}, concurrency = 3 }) {
+  const list = (Array.isArray(assignments) ? assignments : [])
+    .map((a) => ({ id: String(a?.company ?? a?.id ?? ""), to: String(a?.ownerId ?? "") }))
+    .filter((a) => /^\d+$/.test(a.id) && /^\d+$/.test(a.to));
+  if (!list.length) throw Object.assign(new Error("no accounts to allot"), { status: 400 });
+  if (list.length > MAX_ALLOT)
+    throw Object.assign(new Error(`${list.length} accounts in one request — the console sends at most ${MAX_ALLOT}`), { status: 400 });
+  if (apiUser && list.some((a) => a.to === String(apiUser)))
+    throw Object.assign(new Error("Accounts are never allotted to the API user (Enout Super Admin)."), { status: 400 });
+  if (new Set(list.map((a) => a.id)).size !== list.length)
+    throw Object.assign(new Error("the same account twice in one request"), { status: 400 });
+
+  const one = async ({ id, to }) => {
+    const out = { id, to, from: "", ok: false, ownerAfter: "", contactsMoved: 0, contactsKept: 0, contactsFailed: [] };
+    try {
+      const co = await kylas.company(id);
+      out.from = await companyOwnerOf(kylas, id, co);
+      /* CONTACTS FIRST: a stop part-way must never leave the account handed
+         over with its people behind (rule 4 of the header). */
+      const people = await contactsOfCompany(kylas, id);
+      for (const p of people) {
+        const owner = String(lookupId(p?.ownerId) ?? "");
+        if (owner === to) continue;
+        if (leaveActive && owner && owner !== out.from && owner !== String(apiUser) && (await isActive(owner)) === true) {
+          out.contactsKept++; continue;
+        }
+        try {
+          const r = await kylas.raw("PUT", `/v1/contacts/${p.id}/owner`, { ownerId: Number(to) });
+          /* The contact endpoint says what it did — believe that, not the 200. */
+          if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(p.id), why: `owner is ${r.newOwnerId}` });
+          else out.contactsMoved++;
+        } catch (e) { out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) }); }
+      }
+      if (out.from !== to) await kylas.setCompanyOwner(id, to);
+      out.ownerAfter = await companyOwnerOf(kylas, id, await kylas.company(id));
+      out.ok = out.ownerAfter === to;
+      if (!out.ok) out.why = `owner reads back as ${out.ownerAfter || "nobody"}`;
+    } catch (e) { out.why = String(e.message || e).slice(0, 160); }
+    return out;
+  };
+
+  const k = Math.max(1, Math.min(Number(concurrency) || 1, list.length));
+  const was = k > 1 && kylas.setConcurrency ? kylas.setConcurrency(k) : null;
+  const results = new Array(list.length);
+  const t0 = Date.now();
+  try {
+    let next = 0;
+    await Promise.all(Array.from({ length: k }, async () => {
+      while (next < list.length) { const i = next++; results[i] = await one(list[i]); }
+    }));
+  } finally { if (was !== null) kylas.setConcurrency(was); }
+  const done = results.filter((r) => r.ok);
+  const contacts = results.reduce((a, r) => a + r.contactsMoved, 0);
+  log(`allot: ${done.length}/${list.length} account(s) read back with their new owner, ${contacts} contact(s) moved` +
+      ` — ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  return { results, accounts: done.length, contacts,
+           kept: results.reduce((a, r) => a + r.contactsKept, 0),
+           failed: results.filter((r) => !r.ok).length, ms: Date.now() - t0 };
+}
