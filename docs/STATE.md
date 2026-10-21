@@ -1794,6 +1794,14 @@ The canary now tries `patch` first and the run uses it. Companies whose owner is
 at the first change. Nothing can give a record back to a deactivated user, so
 that one is Ayush's call.
 
+**Done, 2026-10-21 (runs 39570668797, 39571471041, 39572846046):** 337 of 517
+companies tagged in Kylas — 1 + 35 + 301 — every one read back with the owner
+it had before, and with the PATCH no owner was moved even for a second. Not
+written: **178 with a deactivated owner** (waiting on Ayush: tick
+`include_deactivated`, or re-assign them first) and **2 deleted in Kylas**
+(1773237 and one more — 404). The first `--all` stopped on the 404; a deleted
+company is now skipped.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
