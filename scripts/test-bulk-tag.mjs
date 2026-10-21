@@ -350,5 +350,17 @@ clearCanary();
   ok("the canary rejects the PATCH", /patch\s+FAILED/.test(c.out) && !/PASSED with ownerMode "patch"/.test(c.out), c.out.trim().split("\n").slice(0, 8).join(" | "));
 }
 
+console.log("\n15 · a company deleted since the list was made (404, as 1773237 live)");
+await startMock("replace-api-owner", { MOCK_COMPANY_PATCH: "json-patch" });
+clearCanary();
+{
+  writeFileSync(ids, "# test\n1776620\n4040404\n903\n");
+  run("--canary");
+  const r = run("--apply", "--all");
+  ok("it is skipped and the run goes on to the rest", r.code === 0 && /4040404 — cannot read/.test(r.out) && /2 tagged/.test(r.out) && /1 not readable/.test(r.out),
+     r.out.trim().split("\n").slice(-4).join(" | "));
+  writeFileSync(ids, "# test\n1776620\n903\n");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

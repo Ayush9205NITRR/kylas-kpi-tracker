@@ -122,6 +122,12 @@ async function call(method, path, body, headers = {}, tries = 0) {
   const r = await fetch(`${BASE}${path}`, { method, headers: { ...H, ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text();
   let json = null; try { json = text ? JSON.parse(text) : null; } catch { /* not json */ }
+  /* A 504 "stream timeout" is Kylas being slow, not an answer (the dry run of
+     2026-10-21 met one) — try again a couple of times. */
+  if ([502, 503, 504].includes(r.status) && tries < 3) {
+    await sleep(1500 * (tries + 1));
+    return call(method, path, body, headers, tries + 1);
+  }
   if (r.status === 429 && tries < 6) {
     await sleep(Number(r.headers.get("retry-after") || 0) * 1000 || 500 * 2 ** tries);
     return call(method, path, body, headers, tries + 1);
@@ -624,10 +630,14 @@ const snapFile = `bulk-tag-snapshot-${new Date().toISOString().replace(/[:.]/g, 
 const snaps = [];
 const keep = () => writeFileSync(snapFile, JSON.stringify(snaps, null, 2));
 console.log(`\nAPPLY — up to ${LIMIT === Infinity ? "all" : LIMIT} of ${ids.length}, ownerMode "${mode}". Before-images: ${snapFile}\n`);
-let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0, deadWrote = 0;
+let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0, deadWrote = 0, unreadable = 0;
 for (const id of ids) {
   if (wrote >= LIMIT) break;
-  const before = await call("GET", `/v1/companies/${id}`);
+  /* A company deleted since the view was made answers 404 (1773237, 2026-10-21,
+     which stopped the first --all after 35). Nothing to tag: say so, go on. */
+  let before;
+  try { before = await call("GET", `/v1/companies/${id}`); }
+  catch (e) { unreadable++; skipped++; console.log(`  ${id} — cannot read (${codeOf(e).slice(0, 60)}), skipped`); continue; }
   const src = textOf(before.customFieldValues?.[FIELD]);
   if (isDone(id, src)) { skipped++; continue; }
   const ownerBefore = await ownerOf(id, before);
@@ -688,6 +698,6 @@ console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back wit
   `${reasserted ? ` (${reasserted} were moved by Kylas on the write and given back at once)` : ""}.` +
   `${deadWrote ? ` ${deadWrote} of them belong to a deactivated user and were read back unchanged.` : ""}` +
   `${mode === "patch" ? " Written with the one-field PATCH: no owner was ever moved." : ""}`);
-if (inactive || refused) console.log(`Skipped: ${inactive} with a deactivated owner · ${refused} Kylas refused. None of them was changed.`);
+if (inactive || refused || unreadable) console.log(`Skipped: ${inactive} with a deactivated owner · ${refused} Kylas refused · ${unreadable} not readable (deleted?). None of them was changed.`);
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");
