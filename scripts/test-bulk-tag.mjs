@@ -181,5 +181,61 @@ clearCanary();
   ok("...and --apply refuses", a.code === 1 && /Refusing/.test(a.out));
 }
 
+console.log("\n8 · --view: the months from an Airtable view, the owner never touched");
+await startMock("replace-keep-owner");
+clearCanary();
+{
+  const AT_PORT = 9953, AT = `http://127.0.0.1:${AT_PORT}`, AH = { authorization: "Bearer x", "content-type": "application/json" };
+  const at = spawn(process.execPath, ["scripts/mock-airtable.mjs"], { env: { ...process.env, PORT: String(AT_PORT) }, stdio: ["ignore", "ignore", "inherit"] });
+  process.on("exit", () => at.kill());
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(`${AT}/__count`, { headers: AH })).ok) break; } catch { /* not yet */ } await sleep(100); }
+  const seed = [["1776620", "lifetime-MQL-SQL October, November"], ["1776620", "lifetime-MQL-SQL December"],
+                ["903", "lifetime-MQL-SQL November"], ["", "lifetime-MQL-SQL October"], ["777", "GPTW"]];
+  for (const [kid, src] of seed) {
+    await fetch(`${AT}/v0/appCO/Company%20List`, { method: "POST", headers: AH,
+      body: JSON.stringify({ records: [{ fields: { "Kylas Company Id": kid, "Source (MQL-SQL)": src } }] }) });
+    await sleep(250);
+  }
+  const env = { AIRTABLE_PAT: "pat", AIRTABLE_API: AT, AIRTABLE_COMPANY_BASE_ID: "appCO" };
+  const runV = (...a) => {
+    const r = spawnSync(process.execPath, [SCRIPT, "--view", "Oct/Nov/Dec", ...a],
+      { cwd: dir, env: { ...process.env, KYLAS_KEY: "k", KYLAS_BASE: BASE, ...env }, encoding: "utf8" });
+    return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+  };
+  const dry = runV();
+  ok("the view is read: duplicate rows merged, rows with no id or no month skipped",
+     dry.code === 0 && /5 rows -> 2 Kylas companies/.test(dry.out) && /1 rows without a Kylas Company Id/.test(dry.out) && /1 with no month/.test(dry.out), dry.out.split("\n").slice(0, 4).join(" | "));
+  ok("...says the owner rule out loud", /OWNER: never read from Airtable, never changed/.test(dry.out));
+  ok("...and writes nothing", (await co(1776620)).customFieldValues.cfSourceOfData === "COLD_CALLING");
+  const before = await co(1776620), before903 = await co(903);
+  const c = runV("--canary");
+  ok("the canary passes first", c.code === 0 && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-2).join(" | "));
+  const a = runV("--apply", "--all", "--ids-only");
+  const x = await co(1776620), y = await co(903);
+  ok("no lifetime tag in Kylas: what was there stays, the tag + months are added", x.customFieldValues.cfSourceOfData === "COLD_CALLING + lifetime-MQL-SQL October, November, December", x.customFieldValues.cfSourceOfData);
+  ok("an empty source gets 'lifetime-MQL-SQL <month>'", y.customFieldValues.cfSourceOfData === "lifetime-MQL-SQL November", y.customFieldValues.cfSourceOfData);
+  ok("OWNERS UNCHANGED on both", x.ownerId === before.ownerId && y.ownerId === before903.ownerId, `${before.ownerId}->${x.ownerId}, ${before903.ownerId}->${y.ownerId}`);
+  ok("...and the run says so", /OWNER CHECK: 2 of 2/.test(a.out), a.out.trim().split("\n").slice(-3).join(" | "));
+  ok("--ids-only prints no company names", !/seats|Shorehouse/.test(a.out), a.out);
+  ok("every other field kept", x.customFieldValues.cfBatch === before.customFieldValues.cfBatch && x.name === before.name);
+  const again = runV("--apply", "--all");
+  ok("a second run writes nothing", /0 tagged · 2 skipped/.test(again.out), again.out.trim().split("\n").slice(-1)[0]);
+
+  /* Kylas holds the tag with more after it: the months go right after the tag. */
+  const cur = await co(903);
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch(`${BASE}/v1/companies/903`, { method: "PUT", headers: { ...H, "content-type": "application/json" },
+      body: JSON.stringify({ name: cur.name, customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL + Lost Deal (25 Oct | 40 lac)" } }) });
+    if (r.status !== 429) break;
+    await sleep(400);
+  }
+  runV("--apply", "--all");
+  const z = await co(903);
+  ok("lifetime-MQL-SQL with more after it: the month goes right after the tag, the rest stays",
+     z.customFieldValues.cfSourceOfData === "lifetime-MQL-SQL November + Lost Deal (25 Oct | 40 lac)", z.customFieldValues.cfSourceOfData);
+  ok("...owner still unchanged", z.ownerId === before903.ownerId);
+  at.kill();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

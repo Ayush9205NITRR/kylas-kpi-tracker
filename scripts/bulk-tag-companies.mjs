@@ -39,6 +39,26 @@
  *
  * Options:  --ids <file>   default scripts/batches/lifetime-mql-sql-october.txt
  *           --tag <text>   default "Lifetime MQL-SQL | October"
+ *           --view <name>  INSTEAD of --ids/--tag: the companies, and each one's
+ *                          months, come from a Company List view in the Company
+ *                          Database base (2026-10-21, "Oct/Nov/Dec"). See below.
+ *
+ * ── --view: THE MONTH ON THE KYLAS SOURCE, FROM AIRTABLE ─────────────────
+ * offsite-month-source.py wrote each account's months into Company List's
+ * "Source (MQL-SQL)" ("lifetime-MQL-SQL October, November"). This reads that
+ * view (Kylas Company Id + Source (MQL-SQL); needs AIRTABLE_PAT) and puts the
+ * same months on the company's Source of Data IN KYLAS, by Ayush's rule:
+ * whatever Kylas holds STAYS; lifetime-MQL-SQL there -> the months go right
+ * after it; not there -> " + lifetime-MQL-SQL <months>" at the end.
+ *
+ * STRICT: THE OWNER MUST NOT CHANGE (Ayush, 2026-10-21). This is the reason it
+ * goes through this script and NOT kylas-airtable-sync's "Assign Companies from
+ * Airtable -> Kylas": that job's company PUT resets the owner and then re-assigns
+ * it from Airtable's "Owner - Kylas" copy, which is stale the moment anybody
+ * re-assigns in Kylas or the console. Here the owner is never taken from
+ * Airtable: it is read from Kylas before the write, the write keeps it (proved
+ * by --canary first), it is read back after, and the FIRST company whose owner
+ * differs STOPS the run. Contacts are never touched — company only.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
@@ -49,6 +69,11 @@ const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i
 const has = (n) => argv.includes(`--${n}`);
 const IDS_FILE = arg("ids", "scripts/batches/lifetime-mql-sql-october.txt");
 const TAG = arg("tag", "Lifetime MQL-SQL | October");
+const VIEW = arg("view", "");
+/* In a public repository's Actions log a company name is published. --ids-only
+   (or BULK_TAG_IDS_ONLY=1) prints ids and owners, no names. */
+const IDS_ONLY = has("ids-only") || process.env.BULK_TAG_IDS_ONLY === "1";
+const nameOf = (rec) => (IDS_ONLY ? "" : String(rec?.name || ""));
 const FIELD = "cfSourceOfData";
 const CANARY_FILE = ".bulk-tag-canary.json";
 const CANARY_MAX_AGE_MS = 24 * 3600 * 1000;
@@ -152,6 +177,36 @@ const withTag = (src) => {
 };
 const hasTag = (src) => String(src || "").includes(TAG);
 
+/* ── the month rule (--view) ─────────────────────────────────────── */
+export const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"];
+const M = `(?:${MONTHS.join("|")})`;
+/* the lifetime tag, and a month list after it ("October, November" or "| October") */
+const LIFE = new RegExp(`(lifetime\\s*-?\\s*mql\\s*[-/]?\\s*sql)((?:\\s*\\|)?\\s+${M}(?:\\s*,\\s*${M})*)?`, "gi");
+const byMonth = (a, b) => MONTHS.indexOf(a) - MONTHS.indexOf(b);
+const monthsIn = (text) => (String(text || "").match(new RegExp(M, "g")) || []);
+/* The months written after the LAST lifetime tag in `text`. */
+export function monthsAfterTag(text) {
+  const all = [...String(text || "").matchAll(LIFE)];
+  const last = all[all.length - 1];
+  return last?.[2] ? [...new Set(monthsIn(last[2]))].sort(byMonth) : [];
+}
+/* Kylas' value with these months on it. What is there stays; the months already
+   after the tag are kept and merged, so running it twice changes nothing. */
+export function monthSource(src, months) {
+  const s = String(src || "").trim();
+  const all = [...s.matchAll(LIFE)];
+  if (!all.length) {
+    const tag = `lifetime-MQL-SQL ${[...new Set(months)].sort(byMonth).join(", ")}`;
+    return s ? `${s} + ${tag}` : tag;
+  }
+  const last = all[all.length - 1];
+  const merged = [...new Set([...monthsIn(last[2] || ""), ...months])].sort(byMonth);
+  return s.slice(0, last.index) + `${last[1]} ${merged.join(", ")}` + s.slice(last.index + last[0].length);
+}
+const want = (id, src) => (VIEW ? monthSource(src, VIEW_MONTHS.get(id) || []) : withTag(src));
+const isDone = (id, src) => (VIEW ? want(id, src) === String(src || "").trim() : hasTag(src));
+
 /* Everything that must survive the write, in a comparable form. */
 function shape(rec) {
   const out = {};
@@ -196,10 +251,11 @@ if (has("canary")) {
         continue;
       }
       console.log(`  ${mode.padEnd(5)} test company ${id}, owner ${ownerBefore.id} (read from ${ownerBefore.from})`);
-      const want = withTag(textOf(before.customFieldValues?.[FIELD]));
-      await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode, ownerBefore));
+      const target = VIEW ? monthSource(textOf(before.customFieldValues?.[FIELD]), ["October"])
+                          : withTag(textOf(before.customFieldValues?.[FIELD]));
+      await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
       const after = await call("GET", `/v1/companies/${id}`);
-      const diff = differences(before, after, want, ownerBefore, await ownerOf(id, after));
+      const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
       tried.push({ mode, ok: !diff.length, diff });
       console.log(`  ${mode.padEnd(5)} ${diff.length ? "FAILED" : "kept the owner and every field"}` +
         (diff.length ? `\n         ${diff.join("\n         ")}` : ""));
@@ -225,13 +281,52 @@ if (has("canary")) {
 }
 
 /* ── the list ────────────────────────────────────────────────────── */
-const ids = [...new Set(readFileSync(IDS_FILE, "utf8").split(/\r?\n/).map((l) => l.trim())
-  .filter((l) => l && !l.startsWith("#")))];
-if (ids.some((x) => !/^\d+$/.test(x))) { console.error(`${IDS_FILE}: every line must be a Kylas company id`); process.exit(1); }
+const VIEW_MONTHS = new Map();
+let ids;
+if (VIEW) {
+  /* The view, read through the Airtable API: every row's Kylas Company Id and the
+     months in its Source (MQL-SQL). Duplicate rows of one company are merged. */
+  const PAT = process.env.AIRTABLE_PAT;
+  if (!PAT) { console.error("--view needs AIRTABLE_PAT (a token that can read the Company Database base)."); process.exit(1); }
+  const AT = (process.env.AIRTABLE_API || "https://api.airtable.com").replace(/\/$/, "");
+  const CO_BASE = process.env.AIRTABLE_COMPANY_BASE_ID || "app55PsyRKqkf2CAQ";
+  let offset = "", rows = 0, noId = 0, noMonth = 0;
+  do {
+    const q = new URLSearchParams({ view: VIEW, pageSize: "100" });
+    q.append("fields[]", "Kylas Company Id"); q.append("fields[]", "Source (MQL-SQL)");
+    if (offset) q.set("offset", offset);
+    let r;
+    for (let i = 0; i < 6; i++) {
+      r = await fetch(`${AT}/v0/${CO_BASE}/${encodeURIComponent("Company List")}?${q}`, { headers: { authorization: `Bearer ${PAT}` } });
+      if (r.status !== 429) break;
+      await sleep(1000 * 2 ** i);
+    }
+    if (!r.ok) { console.error(`Airtable: the view "${VIEW}" could not be read — ${r.status} ${(await r.text()).slice(0, 200)}`); process.exit(1); }
+    const page = await r.json();
+    for (const rec of page.records || []) {
+      rows++;
+      const kid = String(rec.fields?.["Kylas Company Id"] ?? "").trim().replace(/\.0+$/, "");
+      const months = monthsAfterTag(rec.fields?.["Source (MQL-SQL)"]);
+      if (!/^\d+$/.test(kid)) { noId++; continue; }
+      if (!months.length) { noMonth++; continue; }
+      VIEW_MONTHS.set(kid, [...new Set([...(VIEW_MONTHS.get(kid) || []), ...months])].sort(byMonth));
+    }
+    offset = page.offset || "";
+    await sleep(220);
+  } while (offset);
+  ids = [...VIEW_MONTHS.keys()];
+  console.log(`\nView "${VIEW}": ${rows} rows -> ${ids.length} Kylas companies` +
+    `${noId ? ` · ${noId} rows without a Kylas Company Id (skipped)` : ""}${noMonth ? ` · ${noMonth} with no month after lifetime-MQL-SQL (skipped)` : ""}`);
+  console.log("OWNER: never read from Airtable, never changed. Read from Kylas, kept, read back; the first difference stops the run.");
+} else {
+  ids = [...new Set(readFileSync(IDS_FILE, "utf8").split(/\r?\n/).map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#")))];
+  if (ids.some((x) => !/^\d+$/.test(x))) { console.error(`${IDS_FILE}: every line must be a Kylas company id`); process.exit(1); }
+}
 
 /* ── 1 · dry run ─────────────────────────────────────────────────── */
 if (!has("apply")) {
-  console.log(`\nDRY RUN — ${ids.length} companies, tag "${TAG}". Nothing is written.\n`);
+  console.log(`\nDRY RUN — ${ids.length} companies, ${VIEW ? `months from the view "${VIEW}"` : `tag "${TAG}"`}. Nothing is written.\n`);
   let todo = 0, done = 0, missing = 0, noOwner = 0, shown = false;
   const fromCount = {};
   for (const id of ids) {
@@ -242,10 +337,10 @@ if (!has("apply")) {
     const src = textOf(rec.customFieldValues?.[FIELD]);
     const owner = await ownerOf(id, rec);
     if (!owner) noOwner++; else fromCount[owner.from] = (fromCount[owner.from] || 0) + 1;
-    if (hasTag(src)) { done++; continue; }
+    if (isDone(id, src)) { done++; continue; }
     todo++;
-    console.log(`  ${id.padEnd(9)} ${String(rec.name || "").slice(0, 28).padEnd(28)} owner ${String(owner?.id ?? "NONE").padEnd(7)}` +
-      `  "${src.slice(0, 40)}" -> "+ ${TAG}"`);
+    console.log(`  ${id.padEnd(9)} ${nameOf(rec).slice(0, 28).padEnd(28)} owner ${String(owner?.id ?? "NONE").padEnd(7)}` +
+      `  "${src.slice(0, 40)}" -> "${want(id, src).slice(-50)}"`);
   }
   console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner found`);
   console.log(`owner read from: ${JSON.stringify(fromCount)}`);
@@ -273,21 +368,22 @@ for (const id of ids) {
   if (wrote >= LIMIT) break;
   const before = await call("GET", `/v1/companies/${id}`);
   const src = textOf(before.customFieldValues?.[FIELD]);
-  if (hasTag(src)) { skipped++; continue; }
+  if (isDone(id, src)) { skipped++; continue; }
   const ownerBefore = await ownerOf(id, before);
   if (!ownerBefore) { console.log(`  ${id} — no owner found, skipped (cannot prove it survives)`); skipped++; continue; }
-  const want = withTag(src);
+  const target = want(id, src);
   snaps.push({ id, owner: ownerBefore, before }); keep();
-  await call("PUT", `/v1/companies/${id}`, bodyFor(before, want, mode, ownerBefore));
+  await call("PUT", `/v1/companies/${id}`, bodyFor(before, target, mode, ownerBefore));
   const after = await call("GET", `/v1/companies/${id}`);
-  const diff = differences(before, after, want, ownerBefore, await ownerOf(id, after));
+  const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
   if (diff.length) {
-    console.log(`\n  STOPPED at ${id} (${before.name}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
+    console.log(`\n  STOPPED at ${id} (${nameOf(before)}). The write did not come back clean:\n    ${diff.join("\n    ")}` +
       `\n  Its before-image is in ${snapFile}. Nothing after it was touched.\n`);
     process.exit(1);
   }
   wrote++;
-  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${String(before.name || "").slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept · "${want.slice(-60)}"`);
+  console.log(`  ${String(wrote).padStart(3)}  ${id.padEnd(9)} ${nameOf(before).slice(0, 30).padEnd(30)} owner ${ownerBefore.id} kept · "${target.slice(-60)}"`);
 }
+console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back with the owner they had before.`);
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");

@@ -1755,6 +1755,24 @@ a module and a CLI may not reach back into a module that imports it.
 
 ---
 
+## 3l2 · Month tags on Source of Data (Oct/Nov/Dec offsite & reach-out), 2026-10-21
+
+Two steps, two tools. **1 · Airtable**: `scripts/offsite-month-source.py` reads
+Ayush's Oct–Dec sheet and writes the months into Company List's `Source (MQL-SQL)`
+(Company Database base), an input of the `Source - Concatenate` formula. Rule:
+what is there stays; `lifetime-MQL-SQL` present → months after it; absent →
+`lifetime-MQL-SQL <months>`. Never `Source of Data`, which is the sync's COPY of
+Kylas. 535 rows written and read back, 2026-10-21. **2 · Kylas**:
+`bulk-tag-companies.mjs --view "Oct/Nov/Dec"`, run by the workflow
+`tag_company_source.yml` (dry-run → first-one → all), puts the same months on
+each company's `cfSourceOfData`, keeping what Kylas holds.
+
+**STRICT: THE OWNER MUST NOT CHANGE (Ayush).** Not through kylas-airtable-sync's
+"Assign Companies from Airtable → Kylas" — its company PUT resets the owner and
+re-assigns it from Airtable's stale copy. Here the owner is read from Kylas, the
+write keeps it (canary first, every run), it is read back, and the first company
+that differs stops the run. Company only; contacts untouched.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

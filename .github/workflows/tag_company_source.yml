@@ -1,0 +1,69 @@
+# MONTH TAG ON THE KYLAS COMPANY'S SOURCE OF DATA, FROM AN AIRTABLE VIEW.
+#
+# scripts/bulk-tag-companies.mjs --view: reads Company List (Company Database
+# base) through the given view, and adds each company's months to its Source of
+# Data IN KYLAS. Company only; contacts are never touched.
+#
+# STRICT: THE OWNER MUST NOT CHANGE. The owner is never read from Airtable. It is
+# read from Kylas before each write, kept by the write (a --canary on a throwaway
+# company proves that first, every run), read back after — and the first company
+# whose owner (or any other field) differs STOPS the run. Do NOT use
+# kylas-airtable-sync's "Assign Companies from Airtable -> Kylas" for this: it
+# re-assigns owners from Airtable's copy.
+#
+# Steps (run them in order):
+#   dry-run    reads everything, writes nothing
+#   first-one  canary, then ONE real company — look at it in Kylas
+#   all        canary, then the rest (already-done ones are skipped)
+#
+# Logs print Kylas ids and owner ids only, no company names (--ids-only): this
+# repository's Actions logs are public.
+name: Tag company Source of Data (months)
+
+on:
+  workflow_dispatch:
+    inputs:
+      view:
+        description: 'Company List view (Company Database base)'
+        default: 'Oct/Nov/Dec'
+      step:
+        description: 'dry-run, first-one, or all'
+        type: choice
+        default: 'dry-run'
+        options: [dry-run, first-one, all]
+
+concurrency:
+  group: tag-company-source
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      VIEW: ${{ github.event.inputs.view }}
+      STEP: ${{ github.event.inputs.step }}
+      BULK_TAG_IDS_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check the secrets are there
+        run: |
+          for v in KYLAS_KEY AIRTABLE_PAT; do
+            if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
+          done
+      - name: Dry run (always first)
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW"
+      - name: Canary (a throwaway company proves the write keeps the owner)
+        if: ${{ github.event.inputs.step != 'dry-run' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary
+      - name: First company
+        if: ${{ github.event.inputs.step == 'first-one' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --limit 1
+      - name: All companies
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --all
