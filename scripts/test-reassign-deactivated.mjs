@@ -135,5 +135,25 @@ await startMock();
   ok("...the other two round robin", (await owner(1778327)) === 80001 && (await owner(1810449)) === 80002);
 }
 
+console.log("\n7 · --from rubal --lifetime-only: one ACTIVE owner's lifetime-MQL-SQL companies, round robin");
+await startMock({ MOCK_DEAD_COMPANIES: "", MOCK_COMPANY_OWNERS: "1776620:80007,1778327:80007,1810449:80007",
+                  MOCK_COMPANY_SOURCES: "1810449:Lifetime MQL, SQL | November" });
+{
+  const d = run("--to", TEAM, "--from", "rubal", "--lifetime-only", "--follow-contacts");
+  ok("his lifetime companies are planned, the one without the tag stays with him",
+     d.code === 0 && /2 companies to move from rubal \(80007\) · 1 of his WITHOUT lifetime MQL-SQL \(left with him\)/.test(d.out),
+     d.out.split("\n").filter((l) => /companies to move|From:|Kylas lists/.test(l)).join(" | "));
+  ok("...round robin from the first name", /1778327 .*-> sejal\s+80001/.test(d.out) && /1810449 .*-> anjali\s+80002/.test(d.out),
+     d.out.split("\n").filter((l) => /->/.test(l)).join(" | "));
+  const bad = run("--to", "sejal,rubal", "--from", "rubal");
+  ok("the person they move FROM can never be a target", bad.code === 1 && /also in --to/.test(bad.out), bad.out.trim());
+  const r = run("--to", TEAM, "--from", "rubal", "--lifetime-only", "--follow-contacts", "--apply", "--all");
+  ok("both move and read back", r.code === 0 && /OWNER CHECK: 2 account/.test(r.out), r.out.trim().split("\n").slice(-4).join(" | "));
+  ok("...to Sejal and Anjali", (await owner(1778327)) === 80001 && (await owner(1810449)) === 80002);
+  ok("...and the non-lifetime one is still Rubal's", (await owner(1776620)) === 80007);
+  const again = run("--to", TEAM, "--from", "rubal", "--lifetime-only");
+  ok("a re-run finds nothing left", /0 companies to move from rubal/.test(again.out));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

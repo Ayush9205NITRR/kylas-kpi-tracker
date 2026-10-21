@@ -35,6 +35,7 @@ if (process.env.MOCK_BD_TEAM === "1") Object.assign(USERS, {
   80004: { id: 80004, firstName: "Arshdeep", lastName: "Four", email: "arshdeep@enout.in", active: true },
   80005: { id: 80005, firstName: "Mayra", lastName: "Five", email: "mayra@enout.in", active: true },
   80006: { id: 80006, firstName: "Sejal", lastName: "Old", email: "sejal.old@enout.in", active: false },
+  80007: { id: 80007, firstName: "Rubal", lastName: "Seven", email: "rubal@enout.in", active: true },
 });
 const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Boolean).join(" ");
 
@@ -100,6 +101,17 @@ const COMPANIES = {
     customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL", cfBatch: "B-12" },
   },
 };
+/* MOCK_COMPANY_OWNERS=1776620:80007,...  and  MOCK_COMPANY_SOURCES=1778327:Lifetime MQL-SQL | October;...
+   put a company on a given owner / give it a Source of Data (reassign --from tests). */
+for (const pair of String(process.env.MOCK_COMPANY_OWNERS || "").split(",").filter(Boolean)) {
+  const [cid, uid] = pair.split(":");
+  if (COMPANIES[cid]) COMPANIES[cid].ownerId = Number(uid);
+}
+for (const pair of String(process.env.MOCK_COMPANY_SOURCES || "").split(";").filter(Boolean)) {
+  const i = pair.indexOf(":");
+  const cid = pair.slice(0, i);
+  if (COMPANIES[cid]) COMPANIES[cid].customFieldValues = { ...(COMPANIES[cid].customFieldValues || {}), cfSourceOfData: pair.slice(i + 1) };
+}
 /* MOCK_DEAD_COMPANIES=903,1778327,...: those companies sit on 74727, a deactivated user. */
 for (const id of String(process.env.MOCK_DEAD_COMPANIES || "").split(",").filter(Boolean))
   if (COMPANIES[id]) COMPANIES[id].ownerId = 74727;

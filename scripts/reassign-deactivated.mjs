@@ -59,7 +59,18 @@ const LEAVE_ACTIVE = has("leave-active-contacts");
    they are, and only its contacts on a deactivated user / the API user / nobody
    follow it to that BD. That BD may be outside --to. */
 const FOLLOW = has("follow-contacts");
-if (!VIEW && !IDS_FILE) { console.error("--view <Company List view> or --ids <file>"); process.exit(1); }
+/* --from <name|email|id> (Ayush, 2026-10-21: "Rubal ke saare companies jinme
+   lifetime MQL-SQL set hai ... round robin among BDs"): instead of "every
+   company in the view whose owner is DEACTIVATED", every company in KYLAS this
+   one user owns — active or not. --view/--ids are then ignored. His own
+   contacts on those accounts follow them; he is never a target.
+   --lifetime-only: only companies whose Source of Data carries the lifetime
+   MQL-SQL tag (any spelling: "lifetime-MQL-SQL", "Lifetime MQL-SQL | October",
+   "Lifetime MQL, SQL"). */
+const FROM = String(arg("from", "")).trim();
+const LIFETIME_ONLY = has("lifetime-only");
+const LIFE = /lifetime[\s-]*mql[\s\-\/,|&]*sql/i;
+if (!VIEW && !IDS_FILE && !FROM) { console.error("--view <Company List view>, --ids <file>, or --from <user>"); process.exit(1); }
 
 const kylas = createClient(KEY, { log: () => {}, base: BASE });
 const call = kylas.raw;
@@ -68,7 +79,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ── the companies ───────────────────────────────────────────────── */
 let ids = [];
-if (VIEW) {
+if (FROM) {
+  /* filled in below, once the user directory is read */
+} else if (VIEW) {
   const PAT = process.env.AIRTABLE_PAT;
   if (!PAT) { console.error("--view needs AIRTABLE_PAT"); process.exit(1); }
   const AT = (process.env.AIRTABLE_API || "https://api.airtable.com").replace(/\/$/, "");
@@ -146,7 +159,7 @@ const API_USER = me.id || "74725";
 /* A name is matched against Kylas' user list; a NUMBER is taken as a user id
    and read directly (the fallback if the list endpoint ever stops answering). */
 const numeric = NAMES.filter((n) => /^\d+$/.test(n));
-const dir = NAMES.length > numeric.length ? await kylas.users([]) : { users: [] };
+const dir = NAMES.length > numeric.length || (FROM && !/^\d+$/.test(FROM)) ? await kylas.users([]) : { users: [] };
 let directory = [...(dir.users || [])];
 for (const n of numeric) { const u = await userOf(n); if (u?.id && !directory.some((d) => String(d.id) === String(u.id))) directory.push(u); }
 if (!directory.length) {
@@ -171,21 +184,48 @@ for (const n of NAMES) {
   if (targets.some((t) => t.id === u.id)) { console.error(`"${n}" is the same user as another name. Nothing written.`); process.exit(1); }
   targets.push({ key: n, id: String(u.id) });
 }
-console.log(`Never: ${API_USER} (the API user / Enout Super Admin). Only companies whose owner is DEACTIVATED move.`);
+let FROM_ID = "", FROM_KEY = "";
+if (FROM) {
+  const q = norm(FROM);
+  const hits = /^\d+$/.test(q) ? [await userOf(q)].filter(Boolean)
+    : directory.filter((u) => norm(u.name).split(/\s+/)[0] === q || norm(u.name) === q || norm(u.email) === q || norm(u.email).split("@")[0] === q);
+  if (hits.length !== 1) {
+    console.error(`--from "${FROM}": ${hits.length ? `${hits.length} users match (ids ${hits.map((u) => u.id).join(", ")}) — say which one (full name, email or id)` : "no user matches"}. Nothing written.`);
+    process.exit(1);
+  }
+  FROM_ID = String(hits[0].id); FROM_KEY = FROM;
+  if (FROM_ID === String(API_USER)) { console.error(`--from is the API user (${API_USER}). Not this tool. Nothing written.`); process.exit(1); }
+  if (targets.some((t) => t.id === FROM_ID)) { console.error(`"${FROM}" is also in --to. Nothing written.`); process.exit(1); }
+  if (VIEW || IDS_FILE) console.log(`--from given: the view / ids are ignored.`);
+  console.log(`\nFrom: ${FROM} = ${FROM_ID} (${hits[0].active === false ? "DEACTIVATED" : "active"}) — every company Kylas has on this owner${LIFETIME_ONLY ? ", Source of Data carrying lifetime MQL-SQL" : ""}.`);
+  const rows = await kylas.companiesForOwner(FROM_ID);
+  ids = [...new Set(rows.filter((c) => String(idOf(c.ownerId) ?? idOf(c.owner) ?? "") === FROM_ID).map((c) => String(c.id)))]
+    .sort((a, b) => Number(a) - Number(b));
+  console.log(`Kylas lists ${ids.length} companies on ${FROM_ID}.`);
+}
+console.log(`Never: ${API_USER} (the API user / Enout Super Admin). ${FROM ? `Only ${FROM}'s companies move` : "Only companies whose owner is DEACTIVATED move"}.`);
 
 /* ── the plan ────────────────────────────────────────────────────── */
 console.log(`\nReading ${ids.length} companies${VIEW ? ` from the view "${VIEW}"` : ""}...`);
 const plan = [];
 const holds = Object.fromEntries(targets.map((t) => [t.id, 0]));
-let unreadable = 0, activeOwner = 0, noOwner = 0;
+let unreadable = 0, activeOwner = 0, noOwner = 0, notLifetime = 0;
+const srcText = (v) => String(v && typeof v === "object" ? (v.name ?? v.value ?? "") : (v ?? ""));
 for (const id of ids) {
   let rec;
   try { rec = await call("GET", `/v1/companies/${id}`); }
   catch (e) { unreadable++; continue; }
   const owner = await companyOwner(id, rec);
   if (!owner) { noOwner++; continue; }
-  const u = await userOf(owner);
   if (holds[owner] !== undefined) holds[owner]++;
+  if (FROM) {
+    /* Read again, one by one: only a company that is STILL his moves. */
+    if (owner !== FROM_ID) { activeOwner++; continue; }
+    if (LIFETIME_ONLY && !LIFE.test(srcText(rec?.customFieldValues?.cfSourceOfData))) { notLifetime++; continue; }
+    plan.push({ id, from: owner });
+    continue;
+  }
+  const u = await userOf(owner);
   if (!u || u.active !== false) { activeOwner++; continue; }
   plan.push({ id, from: owner });
 }
@@ -195,7 +235,9 @@ for (const id of ids) {
 targets.sort((a, b) => holds[a.id] - holds[b.id] || NAMES.indexOf(a.key) - NAMES.indexOf(b.key));
 console.log(`\nTargets (round robin, in this order): ${targets.map((t) => `${t.key} = ${t.id} (holds ${holds[t.id]} here now)`).join(" · ")}`);
 /* An active BD (not the API user) holding a contact = somebody already working it. */
-const activeBd = async (id) => !!id && id !== API_USER && (await userOf(id))?.active !== false && !!(await userOf(id));
+/* With --from, the person the accounts are moving AWAY from is not "somebody
+   already working it": his contacts follow the account. */
+const activeBd = async (id) => !!id && id !== API_USER && id !== FROM_ID && (await userOf(id))?.active !== false && !!(await userOf(id));
 if (FOLLOW) {
   for (const p of plan) {
     p.cs = await contactsOf(p.id);
@@ -217,15 +259,17 @@ if (FOLLOW) {
   console.log(`\n--follow-contacts: ${followers.length} account(s) go to the active BD already holding their contacts (BD id: accounts) ${Object.entries(by).map(([k, n]) => `${k}: ${n}`).join(" · ") || "-"}` +
     `${outside.length ? ` — ${outside.length} of those BDs are outside --to (${outside.join(", ")})` : ""}. Round robin: the other ${rr.length}.`);
 }
-console.log(`\n${plan.length} companies with a DEACTIVATED owner · ${activeOwner} with an active owner (left alone) · ${noOwner} no owner found · ${unreadable} unreadable`);
+console.log(FROM
+  ? `\n${plan.length} companies to move from ${FROM} (${FROM_ID})${LIFETIME_ONLY ? ` · ${notLifetime} of his WITHOUT lifetime MQL-SQL (left with him)` : ""} · ${activeOwner} no longer his (left alone) · ${noOwner} no owner found · ${unreadable} unreadable`
+  : `\n${plan.length} companies with a DEACTIVATED owner · ${activeOwner} with an active owner (left alone) · ${noOwner} no owner found · ${unreadable} unreadable`);
 console.log(`Split: ${Object.entries(perTarget).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
 const fromCount = {};
 for (const p of plan) fromCount[p.from] = (fromCount[p.from] || 0) + 1;
-console.log(`From (deactivated owner id: companies): ${Object.entries(fromCount).map(([k, n]) => `${k}: ${n}`).join(" · ")}`);
+if (!FROM) console.log(`From (deactivated owner id: companies): ${Object.entries(fromCount).map(([k, n]) => `${k}: ${n}`).join(" · ")}`);
 
 if (!has("apply")) {
   /* The contacts that would follow — counted, with who holds them now. */
-  let contacts = 0, withActiveOther = 0, withDead = 0, withApi = 0, accountsActiveOther = 0;
+  let contacts = 0, withActiveOther = 0, withDead = 0, withApi = 0, accountsActiveOther = 0, withFrom = 0;
   for (const p of plan) {
     const cs = p.cs || await contactsOf(p.id);
     p.contacts = cs.length;
@@ -234,13 +278,14 @@ if (!has("apply")) {
     for (const c of cs) {
       const u = await userOf(c.owner);
       if (c.owner === API_USER) withApi++;
+      else if (FROM_ID && c.owner === FROM_ID) withFrom++;
       else if (u && u.active === false) withDead++;
       else if (c.owner && c.owner !== p.to) { withActiveOther++; other++; }
     }
     if (other) accountsActiveOther++;
-    console.log(`  ${p.id.padEnd(9)} owner ${p.from.padEnd(6)} (deactivated) -> ${p.toKey.padEnd(9)} ${p.to}   ${cs.length} contact(s)`);
+    console.log(`  ${p.id.padEnd(9)} owner ${p.from.padEnd(6)} (${FROM ? FROM : "deactivated"}) -> ${p.toKey.padEnd(9)} ${p.to}   ${cs.length} contact(s)`);
   }
-  console.log(`\nContacts on these accounts: ${contacts} — now held by: ${withDead} a deactivated user · ${withApi} the API user · ${withActiveOther} an ACTIVE BD (across ${accountsActiveOther} accounts)`);
+  console.log(`\nContacts on these accounts: ${contacts} — now held by: ${FROM ? `${withFrom} ${FROM} himself · ` : ""}${withDead} a deactivated user · ${withApi} the API user · ${withActiveOther} an ACTIVE BD (across ${accountsActiveOther} accounts)`);
   console.log(LEAVE_ACTIVE ? `--leave-active-contacts: the ${withActiveOther} with an active BD STAY; the rest follow their account.`
                            : `All of them follow their account (--leave-active-contacts keeps the ${withActiveOther} with their active BD).`);
   console.log(`DRY RUN — nothing written. Next: --apply --limit 1, look at that account in Kylas, then --apply --all.\n`);

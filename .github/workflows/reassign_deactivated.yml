@@ -11,6 +11,10 @@
 # the month tag (tag_company_source's write) on them straight after.
 #
 # Steps: dry-run (the plan, nothing written) -> first-one -> all.
+#
+# from (2026-10-21, Rubal): instead of the view's deactivated owners, every
+# company in Kylas one named owner holds — with lifetime_only, only those whose
+# Source of Data carries lifetime MQL-SQL. The month tag steps are skipped then.
 # Logs print ids only: this repository's Actions logs are public.
 name: Reassign deactivated users' accounts (round robin)
 
@@ -23,6 +27,13 @@ on:
       to:
         description: 'active BDs, comma separated (first names, emails or Kylas user ids)'
         default: 'sejal,anjali,muskan,arshdeep,mayra'
+      from:
+        description: 'optional: move THIS owner''s companies (all of Kylas, active or not) instead of the view''s deactivated owners — a first name, email or Kylas user id'
+        default: ''
+      lifetime_only:
+        description: 'with from: only companies whose Source of Data carries lifetime MQL-SQL'
+        type: boolean
+        default: true
       contacts:
         description: 'follow-active-bd: an account whose contacts an active BD holds goes to THAT BD (Ayush, 2026-10-21); all: every contact follows the round robin; leave-active-bd: round robin, those contacts stay'
         type: choice
@@ -48,6 +59,8 @@ jobs:
       VIEW: ${{ github.event.inputs.view }}
       TO: ${{ github.event.inputs.to }}
       STEP: ${{ github.event.inputs.step }}
+      FROM: ${{ github.event.inputs.from }}
+      LIFE: ${{ github.event.inputs.from != '' && github.event.inputs.lifetime_only == 'true' && '--lifetime-only' || '' }}
       LEAVE: ${{ github.event.inputs.contacts == 'leave-active-bd' && '--leave-active-contacts' || github.event.inputs.contacts == 'follow-active-bd' && '--follow-contacts' || '' }}
       BULK_TAG_IDS_ONLY: '1'
     steps:
@@ -61,13 +74,13 @@ jobs:
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
       - name: Plan (always first; writes nothing)
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" ${FROM:+--from "$FROM"} $LIFE $LEAVE
       - name: First account
         if: ${{ github.event.inputs.step == 'first-one' }}
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE --apply --limit 1
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" ${FROM:+--from "$FROM"} $LIFE $LEAVE --apply --limit 1
       - name: All accounts
         if: ${{ github.event.inputs.step == 'all' }}
-        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" $LEAVE --apply --all
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" ${FROM:+--from "$FROM"} $LIFE $LEAVE --apply --all
       - name: Keep the before-images (ids and old owners only — for an undo)
         if: ${{ always() && github.event.inputs.step != 'dry-run' }}
         uses: actions/upload-artifact@v4
@@ -77,8 +90,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
       - name: Month tag on the moved accounts — canary
-        if: ${{ github.event.inputs.step == 'all' }}
+        if: ${{ github.event.inputs.step == 'all' && github.event.inputs.from == '' }}
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary
       - name: Month tag on the moved accounts
-        if: ${{ github.event.inputs.step == 'all' }}
+        if: ${{ github.event.inputs.step == 'all' && github.event.inputs.from == '' }}
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --all
