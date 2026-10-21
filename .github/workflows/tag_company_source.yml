@@ -15,6 +15,8 @@
 #   dry-run    reads everything, writes nothing
 #   first-one  canary, then ONE real company — look at it in Kylas
 #   all        canary, then the rest (already-done ones are skipped)
+#   probe      one company Kylas refused: its body's shape, and that body tried
+#              on throwaway companies to name the field Kylas rejects
 #
 # Logs print Kylas ids and owner ids only, no company names (--ids-only): this
 # repository's Actions logs are public.
@@ -27,10 +29,13 @@ on:
         description: 'Company List view (Company Database base)'
         default: 'Oct/Nov/Dec'
       step:
-        description: 'dry-run, first-one, or all'
+        description: 'dry-run, first-one, all — or probe (why Kylas refuses one company; writes nothing real)'
         type: choice
         default: 'dry-run'
-        options: [dry-run, first-one, all]
+        options: [dry-run, first-one, all, probe]
+      company:
+        description: 'probe only: the Kylas company id'
+        default: '1773567'
 
 concurrency:
   group: tag-company-source
@@ -45,6 +50,7 @@ jobs:
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       VIEW: ${{ github.event.inputs.view }}
       STEP: ${{ github.event.inputs.step }}
+      COMPANY: ${{ github.event.inputs.company }}
       BULK_TAG_IDS_ONLY: '1'
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +62,14 @@ jobs:
           for v in KYLAS_KEY AIRTABLE_PAT; do
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
+      - name: Probe one refused company (throwaway creates only)
+        if: ${{ github.event.inputs.step == 'probe' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --probe "$COMPANY"
       - name: Dry run (always first)
+        if: ${{ github.event.inputs.step != 'probe' }}
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW"
       - name: Canary (a throwaway company proves the write keeps the owner)
-        if: ${{ github.event.inputs.step != 'dry-run' }}
+        if: ${{ github.event.inputs.step != 'dry-run' && github.event.inputs.step != 'probe' }}
         run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary
       - name: First company
         if: ${{ github.event.inputs.step == 'first-one' }}

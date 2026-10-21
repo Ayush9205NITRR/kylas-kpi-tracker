@@ -135,6 +135,8 @@ const isLookup = (v) => !!v && typeof v === "object" && !Array.isArray(v)
   && v.id !== undefined && Object.keys(v).every((k) => k === "id" || k === "name");
 const topOf = (v) => (Array.isArray(v) ? (v.every(isLookup) ? v.map((x) => x.id) : v) : isLookup(v) ? v.id : v);
 const idOf = (v) => (v && typeof v === "object" ? v.id : v) ?? null;
+/* For the log: the whole value on one line; a long one keeps both ends. */
+const clip = (s, n = 90) => { const t = String(s).replace(/\r?\n/g, " ⏎ "); return t.length <= n ? t : `${t.slice(0, 40)} … ${t.slice(-(n - 43))}`; };
 const textOf = (v) => (v && typeof v === "object" ? (v.name ?? v.value ?? "") : (v ?? "")).toString();
 
 /* WHERE THE OWNER IS. The company SEARCH returns it as ownerId, and that is
@@ -323,6 +325,85 @@ if (VIEW) {
   if (ids.some((x) => !/^\d+$/.test(x))) { console.error(`${IDS_FILE}: every line must be a Kylas company id`); process.exit(1); }
 }
 
+/* ── --probe <id>: WHY DOES KYLAS REFUSE THIS COMPANY? ──────────────
+   2026-10-21: the canary passed and then every real company came back 400
+   02803002 "generic.error" — a code that names no field. The canary's test
+   company carried a name and one text field; a real one carries thirty. So,
+   without touching the real record:
+     1. its body's SHAPE (keys and kinds, never values — the log is public),
+        each custom field against Kylas' own definition of it;
+     2. that body POSTed as a THROWAWAY company. Refused too -> the body is the
+        cause, and each key is tried alone on a throwaway to name it;
+     3. with --probe-write only: the real PUT with the owner it already has in
+        the body ("same"), then the usual owner check and read-back. */
+const kind = (v) => (v === null ? "null" : Array.isArray(v) ? `[${v.length ? kind(v[0]) : ""}]x${v.length}`
+  : typeof v === "object" ? `{${Object.keys(v).join(",")}}` : typeof v === "string" ? `str(${v.length})` : typeof v);
+const codeOf = (e) => String(e?.message || "").replace(/^\S+ \S+ -> /, "").replace(/"path":"[^"]*",?/, "").slice(0, 220);
+if (has("probe")) {
+  const id = String(arg("probe", ""));
+  if (!/^\d+$/.test(id)) { console.error("--probe <Kylas company id>"); process.exit(1); }
+  const rec = await call("GET", `/v1/companies/${id}`);
+  const owner = await ownerOf(id, rec);
+  console.log(`\nPROBE ${id} — owner ${owner?.id ?? "NONE"} (${owner ? ((await ownerActive(owner.id)) ? "active" : "NOT active") : "-"})`);
+  const src = textOf(rec.customFieldValues?.[FIELD]);
+  const target = VIEW ? want(id, src) : withTag(src);
+  const body = bodyFor(rec, target, "omit", owner);
+  console.log(`\n1 · the body a write sends (keys and kinds, no values):`);
+  for (const [k, v] of Object.entries(body)) if (k !== "customFieldValues") console.log(`    ${k.padEnd(26)} ${kind(v)}   (Kylas sent: ${kind(rec[k])})`);
+  console.log(`    left out (server/owner keys present on the record): ${Object.keys(rec).filter((k) => SERVER_KEYS.has(k) || OWNER_KEYS.has(k)).join(", ")}`);
+  let defs = [];
+  try { const r = await call("GET", "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200"); defs = r?.content || r || []; }
+  catch (e) { console.log(`    (field definitions not readable: ${codeOf(e)})`); }
+  const defOf = (n) => defs.find((d) => d.name === n);
+  for (const [k, v] of Object.entries(body.customFieldValues || {})) {
+    const d = defOf(k);
+    const opts = d?.picklist?.picklistValues || d?.picklistValues || [];
+    const vals = Array.isArray(v) ? v : [v];
+    const bad = opts.length ? vals.filter((x) => { const o = opts.find((p) => String(p.id) === String(x)); return !o || o.disabled === true || o.active === false; }) : [];
+    console.log(`    cf ${k.padEnd(28)} ${kind(v).padEnd(10)} def: ${d ? `${d.type}${d.active === false ? " INACTIVE" : ""}${d.deleted ? " DELETED" : ""}${d.standard ? " standard" : ""}` : "NOT IN THE FIELD LIST"}` +
+      `${bad.length ? `  !! ${bad.length} value(s) not an active option` : ""}   (Kylas sent: ${kind(rec.customFieldValues?.[k])})`);
+  }
+  const testName = `ZZ ENOUT TEST — delete me probe ${new Date().toISOString().slice(0, 16)}`;
+  const tryCreate = async (b) => {
+    try {
+      const made = await call("POST", "/v1/companies", { ...b, name: testName });
+      if (made?.id) { try { await call("DELETE", `/v1/companies/${made.id}`); } catch (e) { console.log(`    ! could not delete test company ${made.id} — delete "${testName}" in Kylas.`); } }
+      return null;
+    } catch (e) { return codeOf(e); }
+  };
+  console.log(`\n2 · that body as a throwaway company:`);
+  const whole = await tryCreate(body);
+  console.log(`    the whole body: ${whole ? `REFUSED ${whole}` : "created fine (and deleted)"}`);
+  if (whole) {
+    const culprits = [];
+    for (const [k, v] of Object.entries(body)) {
+      if (k === "name") continue;
+      if (k === "customFieldValues") {
+        for (const [kk, vv] of Object.entries(v)) { const r = await tryCreate({ customFieldValues: { [kk]: vv } }); if (r) culprits.push(`cf ${kk} — ${r}`); }
+      } else { const r = await tryCreate({ [k]: v }); if (r) culprits.push(`${k} — ${r}`); }
+    }
+    console.log(culprits.length ? `    refused on its own:\n      ${culprits.join("\n      ")}` : "    every key is accepted on its own — it is a combination, or the update path");
+  }
+  if (has("probe-write")) {
+    console.log(`\n3 · the real write, owner ${owner?.id} IN the body ("same"):`);
+    if (!owner || (await ownerActive(owner.id)) !== true) { console.log("    not tried: no active owner"); process.exit(1); }
+    writeFileSync(`bulk-tag-snapshot-probe-${id}.json`, JSON.stringify({ id, owner, before: rec }, null, 2));
+    try { await call("PUT", `/v1/companies/${id}`, bodyFor(rec, target, "same", owner)); }
+    catch (e) {
+      const chk = await keepOwner(id, owner);
+      console.log(`    REFUSED ${codeOf(e)}\n    owner after: ${chk.ownerAfter?.id} (${chk.ownerAfter?.id === owner.id ? "unchanged" : "CHANGED"})`);
+      process.exit(0);
+    }
+    const { after, ownerAfter, restored } = await keepOwner(id, owner);
+    const diff = differences(rec, after, target, owner, ownerAfter);
+    console.log(`    TOOK IT. owner ${owner.id} -> ${ownerAfter?.id}${restored ? " (moved by Kylas, given back)" : " (never moved)"}` +
+      `${diff.length ? `\n    !! differences:\n      ${diff.join("\n      ")}` : "\n    every other field the same"}`);
+    process.exit(diff.length ? 1 : 0);
+  }
+  console.log("\nNothing real was written.\n");
+  process.exit(0);
+}
+
 /* ── 2 · the canary ──────────────────────────────────────────────── */
 if (has("canary")) {
   console.log(`\nCANARY — a throwaway company goes through the exact write, before any real one.\n`);
@@ -416,7 +497,7 @@ if (!has("apply")) {
     }
     todo++;
     console.log(`  ${id.padEnd(9)} ${nameOf(rec).slice(0, 28).padEnd(28)} owner ${String(owner?.id ?? "NONE").padEnd(7)}` +
-      `  "${src.slice(0, 40)}" -> "${want(id, src).slice(-50)}"`);
+      `  "${clip(src)}" -> "${clip(want(id, src))}"`);
   }
   console.log(`\n${todo} to tag · ${done} already tagged · ${missing} unreadable · ${noOwner} with no owner found · ${inactive} with a deactivated owner (skipped)`);
   console.log(`owner read from: ${JSON.stringify(fromCount)}`);
