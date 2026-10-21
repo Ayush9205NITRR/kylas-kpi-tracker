@@ -24,3 +24,7 @@ db/*.sqlite-journal
 # bulk-tag-companies.mjs: the canary verdict and the before-write snapshots (company data)
 .bulk-tag-canary.json
 bulk-tag-*.json
+
+# Local output of scripts/offsite-month-source.py: company names and ids from a pipeline sheet.
+offsite-source-*.csv
+offsite-source-undo-*.json
