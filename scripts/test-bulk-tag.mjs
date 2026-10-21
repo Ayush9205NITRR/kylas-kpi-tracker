@@ -165,7 +165,7 @@ clearCanary();
      dry.out.split("\n").filter((l) => /owner (read|found)|no owner/.test(l)).join(" | "));
   ok("...and prints what the record does carry", /owner-like fields on 1776620/.test(dry.out));
   const c = run("--canary");
-  ok("the canary can test, and passes", c.code === 0 && /read from search/.test(c.out) && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
+  ok("the canary can test, and passes", c.code === 0 && /a real BD user/.test(c.out) && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
   const a = run("--apply", "--all");
   ok("both tagged", /2 tagged/.test(a.out), a.out.trim().split("\n").slice(-1)[0]);
   ok("...owners still there, by the search", (await ownerBySearch(1776620)) === 74725 && (await ownerBySearch(903)) === 74726);
@@ -179,7 +179,7 @@ clearCanary();
   ok("read from the owner field", /"owner":2/.test(dry.out) && /0 with no owner found/.test(dry.out),
      dry.out.split("\n").filter((l) => /owner read from/.test(l)).join(""));
   const c = run("--canary");
-  ok("the canary passes", c.code === 0 && /read from owner/.test(c.out));
+  ok("the canary passes", c.code === 0 && /a real BD user/.test(c.out) && /PASSED/.test(c.out), c.out.trim().split("\n").slice(-3).join(" | "));
 }
 
 console.log("\n7 · nobody knows the owner: the script must not guess");
@@ -272,7 +272,15 @@ clearCanary();
 {
   const dry = run();
   ok("the dry run names it", /903 .*owner 74727 is DEACTIVATED/.test(dry.out) && /1 with a deactivated owner/.test(dry.out), dry.out.split("\n").filter((l) => /DEACTIV|deactivated/.test(l)).join(" | "));
-  run("--canary");
+  /* Every other company here belongs to the API user, which leaves the canary
+     nobody real to test with (correctly). Give 1776620 to an active BD user. */
+  for (let i = 0; i < 10; i++) {
+    const r = await fetchR(`${BASE}/v1/companies/1776620/owner`, { method: "PUT", headers: { ...H, "content-type": "application/json" }, body: JSON.stringify({ ownerId: 74726 }) });
+    if (r.status !== 429) break;
+    await sleep(400);
+  }
+  const cc = run("--canary");
+  ok("the canary tests with the active owner, never the deactivated one", cc.code === 0 && /owner 74726 \(a real BD user/.test(cc.out), cc.out.trim().split("\n").slice(0, 3).join(" | "));
   const r = run("--apply", "--all");
   const b = await co(903);
   ok("it is skipped: not written, owner untouched", !b.customFieldValues?.cfSourceOfData && b.ownerId === 74727, JSON.stringify(b).slice(0, 160));
