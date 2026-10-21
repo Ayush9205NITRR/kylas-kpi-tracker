@@ -410,6 +410,54 @@ if (has("probe")) {
       console.log(`    ${c.cf ? "cf " : ""}${c.k}:\n      ${out.join("\n      ")}`);
     }
   }
+  /* 4 · CAN ONE FIELD BE WRITTEN WITHOUT SENDING THE REST BACK? A value Kylas
+     itself will not take back (a picklist option since retired) makes every
+     whole-record write impossible. So, on a throwaway carrying this record's
+     lookups and a real owner: PATCH (merge-patch, json-patch) and a PUT of
+     only the name and the one field — and after each, did the field take, did
+     everything else stay, and is the owner still the owner? */
+  console.log(`\n4 · writing ONLY Source of Data, on a throwaway:`);
+  const seedCf = { cfBatch: "probe", [FIELD]: "a" };
+  for (const [k, v] of Object.entries(rec.customFieldValues || {}))
+    if (v && typeof v === "object" && !Array.isArray(v) && k !== "cfPipelineStageBd") seedCf[k] = v;
+  const seed = { name: testName, customFieldValues: seedCf };
+  if (rec.numberOfEmployees) seed.numberOfEmployees = rec.numberOfEmployees;
+  let tid = null;
+  try {
+    tid = (await call("POST", "/v1/companies", seed))?.id;
+    if (owner && (await ownerActive(owner.id)) === true) await call("PUT", `/v1/companies/${tid}/owner`, { ownerId: Number(owner.id) });
+    const start = await call("GET", `/v1/companies/${tid}`);
+    const ownerStart = await ownerOf(tid, start);
+    console.log(`    test company ${tid}, owner ${ownerStart?.id}, fields: ${Object.keys(shape(start)).join(", ")}`);
+    const raw = async (method, path, body, ctype) => {
+      const r = await fetch(`${BASE}${path}`, { method, headers: { ...H, "content-type": ctype }, body: JSON.stringify(body) });
+      const t = await r.text(); await sleep(300);
+      return `${r.status}${r.ok ? "" : ` ${t.replace(/"timestamp":"[^"]*",?/, "").slice(0, 110)}`}`;
+    };
+    const tries = [
+      ["PATCH merge-patch", "PATCH", { customFieldValues: { [FIELD]: "m" } }, "application/merge-patch+json", "m"],
+      ["PATCH json-patch replace", "PATCH", [{ op: "replace", path: `/customFieldValues/${FIELD}`, value: "j" }], "application/json-patch+json", "j"],
+      ["PATCH json-patch add", "PATCH", [{ op: "add", path: `/customFieldValues/${FIELD}`, value: "k" }], "application/json-patch+json", "k"],
+      ["PATCH plain json", "PATCH", { customFieldValues: { [FIELD]: "p" } }, "application/json", "p"],
+      ["PUT name + the field only", "PUT", { name: testName, customFieldValues: { [FIELD]: "u" } }, "application/json", "u"],
+    ];
+    let prev = start;
+    for (const [label, method, body, ctype, val] of tries) {
+      const status = await raw(method, `/v1/companies/${tid}`, body, ctype);
+      const now = await call("GET", `/v1/companies/${tid}`);
+      const took = textOf(now.customFieldValues?.[FIELD]) === val;
+      const lost = Object.entries(shape(prev)).filter(([k, v]) => shape(now)[k] !== v).map(([k]) => k);
+      const ownerNow = await ownerOf(tid, now);
+      console.log(`    ${label.padEnd(26)} ${status.padEnd(4)} field ${took ? "TOOK" : "did not take"} · ` +
+        `${lost.length ? `CHANGED/LOST: ${lost.join(", ")}` : "every other field kept"} · owner ${ownerNow?.id === ownerStart?.id ? "unchanged" : `${ownerStart?.id} -> ${ownerNow?.id}`}`);
+      if (ownerNow?.id !== ownerStart?.id && ownerStart) await call("PUT", `/v1/companies/${tid}/owner`, { ownerId: Number(ownerStart.id) });
+      prev = await call("GET", `/v1/companies/${tid}`);
+    }
+  } catch (e) { console.log(`    error: ${codeOf(e)}`); }
+  finally {
+    if (tid) { try { await call("DELETE", `/v1/companies/${tid}`); console.log(`    deleted the test company ${tid}`); } catch { console.log(`    ! could not delete test company ${tid} — delete "${testName}" in Kylas.`); } }
+  }
+
   if (has("probe-write")) {
     console.log(`\n3 · the real write, owner ${owner?.id} IN the body ("same"):`);
     if (!owner || (await ownerActive(owner.id)) !== true) { console.log("    not tried: no active owner"); process.exit(1); }
