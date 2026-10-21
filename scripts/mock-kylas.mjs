@@ -26,6 +26,16 @@ const USERS = {
   74727: { id: 74727, firstName: "Gone", lastName: "Away",
            email: "gone@enout.in", active: false },
 };
+/* MOCK_BD_TEAM=1: the five BDs reassign-deactivated.mjs shares accounts between
+   (2026-10-21), plus an inactive namesake so a name must match an ACTIVE user. */
+if (process.env.MOCK_BD_TEAM === "1") Object.assign(USERS, {
+  80001: { id: 80001, firstName: "Sejal", lastName: "One", email: "sejal@enout.in", active: true },
+  80002: { id: 80002, firstName: "Anjali", lastName: "Two", email: "anjali@enout.in", active: true },
+  80003: { id: 80003, firstName: "Muskan", lastName: "Three", email: "muskan@enout.in", active: true },
+  80004: { id: 80004, firstName: "Arshdeep", lastName: "Four", email: "arshdeep@enout.in", active: true },
+  80005: { id: 80005, firstName: "Mayra", lastName: "Five", email: "mayra@enout.in", active: true },
+  80006: { id: 80006, firstName: "Sejal", lastName: "Old", email: "sejal.old@enout.in", active: false },
+});
 const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Boolean).join(" ");
 
 /* Kylas attaches an id -> name table for every lookup on the record. Without
@@ -90,6 +100,9 @@ const COMPANIES = {
     customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL", cfBatch: "B-12" },
   },
 };
+/* MOCK_DEAD_COMPANIES=903,1778327,...: those companies sit on 74727, a deactivated user. */
+for (const id of String(process.env.MOCK_DEAD_COMPANIES || "").split(",").filter(Boolean))
+  if (COMPANIES[id]) COMPANIES[id].ownerId = 74727;
 
 /* Bulk, so pagination and the owner filter are exercised: 260 companies split
    between two owners means page 0 cannot hold them and a client-side owner

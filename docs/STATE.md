@@ -1811,6 +1811,18 @@ rest with that reason. The only way in: re-assign those companies to active
 users in Kylas (Ayush's call — which person gets which account), then run `all`
 again; only they are left, the 337 are skipped as done.
 
+**Reassigning them (Ayush, 2026-10-21): round robin to Sejal, Anjali, Muskan,
+Arshdeep, Mayra — never Enout Super Admin — contacts with the account.**
+`scripts/reassign-deactivated.mjs`, workflow `reassign_deactivated.yml`
+(dry-run → first-one → all; "all" then runs the month tag on them). Only
+companies whose Kylas owner is DEACTIVATED are moved; each `--to` name must
+match exactly one ACTIVE user; the API user is refused as a target. One-field
+owner endpoints only — `PUT /v1/contacts/{id}/owner` for every contact of the
+account, then `PUT /v1/companies/{id}/owner` — each read back, first mismatch
+stops. Round robin over ids sorted, starting with whoever holds fewest of the
+view's companies, so a re-run after a stop keeps the split even. One-way by
+nature: nothing can be handed back to a deactivated user.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

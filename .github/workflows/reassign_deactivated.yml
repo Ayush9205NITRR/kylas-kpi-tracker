@@ -1,0 +1,70 @@
+# DEACTIVATED USERS' ACCOUNTS -> ACTIVE BDs, ROUND ROBIN, CONTACTS WITH THEM.
+#
+# scripts/reassign-deactivated.mjs: every company in the Company List view whose
+# Kylas owner is DEACTIVATED goes round robin to the named BDs, its contacts
+# first, then the account — each read back; the first one that does not read
+# back as planned STOPS the run. Never the API user (Enout Super Admin). An
+# account with an active owner is never touched.
+#
+# Why: Kylas refuses any update to a record held by a deactivated user (400
+# "Invalid owner."), so those accounts' month tags could not go in. "all" runs
+# the month tag (tag_company_source's write) on them straight after.
+#
+# Steps: dry-run (the plan, nothing written) -> first-one -> all.
+# Logs print ids only: this repository's Actions logs are public.
+name: Reassign deactivated users' accounts (round robin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      view:
+        description: 'Company List view (Company Database base)'
+        default: 'Oct/Nov/Dec'
+      to:
+        description: 'active BDs, comma separated (first names, emails or Kylas user ids)'
+        default: 'sejal,anjali,muskan,arshdeep,mayra'
+      step:
+        description: 'dry-run, first-one, or all (all also tags the moved accounts)'
+        type: choice
+        default: 'dry-run'
+        options: [dry-run, first-one, all]
+
+concurrency:
+  group: tag-company-source
+  cancel-in-progress: false
+
+jobs:
+  reassign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      VIEW: ${{ github.event.inputs.view }}
+      TO: ${{ github.event.inputs.to }}
+      STEP: ${{ github.event.inputs.step }}
+      BULK_TAG_IDS_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check the secrets are there
+        run: |
+          for v in KYLAS_KEY AIRTABLE_PAT; do
+            if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
+          done
+      - name: Plan (always first; writes nothing)
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO"
+      - name: First account
+        if: ${{ github.event.inputs.step == 'first-one' }}
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" --apply --limit 1
+      - name: All accounts
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/reassign-deactivated.mjs --view "$VIEW" --to "$TO" --apply --all
+      - name: Month tag on the moved accounts — canary
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --canary
+      - name: Month tag on the moved accounts
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/bulk-tag-companies.mjs --view "$VIEW" --apply --all
