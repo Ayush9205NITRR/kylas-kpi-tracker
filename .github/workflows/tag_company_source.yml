@@ -41,7 +41,7 @@ on:
         default: 'dry-run'
         options: [dry-run, first-one, all, probe]
       include_deactivated:
-        description: 'also tag companies whose owner is DEACTIVATED (one-field PATCH only; owner read back, first change stops)'
+        description: 'also try companies whose owner is DEACTIVATED (Kylas refuses these with "Invalid owner." — re-assign them first)'
         type: boolean
         default: false
       company:

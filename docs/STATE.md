@@ -1802,6 +1802,15 @@ written: **178 with a deactivated owner** (waiting on Ayush: tick
 (1773237 and one more — 404). The first `--all` stopped on the 404; a deleted
 company is now skipped.
 
+**The 178 cannot be tagged through the API while their owner is deactivated.**
+Run 39579245908 (`include_deactivated`): Kylas refused the very first one,
+1776411, with 400 02801020 **"Invalid owner."** — it refuses ANY update to a
+record held by a deactivated user, even the PATCH that carries no owner.
+Nothing changed. The script now catches it, reads the owner back, and skips the
+rest with that reason. The only way in: re-assign those companies to active
+users in Kylas (Ayush's call — which person gets which account), then run `all`
+again; only they are left, the 337 are skipped as done.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

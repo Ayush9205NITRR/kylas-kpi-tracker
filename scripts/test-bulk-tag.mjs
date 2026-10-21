@@ -322,7 +322,7 @@ clearCanary();
   ok("...each carrying Source of Data alone", w.filter((x) => x.kind === "company-patch").every((x) => x.body.length === 1 && x.body[0].path === "/customFieldValues/cfSourceOfData"));
 }
 
-console.log("\n13 · a DEACTIVATED owner with the PATCH: skipped unless --include-deactivated");
+console.log("\n13 · a DEACTIVATED owner with the PATCH: skipped; with --include-deactivated, Kylas refuses (as live)");
 await startMock("replace-api-owner", { MOCK_COMPANY_PATCH: "json-patch", MOCK_COMPANY_DEAD_OWNER: "903" });
 clearCanary();
 {
@@ -338,8 +338,10 @@ clearCanary();
      r1.out.split("\n").filter((l) => /903/.test(l)).join(" | "));
   const r2 = run("--apply", "--all", "--include-deactivated");
   const b = await co(903);
-  ok("with it: tagged, and the deactivated owner is still the owner", b.customFieldValues.cfSourceOfData === TAG && b.ownerId === 74727 && /1 of them belong to a deactivated user/.test(r2.out),
-     `${b.ownerId} ${b.customFieldValues.cfSourceOfData} | ${r2.out.trim().split("\n").slice(-3).join(" | ")}`);
+  /* Live: Kylas refuses ANY update while the owner is deactivated (400 "Invalid owner."). */
+  ok("with it: Kylas refuses, nothing changed, the deactivated owner is still the owner", r2.code === 0 && !b.customFieldValues?.cfSourceOfData && b.ownerId === 74727 &&
+     /refuses any update while the owner \(74727\) is deactivated/.test(r2.out) && /Re-assign them to an active user/.test(r2.out),
+     `${b.ownerId} ${b.customFieldValues?.cfSourceOfData} | ${r2.out.trim().split("\n").slice(-4).join(" | ")}`);
 }
 
 console.log("\n14 · a PATCH that erases the owner is never used");

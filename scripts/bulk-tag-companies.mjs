@@ -630,7 +630,7 @@ const snapFile = `bulk-tag-snapshot-${new Date().toISOString().replace(/[:.]/g, 
 const snaps = [];
 const keep = () => writeFileSync(snapFile, JSON.stringify(snaps, null, 2));
 console.log(`\nAPPLY — up to ${LIMIT === Infinity ? "all" : LIMIT} of ${ids.length}, ownerMode "${mode}". Before-images: ${snapFile}\n`);
-let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0, deadWrote = 0, unreadable = 0;
+let wrote = 0, skipped = 0, refused = 0, inactive = 0, reasserted = 0, deadWrote = 0, unreadable = 0, deadRefused = "";
 for (const id of ids) {
   if (wrote >= LIMIT) break;
   /* A company deleted since the view was made answers 404 (1773237, 2026-10-21,
@@ -643,8 +643,8 @@ for (const id of ids) {
   const ownerBefore = await ownerOf(id, before);
   if (!ownerBefore) { console.log(`  ${id} — no owner found, skipped (cannot prove it survives)`); skipped++; continue; }
   const dead = (await ownerActive(ownerBefore.id)) === false;
-  if (dead && !(mode === "patch" && INCLUDE_DEAD)) {
-    console.log(`  ${id} — owner ${ownerBefore.id} is deactivated, skipped (${mode === "patch" ? "--include-deactivated writes these" : "a write would change its owner for good"})`);
+  if (dead && !(mode === "patch" && INCLUDE_DEAD && !deadRefused)) {
+    console.log(`  ${id} — owner ${ownerBefore.id} is deactivated, skipped (${deadRefused ? "Kylas refuses updates to these" : mode === "patch" ? "--include-deactivated writes these" : "a write would change its owner for good"})`);
     skipped++; inactive++; continue;
   }
   const target = want(id, src);
@@ -652,8 +652,25 @@ for (const id of ids) {
   if (dead) {
     /* Nothing can give a record back to a deactivated user, so there is no
        keepOwner here: read back, and the first owner that is not the one it
-       had STOPS the run. */
-    await writeSource(id, before, target, mode, ownerBefore);
+       had STOPS the run.
+       LIVE, 2026-10-21: Kylas refuses ANY update to a record whose owner is
+       deactivated — even this PATCH, which carries no owner — with 400
+       02801020 "Invalid owner." Nothing changes. After the first such refusal
+       (owner read back) the rest are skipped: they would all be refused. */
+    try { await writeSource(id, before, target, mode, ownerBefore); }
+    catch (e) {
+      if (e.status !== 400 && e.status !== 422) throw e;
+      const back = await call("GET", `/v1/companies/${id}`);
+      const ownerBack = await ownerOf(id, back);
+      if (ownerBack?.id !== ownerBefore.id) {
+        console.log(`\n  STOPPED at ${id}: Kylas refused the write AND its owner is no longer ${ownerBefore.id}. Before-image in ${snapFile}.\n`);
+        process.exit(1);
+      }
+      deadRefused = codeOf(e).replace(/"timestamp":"[^"]*",?/, "").slice(0, 120);
+      console.log(`  ${id} — Kylas refuses any update while the owner (${ownerBefore.id}) is deactivated: ${deadRefused}` +
+        `\n           nothing changed, owner ${ownerBefore.id} read back. The other deactivated-owner companies are skipped.`);
+      skipped++; inactive++; continue;
+    }
     const after = await call("GET", `/v1/companies/${id}`);
     const diff = differences(before, after, target, ownerBefore, await ownerOf(id, after));
     if (diff.length) {
@@ -698,6 +715,8 @@ console.log(`\nOWNER CHECK: ${wrote} of ${wrote} written companies read back wit
   `${reasserted ? ` (${reasserted} were moved by Kylas on the write and given back at once)` : ""}.` +
   `${deadWrote ? ` ${deadWrote} of them belong to a deactivated user and were read back unchanged.` : ""}` +
   `${mode === "patch" ? " Written with the one-field PATCH: no owner was ever moved." : ""}`);
+if (deadRefused) console.log(`DEACTIVATED OWNERS: Kylas will not update a company while its owner is deactivated (${deadRefused}).` +
+  ` Re-assign them to an active user in Kylas, then run this again — they are the only ones left.`);
 if (inactive || refused || unreadable) console.log(`Skipped: ${inactive} with a deactivated owner · ${refused} Kylas refused · ${unreadable} not readable (deleted?). None of them was changed.`);
 console.log(`\n${wrote} tagged · ${skipped} skipped (already tagged or no owner).` +
   (LIMIT === 1 && wrote ? `\nOpen that company in Kylas: owner, fields, Source of Data. Then --apply --all.` : "") + "\n");

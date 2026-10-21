@@ -677,6 +677,9 @@ createServer(async (req, res) => {
     if (!mode || !/json-patch\+json/.test(ctype)) return json(res, 415, { message: "Unsupported Media Type" });
     const prev = COMPANIES[coPut[1]];
     if (!prev) return json(res, 404, { message: "no such company" });
+    /* Live, 2026-10-21: any update to a record held by a deactivated user is
+       refused — 400 02801020 "Invalid owner." — even one that carries no owner. */
+    if (prev.ownerId === 74727) return json(res, 400, { errorCode: "02801020", code: "02801020", message: "Invalid owner." });
     const ops = JSON.parse(await text(req));
     for (const op of Array.isArray(ops) ? ops : []) {
       const m = String(op.path || "").match(/^\/customFieldValues\/(\w+)$/);
