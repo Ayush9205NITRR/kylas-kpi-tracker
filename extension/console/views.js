@@ -3465,8 +3465,27 @@
   const colsOn = () => ACOLS.filter((c) => c.fixed || ACC.cols.has(c.k));
   /* A hand-set width wins over the column's share of the row. Mixing px and
      fr in one grid is fine: the pinned columns take their pixels and the rest
-     divide what is left. */
-  const gridOf = (cols) => cols.map((c) => (ACC.widths[c.k] ? `${ACC.widths[c.k]}px` : c.w)).join(" ");
+     divide what is left.
+
+     WHAT IS LEFT IS THE SCREEN, NOT THE LONGEST CELL. The table used to be
+     width:max-content over bare fr tracks, and a max-content grid sizes its fr
+     from the widest content: one 60-character Source of Data ("lifetime-MQL-SQL,
+     … Influencer Brand — Sangam Gupta & N…") made every fr ~500px, Company
+     800px, and five of nine columns sat off the right edge (Ayush, 2026-10-22:
+     "poore columns nahi dikh rahe"). Now the table is the width of the screen,
+     a long cell ellipsizes, and each column has a floor — its share times
+     FR_FLOOR — so the table scrolls sideways only when the columns switched on
+     cannot fit at their floors. */
+  /* A cell cut short by its column says the rest on hover. The cell HTML is
+     already escaped, so its text — tags dropped — is safe in an attribute. */
+  const cellHTML = (col, c) => {
+    const h = col.cell(c), tip = String(h).replace(/<[^>]*>/g, "").replace(/"/g, "&quot;").trim();
+    return `<span class="${col.cls || ""}${col.num ? " num" : ""}"${tip && tip !== "—" ? ` title="${tip}"` : ""}>${h}</span>`;
+  };
+  const FR_FLOOR = 110, COL_GAP = 14, ROW_PAD = 28;
+  const floorOf = (c) => ACC.widths[c.k] || Math.max(80, Math.round(parseFloat(c.w) * FR_FLOOR));
+  const gridOf = (cols) => cols.map((c) => (ACC.widths[c.k] ? `${ACC.widths[c.k]}px` : `minmax(${floorOf(c)}px, ${c.w})`)).join(" ");
+  const minOf = (cols) => cols.reduce((a, c) => a + floorOf(c), 0) + COL_GAP * (cols.length - 1) + ROW_PAD;
 
   /* ── THE BOARD ──────────────────────────────────────────────────────
      The same accounts as the table, stacked into Ayush's six call buckets
@@ -3743,13 +3762,13 @@
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         ${moreFilters(all)}
         ${ACC.view === "board" ? boardHTML(rows) : `
-        <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)}">
+        <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
           <div class="vr vh">${cols.map((col) =>
             `<span class="${col.num ? "num" : ""}">${esc(col.label)}<i class="cgrip" data-grip="${esc(col.k)}"
               title="Drag to resize · double-click to reset" role="separator" aria-hidden="true"></i></span>`).join("")}</div>
           ${shown.length ? shown.map((c) =>
             `<div class="vr" data-id="${esc(c.id)}">${cols.map((col) =>
-              `<span class="${col.cls || ""}${col.num ? " num" : ""}">${col.cell(c)}</span>`).join("")}</div>`
+              cellHTML(col, c)).join("")}</div>`
           ).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
         </div></div>
         ${rows.length > ACC.limit
@@ -4428,7 +4447,9 @@
            to drag back. The ceiling keeps one column from pushing every other
            one off the far end of the scroll. */
         ACC.widths[GRIP.k] = Math.round(Math.min(Math.max(GRIP.w + (e.clientX - GRIP.x), 64), 640));
-        document.querySelector(".acctable")?.style.setProperty("--acols", gridOf(colsOn()));
+        const t = document.querySelector(".acctable");
+        t?.style.setProperty("--acols", gridOf(colsOn()));
+        t?.style.setProperty("--amin", `${minOf(colsOn())}px`);
       });
       document.addEventListener("mouseup", () => {
         if (!GRIP) return;

@@ -664,7 +664,9 @@ table.ladder .lbar i{display:block;height:100%;border-radius:2px}
    column on there are seventeen of them, and a row you have scrolled to the
    right of is a row you can no longer name. */
 .accscroll{overflow-x:auto}
-.acctable{min-width:100%;width:max-content}
+/* The screen's width, never the longest cell's — see gridOf() in views.js.
+   --amin is the sum of the columns' floors: past that, it scrolls. */
+.acctable{width:100%;min-width:var(--amin,100%)}
 .acctable .vr>span:first-child{position:sticky;left:0;z-index:1;background:inherit;
   padding-right:6px;margin-right:-6px}
 .acctable .vr:not(.vh){background:var(--panel)}
