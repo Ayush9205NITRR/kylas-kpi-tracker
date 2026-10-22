@@ -624,13 +624,17 @@ check('Restore takes it off the list', !readF2.body.focus?.[String(contact.compa
 await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
   headers: { Authorization: 'Bearer x', 'content-type': 'application/json' },
   body: JSON.stringify({ records: [{ fields: { 'Kylas Company Id': String(contact.companyId),
-    'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }] } }] }) });
+    'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }],
+    /* The fourth home of the Boolean post, the only one filled on 78 rows. */
+    'Boolean (linked)': 'https://www.linkedin.com/posts/seats_offsite' } }] }) });
 const readR = await get(await coldWorker(43), `/research?companyId=${contact.companyId}`, { RESEARCH_BASE: 'appRESEARCH' });
 check('the card reads the curated Company List row, flattened',
       readR.body.found && readR.body.fields?.['No. of Employees (kylas)'] === '51-200' &&
       readR.body.fields?.['Total Funding'] === '8500000' && readR.body.fields?.['Latest Funding Type'] === 'Series A' &&
       /airtable\.com\/appRESEARCH\//.test(readR.body.url || ''),
       JSON.stringify(readR.body).slice(0, 160));
+check('...including a Boolean post kept only in "Boolean (linked)"',
+      readR.body.fields?.['Boolean (linked)'] === 'https://www.linkedin.com/posts/seats_offsite', JSON.stringify(readR.body.fields));
 
 /* The Company List's own "Offsite Timeline" (Kylas cfOffsiteTimeline, copied
    by the team's field map) reaches the accounts list too. */

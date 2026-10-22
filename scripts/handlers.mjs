@@ -695,7 +695,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        type latest round's type, which is what "funding stage" means here
        pri  the team's own priority score (at_priority)
        li   company LinkedIn
-       bp   boolean post link, whichever of the three columns is filled */
+       bp   boolean post link, whichever of the four columns is filled */
   function rowsToEnrichment(fieldsList) {
     const out = new Map();
     for (const f of fieldsList) {
@@ -809,10 +809,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      as arrays, selects as { name }. Held half an hour — it is curated by
      hand, not changing under the associate's feet. */
   /* The fields the team curates for research (Ayush, 2026-09-24), and
-     nothing else. "Boolean Post link" has three homes in that table; the
-     first one filled wins. */
+     nothing else. "Boolean Post link" has four homes in that table
+     (ENRICH_BOOLEAN_COLUMNS); the first one filled wins. */
   const RESEARCH_LIST_FIELDS = ["Kylas Company Id", "linkedin - Appollo",
-    "Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)",
+    ...ENRICH_BOOLEAN_COLUMNS,
     "Total Funding", "Latest Funding Amount", "Latest Funding Type", "Source - Concatenate",
     "Account Pipeline Stage", "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee"];
   const flat = (v) => Array.isArray(v) ? [...new Set(v.map(flat).filter((x) => x !== "" && x != null))].join(", ")

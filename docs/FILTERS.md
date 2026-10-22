@@ -64,7 +64,7 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | Funding stage | Single select | `enrich.type` | the latest round's type |
 | Demand team stage | Single select | `enrich.aps` | Company List's `Account Pipeline Stage`, a reference the demand team maintains by hand. Off by default |
 | LinkedIn | Link | `enrich.li` | |
-| Boolean post | Link | `enrich.bp` | whichever of the three Boolean columns is filled |
+| Boolean post | Link | `enrich.bp` | whichever of the four Boolean columns is filled |
 | Created at | **Date** | `createdAt` | Kylas' own audit field on the company. Off by default |
 | Created by | Single select | `createdBy` | the Kylas user who created the company record |
 | Last updated at | **Date** | `updatedAt` | the company record's last change in Kylas — not the last call |

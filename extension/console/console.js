@@ -1377,7 +1377,7 @@ const RESEARCH_SECTIONS=[
     {l:"Revenue per employee",k:["at_rev_per_employee"],money:1}]},
   {t:"Pipeline & signals",f:[
     {l:"Account pipeline stage",k:["Account Pipeline Stage"]},
-    {l:"Boolean post",k:["Boolean Post link - kylas","Boolean - New","Boolean Post Link (Demand Team)"],link:1,wide:1}]}];
+    {l:"Boolean post",k:["Boolean Post link - kylas","Boolean - New","Boolean Post Link (Demand Team)","Boolean (linked)"],link:1,wide:1}]}];
 /* companyId -> { state: "loading"|"ok"|"error", data, error } */
 const RES=new Map();
 let RES_OPEN=false, RES_FOR="";

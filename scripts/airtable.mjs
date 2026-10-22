@@ -1117,14 +1117,16 @@ export async function readFocus(at) {
    can show revenue, size, funding and priority on 6,000 rows without asking
    Airtable anything, and so the band filters can count without a round trip.
 
-   BOOLEAN POST HAS THREE HOMES in that table and different rows use different
-   ones; the reader takes the first one filled. Named here rather than picked
+   BOOLEAN POST HAS FOUR HOMES in that table and different rows use different
+   ones; the reader takes the first one filled. "Boolean (linked)" was missed
+   until 2026-10-22 (Ayush, from a research pane reading "—"): 107 rows hold
+   their link there, 78 of them nowhere else. Named here rather than picked
    in the console, because "which column is the boolean post" is a fact about
    the base, not about the screen. */
 export const ENRICH_TABLE = "Company List";
 export const ENRICH_KEY = "Kylas Company Id";
 export const ENRICH_BOOLEAN_COLUMNS =
-  ["Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)"];
+  ["Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)", "Boolean (linked)"];
 export const ENRICH_FIELDS = [
   ENRICH_KEY, "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee",
   "Total Funding", "Latest Funding Amount", "Latest Funding Type", "at_priority",
