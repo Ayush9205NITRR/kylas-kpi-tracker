@@ -1941,6 +1941,14 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
   elsewhere. **Left, by design: 339 accounts** whose own owner is the Super Admin
   (152, 541 contacts on others) or a deactivated user (187, 469) — the account
   needs an owner first. Before-images: artifacts `align-<run id>`.
+- **…and the other way round for those (`mode: give-accounts`, Ayush: "jiske paas
+  contact hai uske paas account — only in case of above two"), 2026-10-22, runs
+  39847571787 + 39849075307:** **214 of the 339** went to the active user holding
+  most of their contacts (Vipul 60, Rubal 57, Aditi 22, Sejal 19, Bhaumik 15,
+  Mayra 13, Ayush 8, Hisham 8, Gurnoor 4, Arshdeep 3, Akash 2, Vidhi/Vedant/Nikita 1;
+  ties to the lower id: 2), **every owner read back**, 105 more contacts followed.
+  From: Super Admin 96, Devansh 48, Tanay 22, Gaurav 21, Shreya 16, Charu 9, Ifee 2.
+  **125 left**: none of their contacts is on an active user — they need allotting.
 - **"X nahi dikh rahi"** — `scripts/find-account.mjs`, workflow **Find an account
   (why is it not showing)**: looks for the name in the Kylas crawl (what the
   console lists) and through contacts' company names, and per hit says owner,
