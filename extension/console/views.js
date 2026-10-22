@@ -1557,7 +1557,13 @@
                     months under different rungs. The tag says so, and its
                     title now names both counts rather than describing the
                     situation in the abstract. */ ""}
-              <td class="conv">${i === 0 ? "\u2014"
+              <td class="conv">${i === 0
+                /* HOW MANY DIALS EACH WORKED COMPANY TOOK. Ayush, 2026-10-22:
+                   "Anjali ke dialed calls zyada hai, companies worked kam" —
+                   the two rows sit far apart and count different things
+                   (calls, companies), so the ratio is said here, where the
+                   question is asked. */
+                ? (cur.worked ? `<b class="tnum">${(cur.calls / cur.worked).toFixed(1)}</b> <span>calls per company worked</span>` : "\u2014")
                 : `<b class="tnum">${pc(cur[rg.key] || 0, cur[RUNGS[i - 1].key] || 0)}</b>
                    <span>of ${esc(RUNGS[i - 1].name)}</span>${
                      over ? ` <i class="carry" title="${esc(String(cur[rg.key] || 0))} compan${
@@ -1566,12 +1572,17 @@
                        esc(RUNGS[i - 1].name)} in an earlier period and moved up in this one \u2014 it is not a miscount.">carried in</i>` : ""}`}</td>
               ${people.map((p) => {
                 const v = p[rg.key] || 0;
-                return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
+                const tip = i === 0 && v ? ` title="${esc(String(p.calls || 0))} calls on ${v} compan${v === 1 ? "y" : "ies"} \u2014 ${
+                  ((p.calls || 0) / v).toFixed(1)} per company"` : "";
+                return `<td${tip}><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
                   <div class="lbar"><i class="r${Math.min(Math.max(i, 2), 5)}" style="width:${v / rowMax[i] * 100}%"></i></div></td>`;
               }).join("")}
             </tr>`;}).join("")}
           </tbody>
         </table></div>
+        <p class="vnote"><b>Worked</b> is every company <b>called</b> in this period (or whose stage
+          moved), however many times; <b>Picked</b>, every company where a call connected. So
+          <i>Calls dialled ÷ Worked</i> is how many dials each account took.</p>
         <p class="vnote">Every rung counts <b>companies</b>, and each one the companies that
           reached it <b>inside this period</b> — so a company worked in January and qualified in
           March counts under worked in January and under Right POC in March. A rung marked

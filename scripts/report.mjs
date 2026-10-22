@@ -418,6 +418,7 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
     bump(key(d.at), d.owner, "timedCalls", 1);
   }
 
+  const callTouches = [];
   for (const c of calls) {
     if (!inWindow(c.at)) continue;
     /* `n` is how many calls this entry STANDS FOR. One raw Call Log row is one
@@ -448,6 +449,19 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
     /* "Connected" is any outcome that is not a no-answer. A dial that nobody
        picked up is work, but it is not a conversation. */
     if (callConnected(c)) bump(key(c.at), c.owner, "connects", n);
+    /* A CALL IS WORK ON ITS COMPANY, whether or not the stage moved. Ayush,
+       2026-10-22, on Anjali's column: 223 calls dialled, 36 companies worked.
+       Worked counted only companies with a STAGE TRANSITION, and the console
+       writes a transition only when the stage changes — so a re-dial that left
+       the account at CNC-2 or Connect Later was a call and not "work", which is
+       the opposite of what the spec table has always said ("including a save
+       that changed no stage"). The raw Call Log row knows its contact, hence its
+       company; a rolled-up day does not, and those old days keep counting from
+       the transitions as before. */
+    if (c.company) {
+      callTouches.push({ k: key(c.at), owner: c.owner, metric: "worked", company: c.company });
+      if (callConnected(c)) callTouches.push({ k: key(c.at), owner: c.owner, metric: "picked", company: c.company });
+    }
   }
 
   /* FIRST arrival only, per company per milestone — computed once, by
@@ -530,6 +544,7 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
   for (const e of touchEvents({ transitions, signals })) {
     if (inWindow(e.at)) touch(key(e.at), e.owner, e.metric, e.company);
   }
+  for (const t of callTouches) touch(t.k, t.owner, t.metric, t.company);
 
   const periods = keys.map((k) => rows.get(k));
   const totals = periods.reduce((acc, r) => {

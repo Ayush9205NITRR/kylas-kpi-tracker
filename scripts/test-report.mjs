@@ -510,5 +510,29 @@ const HELD = "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS";
   eq("...while the dial still counts", r.totals.calls, 1);
 }
 
+console.log("\ncalls are work on their company — Worked / Picked without a stage change (2026-10-22)");
+{
+  /* Anjali's column: 223 calls, 36 worked — re-dials that left the stage where
+     it was counted as calls and never as work. */
+  const calls = [
+    { at: "2026-10-21T05:00:00Z", owner: "Anjali", stage: "CNC_COULD_NOT_CONNECT_2", company: "co1" },
+    { at: "2026-10-21T06:00:00Z", owner: "Anjali", stage: "CNC_COULD_NOT_CONNECT_2", company: "co1" },  /* same company again */
+    { at: "2026-10-21T07:00:00Z", owner: "Anjali", stage: "CONNECT_LATER", company: "co2" },           /* answered */
+    { at: "2026-10-21T08:00:00Z", owner: "Gurnoor", stage: "CONNECT_LATER", company: "co2" },          /* two people, one account */
+    { at: "2026-10-21T09:00:00Z", owner: "Anjali", stage: "CNC_COULD_NOT_CONNECT", n: 40 },           /* a rolled-up day: no company */
+  ];
+  const r = report("day", { calls, transitions: [], signals: [] }, { from: "2026-10-21", to: "2026-10-21" });
+  const anj = r.byOwner.find((o) => o.owner === "Anjali");
+  eq("a call with no stage change is work: Anjali worked 2 companies", anj.worked, 2);
+  eq("...picked only where the call connected", anj.picked, 1);
+  eq("...and her calls are still every dial", anj.calls, 43);
+  eq("the team counts an account once though two people called it", r.totals.worked, 2);
+  eq("...and Gurnoor has it in his own column", r.byOwner.find((o) => o.owner === "Gurnoor").worked, 1);
+  const both = report("day", { calls: [{ at: "2026-10-21T05:00:00Z", owner: "Anjali", stage: "CONNECT_LATER", company: "co9" }],
+    transitions: [{ at: "2026-10-21T05:00:01Z", owner: "Anjali", to: "CONNECT_LATER", company: "co9", contact: "c9" }], signals: [] },
+    { from: "2026-10-21", to: "2026-10-21" });
+  eq("a call and its transition are one company, not two", both.totals.worked, 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1180,7 +1180,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        D1 copy, which reads whole tables, disagreed with this path. */
     const ALL = { pageSize: 100, maxPages: 2000 };
     const [callRows, rolledRows, transRows, contactRows, diallerRows, team] = await Promise.all([
-      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set"], ...ALL }),
+      /* Contact: a call is work on its company (report.mjs, Worked). */
+      listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set", "Contact"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
          owner per outcome, because the raw log fills an Airtable base in about
          six weeks at this call volume. Missing this read would make every month
@@ -1217,11 +1218,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       readTeam(airtable).catch(() => []),
     ]);
 
-    const raw = callRows.map((r) => ({ at: r.fields["Called At"], owner: r.fields.Owner,
-                                       outcome: r.fields.Outcome,
-                                       /* What decides connected — see callConnected. */
-                                       stage: r.fields["Stage Set"] || "",
-                                       secs: Number(r.fields.Duration || 0) }));
+    const contactCompany = new Map(contactRows.map((r) => [r.id, (r.fields.Company || [])[0] || r.id]));
+    const raw = callRows.map((r) => {
+      const contact = (r.fields.Contact || [])[0] || "";
+      return { at: r.fields["Called At"], owner: r.fields.Owner,
+               outcome: r.fields.Outcome,
+               /* What decides connected — see callConnected. */
+               stage: r.fields["Stage Set"] || "",
+               secs: Number(r.fields.Duration || 0),
+               /* The company the call worked — same rule as the transitions below. */
+               company: contact ? (contactCompany.get(contact) || contact) : "" };
+    });
     const rolled = rolledRows.map((r) => ({ at: r.fields.Day, owner: r.fields.Owner,
                                             outcome: r.fields.Outcome,
                                             stage: r.fields["Stage Set"] || "",

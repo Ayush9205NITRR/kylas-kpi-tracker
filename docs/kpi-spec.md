@@ -20,8 +20,8 @@ PER-PERIOD activity. Rungs 3–7 are ONCE-EVER arrivals.**
 
 | # | Rung | Counted when | How often |
 |---|---|---|---|
-| 1 | **Worked** | the company got **any stage transition** in the period — including a save that changed no stage | once per company **per period** |
-| 2 | **Picked** | a transition landed on a stage that is **not** a no-answer | once per company **per period** |
+| 1 | **Worked** | the company was **called** in the period (a Call Log save — including one that changed no stage) **or** got a stage transition | once per company **per period** |
+| 2 | **Picked** | a call **connected** (its stage is not a no-answer), or a transition landed on such a stage | once per company **per period** |
 | 3 | **Right POC** | any contact has **budget OR timeline OR pax** filled on any row, past or current | once per company, **ever** |
 | 4 | **Discovery** | **one single row** carries **budget AND timeline AND pax** | once per company, **ever** |
 | 5 | **SQL booked** | a transition to **rung ≥ 23** (`ACTIVE_REQUIREMENT_CALL_BOOKED` and above) | once per company, **ever** |
@@ -231,12 +231,23 @@ For a period: `COUNT(Companies where Last Call At within [from, to])`.
 period; the five above them count what ARRIVED in the period.
 
 ```
-Companies worked  = distinct companies with any stage change in the period
-                    (plus a console save that set First Worked At)
-Companies picked  = the same, restricted to a move INTO a stage that is not
+Companies worked  = distinct companies with a call logged in the period, or
+                    any stage change in it (plus a console save that set
+                    First Worked At)
+Companies picked  = the same, restricted to a call / move whose stage is not
                     one of NOT_CONNECTED (the three CNC rungs, Followup - CNC,
                     and Yet to be Mined)
 ```
+
+**Calls count, not only stage changes (2026-10-22).** Ayush, on the ladder:
+*"Anjali ke dialed calls zyada hai, no of companies worked kam hai"* — 223
+calls dialled, 36 worked. The table above has always said a save that changed
+no stage is still work, but the console writes a Stage Transition only when
+the stage moves, so a re-dial that left an account at CNC-2 or Connect Later
+was counted as a call and never as work. report() now also counts each raw
+Call Log row's company (through its contact). Rolled-up days (Call Rollup, past
+the retention window) carry no company and keep counting from transitions. The
+Worked row's conversion column shows **calls per company worked**.
 
 **Why.** Anjali worked four accounts in a day and her column read 1. Under
 first-arrival counting that is correct and useless: an account anybody had
