@@ -1933,8 +1933,14 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
   **deactivated** user are only reported: contacts are never moved TO them;
   allot the account first. Plan + before-images: artifact `align-<run id>`.
   Tests: `test-align` 16; `test-allot-live` 14 (no box; Priya's contacts move).
-- Expected first hit: the **320 contacts in 101 accounts** §3l3 left with the
-  active BD already working them.
+- **Done, 2026-10-22 (runs 39777423782 first-one, 39778418090 all, 39785638932
+  the rest):** 18,065 accounts and 37,498 contacts crawled; **1,314 contacts on
+  ~494 accounts moved to the account's owner** (Mayra 119 accounts, Sejal 127,
+  Gurnoor 59, Arshdeep 60, Muskan 35, Anjali 34, Aditi 33, …; 287 of them had
+  been on Sejal). The re-check finds no account on an active BD with a contact
+  elsewhere. **Left, by design: 339 accounts** whose own owner is the Super Admin
+  (152, 541 contacts on others) or a deactivated user (187, 469) — the account
+  needs an owner first. Before-images: artifacts `align-<run id>`.
 - **"X nahi dikh rahi"** — `scripts/find-account.mjs`, workflow **Find an account
   (why is it not showing)**: looks for the name in the Kylas crawl (what the
   console lists) and through contacts' company names, and per hit says owner,
