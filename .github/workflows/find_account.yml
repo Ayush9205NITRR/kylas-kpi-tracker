@@ -1,0 +1,27 @@
+# "X NAHI DIKH RAHI" — is the account in Kylas, in the copy the console lists
+# from, and on whom. Reads only. Logs print ids and BD first names; the name
+# searched for is not echoed by the script.
+name: Find an account (why is it not showing)
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'the account name as you would type it in Kylas'
+        required: true
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Look in Kylas and in the copy (reads only)
+        env:
+          KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          FIND_NAME: ${{ github.event.inputs.name }}
+        run: node scripts/find-account.mjs
