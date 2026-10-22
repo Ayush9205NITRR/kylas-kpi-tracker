@@ -30,6 +30,12 @@
  *   deactivated  the account is on a deactivated user — same: allot it first
  *   no-owner     Kylas names no owner for the account
  *   aligned      nothing to do
+ *
+ * THE OTHER WAY ROUND, for super-admin and deactivated (--give-accounts; Ayush,
+ * 2026-10-22: "jiske paas contact hai uske paas account hone chahiye — only in
+ * case of above two"): the ACCOUNT goes to the active BD who holds the most of
+ * its contacts (holderOf), and its other contacts follow it. An account none of
+ * whose contacts is on an active BD is left where it is.
  */
 
 const idOf = (v) => String((v && typeof v === "object" ? v.id : v) ?? "");
@@ -50,6 +56,18 @@ export function offAccounts(accounts = [], contacts = []) {
     out.get(co).off.push({ id: String(c.id), from });
   }
   return [...out.values()].sort((a, b) => b.off.length - a.off.length || Number(a.id) - Number(b.id));
+}
+
+/* move: [{ id, from }] — an account's contacts not on its owner. isBd(id):
+   an active BD who may be given accounts (never the API user). The BD holding
+   the most of them, ties to the lower user id so a re-run decides the same;
+   null when no contact is on an active BD. */
+export async function holderOf(move = [], isBd = async () => false) {
+  const n = new Map();
+  for (const m of move) if (m.from && (await isBd(m.from))) n.set(m.from, (n.get(m.from) || 0) + 1);
+  const ranked = [...n].sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]));
+  if (!ranked.length) return null;
+  return { to: ranked[0][0], holds: ranked[0][1], of: move.length, tie: ranked.length > 1 && ranked[1][1] === ranked[0][1] };
 }
 
 /* owner: the account's owner as Kylas has it now; people: its contacts as

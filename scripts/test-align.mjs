@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { createClient } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany } from "./reassign.mjs";
-import { classify, verify, offAccounts } from "./align.mjs";
+import { classify, verify, offAccounts, holderOf } from "./align.mjs";
 
 let pass = 0, fail = 0;
 const ok = (what, c, d = "") => { (c ? pass++ : fail++); console.log(`  ${c ? "PASS" : "FAIL"}  ${what}${!c && d ? `  — ${String(d).slice(0, 300)}` : ""}`); };
@@ -25,6 +25,16 @@ console.log("\n0 · one contact crawl, joined to the accounts");
   ok("names the accounts with a contact on somebody else, most first", off.map((o) => o.id).join() === "2,1", JSON.stringify(off));
   ok("...with who holds each, lookups read as ids", off[1].off[0].id === "12" && off[1].off[0].from === "74725");
   ok("contacts on accounts not in the list, or on none, are ignored", !off.some((o) => o.id === "3"));
+}
+
+{
+  const bd = async (id) => ["80001", "80005", "74726"].includes(id);
+  const h = await holderOf([{ id: "1", from: "80005" }, { id: "2", from: "80005" }, { id: "3", from: "74726" }, { id: "4", from: "74725" }], bd);
+  ok("holderOf: the active BD with the most contacts", h.to === "80005" && h.holds === 2 && h.of === 4 && !h.tie, JSON.stringify(h));
+  const t = await holderOf([{ id: "1", from: "80005" }, { id: "2", from: "74726" }], bd);
+  ok("...a tie goes to the lower user id, and says so", t.to === "74726" && t.tie, JSON.stringify(t));
+  ok("...nobody when no contact is on an active BD (Super Admin, deactivated, none)",
+     (await holderOf([{ id: "1", from: "74725" }, { id: "2", from: "" }], bd)) === null);
 }
 
 console.log("\n1 · what is fixed and what is only reported");

@@ -9,6 +9,8 @@
  *   ... --owners "sejal,mayra"                                             only accounts these people own
  *   ... --apply --limit 1                                                  the first account — look at it in Kylas
  *   ... --apply --all                                                      the rest
+ *   ... --give-accounts [--apply --limit 1 | --all]   accounts on the Super Admin or a
+ *        deactivated user go to the active BD holding most of their contacts
  *
  * The check reads every account and every contact from Kylas (two crawls),
  * joins them, and reads the accounts that are off again, owner included —
@@ -23,7 +25,7 @@
 import { writeFileSync } from "node:fs";
 import { createClient, toUser } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany, MAX_ALLOT } from "./reassign.mjs";
-import { verify, offAccounts } from "./align.mjs";
+import { verify, offAccounts, holderOf } from "./align.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i + 1] : d; };
@@ -123,6 +125,60 @@ if (notFix.length) {
   if (notFix.length > 40) console.log(`  …and ${notFix.length - 40} more`);
 }
 writeFileSync("align-plan.json", JSON.stringify(checked.map(({ id, owner, status, move }) => ({ id, owner, status, move })), null, 2));
+
+/* ── --give-accounts: the account follows its contacts ──────────────
+   Only accounts on the Super Admin or a deactivated user. Each is read again
+   (owner and contacts); the account goes to the active BD holding most of its
+   contacts, and every other contact follows it. align.mjs holderOf(). */
+if (has("give-accounts")) {
+  const orphans = [...by("super-admin"), ...by("deactivated")];
+  console.log(`\nGIVE ACCOUNTS — reading the ${orphans.length} account(s) on the Super Admin or a deactivated user again…`);
+  const fresh = await verify({ kylas, items: orphans.map((r) => r.id), apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
+    onProgress: progress("re-read") });
+  const isBd = async (id) => !!id && id !== API_USER && !!(await userOf(id)) && (await userOf(id)).active !== false;
+  const plan = [], none = [];
+  let ties = 0;
+  for (const r of fresh) {
+    if (!["super-admin", "deactivated"].includes(r.status)) continue;
+    const h = await holderOf(r.move, isBd);
+    if (!h) { none.push(r); continue; }
+    if (h.tie) ties++;
+    plan.push({ id: r.id, from: r.owner, to: h.to, holds: h.holds, contacts: r.contacts, move: r.move });
+  }
+  const perTo = {};
+  /* Every contact of the account not already on the BD moves — those on the
+     owner it is taken from as well, which `move` does not list. */
+  for (const p of plan) { (perTo[p.to] ||= { a: 0, c: 0 }); perTo[p.to].a++; perTo[p.to].c += (p.contacts || 0) - p.holds; }
+  console.log(`${plan.length} account(s) go to the BD holding most of their contacts · ${none.length} have no contact on an active BD (left as they are)` +
+    `${ties ? ` · ${ties} were a tie, given to the lower user id` : ""}.`);
+  console.log(`By who gets them (accounts · contacts that also move to them):`);
+  for (const [o, v] of Object.entries(perTo).sort((a, b) => b[1].a - a[1].a)) console.log(`  ${label(o).padEnd(28)} ${v.a} · ${v.c}`);
+  const fromN = {};
+  for (const p of plan) fromN[p.from] = (fromN[p.from] || 0) + 1;
+  console.log(`Taken from: ${Object.entries(fromN).map(([o, n]) => `${label(o)} ${n}`).join(" · ")}`);
+  writeFileSync("align-plan.json", JSON.stringify({ plan, none: none.map((r) => ({ id: r.id, owner: r.owner, move: r.move })) }, null, 2));
+  if (!has("apply")) { console.log(`\nCHECK ONLY — nothing written. Next: --give-accounts --apply --limit 1, then --all.\n`); process.exit(0); }
+  if (!(LIMIT > 0)) { console.error("Say how many: --limit 1 for the first one, --all for the rest."); process.exit(1); }
+  const todo = plan.slice(0, LIMIT);
+  const snapFile = `align-snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  writeFileSync(snapFile, JSON.stringify(todo.map((p) => ({ company: p.id, owner: p.from, to: p.to, contacts: p.move })), null, 2));
+  console.log(`\nAPPLY — ${todo.length} of ${plan.length} account(s). Before-images: ${snapFile}\n`);
+  let given = 0, moved = 0, failed = 0;
+  for (const p of todo) {
+    /* One at a time with its own fromAny: the owner it may be taken from is
+       the one THIS account was seen on. */
+    const r = await allot({ kylas, apiUser: API_USER, leaveActive: false, fromAny: [p.from],
+      assignments: [{ company: p.id, ownerId: p.to }] });
+    const x = r.results[0];
+    if (x.ok) given++;
+    moved += x.contactsMoved; failed += x.contactsFailed.length;
+    console.log(`  ${x.id.padEnd(9)} ${label(p.from)} -> ${label(p.to)}${x.ok ? " ✓" : ` · ${x.why}`} · ${x.contactsMoved} contact(s) moved` +
+      `${x.contactsFailed.length ? ` · NOT MOVED: ${x.contactsFailed.map((f) => `${f.id} (${f.why})`).join(", ")}` : ""}`);
+  }
+  console.log(`\nDONE: ${given}/${todo.length} account(s) now on the BD holding their contacts, read back · ${moved} contact(s) moved` +
+    `${failed ? ` · ${failed} NOT moved (listed above)` : ""}.\n`);
+  process.exit(failed || given < todo.length ? 1 : 0);
+}
 
 if (!has("apply")) {
   console.log(`\nCHECK ONLY — nothing written (plan in align-plan.json). Next: --apply --limit 1, look at that account in Kylas, then --apply --all.\n`);
