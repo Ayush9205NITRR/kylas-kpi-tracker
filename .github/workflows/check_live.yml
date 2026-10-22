@@ -1,0 +1,22 @@
+# CHECK — Boolean post, the notification mail, account allotment — against
+# live Kylas + Airtable through the console's own code. Reads only: writes
+# nothing, sends nothing. Logs print ids and BD first names only.
+name: Check — Boolean post, notifications, allotment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check (reads only)
+        run: node scripts/check-live.mjs
