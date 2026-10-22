@@ -3,14 +3,19 @@
  * Ayush, 2026-10-22: "for that account — all associated contacts for that
  * account should be allotted to whoever owns that account. Check for that."
  *
- * Two passes, so a check over the whole CRM costs minutes and not hours:
+ * KYLAS ONLY, NOT THE AIRTABLE COPY. The first version nominated accounts from
+ * the copy and would have checked about one in twenty: on 2026-10-22 the copy
+ * held 685 of Kylas' ~17,900 companies, and only 1,947 of its 37,443 contacts
+ * were linked to a company at all. So:
  *
- *   1. candidates() — the Airtable copy (Companies + Contacts, both carrying
- *      "Kylas Owner ID") says which accounts have at least one contact on
- *      somebody else. Reads only; pure.
- *   2. verify() — each of those accounts is read again from KYLAS, the
- *      account's owner and every contact on it, and classify() decides. The
- *      copy is at most an hour old, so it only nominates; Kylas decides.
+ *   1. the console's own company crawl (kylas.companies()) gives every account
+ *      and its owner;
+ *   2. verify() reads each account's contacts from Kylas (one search per
+ *      account — the owner is already known from the crawl) and classify()
+ *      decides;
+ *   3. the accounts that are not aligned are read AGAIN, owner included
+ *      (verify() with no owner given), so a fix never acts on a crawl that is
+ *      minutes old.
  *
  * WHAT IS FIXED, AND WHAT IS ONLY REPORTED (classify):
  *   fix          the account is on an active BD → its other contacts go to
@@ -21,35 +26,10 @@
  *                allotting first
  *   deactivated  the account is on a deactivated user — same: allot it first
  *   no-owner     Kylas names no owner for the account
- *   aligned      nothing to do (the copy was behind)
+ *   aligned      nothing to do
  */
 
 const idOf = (v) => String((v && typeof v === "object" ? v.id : v) ?? "");
-
-/* companies: Airtable Companies rows ({ id: recId, fields: { "Kylas Company
-   ID", "Kylas Owner ID" } }); contacts: Contacts rows ({ fields: { "Kylas
-   Contact ID", Company: [recId], "Kylas Owner ID" } }). Returns the accounts
-   with at least one contact whose owner is not the account's, most such
-   contacts first. */
-export function candidates({ companies = [], contacts = [] }) {
-  const byRec = new Map();
-  for (const c of companies) {
-    const kid = String(c?.fields?.["Kylas Company ID"] ?? "").trim();
-    if (/^\d+$/.test(kid)) byRec.set(c.id, { kid, owner: String(c.fields["Kylas Owner ID"] ?? "").trim() });
-  }
-  const out = new Map();
-  for (const p of contacts) {
-    const f = p?.fields || {};
-    const co = byRec.get((f.Company || [])[0]);
-    const id = String(f["Kylas Contact ID"] ?? "").trim();
-    if (!co || !/^\d+$/.test(id)) continue;
-    const owner = String(f["Kylas Owner ID"] ?? "").trim();
-    if (owner === co.owner) continue;
-    if (!out.has(co.kid)) out.set(co.kid, { id: co.kid, owner: co.owner, off: [] });
-    out.get(co.kid).off.push({ id, owner });
-  }
-  return [...out.values()].sort((a, b) => b.off.length - a.off.length || Number(a.id) - Number(b.id));
-}
 
 /* owner: the account's owner as Kylas has it now; people: its contacts as
    Kylas has them ({ id, ownerId }). userOf(id) -> { active } | null. */
@@ -64,16 +44,18 @@ export async function classify({ owner, people = [], apiUser = "", userOf = asyn
   return { status: "fix", move };
 }
 
-/* Each account read from Kylas: its owner, its contacts, then classify().
-   companyOwnerOf / contactsOfCompany come from reassign.mjs, passed in so this
-   file stays free of the client. A deleted account (404) is skipped. */
-export async function verify({ kylas, ids = [], apiUser = "", userOf, companyOwnerOf, contactsOfCompany,
+/* items: [{ id, owner? }]. With an owner (from the crawl) only the contacts
+   are read; without, the account is read too. companyOwnerOf /
+   contactsOfCompany come from reassign.mjs, passed in so this file stays free
+   of the client. A deleted account (404) is skipped. */
+export async function verify({ kylas, items = [], apiUser = "", userOf, companyOwnerOf, contactsOfCompany,
                                concurrency = 3, onProgress = () => {} }) {
-  const results = new Array(ids.length);
+  const list = items.map((x) => (typeof x === "object" ? x : { id: x }));
+  const results = new Array(list.length);
   let next = 0, done = 0;
-  const one = async (id) => {
+  const one = async ({ id, owner: known }) => {
     try {
-      const owner = await companyOwnerOf(kylas, id, await kylas.company(id));
+      const owner = known !== undefined ? String(known) : await companyOwnerOf(kylas, id, await kylas.company(id));
       const people = await contactsOfCompany(kylas, id);
       return { id: String(id), owner, contacts: people.length, ...(await classify({ owner, people, apiUser, userOf })) };
     } catch (e) {
@@ -81,8 +63,8 @@ export async function verify({ kylas, ids = [], apiUser = "", userOf, companyOwn
       return { id: String(id), status: "error", move: [], why: String(e?.message || e).slice(0, 120) };
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, ids.length)) }, async () => {
-    while (next < ids.length) { const i = next++; results[i] = await one(ids[i]); onProgress(++done, ids.length); }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, async () => {
+    while (next < list.length) { const i = next++; results[i] = await one(list[i]); onProgress(++done, list.length); }
   }));
   return results;
 }

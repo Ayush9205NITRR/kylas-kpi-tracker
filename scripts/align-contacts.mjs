@@ -10,9 +10,10 @@
  *   ... --apply --limit 1                                                  the first account — look at it in Kylas
  *   ... --apply --all                                                      the rest
  *
- * The check reads the Airtable copy to nominate accounts, then reads each of
- * them again from Kylas — the account's owner and every contact on it — and
- * plans from that. --apply moves each contact with PUT /v1/contacts/{id}/owner
+ * The check reads every account from Kylas (the console's own crawl), the
+ * contacts of each, and reads the ones that are off again, owner included —
+ * align.mjs says why it is not the Airtable copy. About an hour for the whole
+ * CRM; --owners narrows it. --apply moves each contact with PUT /v1/contacts/{id}/owner
  * (one field; never a whole-record PUT) through reassign.mjs allot(), which
  * re-reads the account first and reads the owner back. The account's own owner
  * never changes here. Before-images (contact id, old owner) go to
@@ -22,21 +23,18 @@
  */
 import { writeFileSync } from "node:fs";
 import { createClient, toUser } from "./kylas.mjs";
-import { createAirtable } from "./airtable.mjs";
 import { allot, companyOwnerOf, contactsOfCompany, MAX_ALLOT } from "./reassign.mjs";
-import { candidates, verify } from "./align.mjs";
+import { verify } from "./align.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i + 1] : d; };
 const has = (n) => argv.includes(`--${n}`);
-const { KYLAS_KEY, AIRTABLE_PAT } = process.env;
-const AIRTABLE_BASE = process.env.AIRTABLE_BASE || "appEwJu0bleHh9b8t";
-for (const [k, v] of Object.entries({ KYLAS_KEY, AIRTABLE_PAT })) if (!v) { console.error(`Set ${k}.`); process.exit(1); }
+const { KYLAS_KEY } = process.env;
+if (!KYLAS_KEY) { console.error("Set KYLAS_KEY."); process.exit(1); }
 const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 const OWNERS = String(arg("owners", "")).split(",").map(norm).filter(Boolean);
 
 const kylas = createClient(KYLAS_KEY, { log: () => {}, base: process.env.KYLAS_BASE || "https://api.kylas.io" });
-const at = createAirtable(AIRTABLE_PAT, AIRTABLE_BASE, { log: () => {} });
 
 /* ── who is who ──────────────────────────────────────────────────── */
 const me = toUser(await kylas.me().catch(() => ({})));
@@ -63,26 +61,34 @@ for (const o of OWNERS) {
   ownerSet.add(hits[0].id);
 }
 
-/* ── 1 · the copy nominates ──────────────────────────────────────── */
-console.log("Reading the Airtable copy (Companies, Contacts)…");
-const companies = await at.listAll("Companies", { fields: ["Kylas Company ID", "Kylas Owner ID"], maxPages: 2000 });
-const contacts = await at.listAll("Contacts", { fields: ["Kylas Contact ID", "Company", "Kylas Owner ID"], maxPages: 4000 });
-let nominated = candidates({ companies, contacts });
-console.log(`${companies.length} accounts, ${contacts.length} contacts in the copy. ` +
-  `${nominated.length} account(s) have a contact on somebody else (${nominated.reduce((a, c) => a + c.off.length, 0)} contacts).`);
+/* ── 1 · every account, from the console's own crawl ─────────────── */
+console.log("Reading every account from Kylas (the console's own crawl)…");
+const crawl = await kylas.companies();
+const cs = kylas.lastCompanySearch();
+console.log(`${crawl.length} accounts${cs?.reportedTotal ? ` of the ${cs.reportedTotal} Kylas reports` : ""}${cs?.truncated ? " — SHORT: the rest are not checked" : ""}.`);
+let accounts = crawl.map((c) => ({ id: String(c.id), owner: String((c.ownerId && typeof c.ownerId === "object" ? c.ownerId.id : c.ownerId) ?? "") }));
 if (ownerSet.size) {
-  nominated = nominated.filter((c) => ownerSet.has(c.owner));
-  console.log(`--owners ${[...ownerSet].map(label).join(", ")}: ${nominated.length} of them.`);
+  accounts = accounts.filter((c) => ownerSet.has(c.owner));
+  console.log(`--owners ${[...ownerSet].map(label).join(", ")}: ${accounts.length} account(s).`);
 }
 const LIMIT = has("all") ? Infinity : Number(arg("limit", "0"));
 const MAX_CHECK = Number(arg("max", "0")) || Infinity;
-const ids = nominated.slice(0, MAX_CHECK).map((c) => c.id);
+accounts = accounts.slice(0, MAX_CHECK);
 
-/* ── 2 · Kylas decides ───────────────────────────────────────────── */
-console.log(`\nReading ${ids.length} account(s) again from Kylas — owner and every contact…`);
-let lastPct = -1;
-const checked = await verify({ kylas, ids, apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
-  onProgress: (d, n) => { const p = Math.floor((d / n) * 10); if (p !== lastPct) { lastPct = p; console.log(`  ${d}/${n}`); } } });
+/* ── 2 · every account's contacts ─────────────────────────────────── */
+const progress = (what) => { let last = -1; const t0 = Date.now();
+  return (d, n) => { const p = Math.floor((d / n) * 20); if (p !== last) { last = p;
+    console.log(`  ${what} ${d}/${n} · ${Math.round((Date.now() - t0) / 1000)}s`); } }; };
+console.log(`\nReading the contacts of ${accounts.length} account(s) from Kylas…`);
+const first = await verify({ kylas, items: accounts, apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
+  concurrency: Number(arg("concurrency", "4")), onProgress: progress("read") });
+const off = first.filter((r) => !["aligned", "gone"].includes(r.status));
+console.log(`${first.length - off.length} aligned · ${off.length} with a contact on somebody else (or unreadable).`);
+
+/* ── 3 · those again, owner included — nothing acts on the crawl ──── */
+console.log(`\nReading those ${off.length} again, owner included…`);
+const checked = await verify({ kylas, items: off.map((r) => r.id), apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
+  onProgress: progress("re-read") });
 const by = (s) => checked.filter((r) => r.status === s);
 const fix = by("fix");
 const count = (list) => list.reduce((a, r) => a + r.move.length, 0);
@@ -90,7 +96,7 @@ console.log(`\nRESULT (Kylas, now):`);
 console.log(`  fix          ${String(fix.length).padStart(5)} account(s) on an active BD · ${count(fix)} contact(s) on somebody else → move to the account's owner`);
 console.log(`  super-admin  ${String(by("super-admin").length).padStart(5)} account(s) on the Super Admin · ${count(by("super-admin"))} contact(s) — allot the account first (contacts are never moved TO the Super Admin)`);
 console.log(`  deactivated  ${String(by("deactivated").length).padStart(5)} account(s) on a deactivated user · ${count(by("deactivated"))} contact(s) — allot the account first`);
-console.log(`  no-owner     ${String(by("no-owner").length).padStart(5)} · aligned (copy was behind) ${by("aligned").length} · deleted ${by("gone").length} · unreadable ${by("error").length}`);
+console.log(`  no-owner     ${String(by("no-owner").length).padStart(5)} · aligned on the re-read ${by("aligned").length} · deleted ${by("gone").length} · unreadable ${by("error").length}`);
 
 const tally = (pairs) => Object.entries(pairs.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
 if (fix.length) {
@@ -120,16 +126,16 @@ const todo = fix.slice(0, LIMIT);
 const snapFile = `align-snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
 writeFileSync(snapFile, JSON.stringify(todo.map((r) => ({ company: r.id, owner: r.owner, contacts: r.move })), null, 2));
 console.log(`\nAPPLY — ${todo.length} of ${fix.length} account(s). Before-images: ${snapFile}\n`);
-let accounts = 0, moved = 0, failed = 0;
+let fixed = 0, moved = 0, failed = 0;
 for (let i = 0; i < todo.length; i += MAX_ALLOT) {
   const batch = todo.slice(i, i + MAX_ALLOT);
   /* The account goes to the person who already owns it — so allot() moves only
      the contacts, every one of them (leaveActive: false), and reads the
      account's owner back unchanged. */
-  const r = await allot({ kylas, apiUser: API_USER, leaveActive: false,
+  const r = await allot({ kylas, apiUser: API_USER, leaveActive: false, keepOwner: true,
     assignments: batch.map((x) => ({ company: x.id, ownerId: x.owner })) });
   for (const x of r.results) {
-    if (x.ok && x.from === x.to) accounts++;
+    if (x.ok && x.from === x.to) fixed++;
     moved += x.contactsMoved; failed += x.contactsFailed.length;
     const bad = !x.ok ? ` · ${x.why}` : x.from !== x.to ? ` · OWNER CHANGED ${x.from} -> ${x.to}?` : "";
     console.log(`  ${x.id.padEnd(9)} ${label(x.to)} · ${x.contactsMoved} contact(s) moved` +
@@ -137,6 +143,6 @@ for (let i = 0; i < todo.length; i += MAX_ALLOT) {
   }
   console.log(`  — ${Math.min(i + MAX_ALLOT, todo.length)}/${todo.length}`);
 }
-console.log(`\nDONE: ${accounts}/${todo.length} account(s) with their contacts now on the account's owner · ${moved} contact(s) moved` +
+console.log(`\nDONE: ${fixed}/${todo.length} account(s) with their contacts now on the account's owner · ${moved} contact(s) moved` +
   `${failed ? ` · ${failed} NOT moved (listed above)` : ""}.\n`);
-process.exit(failed || accounts < todo.length ? 1 : 0);
+process.exit(failed || fixed < todo.length ? 1 : 0);

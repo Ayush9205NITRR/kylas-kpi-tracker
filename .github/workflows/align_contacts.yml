@@ -3,9 +3,10 @@
 # Ayush, 2026-10-22: "all associated contacts for that account should be
 # allotted to whoever owns that account. Check for that."
 #
-#   check      the Airtable copy nominates accounts with a contact on somebody
-#              else; each is read again from Kylas (owner + every contact) and
-#              the report says how many, whose, and who holds them. Writes nothing.
+#   check      every account from Kylas (the console's own crawl), the contacts
+#              of each, the ones that are off read again owner included; the
+#              report says how many, whose, and who holds them. Writes nothing.
+#              About an hour for the whole CRM — `owners` narrows it.
 #   first-one  moves the contacts of the first account to its owner — look at it in Kylas
 #   all        the rest
 #
@@ -33,10 +34,9 @@ concurrency:
 jobs:
   align:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 340
     env:
       KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
-      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       OWNERS: ${{ github.event.inputs.owners }}
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
           node-version: '22'
       - name: Check the secrets are there
         run: |
-          for v in KYLAS_KEY AIRTABLE_PAT; do
+          for v in KYLAS_KEY; do
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
       - name: Check (writes nothing)

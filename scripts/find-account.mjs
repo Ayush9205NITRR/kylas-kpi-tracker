@@ -1,100 +1,99 @@
 #!/usr/bin/env node
-/* "X NAHI DIKH RAHI" — WHERE IS THIS ACCOUNT, AND WHY IS IT NOT ON THE SCREEN.
+/* "X NAHI DIKH RAHI" — IS THIS ACCOUNT IN KYLAS, AND WHY IS IT NOT ON THE SCREEN.
  *
  * Ayush, 2026-10-22: "Boolean Post nahi dikh rahi hai, kya reason ho sakte
- * hai". The console's accounts list is the Airtable copy (handlers.mjs
- * /companies), so an account can be missing from it for reasons Kylas never
- * shows. This asks Kylas (free-text, as its own search box does) and the copy,
- * and says which case it is:
- *
- *   not in Kylas         nothing by that name — spelling, or deleted
- *   not in the copy      in Kylas, but the sync has not brought it over yet
- *                        (companies sync nightly at 02:00 IST; a contact's
- *                        hourly sync brings its company with it)
- *   owner                in the copy, on somebody else — a BD sees only their own
- *   deactivated / Super Admin owner
+ * hai". This reads what the console reads — the Kylas company crawl
+ * (handlers.mjs /companies serves it whenever the Airtable copy is short of the
+ * account, which on 2026-10-22 it was: 685 of ~17,900) — and looks for the name
+ * there, then for contacts whose company carries that name. For each account
+ * found: its owner, whether that owner is active, its contacts and who holds
+ * them, and so which screens show it.
  *
  *   node --env-file=.env.local scripts/find-account.mjs --name "boolean post"
  *
- * Reads only. Logs print ids and BD first names only (public Actions logs):
- * the name searched for is never echoed, and a match is described as exact or
- * partial rather than printed.
+ * Reads only. PUBLIC LOGS: a matched name is printed as its first three
+ * letters and its length ("Boo… 12 chars"), never whole; ids and BD first
+ * names otherwise.
  */
 import { createClient, toUser } from "./kylas.mjs";
-import { createAirtable } from "./airtable.mjs";
 import { companyOwnerOf, contactsOfCompany } from "./reassign.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i + 1] : d; };
 const NAME = String(arg("name", process.env.FIND_NAME || "")).trim();
-const { KYLAS_KEY, AIRTABLE_PAT } = process.env;
 if (!NAME) { console.error('--name "account name"'); process.exit(1); }
-for (const [k, v] of Object.entries({ KYLAS_KEY, AIRTABLE_PAT })) if (!v) { console.error(`Set ${k}.`); process.exit(1); }
+if (!process.env.KYLAS_KEY) { console.error("Set KYLAS_KEY."); process.exit(1); }
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 const want = norm(NAME);
+const words = NAME.toLowerCase().split(/\s+/).map(norm).filter((w) => w.length >= 4);
 const idOf = (v) => String((v && typeof v === "object" ? v.id : v) ?? "");
+const hint = (s) => `"${String(s || "").trim().slice(0, 3)}…" ${String(s || "").trim().length} chars`;
+/* exact | contains the whole name | has one of its words | null. An empty name
+   matches nothing — the first version let "" through as a partial match. */
+const match = (name) => {
+  const n = norm(name);
+  if (!n) return null;
+  if (n === want) return "exact";
+  if (n.includes(want) || (n.length >= 5 && want.includes(n))) return "partial";
+  if (words.some((w) => n.includes(w))) return "word";
+  return null;
+};
 
-const kylas = createClient(KYLAS_KEY, { log: () => {}, base: process.env.KYLAS_BASE || "https://api.kylas.io" });
-const at = createAirtable(AIRTABLE_PAT, process.env.AIRTABLE_BASE || "appEwJu0bleHh9b8t", { log: () => {} });
+const kylas = createClient(process.env.KYLAS_KEY, { log: () => {}, base: process.env.KYLAS_BASE || "https://api.kylas.io" });
 const apiUser = toUser(await kylas.me().catch(() => ({}))).id || "74725";
 const userCache = new Map();
+const userOf = async (id) => {
+  if (!userCache.has(id)) userCache.set(id, await kylas.user(id).then(toUser).catch(() => null));
+  return userCache.get(id);
+};
 const who = async (id) => {
   if (!id) return "nobody";
   if (id === apiUser) return `Super Admin ${id}`;
-  if (!userCache.has(id)) userCache.set(id, await kylas.user(id).then(toUser).catch(() => null));
-  const u = userCache.get(id);
+  const u = await userOf(id);
   return `${u?.name?.split(" ")[0] || "user"} ${id}${u?.active === false ? " (DEACTIVATED)" : ""}`;
 };
-const match = (name) => (norm(name) === want ? "exact" : norm(name).includes(want) || want.includes(norm(name)) ? "partial" : "loose");
-const free = (v) => ({ condition: "AND", valid: true, rules: [{ id: "multi_field", field: "multi_field", type: "multi_field", input: "multi_field", operator: "multi_field", value: v }] });
-const rows = (r) => r?.content || r?.data || [];
 
-/* Each word too, so "Boolean Post" also finds "BooleanPost" and "Boolean Post Pvt Ltd". */
-const terms = [...new Set([NAME, ...NAME.split(/\s+/).filter((w) => w.length >= 4)])];
-const companies = new Map();
-for (const t of terms) {
-  for (const fields of [["id", "name", "ownerId", "createdAt", "updatedAt"], ["id", "name", "ownerId"]]) {
-    try {
-      const r = await kylas.raw("POST", "/v1/search/company?sort=updatedAt,desc&page=0&size=50", { fields, jsonRule: free(t) });
-      for (const c of rows(r)) if (match(c.name) !== "loose") companies.set(String(c.id), c);
-      break;
-    } catch (e) { if (![400, 500].includes(e.status)) throw e; }
+console.log("Reading every account from Kylas (the list the console shows)…");
+const crawl = await kylas.companies();
+const cs = kylas.lastCompanySearch();
+console.log(`${crawl.length} accounts${cs?.reportedTotal ? ` of the ${cs.reportedTotal} Kylas reports` : ""}${cs?.truncated ? " — the list is SHORT, an account can be missing from it" : ""}.`);
+const found = new Map();
+for (const c of crawl) { const m = match(c.name); if (m) found.set(String(c.id), { id: String(c.id), name: c.name, how: m }); }
+
+/* Contacts whose company is called that — Kylas' own free-text search. */
+for (const t of [NAME, ...words]) {
+  let list = [];
+  try { list = await kylas.contactsMatching(t, 50); } catch { continue; }
+  for (const p of list) {
+    const coName = p.companyName || (p.company && typeof p.company === "object" ? p.company.name : "");
+    const m = match(coName), id = idOf(p.company);
+    if (m && id && !found.has(id)) found.set(id, { id, name: coName, how: `${m}, through a contact — NOT in the console's list` });
   }
 }
-const contacts = new Map();
-for (const t of terms) {
-  try { for (const c of await kylas.contactsMatching(t, 50)) contacts.set(String(c.id), c); } catch { /* the company half still answers */ }
-}
-const viaContact = [...contacts.values()].filter((c) => match(c.companyName || c.company?.name || "") !== "loose");
-for (const c of viaContact) {
-  const id = idOf(c.company);
-  if (id && !companies.has(id)) companies.set(id, { id, name: c.companyName || c.company?.name || "", viaContact: true });
-}
 
-console.log(`Kylas: ${companies.size} account(s) whose name matches (exact or partial).`);
-if (!companies.size) {
-  console.log(`\nVERDICT: not in Kylas under that name — check the spelling in Kylas, or it was deleted / merged.`);
-  process.exit(0);
+const rank = { exact: 0, partial: 1, word: 2 };
+const hits = [...found.values()].sort((a, b) => (rank[a.how.split(",")[0]] ?? 3) - (rank[b.how.split(",")[0]] ?? 3));
+console.log(`\n${hits.filter((h) => h.how === "exact").length} exact · ${hits.filter((h) => h.how.startsWith("partial")).length} containing the whole name · ` +
+  `${hits.filter((h) => h.how.startsWith("word")).length} sharing a word.`);
+if (!hits.some((h) => h.how !== "word")) {
+  console.log(`\nVERDICT: no account in Kylas is called that. Check the spelling in Kylas itself (search there), ` +
+    `or it was deleted / merged.${hits.length ? " The word matches are listed below in case one is it." : ""}`);
 }
-for (const [id, c] of companies) {
+for (const h of hits.slice(0, 15)) {
   let rec = null;
-  try { rec = await kylas.company(id); } catch (e) { console.log(`\n${id}: Kylas cannot read it (${e.status || e.message}) — deleted?`); continue; }
-  const owner = await companyOwnerOf(kylas, id, rec);
-  const people = await contactsOfCompany(kylas, id).catch(() => []);
-  const copy = await at.list("Companies", `{Kylas Company ID}='${id}'`, 1).catch(() => []);
-  const row = copy[0]?.fields || null;
-  const copyContacts = await at.list("Contacts", `ARRAYJOIN({Company Kylas ID})='${id}'`, 100).catch(() => []);
-  const u = owner ? (await who(owner), userCache.get(owner)) : null;
-  console.log(`\n${id}  (${match(c.name || rec?.name)} match${c.viaContact ? ", found through a contact" : ""})`);
-  console.log(`  Kylas:   owner ${await who(owner)} · created ${rec?.createdAt || c.createdAt || "?"} · updated ${rec?.updatedAt || c.updatedAt || "?"} · ${people.length} contact(s)` +
-    (people.length ? ` on ${[...new Set(await Promise.all(people.map((p) => who(idOf(p.ownerId)))))].join(", ")}` : ""));
-  console.log(`  Copy:    ${row ? `in Companies — owner ${row["Kylas Owner ID"] ? await who(String(row["Kylas Owner ID"])) : "(blank)"} · ${copyContacts.length} contact row(s)` : "NOT in Companies"}`);
-  const why = [];
-  if (!row) why.push("not in the Airtable copy yet, so the console cannot list it — the nightly company sync (02:00 IST) brings it, or sooner if a contact on it syncs (hourly)");
-  else if (String(row["Kylas Owner ID"] || "") !== owner) why.push(`the copy still has the old owner — it moves to ${await who(owner)} at the next sync`);
-  if (owner === apiUser) why.push("owned by the Super Admin — only shows under Owner: Super Admin / everyone, never in a BD's own list");
-  else if (u && u.active === false) why.push("owner is DEACTIVATED — nobody sees it in their own list; allot it");
-  else if (owner) why.push(`a BD sees it only if they are ${await who(owner)} — anyone else must switch Owner to everyone (admins)`);
-  if (!people.length) why.push("no contacts — it shows under All accounts, but not in any calling queue");
-  console.log(`  Why:     ${why.join("\n           ")}`);
+  try { rec = await kylas.company(h.id); } catch (e) { console.log(`\n${h.id}  ${hint(h.name)} (${h.how}) — Kylas cannot read it (${e.status || e.message}): deleted?`); continue; }
+  const owner = await companyOwnerOf(kylas, h.id, rec);
+  const people = await contactsOfCompany(kylas, h.id).catch(() => []);
+  const holders = [...new Set(await Promise.all(people.map((p) => who(idOf(p.ownerId)))))];
+  const u = owner && owner !== apiUser ? await userOf(owner) : null;
+  console.log(`\n${h.id}  ${hint(h.name)} (${h.how})`);
+  console.log(`  owner ${await who(owner)} · created ${rec?.createdAt || "?"} · updated ${rec?.updatedAt || "?"} · ` +
+    `${people.length} contact(s)${people.length ? ` on ${holders.join(", ")}` : ""}`);
+  const shows = [];
+  if (owner === apiUser) shows.push("on the Super Admin: in All accounts only with Owner = everyone / Super Admin; in nobody's own list or queue");
+  else if (u?.active === false) shows.push("owner DEACTIVATED: in nobody's own list; admins see it with Owner = everyone — allot it");
+  else if (owner) shows.push(`in ${await who(owner)}'s own list; everyone else only with Owner = everyone (admins)`);
+  if (!people.length) shows.push("no contacts: listed under All accounts, but never in a calling queue");
+  console.log(`  Shows:  ${shows.join("\n          ")}`);
 }
+if (hits.length > 15) console.log(`\n…and ${hits.length - 15} more word matches.`);

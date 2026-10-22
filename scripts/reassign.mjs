@@ -372,8 +372,11 @@ export async function contactsOfCompany(kylas, companyId) {
   return out;
 }
 
+/* keepOwner: the account must ALREADY be on `to` — only its contacts move. An
+   account whose owner reads back as anybody else is left untouched (align.mjs:
+   a check minutes old must never hand an account back to its previous owner). */
 export async function allot({ kylas, assignments = [], leaveActive = true, apiUser = "",
-                              isActive = async () => null, log = () => {}, concurrency = 3 }) {
+                              isActive = async () => null, log = () => {}, concurrency = 3, keepOwner = false }) {
   const list = (Array.isArray(assignments) ? assignments : [])
     .map((a) => ({ id: String(a?.company ?? a?.id ?? ""), to: String(a?.ownerId ?? "") }))
     .filter((a) => /^\d+$/.test(a.id) && /^\d+$/.test(a.to));
@@ -390,6 +393,7 @@ export async function allot({ kylas, assignments = [], leaveActive = true, apiUs
     try {
       const co = await kylas.company(id);
       out.from = await companyOwnerOf(kylas, id, co);
+      if (keepOwner && out.from !== to) { out.why = `owner is now ${out.from || "nobody"}, not ${to} — left as it is`; return out; }
       /* CONTACTS FIRST: a stop part-way must never leave the account handed
          over with its people behind (rule 4 of the header). */
       const people = await contactsOfCompany(kylas, id);

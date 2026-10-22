@@ -1919,16 +1919,25 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
   `allot_accounts.yml` defaults `contacts` to `all`.
 - **The check, and the fix for what is already off** — `scripts/align-contacts.mjs`,
   workflow **Contacts follow their account's owner** (`check` → `first-one` →
-  `all`, optional `owners`). The Airtable copy (`Kylas Owner ID` on Companies and
-  Contacts) nominates accounts with a contact on somebody else; each is read again
-  from **Kylas** (owner + every contact, `align.mjs verify()`), and the fix is
-  `allot()` to the owner the account already has — contacts only, one-field
-  writes, owner read back unchanged. Accounts on the **Super Admin** or a
+  `all`, optional `owners`). **Kylas only**: every account from the console's own
+  crawl, the contacts of each, the ones that are off read again owner included
+  (`align.mjs verify()`); the fix is `allot(…, keepOwner)` to the owner the
+  account already has — contacts only, one-field writes, and an account whose
+  owner has changed since the check is left alone. NOT the Airtable copy: the
+  first version nominated from it and would have checked ~1 account in 20 — on
+  2026-10-22 the copy held **685 of ~17,900 companies**, and only **1,947 of its
+  37,443 contacts** were linked to a company (the console lists from the Kylas
+  crawl for exactly that reason, handlers.mjs "a copy that is short"). Accounts on the **Super Admin** or a
   **deactivated** user are only reported: contacts are never moved TO them;
   allot the account first. Plan + before-images: artifact `align-<run id>`.
   Tests: `test-align` 16; `test-allot-live` 14 (no box; Priya's contacts move).
 - Expected first hit: the **320 contacts in 101 accounts** §3l3 left with the
   active BD already working them.
+- **"X nahi dikh rahi"** — `scripts/find-account.mjs`, workflow **Find an account
+  (why is it not showing)**: looks for the name in the Kylas crawl (what the
+  console lists) and through contacts' company names, and per hit says owner,
+  active or not, contacts and on whom, and which screens show it. Names print as
+  `"Boo…" 12 chars` (public logs).
 
 ## 3m · The duplicate check (phone and email, against the whole account)
 

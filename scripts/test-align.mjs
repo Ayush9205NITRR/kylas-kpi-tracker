@@ -3,37 +3,19 @@
  *
  *   node scripts/test-align.mjs
  *
- * The pure half on fixtures; then verify() and the fix (allot() to the owner
- * the account already has) against mock-kylas.
+ * classify() on fixtures; then verify() and the fix (allot() to the owner the
+ * account already has, keepOwner) against mock-kylas.
  */
 import { spawn } from "node:child_process";
 import { createClient } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany } from "./reassign.mjs";
-import { candidates, classify, verify } from "./align.mjs";
+import { classify, verify } from "./align.mjs";
 
 let pass = 0, fail = 0;
 const ok = (what, c, d = "") => { (c ? pass++ : fail++); console.log(`  ${c ? "PASS" : "FAIL"}  ${what}${!c && d ? `  — ${String(d).slice(0, 300)}` : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-console.log("\n1 · the copy nominates");
-const companies = [
-  { id: "recA", fields: { "Kylas Company ID": "1", "Kylas Owner ID": "80001" } },
-  { id: "recB", fields: { "Kylas Company ID": "2", "Kylas Owner ID": "80005" } },
-  { id: "recC", fields: { "Kylas Company ID": "3", "Kylas Owner ID": "80001" } },
-];
-const contacts = [
-  { fields: { "Kylas Contact ID": "11", Company: ["recA"], "Kylas Owner ID": "80001" } },
-  { fields: { "Kylas Contact ID": "12", Company: ["recA"], "Kylas Owner ID": "74725" } },
-  { fields: { "Kylas Contact ID": "21", Company: ["recB"], "Kylas Owner ID": "80001" } },
-  { fields: { "Kylas Contact ID": "22", Company: ["recB"], "Kylas Owner ID": "74726" } },
-  { fields: { "Kylas Contact ID": "31", Company: ["recC"], "Kylas Owner ID": "80001" } },
-  { fields: { "Kylas Contact ID": "41", "Kylas Owner ID": "80001" } },
-];
-const cand = candidates({ companies, contacts });
-ok("only accounts with a contact on somebody else", cand.map((c) => c.id).join() === "2,1", JSON.stringify(cand));
-ok("...with which contacts, and who holds them", cand[0].off.map((o) => `${o.id}:${o.owner}`).join() === "21:80001,22:74726");
-
-console.log("\n2 · what is fixed and what is only reported");
+console.log("\n1 · what is fixed and what is only reported");
 const users = { 80001: { active: true }, 80005: { active: true }, 74726: { active: true }, 74727: { active: false } };
 const userOf = async (id) => users[id] || null;
 const ppl = [{ id: 1, ownerId: 80001 }, { id: 2, ownerId: { id: 74725 } }, { id: 3, ownerId: null }];
@@ -44,7 +26,7 @@ ok("account on a deactivated user: reported, not fixed", (await classify({ owner
 ok("account with no owner: reported", (await classify({ owner: "", people: ppl, apiUser: "74725", userOf })).status === "no-owner");
 ok("everyone already on the owner: aligned", (await classify({ owner: "80001", people: [ppl[0]], apiUser: "74725", userOf })).status === "aligned");
 
-console.log("\n3 · against Kylas (mock)");
+console.log("\n2 · against Kylas (mock)");
 const PORT = 9963, BASE = `http://127.0.0.1:${PORT}`;
 const mock = spawn(process.execPath, ["scripts/mock-kylas.mjs"], {
   env: { ...process.env, PORT: String(PORT), MOCK_BD_TEAM: "1", MOCK_DEAD_COMPANIES: "903" }, stdio: ["ignore", "ignore", "inherit"] });
@@ -55,7 +37,7 @@ const get = async (path) => { for (let i = 0; i < 10; i++) { const r = await fet
 const mockUsers = async (id) => ({ 74725: { active: true }, 74726: { active: true }, 74727: { active: false }, 80001: { active: true }, 80005: { active: true } })[id] || null;
 
 /* 1776620: on the Super Admin, one contact of its own and one of Priya's (74726). */
-let v = await verify({ kylas, ids: ["1776620", "903", "999999"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
+let v = await verify({ kylas, items: ["1776620", "903", "999999"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
 ok("an account on the Super Admin is reported, not fixed", v[0].status === "super-admin", JSON.stringify(v[0]));
 ok("an account on a deactivated user is reported", v[1].status === "deactivated", JSON.stringify(v[1]));
 ok("a deleted account is skipped", v[2].status === "gone", JSON.stringify(v[2]));
@@ -64,14 +46,20 @@ ok("a deleted account is skipped", v[2].status === "gone", JSON.stringify(v[2]))
 await allot({ kylas, apiUser: "74725", isActive: async (id) => (await mockUsers(id))?.active ?? null, leaveActive: true,
   assignments: [{ company: 1776620, ownerId: 80005 }] });
 ok("set-up: Priya's contact stayed with Priya", (await get("/v1/contacts/112937")).ownerId === 74726);
-v = await verify({ kylas, ids: ["1776620"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
+v = await verify({ kylas, items: ["1776620"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
 ok("now it is a fix: Priya's contact is on somebody other than the account's owner", v[0].status === "fix" && v[0].owner === "80005" &&
    v[0].move.length === 1 && v[0].move[0].id === "112937" && v[0].move[0].from === "74726", JSON.stringify(v[0]));
-const r = await allot({ kylas, apiUser: "74725", leaveActive: false, assignments: [{ company: v[0].id, ownerId: v[0].owner }] });
+/* keepOwner: a check that still thinks the account is Sejal's must not hand it back. */
+const stale = await allot({ kylas, apiUser: "74725", leaveActive: false, keepOwner: true, assignments: [{ company: v[0].id, ownerId: 80001 }] });
+ok("keepOwner: an account no longer on that person is left alone", !stale.results[0].ok && stale.results[0].contactsMoved === 0 &&
+   (await get("/v1/companies/1776620")).ownerId === 80005 && (await get("/v1/contacts/112937")).ownerId === 74726, JSON.stringify(stale.results[0]));
+const known = await verify({ kylas, items: [{ id: "1776620", owner: "80005" }], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
+ok("an owner from the crawl skips the account read and decides the same", known[0].status === "fix" && known[0].move.length === 1, JSON.stringify(known[0]));
+const r = await allot({ kylas, apiUser: "74725", leaveActive: false, keepOwner: true, assignments: [{ company: v[0].id, ownerId: v[0].owner }] });
 ok("the fix moves the contact and leaves the account where it was", r.results[0].ok && r.results[0].from === "80005" && r.results[0].contactsMoved === 1, JSON.stringify(r.results[0]));
 ok("...in Kylas: the contact is on the account's owner", (await get("/v1/contacts/112937")).ownerId === 80005);
 ok("...the account's owner unchanged", (await get("/v1/companies/1776620")).ownerId === 80005);
-v = await verify({ kylas, ids: ["1776620"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
+v = await verify({ kylas, items: ["1776620"], apiUser: "74725", userOf: mockUsers, companyOwnerOf, contactsOfCompany });
 ok("checked again: aligned", v[0].status === "aligned", JSON.stringify(v[0]));
 
 console.log(`\n${pass} passed, ${fail} failed`);
