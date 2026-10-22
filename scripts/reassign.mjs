@@ -408,7 +408,13 @@ export async function allot({ kylas, assignments = [], leaveActive = true, apiUs
           /* The contact endpoint says what it did — believe that, not the 200. */
           if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(p.id), why: `owner is ${r.newOwnerId}` });
           else out.contactsMoved++;
-        } catch (e) { out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) }); }
+        } catch (e) {
+          /* 002109 "Entity is already owned by given user": the search was a
+             moment behind a contact that is already on `to` — done, not failed
+             (2026-10-22, two of 1,294 in the live align run). */
+          if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
+          out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) });
+        }
       }
       if (out.from !== to) await kylas.setCompanyOwner(id, to);
       out.ownerAfter = await companyOwnerOf(kylas, id, await kylas.company(id));
