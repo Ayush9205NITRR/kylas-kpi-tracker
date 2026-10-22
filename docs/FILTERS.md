@@ -47,7 +47,7 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | column | type | reads | notes |
 |---|---|---|---|
 | Company | Text | `name` | |
-| Pipeline stage | Single select | Kylas' `Pipeline Stage - BD`, or the POCs' best rung | the checklist includes **No stage** — thousands of allotted accounts have never been given one, and leaving it out makes them unreachable |
+| ~~Pipeline stage~~ (column removed 2026-10-22 — the UI shows Account stage only) | Single select | Kylas' `Pipeline Stage - BD`, or the POCs' best rung | the checklist includes **No stage** — thousands of allotted accounts have never been given one, and leaving it out makes them unreachable |
 | Owner | Single select | `owner` | |
 | Source of Data | Single select | `source` | |
 | Offsite | Multiple select | `offsite` | the one genuinely multi-valued column: a company can name two quarters, so the checklist means *has any of*, not *is* |

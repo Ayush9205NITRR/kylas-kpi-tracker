@@ -2426,7 +2426,7 @@
      rather than a number: the company, who owns it, where it came from, both
      pipeline stages. Not the money — "100" would match half the list through
      a revenue figure nobody was searching for. */
-  const textOf = (co) => [co.name, co.owner, co.source, label(stageOf(co)), co.enrich?.aps]
+  const textOf = (co) => [co.name, co.owner, co.source, label(acctStageOf(co)), co.enrich?.aps]
     .filter(Boolean).join(" ").toLowerCase();
   /* Every word has to land, in any order and anywhere on the row: "acme ravi"
      finds Ravi's Acme without caring which column holds which.
@@ -2531,7 +2531,7 @@
     focus: (c) => focusOf(c),
     next: (c) => nextOf(c),
     fresh: (c) => freshOf(c),
-    stage: (c) => stageOf(c) || "",
+    stage: (c) => acctStageOf(c) || "",
     /* THE BANDS. Computed from the raw number on every read — nobody types
        "₹50–100 Cr" into a field, and a band that was written down once is
        wrong the day the number behind it changes. */
@@ -3330,14 +3330,11 @@
       ff: { type: "text", get: (c) => c.name || "" },
       cell: (c) => `${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
         focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}` },
-    { k: "stage", label: "Pipeline stage", w: "1.3fr", on: true,
-      /* blankOk: "no stage" is a real answer on thousands of accounts, so the
-         checklist offers it rather than making it unreachable. */
-      /* Wrapped, not named: stageName and offLabel below are declared further
-         down this file, and naming one here would read it before it exists —
-         the same trap VALUE_OF carries a note about. */
-      ff: { type: "enum", get: (c) => stageOf(c) || "", labelOf: (v) => stageName(v), blankOk: true },
-      cell: (c) => esc(label(stageOf(c)) || "—") },
+    /* NO "PIPELINE STAGE" COLUMN. The company record's own Pipeline Stage - BD
+       is still read and kept (the backend, the push, the board's fallback for
+       an account with no saved contact), but the screen shows one stage: the
+       Account stage, computed from the contacts. Ayush, 2026-10-22: "Pipeline
+       stage is not required in UI, we only require account stage". */
     { k: "owner", label: "Owner", w: "1fr", on: true,
       ff: { type: "enum", get: (c) => c.owner || "" },
       cell: (c) => esc(c.owner || "—") },
@@ -3398,7 +3395,8 @@
        docs/stages.json. That is a different fact from the two columns either
        side of it:
 
-         Pipeline stage    the company's own Pipeline Stage - BD in Kylas, a
+         Pipeline stage    (no longer a column, 2026-10-22) the company's own
+                           Pipeline Stage - BD in Kylas, a
                            single value somebody typed on the company record,
                            which goes stale the moment a POC moves
          Account stage     THIS — computed from the contacts
@@ -3978,7 +3976,7 @@
       add("owner", "", `Allotted to: ${o?.name || FILTERS.owner}`);
     }
     for (const [key, name, lab] of [["source", "Source of Data", label],
-                                    ["stage", "Stage", label],
+                                    ["stage", "Account stage", label],
                                     ["kpi", "KPI", (k) => (FUNNEL.find((f) => f.key === k) || {}).label || k]]) {
       const st = FILTERS[key];
       const not = st.mode === "none" ? "not " : "";
@@ -4032,7 +4030,7 @@
        problem as not knowing the counts. */
     const sources = union(SOURCES, all.map((c) => c.source))
       .sort((a, b) => (srcCount.get(b) || 0) - (srcCount.get(a) || 0) || String(a).localeCompare(String(b)));
-    const stages = union(STAGES, all.map((c) => c.stage))
+    const stages = union(STAGES, all.map((c) => acctStageOf(c)))
       .sort((a, b) => (STAGE_RUNG[b] || 0) - (STAGE_RUNG[a] || 0));
 
     /* The filter test and the sort, both used by the first paint and by
@@ -4040,7 +4038,7 @@
        the table then painted differently. */
     const keep = (c) =>
       matchesSet(FILTERS.source, c.source ? [c.source] : []) &&
-      matchesSet(FILTERS.stage, c.stage ? [c.stage] : []) &&
+      matchesSet(FILTERS.stage, acctStageOf(c) ? [acctStageOf(c)] : []) &&
       matchesSet(FILTERS.kpi, FUNNEL.filter((f) => c[f.key]).map((f) => f.key)) &&
       (!FILTERS.calledSince || (c.lastCalledAt || "") >= FILTERS.calledSince);
 
@@ -4063,7 +4061,7 @@
             <span class="c1">${`<input class="cpick" type="checkbox" data-pick="${esc(c.id)}"
               aria-label="Select ${esc(c.name)}"${ACC.picked.has(String(c.id)) ? " checked" : ""}>`
             }<b>${esc(c.name)}</b><em>${esc(c.source || "—")}</em></span>
-            <span class="c2">${esc(label(c.stage) || "—")}</span>
+            <span class="c2">${esc(label(acctStageOf(c)) || "—")}</span>
             <span class="c3">${c.contacts.length}</span>
             <span class="c4${c.pocs.right.length ? "" : " no"}"${
               c.pocs.right.length > 1 ? ` title="${esc(c.pocs.right.join(", "))}"` : ""
@@ -4103,7 +4101,7 @@
       return `
         <button class="vcard${stale ? " stale" : ""}" type="button" data-id="${esc(c.id)}">
           <b>${esc(c.name)}</b>
-          ${showStage ? `<em>${esc(label(stageOf(c)) || c.kpiStage || "Not reached")}</em>` : ""}
+          ${showStage ? `<em>${esc(label(acctStageOf(c)) || c.kpiStage || "Not reached")}</em>` : ""}
           ${who ? `<span class="who" title="${esc([...c.pocs.discovery, ...c.pocs.right].join(", "))}"
             >${esc(who)}${more > 0 ? ` +${more}` : ""}</span>` : ""}
           <span class="foot">
@@ -4176,8 +4174,8 @@
           VIEW_MODE === "accounts" ? "" : `
         <label>Source${multiFilter("fSource", "Source of data", sources, FILTERS.source, label,
           countBy(all, (c) => (c.source ? [c.source] : [])))}</label>
-        <label>Stage${multiFilter("fStage", "Pipeline stage", stages, FILTERS.stage, label,
-          countBy(all, (c) => (c.stage ? [c.stage] : [])))}</label>`}
+        <label>Stage${multiFilter("fStage", "Account stage", stages, FILTERS.stage, label,
+          countBy(all, (c) => (acctStageOf(c) ? [acctStageOf(c)] : [])))}</label>`}
         ${/* The funnel filter IS the board's columns, so on the board it is a
              second control for one thing — and two controls for one thing
              disagree the moment somebody uses both. In Accounts it is the KPI
