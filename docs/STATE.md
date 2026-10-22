@@ -1920,8 +1920,10 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
 - **The check, and the fix for what is already off** — `scripts/align-contacts.mjs`,
   workflow **Contacts follow their account's owner** (`check` → `first-one` →
   `all`, optional `owners`). **Kylas only**: every account from the console's own
-  crawl, the contacts of each, the ones that are off read again owner included
-  (`align.mjs verify()`); the fix is `allot(…, keepOwner)` to the owner the
+  crawl, every contact in one crawl (`contactsChangedSince(null)`, id/owner/company),
+  joined (`align.mjs offAccounts()`); only the accounts that are off are read again,
+  owner included (`verify()`). A search per account was the first try: at Kylas'
+  ~1 request a second that is five hours for 18,000 accounts; the fix is `allot(…, keepOwner)` to the owner the
   account already has — contacts only, one-field writes, and an account whose
   owner has changed since the check is left alone. NOT the Airtable copy: the
   first version nominated from it and would have checked ~1 account in 20 — on

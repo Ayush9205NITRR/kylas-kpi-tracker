@@ -10,10 +10,9 @@
  *   ... --apply --limit 1                                                  the first account — look at it in Kylas
  *   ... --apply --all                                                      the rest
  *
- * The check reads every account from Kylas (the console's own crawl), the
- * contacts of each, and reads the ones that are off again, owner included —
- * align.mjs says why it is not the Airtable copy. About an hour for the whole
- * CRM; --owners narrows it. --apply moves each contact with PUT /v1/contacts/{id}/owner
+ * The check reads every account and every contact from Kylas (two crawls),
+ * joins them, and reads the accounts that are off again, owner included —
+ * align.mjs says how, and why it is not the Airtable copy. --owners narrows it. --apply moves each contact with PUT /v1/contacts/{id}/owner
  * (one field; never a whole-record PUT) through reassign.mjs allot(), which
  * re-reads the account first and reads the owner back. The account's own owner
  * never changes here. Before-images (contact id, old owner) go to
@@ -24,7 +23,7 @@
 import { writeFileSync } from "node:fs";
 import { createClient, toUser } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany, MAX_ALLOT } from "./reassign.mjs";
-import { verify } from "./align.mjs";
+import { verify, offAccounts } from "./align.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i + 1] : d; };
@@ -75,20 +74,30 @@ const LIMIT = has("all") ? Infinity : Number(arg("limit", "0"));
 const MAX_CHECK = Number(arg("max", "0")) || Infinity;
 accounts = accounts.slice(0, MAX_CHECK);
 
-/* ── 2 · every account's contacts ─────────────────────────────────── */
+/* ── 2 · every contact, once — joined to the accounts ────────────── */
 const progress = (what) => { let last = -1; const t0 = Date.now();
   return (d, n) => { const p = Math.floor((d / n) * 20); if (p !== last) { last = p;
     console.log(`  ${what} ${d}/${n} · ${Math.round((Date.now() - t0) / 1000)}s`); } }; };
-console.log(`\nReading the contacts of ${accounts.length} account(s) from Kylas…`);
-const first = await verify({ kylas, items: accounts, apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
-  concurrency: Number(arg("concurrency", "4")), onProgress: progress("read") });
-const off = first.filter((r) => !["aligned", "gone"].includes(r.status));
-console.log(`${first.length - off.length} aligned · ${off.length} with a contact on somebody else (or unreadable).`);
+console.log(`\nReading every contact from Kylas (id, owner, company)…`);
+let pagesSeen = 0;
+const crawlC = await kylas.contactsChangedSince(null, { fields: ["id", "ownerId", "company", "updatedAt"],
+  onPage: (n) => { if (++pagesSeen % 25 === 0) console.log(`  ${n} contacts…`); } });
+console.log(`${crawlC.contacts.length} contacts${crawlC.reportedTotal ? ` of the ${crawlC.reportedTotal} Kylas reports` : ""}` +
+  `${crawlC.stalled ? " — the crawl STALLED short; accounts whose contacts it missed are not checked" : ""}.`);
+const off = offAccounts(accounts, crawlC.contacts);
+const userNow = async (id) => (id === API_USER ? "super-admin" : (await userOf(id))?.active === false ? "deactivated" : id ? "bd" : "no-owner");
+const kinds = { bd: [], "super-admin": [], deactivated: [], "no-owner": [] };
+for (const a of off) kinds[await userNow(a.owner)].push(a);
+console.log(`${off.length} account(s) with a contact on somebody else: ${kinds.bd.length} on an active BD (to fix) · ` +
+  `${kinds["super-admin"].length} on the Super Admin · ${kinds.deactivated.length} on a deactivated user · ${kinds["no-owner"].length} with no owner.`);
 
-/* ── 3 · those again, owner included — nothing acts on the crawl ──── */
-console.log(`\nReading those ${off.length} again, owner included…`);
-const checked = await verify({ kylas, items: off.map((r) => r.id), apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
+/* ── 3 · the ones to fix, read again — nothing acts on the crawl ──── */
+console.log(`\nReading those ${kinds.bd.length} again from Kylas, owner and every contact…`);
+const reread = await verify({ kylas, items: kinds.bd.map((r) => r.id), apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
   onProgress: progress("re-read") });
+const asCrawled = (list, status) => list.map((a) => ({ id: a.id, owner: a.owner, status, move: a.off }));
+const checked = [...reread, ...asCrawled(kinds["super-admin"], "super-admin"), ...asCrawled(kinds.deactivated, "deactivated"),
+                 ...asCrawled(kinds["no-owner"], "no-owner")];
 const by = (s) => checked.filter((r) => r.status === s);
 const fix = by("fix");
 const count = (list) => list.reduce((a, r) => a + r.move.length, 0);

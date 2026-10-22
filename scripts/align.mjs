@@ -10,12 +10,15 @@
  *
  *   1. the console's own company crawl (kylas.companies()) gives every account
  *      and its owner;
- *   2. verify() reads each account's contacts from Kylas (one search per
- *      account — the owner is already known from the crawl) and classify()
- *      decides;
- *   3. the accounts that are not aligned are read AGAIN, owner included
- *      (verify() with no owner given), so a fix never acts on a crawl that is
- *      minutes old.
+ *   2. ONE crawl of every contact (kylas.contactsChangedSince(null), 200 a
+ *      page, only id / owner / company) — offAccounts() joins the two and
+ *      names the accounts with a contact on somebody else. A search per
+ *      account was tried first: Kylas allows about one request a second, so
+ *      18,000 accounts was five hours; the contact crawl is a few hundred
+ *      requests;
+ *   3. those accounts are read AGAIN, owner and contacts (verify() with no
+ *      owner given), and classify() decides — so a fix never acts on a crawl
+ *      that is minutes old.
  *
  * WHAT IS FIXED, AND WHAT IS ONLY REPORTED (classify):
  *   fix          the account is on an active BD → its other contacts go to
@@ -30,6 +33,24 @@
  */
 
 const idOf = (v) => String((v && typeof v === "object" ? v.id : v) ?? "");
+
+/* accounts: [{ id, owner }] from the company crawl; contacts: Kylas rows
+   ({ id, ownerId, company }). Every account with at least one contact whose
+   owner is not the account's, most such contacts first. Contacts on an
+   account outside `accounts` (another owner, under --owners) are ignored. */
+export function offAccounts(accounts = [], contacts = []) {
+  const owner = new Map(accounts.map((a) => [String(a.id), String(a.owner ?? "")]));
+  const out = new Map();
+  for (const c of contacts) {
+    const co = idOf(c?.company);
+    if (!co || !owner.has(co)) continue;
+    const from = idOf(c.ownerId);
+    if (from === owner.get(co)) continue;
+    if (!out.has(co)) out.set(co, { id: co, owner: owner.get(co), off: [] });
+    out.get(co).off.push({ id: String(c.id), from });
+  }
+  return [...out.values()].sort((a, b) => b.off.length - a.off.length || Number(a.id) - Number(b.id));
+}
 
 /* owner: the account's owner as Kylas has it now; people: its contacts as
    Kylas has them ({ id, ownerId }). userOf(id) -> { active } | null. */

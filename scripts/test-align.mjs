@@ -9,11 +9,23 @@
 import { spawn } from "node:child_process";
 import { createClient } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany } from "./reassign.mjs";
-import { classify, verify } from "./align.mjs";
+import { classify, verify, offAccounts } from "./align.mjs";
 
 let pass = 0, fail = 0;
 const ok = (what, c, d = "") => { (c ? pass++ : fail++); console.log(`  ${c ? "PASS" : "FAIL"}  ${what}${!c && d ? `  — ${String(d).slice(0, 300)}` : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+console.log("\n0 · one contact crawl, joined to the accounts");
+{
+  const accts = [{ id: "1", owner: "80001" }, { id: "2", owner: "80005" }];
+  const cs = [{ id: 11, ownerId: 80001, company: 1 }, { id: 12, ownerId: { id: 74725 }, company: { id: 1 } },
+              { id: 21, ownerId: 80001, company: 2 }, { id: 22, ownerId: 74726, company: 2 },
+              { id: 31, ownerId: 80001, company: 3 }, { id: 41, ownerId: 80001 }];
+  const off = offAccounts(accts, cs);
+  ok("names the accounts with a contact on somebody else, most first", off.map((o) => o.id).join() === "2,1", JSON.stringify(off));
+  ok("...with who holds each, lookups read as ids", off[1].off[0].id === "12" && off[1].off[0].from === "74725");
+  ok("contacts on accounts not in the list, or on none, are ignored", !off.some((o) => o.id === "3"));
+}
 
 console.log("\n1 · what is fixed and what is only reported");
 const users = { 80001: { active: true }, 80005: { active: true }, 74726: { active: true }, 74727: { active: false } };
