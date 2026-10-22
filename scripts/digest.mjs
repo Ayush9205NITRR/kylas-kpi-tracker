@@ -191,34 +191,44 @@ export function renderHtml(s) {
 
 /* ── sending ───────────────────────────────────────────────────────────── */
 
-export async function sendDigest(env = {}, s, { log = () => {}, fetchImpl = fetch, connect } = {}) {
-  const url = env.MAIL_URL, key = env.MAIL_KEY, to = env.MAIL_TO;
+export async function sendDigest(env = {}, s, opts = {}) {
+  const text = renderText(s);
+  return sendReport(env, {
+    subject: `${attention(s) ? "⚠ " : ""}BD console → Kylas · ${s.day} · ${s.contactsUpdated} updated, ${s.contactsCreated} created` +
+      (attention(s) ? ` · ${attention(s)} need attention` : ""),
+    text, html: renderHtml(s), label: "digest" }, opts);
+}
+
+/* ANY REPORT MAIL, the same way the digest goes: SMTP when MAIL_SMTP_USER and
+   MAIL_SMTP_PASS are set (a Gmail / Workspace app password — automations@enout.in
+   is the intended sender), else MAIL_URL, else logged and "not configured".
+   `to` overrides MAIL_TO for one report (a comma-separated list). The password
+   never reaches a log line. */
+export async function sendReport(env = {}, { subject, text, html, to: toOverride, label = "report" },
+                                 { log = () => {}, fetchImpl = fetch, connect } = {}) {
+  const url = env.MAIL_URL, key = env.MAIL_KEY, to = toOverride || env.MAIL_TO;
   const smtp = env.MAIL_SMTP_USER && env.MAIL_SMTP_PASS;
   const from = env.MAIL_FROM || (smtp ? env.MAIL_SMTP_USER : "");
-  const text = renderText(s);
-  if (!(url || smtp) || !to || !from) { log(`digest (not sent — set MAIL_SMTP_USER + MAIL_SMTP_PASS, or MAIL_URL + MAIL_KEY, and MAIL_TO):\n${text}`);
+  if (!(url || smtp) || !to || !from) { log(`${label} (not sent — set MAIL_SMTP_USER + MAIL_SMTP_PASS, or MAIL_URL + MAIL_KEY, and MAIL_TO):\n${text}`);
     return { sent: false, why: "not configured", text }; }
-  const body = { from, to: String(to).split(",").map((x) => x.trim()).filter(Boolean),
-                 subject: `${attention(s) ? "⚠ " : ""}BD console → Kylas · ${s.day} · ${s.contactsUpdated} updated, ${s.contactsCreated} created` +
-                    (attention(s) ? ` · ${attention(s)} need attention` : ""),
-                 text, html: renderHtml(s) };
+  const body = { from, to: String(to).split(",").map((x) => x.trim()).filter(Boolean), subject, text, html };
   if (smtp) {
     try {
       await sendMail({ host: env.MAIL_SMTP_HOST || "smtp.gmail.com", port: Number(env.MAIL_SMTP_PORT) || 465,
                        user: env.MAIL_SMTP_USER, pass: env.MAIL_SMTP_PASS, ...body }, { connect });
     } catch (e) {
-      log(`! digest not sent — ${String(e.message).replace(env.MAIL_SMTP_PASS, "***").slice(0, 200)}`);
+      log(`! ${label} not sent — ${String(e.message).replace(env.MAIL_SMTP_PASS, "***").slice(0, 200)}`);
       return { sent: false, why: String(e.message).slice(0, 120), text };
     }
-    log(`digest sent to ${to} (smtp, as ${addressOf(from)})`);
+    log(`${label} sent to ${to} (smtp, as ${addressOf(from)})`);
     return { sent: true, text };
   }
   const res = await fetchImpl(url, { method: "POST",
     headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify(body) });
   const out = await res.text().catch(() => "");
-  if (!res.ok) { log(`! digest not sent — ${res.status} ${out.slice(0, 160)}`); return { sent: false, why: `${res.status}`, text }; }
-  log(`digest sent to ${to}`);
+  if (!res.ok) { log(`! ${label} not sent — ${res.status} ${out.slice(0, 160)}`); return { sent: false, why: `${res.status}`, text }; }
+  log(`${label} sent to ${to}`);
   return { sent: true, text };
 }
 

@@ -1,0 +1,22 @@
+# WHAT THE MORNING "CALLED, BELOW ACTIVATION" MAIL WOULD SAY — counts only.
+# Reads live Kylas + Airtable through the console's own code; sends nothing.
+# No company names in the log (this repository's Actions logs are public).
+name: Preview — called, below Activation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preview
+        run: node scripts/below-activation-preview.mjs

@@ -1886,6 +1886,30 @@ contacts moved with them** (every one on those owners or a deactivated user);
 **320 contacts in 101 accounts stayed with the active BD already working
 them.** Before-images + the picked ids: artifact `allot-snapshot-39672745871`.
 
+## 3l4 · "Called, below Activation" — the morning tracker mail (2026-10-22)
+
+Ayush: *"accounts which are called but have been in below activation state in
+rung — usko hum tag kar paaye … har din ka update: pehli call -> CNC mein thi,
+ab usse track karna"*, by mail. `scripts/below-activation.mjs`, sent by the
+Worker's maintenance job once a day after 06:00 IST (same guard as the digest).
+
+**On the list:** called at least once (console Call Log **or** the Kylas dialler —
+`Dialler Calls`, joined by Kylas contact id) and the furthest contact under
+**rung 13 (Activation)**; left out: Not Interested, Invalid Contact (closed),
+Offsite Delayed, Offsite Done (Late Reachout) (a talk was had). No threshold —
+tracked from the first call. **The mail:** count, per owner, what changed since
+yesterday (climbed to Activation+, newly here, closed), then per owner the
+accounts longest stuck first — stage, days since the first call, calls, days
+since the last. Yesterday is a snapshot in the shared store, written only when
+a mail went (a failed send retries against the same yesterday).
+
+**Sending:** `sendReport()` in digest.mjs — SMTP with `MAIL_SMTP_USER` /
+`MAIL_SMTP_PASS` (intended sender **automations@enout.in**, an app password),
+to `MAIL_TO_STUCK` or else `MAIL_TO`. Until those secrets exist it logs the
+body and sends nothing. `GET /below-activation` (admins) previews it;
+workflow **Preview — called, below Activation** prints the live counts (no
+names — public logs). Tests: `test-below-activation` 25.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

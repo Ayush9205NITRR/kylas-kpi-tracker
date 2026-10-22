@@ -52,7 +52,9 @@ import { offsiteOf, quartersOf, OFFSITE_QUARTERS } from "./offsite.mjs";
 import { accountProgress, focusStanding, median } from "./progress.mjs";
 import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
-import { summarise, sendDigest, windowFor, yesterdayIn } from "./digest.mjs";
+import { summarise, sendDigest, sendReport, windowFor, yesterdayIn } from "./digest.mjs";
+import { stuckAccounts, changes as stuckChanges, snapshotOf, subjectOf as stuckSubject,
+         renderText as stuckText, renderHtml as stuckHtml } from "./below-activation.mjs";
 import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
 import { checkContact as dedupeCheck } from "./dedupe.mjs";
 import { auditOffsite } from "./offsite-audit.mjs";
@@ -1712,15 +1714,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   setReportTz(TZ_MIN);
   const progressData = memo("account progress", {
     ttl: REPORT_TTL,
-    key: mirror ? () => mirror.stamp(["Contacts", "Companies", "Stage Transitions", "Call Log"]) : null,
+    key: mirror ? () => mirror.stamp(["Contacts", "Companies", "Stage Transitions", "Call Log", "Dialler Calls"]) : null,
   }, async () => {
-    const [companies, contacts, transitions, calls] = await Promise.all([
+    const [companies, contacts, transitions, calls, dialler] = await Promise.all([
       airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
-      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date", "Kylas Contact ID"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Stage Transitions", { fields: ["To Stage", "Changed At", "Contact"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Contact", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
+      /* The Kylas dialler's calls — "called" includes them (below-activation.mjs). */
+      listTolerant(airtable, "Dialler Calls", { fields: ["Called At", "Contact Kylas ID"], pageSize: 100, maxPages: 2000 }).catch(() => []),
     ]);
-    return accountProgress({ companies, contacts, transitions, calls, today: todayLocal(), tzMin: TZ_MIN });
+    return accountProgress({ companies, contacts, transitions, calls, dialler, today: todayLocal(), tzMin: TZ_MIN });
   });
   const progress = async () => {
     if (!airtable) return { byCompany: new Map(), followups: new Map() };
@@ -2387,6 +2391,19 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* The pane reads the copy, which now disagrees with Kylas — see /reassign. */
       if (mirror) await mirror.markStale().catch((e) => log(`! mirror: ${e.message}`));
       return out;
+    },
+
+    /* THE "CALLED, BELOW ACTIVATION" MAIL, previewed: what tomorrow's would
+       say, against the last snapshot, sending nothing and keeping nothing.
+       ?format=text for the mail body as it would go. Admins only. */
+    "/below-activation": async (url) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("This report is for admins."), { status: 403 });
+      const r = await stuckReport();
+      if (url.searchParams.get("format") === "text") return { text: stuckText(r.today, r.stuck, r.ch, { labels: STAGE_LABEL }) };
+      return { day: r.today, since: r.prevDay, count: r.stuck.length, accounts: r.stuck,
+               climbed: r.ch.climbed, added: r.ch.added.map((a) => a.id), closed: r.ch.closed, first: r.ch.first };
     },
 
     /* WHO AN ACCOUNT CAN BE ALLOTTED TO: active Kylas users, never the API
@@ -3173,6 +3190,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        pass. */
     try { out.digest = await dailyDigest(); }
     catch (e) { out.digest = { error: e.message.slice(0, 160) }; log(`! digest: ${e.message.slice(0, 120)}`); }
+    try { out.belowActivation = await stuckMail(); }
+    catch (e) { out.belowActivation = { error: e.message.slice(0, 160) }; log(`! below-activation mail: ${e.message.slice(0, 120)}`); }
     return out;
   }
 
@@ -3206,6 +3225,42 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const s = summarise(rows, { day, seenCompanies: seen, push, offsite });
     const sent = await sendDigest(env, s, { log });
     return { day, jobs: rows.length, sent: sent.sent, why: sent.why };
+  }
+
+  /* CALLED, BUT STILL BELOW ACTIVATION (scripts/below-activation.mjs).
+     Today's list, and what changed against the snapshot the last mail kept.
+     Owners as Kylas has them now (the crawl) — the copy lags an allotment. */
+  const STUCK_SNAPSHOT = "below-activation-snapshot";
+  async function stuckReport() {
+    const { byCompany } = await progress();
+    const crawl = await kylasCompanies.peek().catch(() => null);
+    const companies = crawl?.companies?.length ? crawl.companies
+      : (airtable ? await readCompanies(airtable).catch(() => []) : []);
+    const today = todayLocal();
+    const stuck = stuckAccounts({ byCompany, companies, today, tzMin: TZ_MIN, labels: STAGE_LABEL });
+    const prev = cache ? JSON.parse((await cache.get(STUCK_SNAPSHOT).catch(() => null)) || "null") : null;
+    return { today, stuck, ch: stuckChanges(prev, stuck, byCompany), prevDay: prev?.__day || null };
+  }
+  /* Once a day, after DIGEST_AFTER_MIN, to MAIL_TO_STUCK (or MAIL_TO). The
+     snapshot is written only when the mail went, so a failed send is retried
+     against the same yesterday rather than losing a day's changes. */
+  async function stuckMail() {
+    if (!cache || !(env.MAIL_TO_STUCK || env.MAIL_TO)) return { skipped: "not configured" };
+    const d = new Date(Date.now() + TZ_MIN * 60000);
+    if (d.getUTCHours() * 60 + d.getUTCMinutes() < DIGEST_AFTER_MIN) return { skipped: "too early" };
+    const today = todayLocal();
+    const mark = `below-activation-sent-${today}`;
+    if (await cache.get(mark).catch(() => null)) return { skipped: "already sent" };
+    await cache.put(mark, new Date().toISOString(), { ttlSeconds: 14 * 86400 }).catch(() => {});
+    const r = await stuckReport();
+    const opts = { labels: STAGE_LABEL };
+    const sent = await sendReport(env, { subject: stuckSubject(r.today, r.stuck, r.ch),
+      text: stuckText(r.today, r.stuck, r.ch, opts), html: stuckHtml(r.today, r.stuck, r.ch, opts),
+      to: env.MAIL_TO_STUCK || env.MAIL_TO, label: "below-activation mail" }, { log });
+    if (sent.sent) await cache.put(STUCK_SNAPSHOT, JSON.stringify({ ...snapshotOf(r.stuck), __day: r.today }),
+                                   { ttlSeconds: 60 * 86400 }).catch(() => {});
+    else await cache.delete(mark).catch(() => {});
+    return { day: r.today, accounts: r.stuck.length, sent: sent.sent, why: sent.why };
   }
 
   return { routes, version: VERSION, startedAt: STARTED, maintain,

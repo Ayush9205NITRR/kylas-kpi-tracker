@@ -9,6 +9,8 @@
  *   done          reached SQL — a focus account is "exhausted" only then
  *   closed        every contact it has is at a dead end (exit stage)
  *   lastCallAt    the latest call logged to any of its contacts
+ *   firstCallAt   the earliest one, and `calls` how many — the "called but
+ *                 still below Activation" mail counts days from the first
  *   nextCall      the earliest call-back set on a contact still in play
  *
  * Follow-up adherence (TAT), per owner: every call that promised a call-back
@@ -32,16 +34,18 @@ export const daysBetween = between;
 const day = (v, tzMin = IST_MIN) => dayOf(v, tzMin);
 
 export function accountProgress({ companies = [], contacts = [], transitions = [],
-                                  calls = [], today, tzMin = IST_MIN }) {
+                                  calls = [], dialler = [], today, tzMin = IST_MIN }) {
   const at = (v) => dayOf(v, tzMin);
   const span = (a, b) => between(a, b, tzMin);
   const t = at(today || todayIn(tzMin));
   const kidOf = new Map(companies.map((r) => [r.id, String(r.fields?.["Kylas Company ID"] || "")]));
   const contactCo = new Map();                 /* contact record id -> kid */
+  const kylasContactCo = new Map();            /* Kylas contact id -> kid, for dialler calls */
   const byCo = new Map();
   const co = (kid) => {
     if (!byCo.has(kid)) byCo.set(kid, { rung: 0, stage: "", sqlAt: null, done: false, contacts: 0,
-                                        exited: 0, lastCallAt: null, nextCall: null });
+                                        exited: 0, lastCallAt: null, firstCallAt: null, calls: 0, nextCall: null,
+                                        dialCalls: 0, dialFirstAt: null, dialLastAt: null });
     return byCo.get(kid);
   };
 
@@ -50,6 +54,7 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
     const kid = kidOf.get((f.Company || [])[0]) || "";
     if (!kid) continue;
     contactCo.set(r.id, kid);
+    if (f["Kylas Contact ID"]) kylasContactCo.set(String(f["Kylas Contact ID"]), kid);
     const p = co(kid);
     const stage = f["Current Stage"] || "";
     const rung = Math.max(Number(f["KPI Rank"] || 0), STAGE_RUNG[stage] || 0);
@@ -95,9 +100,25 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
     if (kid) {
       const p = co(kid);
       if (!p.lastCallAt || f["Called At"] > p.lastCallAt) p.lastCallAt = f["Called At"];
+      if (!p.firstCallAt || f["Called At"] < p.firstCallAt) p.firstCallAt = f["Called At"];
+      p.calls++;
     }
     if (!perContact.has(cid)) perContact.set(cid, []);
     perContact.get(cid).push({ at: f["Called At"], promised: at(f["Next Call Date"]), owner: f.Owner || "" });
+  }
+
+  /* CALLS PLACED FROM THE KYLAS DIALLER APP (Dialler Calls, keyed by the Kylas
+     contact id). Kept apart from the console's own calls above — lastCallAt
+     and the follow-up maths mean "logged in the console" everywhere else —
+     and read where "has anybody called this account at all" is the question. */
+  for (const r of dialler) {
+    const f = r.fields || {};
+    const kid = kylasContactCo.get(String(f["Contact Kylas ID"] || ""));
+    if (!kid || !f["Called At"]) continue;
+    const p = co(kid);
+    p.dialCalls++;
+    if (!p.dialFirstAt || f["Called At"] < p.dialFirstAt) p.dialFirstAt = f["Called At"];
+    if (!p.dialLastAt || f["Called At"] > p.dialLastAt) p.dialLastAt = f["Called At"];
   }
 
   const followups = new Map();                 /* owner -> { due, onTime, late, open, delays[] } */
