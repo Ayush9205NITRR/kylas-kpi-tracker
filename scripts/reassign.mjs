@@ -346,7 +346,7 @@ function ownerOnRecord(rec) {
 }
 /* The single GET carries the owner as ownedBy on this account today; it did
    not once (see the header), so the search by id stays as the fallback. */
-async function companyOwnerOf(kylas, id, rec) {
+export async function companyOwnerOf(kylas, id, rec) {
   const on = ownerOnRecord(rec);
   if (on) return on;
   try {
@@ -360,7 +360,7 @@ async function companyOwnerOf(kylas, id, rec) {
 /* Every contact on the account, paged — an account with more than one page of
    people must not have its second page left behind. Only rows that name this
    company: a filter Kylas ignored must never move strangers. */
-async function contactsOfCompany(kylas, companyId) {
+export async function contactsOfCompany(kylas, companyId) {
   const out = [];
   for (let p = 0; p < 20; p++) {
     const r = await kylas.raw("POST", `/v1/search/contact?page=${p}&size=100`, { fields: ["id", "ownerId", "company"],

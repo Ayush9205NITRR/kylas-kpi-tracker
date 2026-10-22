@@ -2268,7 +2268,7 @@
                 picked: new Set(), busy: "", adding: false, moving: false, prog: null, moveTo: "",
                 /* ALLOT: who gets these accounts, and what share. One row is
                    "all to one person"; two rows at 40/60 is Ayush's split. */
-                allot: [{ id: "", pct: 100 }], allotKeep: true, allotting: false, allotStop: false,
+                allot: [{ id: "", pct: 100 }], allotting: false, allotStop: false,
                 sources: new Set(), kpis: new Set(),
                 /* CALL-BACKS FIRST IS THE DEFAULT ORDER. A promised call-back is
                    the one thing on this screen with a deadline, so an account
@@ -3153,13 +3153,11 @@
       </div>
       <div class="exbrow">
         <span class="exbk"></span>
-        <label class="exbto"><input type="checkbox" id="accAllotKeep"${ACC.allotKeep ? " checked" : ""}>
-          Keep contacts another active BD already holds with them</label>
         <span class="exbh">${preview ? `${preview}${total !== 100 ? ` <span class="allotwarn">(shares add to ${total}% — used as proportions)</span>` : ""}` : "Choose who gets them."}</span>
         <button class="gbtn sm pri" id="accAllotGo" type="button"${ready ? "" : " disabled"}>${
           ACC.allotting ? "Allotting…" : `Allot ${plan.length || ""} account${plan.length === 1 ? "" : "s"}`}</button>
       </div>
-      <p class="exbnote">The <b>account</b> and its <b>contacts</b> move to the person shown, ${ALLOT_BATCH} at a time.
+      <p class="exbnote">The <b>account</b> and <b>every one of its contacts</b> move to the person shown, ${ALLOT_BATCH} at a time.
         Every account's owner is read back from Kylas. Stop whenever you like — what has moved stays moved,
         the rest stay ticked.</p>`;
   }
@@ -4800,7 +4798,6 @@
     };
     on("accAllotAdd", "click", () => { ACC.allot.push({ id: "", pct: 0 }); evenly(); redraw(); });
     on("accAllotEven", "click", () => { evenly(); redraw(); });
-    on("accAllotKeep", "change", (e) => { ACC.allotKeep = !!e.target.checked; });
     on("accAllotStop", "click", () => { ACC.allotStop = true; redraw(); });
     on("accAllotGo", "click", async () => {
       if (ACC.allotting) return;
@@ -4813,8 +4810,7 @@
       /* ONE AGREEMENT, TO THE WHOLE RUN, with the split in front of it. */
       const yes = confirm(
         `Allot ${plan.length} account${plan.length === 1 ? "" : "s"}:\n${lines}\n\n` +
-        `Each account's contacts go to the same person` +
-        (ACC.allotKeep ? ` — except contacts another active BD already holds, which stay with them.` : `.`) +
+        `Every contact on each account goes to the same person, whoever holds it now.` +
         `\n\nIt goes ${ALLOT_BATCH} accounts at a time and every account's owner is read back from Kylas. ` +
         `You can stop at any point: what has moved stays moved, the rest stay ticked.\n\n` +
         `This writes to Kylas and cannot be undone from here.`);
@@ -4840,7 +4836,7 @@
         for (const batch of batches) {
           if (ACC.allotStop) break;
           let r;
-          try { r = await API.allot(batch, ACC.allotKeep); }
+          try { r = await API.allot(batch); }
           catch (e) {
             /* A WHOLE BATCH REFUSED (network, timeout, 5xx): those accounts stay
                ticked and the run goes on — one bad request is not the run. */

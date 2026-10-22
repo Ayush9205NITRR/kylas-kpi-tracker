@@ -1869,10 +1869,9 @@ It replaces "Move their contacts to"; one person at 100% is that.
 decided in the console; **one-field writes only** — `PUT /contacts/{id}/owner`
 for each contact, then `PUT /companies/{id}/owner` — never a whole-record PUT
 (refused on retired picklist values, and a read per contact); each account's
-owner **read back**. Contacts an active BD already holds can stay ("Keep
-contacts another active BD already holds", on by default); the previous
-owner's, the API user's and deactivated users' always move. Never to the API
-user. `GET /allot-people`: active users only. The old `/reassign` stays for
+owner **read back**. **Every contact goes with its account** (1.71.0, §3l5);
+until 1.71.0 contacts an active BD already held could stay ("Keep contacts
+another active BD already holds", on by default). Never to the API user. `GET /allot-people`: active users only. The old `/reassign` stays for
 older builds. Tests: `test-allot` 14, `test-allot-live` 13 (real Chrome).
 
 **The same split from a script:** `select-accounts.mjs` runs the console's own
@@ -1909,6 +1908,27 @@ to `MAIL_TO_STUCK` or else `MAIL_TO`. Until those secrets exist it logs the
 body and sends nothing. `GET /below-activation` (admins) previews it;
 workflow **Preview — called, below Activation** prints the live counts (no
 names — public logs). Tests: `test-below-activation` 25.
+
+## 3l5 · Every contact belongs to whoever owns its account (2026-10-22, 1.71.0)
+
+Ayush: *"all associated contacts for that account should be allotted to
+whoever owns that account. Check for that."* It is the rule now, not an option:
+
+- **Allot (console + `/allot`)**: the keep-contacts box is gone and the server
+  sends `leaveActive: false` whatever a request carries (1.69/1.70 sent true).
+  `allot_accounts.yml` defaults `contacts` to `all`.
+- **The check, and the fix for what is already off** — `scripts/align-contacts.mjs`,
+  workflow **Contacts follow their account's owner** (`check` → `first-one` →
+  `all`, optional `owners`). The Airtable copy (`Kylas Owner ID` on Companies and
+  Contacts) nominates accounts with a contact on somebody else; each is read again
+  from **Kylas** (owner + every contact, `align.mjs verify()`), and the fix is
+  `allot()` to the owner the account already has — contacts only, one-field
+  writes, owner read back unchanged. Accounts on the **Super Admin** or a
+  **deactivated** user are only reported: contacts are never moved TO them;
+  allot the account first. Plan + before-images: artifact `align-<run id>`.
+  Tests: `test-align` 16; `test-allot-live` 14 (no box; Priya's contacts move).
+- Expected first hit: the **320 contacts in 101 accounts** §3l3 left with the
+  active BD already working them.
 
 ## 3m · The duplicate check (phone and email, against the whole account)
 

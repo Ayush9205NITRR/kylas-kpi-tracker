@@ -106,7 +106,10 @@ ok('in Kylas: every account on Sejal or Mayra', owners.every((o) => o === 80001 
 ok('...two each', owners.filter((o) => o === 80001).length === 2 && owners.filter((o) => o === 80005).length === 2, JSON.stringify(owners));
 const c112936 = (await get('/v1/contacts/112936')).ownerId;
 ok("the Super Admin's contact on 1776620 moved with its account", c112936 === (await get('/v1/companies/1776620')).ownerId, String(c112936));
-ok("Priya's contacts stayed with Priya (the box was ticked)", (await get('/v1/contacts/112937')).ownerId === 74726 && (await get('/v1/contacts/38470')).ownerId === 74726);
+/* Every contact follows its account now (2026-10-22), Priya's included. */
+ok("Priya's contacts went with their accounts too", (await get('/v1/contacts/112937')).ownerId === (await get('/v1/companies/1776620')).ownerId &&
+   (await get('/v1/contacts/38470')).ownerId === (await get('/v1/companies/903')).ownerId);
+ok('no keep-contacts box any more', !(await F().evaluate(() => !!document.getElementById('accAllotKeep'))));
 const ticked = await F().evaluate(() => document.querySelectorAll('.acctable .vr[data-id] input[type=checkbox]:checked').length);
 ok('the moved rows are unticked', ticked === 0, String(ticked));
 /* The list is the Airtable copy, which learns the new owners at the next sync;

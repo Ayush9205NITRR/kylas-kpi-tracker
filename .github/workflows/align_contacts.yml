@@ -1,0 +1,69 @@
+# EVERY CONTACT ON AN ACCOUNT BELONGS TO WHOEVER OWNS THE ACCOUNT.
+#
+# Ayush, 2026-10-22: "all associated contacts for that account should be
+# allotted to whoever owns that account. Check for that."
+#
+#   check      the Airtable copy nominates accounts with a contact on somebody
+#              else; each is read again from Kylas (owner + every contact) and
+#              the report says how many, whose, and who holds them. Writes nothing.
+#   first-one  moves the contacts of the first account to its owner — look at it in Kylas
+#   all        the rest
+#
+# Accounts on the Super Admin or a deactivated user are only REPORTED: their
+# contacts are never moved TO them — allot the account first.
+# Logs print ids and BD names only: this repository's Actions logs are public.
+name: Contacts follow their account's owner
+
+on:
+  workflow_dispatch:
+    inputs:
+      owners:
+        description: 'only accounts these people own (first names or Kylas ids, comma separated); empty = every account'
+        default: ''
+      step:
+        description: 'check, first-one, or all'
+        type: choice
+        default: 'check'
+        options: [check, first-one, all]
+
+concurrency:
+  group: tag-company-source
+  cancel-in-progress: false
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      OWNERS: ${{ github.event.inputs.owners }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check the secrets are there
+        run: |
+          for v in KYLAS_KEY AIRTABLE_PAT; do
+            if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
+          done
+      - name: Check (writes nothing)
+        if: ${{ github.event.inputs.step == 'check' }}
+        run: node scripts/align-contacts.mjs ${OWNERS:+--owners "$OWNERS"}
+      - name: First account
+        if: ${{ github.event.inputs.step == 'first-one' }}
+        run: node scripts/align-contacts.mjs ${OWNERS:+--owners "$OWNERS"} --apply --limit 1
+      - name: All accounts
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/align-contacts.mjs ${OWNERS:+--owners "$OWNERS"} --apply --all
+      - name: Keep the plan and the before-images (ids and old owners only — for an undo)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: align-${{ github.run_id }}
+          path: |
+            align-plan.json
+            align-snapshot-*.json
+          if-no-files-found: ignore
+          retention-days: 90

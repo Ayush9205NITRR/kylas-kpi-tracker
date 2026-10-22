@@ -337,8 +337,8 @@
       req("/reassign", { method: "POST", body: { companies, ownerId, apply: true }, timeout: 600000 }),
     /* Each account to its own person, with its contacts — a few at a time, so
        the bar moves. assignments: [{ company, ownerId }]. */
-    allot: (assignments, leaveActive) =>
-      req("/allot", { method: "POST", body: { assignments, leaveActive }, timeout: 180000 }),
+    allot: (assignments) =>
+      req("/allot", { method: "POST", body: { assignments }, timeout: 180000 }),
     /* Who an account can be allotted TO: active Kylas users, never the API user. */
     allotPeople: () => req("/allot-people", { timeout: 30000 }),
     /* Every company's focus-list status, and setting one. */

@@ -2375,10 +2375,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     },
 
     /* ALLOTTING ACCOUNTS, EACH TO ITS OWN PERSON, WITH THEIR CONTACTS.
-       POST { assignments: [{ company, ownerId }…], leaveActive } — the console
+       POST { assignments: [{ company, ownerId }…] } — the console
        decides the split (40/60, round robin) where the person sees it and
        sends a few accounts at a time for its progress bar. scripts/reassign.mjs
-       allot() holds the rules. Admins only, as /reassign. */
+       allot() holds the rules. Admins only, as /reassign.
+       EVERY contact goes with its account (Ayush, 2026-10-22: "all associated
+       contacts for that account should be allotted to whoever owns that
+       account"). A leaveActive the request carries — 1.69/1.70 sent true by
+       default, to keep contacts another active BD held — is ignored. */
     "/allot": async (_url, body) => {
       const who = await whoami();
       if (roleOf(who) !== "admin")
@@ -2393,7 +2397,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         }
         return active.get(String(id));
       };
-      const out = await allot({ kylas, assignments: body?.assignments, leaveActive: body?.leaveActive !== false,
+      const out = await allot({ kylas, assignments: body?.assignments, leaveActive: false,
                                 apiUser, isActive, log, concurrency: Number(env.REASSIGN_CONCURRENCY || 3) });
       /* The pane reads the copy, which now disagrees with Kylas — see /reassign. */
       if (mirror) await mirror.markStale().catch((e) => log(`! mirror: ${e.message}`));
