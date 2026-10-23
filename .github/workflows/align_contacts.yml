@@ -22,15 +22,25 @@ on:
         description: 'only accounts these people own (first names or Kylas ids, comma separated); empty = every account'
         default: ''
       mode:
-        description: 'contacts: an active BD''s account gets all its contacts · give-accounts: an account on the Super Admin or a deactivated user goes to the active BD holding most of its contacts'
+        description: 'contacts: an active BD''s account gets all its contacts · give-accounts: an account on the Super Admin or a deactivated user goes to the active BD holding most of its contacts · give-to-pool: the same, but ONLY to the pool below, and what an earlier give run put outside it is re-routed'
         type: choice
         default: 'contacts'
-        options: [contacts, give-accounts]
+        options: [contacts, give-accounts, give-to-pool]
+      pool:
+        description: 'give-to-pool only: the user ids accounts may go to (Arshdeep, Muskan, Sejal, Mayra, Anjali, Gurnoor, Aditi)'
+        default: '82866,82867,85880,74755,83129,82978,82994'
+      snapshot_runs:
+        description: 'give-to-pool only: earlier give runs whose before-images say who got what (run ids)'
+        default: '39847571787,39849075307'
       step:
         description: 'check, first-one, or all'
         type: choice
         default: 'check'
         options: [check, first-one, all]
+
+permissions:
+  contents: read
+  actions: read     # download the earlier runs' before-images
 
 concurrency:
   group: tag-company-source
@@ -43,7 +53,10 @@ jobs:
     env:
       KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
       OWNERS: ${{ github.event.inputs.owners }}
-      GIVE: ${{ github.event.inputs.mode == 'give-accounts' && '--give-accounts' || '' }}
+      GH_TOKEN: ${{ github.token }}
+      GIVE: ${{ github.event.inputs.mode == 'give-accounts' && '--give-accounts' || github.event.inputs.mode == 'give-to-pool' && format('--give-accounts --pool {0} --snapshots snaps', github.event.inputs.pool) || '' }}
+      SNAP_RUNS: ${{ github.event.inputs.snapshot_runs }}
+      MODE: ${{ github.event.inputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,6 +67,12 @@ jobs:
           for v in KYLAS_KEY; do
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
+      - name: Download the earlier give runs' before-images
+        if: ${{ github.event.inputs.mode == 'give-to-pool' }}
+        run: |
+          mkdir -p snaps
+          for r in ${SNAP_RUNS//,/ }; do gh run download "$r" -n "align-$r" -D "snaps/$r"; done
+          echo "$(find snaps -name 'align-snapshot-*.json' | wc -l) before-image file(s)"
       - name: Check (writes nothing)
         if: ${{ github.event.inputs.step == 'check' }}
         run: node scripts/align-contacts.mjs ${OWNERS:+--owners "$OWNERS"} $GIVE

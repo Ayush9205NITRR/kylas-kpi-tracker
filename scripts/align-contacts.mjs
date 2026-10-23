@@ -9,6 +9,8 @@
  *   ... --owners "sejal,mayra"                                             only accounts these people own
  *   ... --apply --limit 1                                                  the first account — look at it in Kylas
  *   ... --apply --all                                                      the rest
+ *   ... --give-accounts --pool id,id,… [--snapshots dir]   the same, but ONLY to those users;
+ *        --snapshots re-routes what an earlier give run put outside the pool
  *   ... --give-accounts [--apply --limit 1 | --all]   accounts on the Super Admin or a
  *        deactivated user go to the active BD holding most of their contacts
  *
@@ -22,10 +24,10 @@
  *
  * Logs print ids and BD names only (this repo's Actions logs are public).
  */
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { createClient, toUser } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany, MAX_ALLOT } from "./reassign.mjs";
-import { verify, offAccounts, holderOf } from "./align.mjs";
+import { verify, offAccounts, holderOf, pickFromPool } from "./align.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i > -1 ? argv[i + 1] : d; };
@@ -132,13 +134,50 @@ writeFileSync("align-plan.json", JSON.stringify(checked.map(({ id, owner, status
    contacts, and every other contact follows it. align.mjs holderOf(). */
 if (has("give-accounts")) {
   const orphans = [...by("super-admin"), ...by("deactivated")];
-  console.log(`\nGIVE ACCOUNTS — reading the ${orphans.length} account(s) on the Super Admin or a deactivated user again…`);
-  const fresh = await verify({ kylas, items: orphans.map((r) => r.id), apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
+  /* --pool 82866,82867,… : the only people an account may go to (user ids). Each
+     must be an active user and never the API user. */
+  const POOL = String(arg("pool", "")).split(",").map((x) => x.trim()).filter(Boolean);
+  for (const id of POOL) {
+    const u = await userOf(id);
+    if (!/^\d+$/.test(id) || id === API_USER || !u || u.active === false) { console.error(`--pool: ${id} is not an active user (or is the API user).`); process.exit(1); }
+  }
+  if (POOL.length) console.log(`\nPOOL: ${POOL.map(label).join(" · ")}`);
+  /* --snapshots <dir> : the before-images of an earlier give run (align-snapshot-*.json,
+     { company, owner, to }). An account that run put on somebody OUTSIDE the pool
+     is re-routed — and only if it is still on that person, so one that has been
+     allotted since is left alone. */
+  const reroute = new Map();
+  const snapDir = arg("snapshots", "");
+  if (snapDir && POOL.length) {
+    const files = [];
+    const walk = (d) => { for (const f of readdirSync(d)) { const q = `${d}/${f}`; if (statSync(q).isDirectory()) walk(q); else if (/align-snapshot-.*\.json$/.test(f)) files.push(q); } };
+    if (existsSync(snapDir)) walk(snapDir);
+    for (const f of files) for (const e of JSON.parse(readFileSync(f, "utf8"))) {
+      if (e?.company && e?.to && !POOL.includes(String(e.to))) reroute.set(String(e.company), String(e.to));
+    }
+    console.log(`${files.length} snapshot file(s): ${reroute.size} account(s) an earlier run put outside the pool.`);
+  }
+  const items = [...new Set([...orphans.map((r) => r.id), ...reroute.keys()])];
+  console.log(`\nGIVE ACCOUNTS — reading ${items.length} account(s) again (${orphans.length} on the Super Admin or a deactivated user${reroute.size ? `, ${reroute.size} to re-route` : ""})…`);
+  const fresh = await verify({ kylas, items, apiUser: API_USER, userOf, companyOwnerOf, contactsOfCompany,
     onProgress: progress("re-read") });
   const isBd = async (id) => !!id && id !== API_USER && !!(await userOf(id)) && (await userOf(id)).active !== false;
   const plan = [], none = [];
-  let ties = 0;
+  let ties = 0, moved_since = 0, byContacts = 0, balanced = 0;
+  const load = new Map();
   for (const r of fresh) {
+    if (["gone", "error"].includes(r.status)) continue;
+    const wasRerouted = reroute.has(r.id);
+    if (POOL.length) {
+      if (POOL.includes(r.owner)) continue;                                  /* already with the pool */
+      if (wasRerouted && r.owner !== reroute.get(r.id)) { moved_since++; continue; }   /* allotted since */
+      if (!wasRerouted && !["super-admin", "deactivated"].includes(r.status)) continue;
+      const h = pickFromPool(r.held, POOL, load);
+      load.set(h.to, (load.get(h.to) || 0) + 1);
+      h.byContacts ? byContacts++ : balanced++;
+      plan.push({ id: r.id, from: r.owner, to: h.to, holds: h.holds, contacts: r.contacts, move: r.move, rerouted: wasRerouted });
+      continue;
+    }
     if (!["super-admin", "deactivated"].includes(r.status)) continue;
     const h = await holderOf(r.move, isBd);
     if (!h) { none.push(r); continue; }
@@ -149,7 +188,9 @@ if (has("give-accounts")) {
   /* Every contact of the account not already on the BD moves — those on the
      owner it is taken from as well, which `move` does not list. */
   for (const p of plan) { (perTo[p.to] ||= { a: 0, c: 0 }); perTo[p.to].a++; perTo[p.to].c += (p.contacts || 0) - p.holds; }
-  console.log(`${plan.length} account(s) go to the BD holding most of their contacts · ${none.length} have no contact on an active BD (left as they are)` +
+  if (POOL.length) console.log(`${plan.length} account(s) go to the pool: ${byContacts} to the pool member holding most of their contacts, ${balanced} (no contact in the pool) spread evenly` +
+    `${moved_since ? ` · ${moved_since} left alone, allotted since` : ""}.`);
+  else console.log(`${plan.length} account(s) go to the BD holding most of their contacts · ${none.length} have no contact on an active BD (left as they are)` +
     `${ties ? ` · ${ties} were a tie, given to the lower user id` : ""}.`);
   console.log(`By who gets them (accounts · contacts that also move to them):`);
   for (const [o, v] of Object.entries(perTo).sort((a, b) => b[1].a - a[1].a)) console.log(`  ${label(o).padEnd(28)} ${v.a} · ${v.c}`);

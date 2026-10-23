@@ -70,6 +70,22 @@ export async function holderOf(move = [], isBd = async () => false) {
   return { to: ranked[0][0], holds: ranked[0][1], of: move.length, tie: ranked.length > 1 && ranked[1][1] === ranked[0][1] };
 }
 
+/* THE POOL (--pool; Ayush, 2026-10-23: "account need to only be assigned to
+   Arshdeep, Muskan, Sejal, Mayra, Anjali, Gurnoor, Aditi"): where an account may
+   go is a fixed list. held: [{ id, from }] — EVERY contact of the account;
+   pool: [user id]; load: Map id -> accounts given so far in this run.
+   The pool member holding most of its contacts; on a tie, or when none of them
+   holds any, the one with the fewest accounts so far (then pool order), so the
+   split stays even without anyone being named twice. */
+export function pickFromPool(held = [], pool = [], load = new Map()) {
+  const n = new Map(pool.map((id) => [String(id), 0]));
+  for (const h of held) if (n.has(String(h.from))) n.set(String(h.from), n.get(String(h.from)) + 1);
+  const ranked = [...n].map(([id, c], i) => ({ id, c, l: load.get(id) || 0, i }))
+    .sort((a, b) => b.c - a.c || a.l - b.l || a.i - b.i);
+  const best = ranked[0];
+  return { to: best.id, holds: best.c, byContacts: best.c > 0 };
+}
+
 /* owner: the account's owner as Kylas has it now; people: its contacts as
    Kylas has them ({ id, ownerId }). userOf(id) -> { active } | null. */
 export async function classify({ owner, people = [], apiUser = "", userOf = async () => null }) {
@@ -96,7 +112,8 @@ export async function verify({ kylas, items = [], apiUser = "", userOf, companyO
     try {
       const owner = known !== undefined ? String(known) : await companyOwnerOf(kylas, id, await kylas.company(id));
       const people = await contactsOfCompany(kylas, id);
-      return { id: String(id), owner, contacts: people.length, ...(await classify({ owner, people, apiUser, userOf })) };
+      return { id: String(id), owner, contacts: people.length, held: people.map((p) => ({ id: String(p.id), from: idOf(p.ownerId) })),
+               ...(await classify({ owner, people, apiUser, userOf })) };
     } catch (e) {
       if (e?.status === 404) return { id: String(id), status: "gone", move: [] };
       return { id: String(id), status: "error", move: [], why: String(e?.message || e).slice(0, 120) };

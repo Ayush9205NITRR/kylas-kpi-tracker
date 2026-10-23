@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { createClient } from "./kylas.mjs";
 import { allot, companyOwnerOf, contactsOfCompany } from "./reassign.mjs";
-import { classify, verify, offAccounts, holderOf } from "./align.mjs";
+import { classify, verify, offAccounts, holderOf, pickFromPool } from "./align.mjs";
 
 let pass = 0, fail = 0;
 const ok = (what, c, d = "") => { (c ? pass++ : fail++); console.log(`  ${c ? "PASS" : "FAIL"}  ${what}${!c && d ? `  — ${String(d).slice(0, 300)}` : ""}`); };
@@ -35,6 +35,21 @@ console.log("\n0 · one contact crawl, joined to the accounts");
   ok("...a tie goes to the lower user id, and says so", t.to === "74726" && t.tie, JSON.stringify(t));
   ok("...nobody when no contact is on an active BD (Super Admin, deactivated, none)",
      (await holderOf([{ id: "1", from: "74725" }, { id: "2", from: "" }], bd)) === null);
+}
+
+{
+  const pool = ["80001", "80005", "74726"];
+  const load = new Map();
+  const a = pickFromPool([{ id: "1", from: "80005" }, { id: "2", from: "80005" }, { id: "3", from: "74726" }, { id: "4", from: "99999" }], pool, load);
+  ok("pool: the member holding most of the contacts, never anyone outside it", a.to === "80005" && a.holds === 2 && a.byContacts, JSON.stringify(a));
+  const b = pickFromPool([{ id: "1", from: "99999" }, { id: "2", from: "74725" }], pool, new Map([["80001", 3], ["80005", 1], ["74726", 1]]));
+  ok("...nobody in the pool holds any: the one with the fewest so far, pool order on a tie", b.to === "80005" && !b.byContacts, JSON.stringify(b));
+  const c = pickFromPool([{ id: "1", from: "80001" }, { id: "2", from: "74726" }], pool, new Map([["80001", 5], ["74726", 1]]));
+  ok("...a tie on contacts goes to the lighter one", c.to === "74726", JSON.stringify(c));
+  const split = {};
+  const l2 = new Map();
+  for (let i = 0; i < 70; i++) { const h = pickFromPool([], pool, l2); l2.set(h.to, (l2.get(h.to) || 0) + 1); split[h.to] = (split[h.to] || 0) + 1; }
+  ok("...70 accounts with no holder split 24/23/23", Object.values(split).sort().join() === "23,23,24", JSON.stringify(split));
 }
 
 console.log("\n1 · what is fixed and what is only reported");
