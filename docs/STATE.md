@@ -1949,6 +1949,17 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
   ties to the lower id: 2), **every owner read back**, 105 more contacts followed.
   From: Super Admin 96, Devansh 48, Tanay 22, Gaurav 21, Shreya 16, Charu 9, Ifee 2.
   **125 left**: none of their contacts is on an active user — they need allotting.
+- **Only these seven may hold accounts (`mode: give-to-pool`, Ayush, 2026-10-23:
+  "Arshdeep, Muskan, Sejal, Mayra, Anjali, Gurnoor, Aditi")**, runs 39930536357
+  (check), 39932026409 (first), 39933384737 (all): the 125 left **plus the 153 the
+  run above had put on Vipul, Rubal, Bhaumik, Ayush, Hisham, Akash, Vidhi, Vedant
+  and Nikita** (found from that run's before-image artifacts, downloaded by the
+  workflow itself — `--snapshots`; an account allotted since is left alone) went to
+  the seven, **277 accounts, every owner read back, 922 contacts followed**:
+  Arshdeep 41, Muskan 40, Sejal 40, Mayra 39, Anjali 39, Gurnoor 39, Aditi 39
+  (`pickFromPool()`: the pool member holding most of the contacts, else the one with
+  the fewest so far — none of these held any, so it was an even spread). Those nine
+  people's OWN older accounts were not touched. `--pool` takes user ids.
 - **"X nahi dikh rahi"** — `scripts/find-account.mjs`, workflow **Find an account
   (why is it not showing)**: looks for the name in the Kylas crawl (what the
   console lists) and through contacts' company names, and per hit says owner,
