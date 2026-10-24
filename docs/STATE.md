@@ -1966,6 +1966,24 @@ whoever owns that account. Check for that."* It is the rule now, not an option:
   active or not, contacts and on whom, and which screens show it. Names print as
   `"Boo…" 12 chars` (public logs).
 
+## 3l6 · "Boolean post nahi dikhti" (2026-10-23/24) — why, and why the extension does not have to change
+
+Company Database → Company List keeps the Boolean post in **four** columns
+(`Boolean Post link - kylas`, `Boolean - New`, `Boolean Post Link (Demand Team)`,
+`Boolean (linked)`); the console read three. Of **1,240** rows whose Source says
+Boolean, **864 have a link, 376 have none anywhere** (the screenshot's DDN is one:
+Source "Boolean - New", no post in any column — nothing to show) and 9 have no
+Kylas Company Id. 107 rows keep it only in `Boolean (linked)`: those were "—".
+
+Fix: `ENRICH_BOOLEAN_COLUMNS` has the fourth (accounts table `bp` — server only), and
+the research row is served with a `Boolean (linked)`-only value ALSO under
+`Boolean Post link - kylas` (handlers.mjs `curatedResearch`), so **a console that
+knows three columns — every extension up to 1.70 — shows it after `npx wrangler
+deploy` alone**. Checked in a real Chrome with the **1.70.0 extension** against the new
+server (renee-cosmetics, ats-global, cloudextel render; DDN stays "—"). The table
+column reads from the D1 copy of Company List, rebuilt once a day, so it follows
+within a day; the pane reads Airtable live. Tests: `test-worker` 182.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

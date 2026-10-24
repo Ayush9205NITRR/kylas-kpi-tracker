@@ -635,6 +635,8 @@ check('the card reads the curated Company List row, flattened',
       JSON.stringify(readR.body).slice(0, 160));
 check('...including a Boolean post kept only in "Boolean (linked)"',
       readR.body.fields?.['Boolean (linked)'] === 'https://www.linkedin.com/posts/seats_offsite', JSON.stringify(readR.body.fields));
+check('...and an older console, which knows three columns, gets it under the first',
+      readR.body.fields?.['Boolean Post link - kylas'] === 'https://www.linkedin.com/posts/seats_offsite', JSON.stringify(readR.body.fields));
 
 /* The Company List's own "Offsite Timeline" (Kylas cfOffsiteTimeline, copied
    by the team's field map) reaches the accounts list too. */

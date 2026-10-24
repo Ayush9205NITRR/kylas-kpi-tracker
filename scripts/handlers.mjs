@@ -830,6 +830,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (!r) return { found: false };
         const fields = {};
         for (const [k, v] of Object.entries(r.fields || {})) { const x = flat(v); if (x !== "") fields[k] = x; }
+        /* THE FOURTH HOME, FOLDED INTO THE FIRST FOR OLDER CONSOLES. Extensions up
+           to 1.70 look for the Boolean post in three columns and know nothing of
+           "Boolean (linked)" — which is where 107 rows keep it. Rather than make
+           every BD wait for a Web Store update to see it, a row that has it ONLY
+           there is served with it under the first column's name too. 1.71+ reads
+           the fourth directly; this changes nothing for them. */
+        const [b1, b2, b3] = ENRICH_BOOLEAN_COLUMNS;
+        if (!fields[b1] && !fields[b2] && !fields[b3] && fields["Boolean (linked)"]) fields[b1] = fields["Boolean (linked)"];
         return { found: true, recordId: r.id, fields };
       }));
     }
