@@ -1005,6 +1005,33 @@ export async function readRcaDue(at, { owner = "", now = Date.now(), log = () =>
   return out;
 }
 
+/* WHAT WAS SAID. The reasons already given, newest first — the other half of
+   readRcaDue. An admin reads the whole team's; an associate's is cut to their
+   own by the caller (owner). Contact names come from the Contacts table by
+   Kylas id, because the RCA row stores only the key. */
+export async function readRcaLog(at, { owner = "", limit = 500 } = {}) {
+  const [rows, contacts] = await Promise.all([
+    listTolerant(at, "RCA", { fields: ["Key", "Gate", "Reason", "Note", "Answered At", "Answered By", "Owner",
+                                       "Stuck Days", "Stuck Since"], pageSize: 100, maxPages: 200 }).catch(() => []),
+    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Company"], pageSize: 100, maxPages: 400 }).catch(() => []),
+  ]);
+  const byKid = new Map(contacts.map((r) => [String(r.fields?.["Kylas Contact ID"] || ""), r.fields || {}]));
+  const out = [];
+  for (const r of rows) {
+    const f = r.fields || {};
+    if (!f.Reason) continue;
+    if (owner && !sameName(f.Owner, owner)) continue;
+    const kid = String(f.Key || "").split("|")[0];
+    const c = byKid.get(kid) || {};
+    out.push({ key: String(f.Key || ""), kid, name: c.Name || kid, companyRec: (c.Company || [])[0] || "",
+               owner: f.Owner || "", gate: f.Gate || "", reason: f.Reason, note: f.Note || "",
+               by: f["Answered By"] || "", at: f["Answered At"] || "",
+               days: Number(f["Stuck Days"]) || 0, since: f["Stuck Since"] || "" });
+  }
+  out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return out.slice(0, limit);
+}
+
 /* Recording an answer. Upserted on the key, so a revised answer replaces the
    first rather than adding a second — and a row is never deleted, because
    "asked, never answered" is itself worth being able to count. */

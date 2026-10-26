@@ -8,7 +8,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "version": "1.72.0",
+  "version": "1.73.0",
   "permissions": [
     "storage",
     "identity",

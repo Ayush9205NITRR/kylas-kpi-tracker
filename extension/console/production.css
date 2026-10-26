@@ -1367,13 +1367,20 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .flres{flex:1;min-width:0;font-size:var(--t-label);color:var(--text2)}
 .flres b{color:var(--text);font-weight:var(--w-strong)}
 .flempty{margin-top:12px}
-#flagsBtn.warn{border-color:var(--amber);color:var(--amber);background:var(--amberSoft)}
+#flagsBtn.warn,#rcaBtn.warn{border-color:var(--amber);color:var(--amber);background:var(--amberSoft)}
 
 /* The stalled-contacts table and the meeting-mode split (2026-10-26). */
 .rcaOwners{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .rcaOwn{border:1px solid var(--line2);border-radius:999px;padding:3px 11px;font-size:var(--t-meta);color:var(--text2)}
 .rcaOwn b{color:var(--text);font-weight:var(--w-strong);margin-right:3px}
-.rcaTable td,.rcaTable th{text-align:left}
-.rcaTable td.tnum,.rcaTable th.tnum{text-align:right}
+.vsteps .rcaTable thead th:not(.tnum),.vsteps .rcaTable tbody td:not(.tnum){text-align:left;font-variant-numeric:normal}
+.vsteps .rcaTable td.tnum,.vsteps .rcaTable th.tnum{text-align:right}
+.rcaTable td:last-child{white-space:nowrap}
 .rcaYou{font-style:normal;font-size:var(--t-meta);color:var(--blue);margin-left:4px}
 .vsteps td .dim{color:var(--text3)}
+
+/* The reasons panel: two tabs over one table, and a note column that wraps. */
+.rcaTabs{display:flex;gap:8px;margin:0 0 12px}
+.rcaTabs .rcaTab{border:1px solid var(--line);background:var(--panel);color:var(--text2);border-radius:999px;padding:4px 12px;font:inherit;font-size:var(--t-meta);cursor:pointer}
+.rcaTabs .rcaTab.on{border-color:var(--blue);color:var(--blue);background:var(--blueSoft)}
+.rcaNoteCell{max-width:260px;white-space:normal;color:var(--text2)}

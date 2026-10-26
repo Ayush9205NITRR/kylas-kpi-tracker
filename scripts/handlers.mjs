@@ -35,7 +35,7 @@ import { checkContact } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
-         readRcaDue, writeRcaAnswer,
+         readRcaDue, readRcaLog, writeRcaAnswer,
          readTeam, writeTeam, counter, nameKey,
          readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
@@ -429,6 +429,24 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     if (requested && requested !== "all" && String(requested) !== mine)
       log(`  scope: ${userName(me)} asked for owner ${requested}, served their own`);
     return mine;
+  }
+
+  /* THE NAME AN RCA / MEETING-MODE READ MAY BE ABOUT. Those tables store the
+     owner as a name, not an id. An admin asks for anyone (or nobody = the whole
+     team); an associate is always cut to themselves, whatever the query says —
+     and one the server cannot name gets nothing rather than everything. */
+  async function nameScope(requested) {
+    const me = await whoami();
+    if (roleOf(me) === "admin") return requested || "";
+    return userName(me) || "\u0000nobody";
+  }
+
+  /* Fills .company on rows that carry a Companies record id in .companyRec, and
+     drops the id. One read of the names; a company the copy lacks stays blank. */
+  async function nameCompanies(rows) {
+    const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 200 })
+      .catch(() => [])).map((r) => [r.id, r.fields?.Name || ""]));
+    for (const d of rows) { d.company = names.get(d.companyRec) || ""; delete d.companyRec; }
   }
 
   const companyCache = new Map();
@@ -2729,20 +2747,27 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        without the data, nothing is known to be overdue. */
     "/rca": async (url) => {
       if (!airtable) return { due: [], gates: RCA_GATES, configured: false };
-      const owner = url.searchParams.get("owner") || "";
+      const owner = await nameScope(url.searchParams.get("owner") || "");
       const watch = {};
       const due = await readRcaDue(airtable, { owner, log, watch });
       /* THE COMPANY, for the table the admin reads ("pta nahi chal raha owner
          kaun hai" — and which account it is). The Contacts row only carries a
          link, so the names are read once, by record id. A company the copy does
          not hold stays blank rather than blocking the list. */
-      if (due.length) {
-        const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 200 })
-          .catch(() => [])).map((r) => [r.id, r.fields?.Name || ""]));
-        for (const d of due) { d.company = names.get(d.companyRec) || ""; delete d.companyRec; }
-      }
+      if (due.length) await nameCompanies(due);
       return { due, gates: RCA_GATES, configured: true, owner,
                watching: watch.watching || 0, next: watch.next || null };
+    },
+
+    /* WHAT WAS SAID — the reasons already given. The admin reads the whole team's
+       (Ayush, 2026-10-26: "admin ko dikhe, as a poora"); an associate only their
+       own (nameScope). */
+    "/rca-log": async (url) => {
+      if (!airtable) return { log: [], gates: RCA_GATES, configured: false };
+      const owner = await nameScope(url.searchParams.get("owner") || "");
+      const rows = await readRcaLog(airtable, { owner });
+      if (rows.length) await nameCompanies(rows);
+      return { log: rows, gates: RCA_GATES, configured: true, owner };
     },
 
     "/rca-answer": async (url, body) => {
@@ -2774,18 +2799,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { ok: true, id: rec?.id || null };
     },
 
-    /* ── STAGE × MODE OF MEETING (admin only) ───────────────────────────
-       Ayush, 2026-10-26: "stage ke hisab se mode of meeting split — sirf admin
-       ko dikhe". Contacts by Current Stage and Mode of Meeting, from the Contacts
+    /* ── STAGE × MODE OF MEETING ────────────────────────────────────────
+       Ayush, 2026-10-26: "stage ke hisab se mode of meeting split", for the
+       admin (everyone) and then for each BD (only their own contacts: nameScope
+       ignores ?owner for an associate). Contacts by Current Stage and Mode of Meeting, from the Contacts
        table (the D1 copy when it is built). ?owner=<name> narrows it to one
        person; empty is the whole team. Held two minutes — the table is read in
        full and nobody needs it to the second. */
     "/mode-split": async (url) => {
-      const who = await whoami();
-      if (roleOf(who) !== "admin")
-        throw Object.assign(new Error("The meeting-mode split is an admin view."), { status: 403 });
       if (!airtable) return { configured: false, modes: [], rows: [], totals: {} };
-      const owner = url.searchParams.get("owner") || "";
+      const owner = await nameScope(url.searchParams.get("owner") || "");
       return perKey(modeSplitCache, `mode-split:${owner}`, async () => {
         const rows = await listTolerant(airtable, "Contacts", {
           fields: ["Current Stage", "Mode of Meeting", "Owner"], pageSize: 100, maxPages: 400 });

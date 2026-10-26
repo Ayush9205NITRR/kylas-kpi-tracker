@@ -1211,17 +1211,27 @@ console.log('\n11. a copy that is short of the account is not the account');
    Ayush, 2026-10-26: the owner gives the reason; the meeting-mode split is
    for the admin. */
 {
-  console.log('\n15f. RCA is answered by the owner; the mode split is admin-only');
+  console.log('\n15f. RCA is answered by the owner; the split and the RCA lists are cut to the caller for an associate');
   const assocEnv = { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in', RESEARCH_BASE: 'appRESEARCH' };
   const aPost = await (await coldWorker(1592)).fetch(new Request('https://bd.enout.website/rca-answer', {
     method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
     body: JSON.stringify({ kid: '1', gate: 'discoveryNoBooking', reason: 'NO_ACTIONABLE_REQUIREMENT', owner: 'Sejal Agrawal' }) }),
     assocEnv, { waitUntil() {} });
   check('an associate cannot answer for a contact that is not theirs', aPost.status === 403, `status ${aPost.status}`);
-  const aSplit = await (await coldWorker(1593)).fetch(new Request('https://bd.enout.website/mode-split', { headers: { Origin: ORIGIN } }),
-    assocEnv, { waitUntil() {} });
-  check('an associate cannot read the meeting-mode split', aSplit.status === 403, `status ${aSplit.status}`);
+  const aGet = async (n, path) => { const r = await (await coldWorker(n)).fetch(new Request('https://bd.enout.website' + path,
+    { headers: { Origin: ORIGIN } }), assocEnv, { waitUntil() {} }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+  const aSplit = await aGet(1593, '/mode-split?owner=Priya%20Deshmukh');
+  check('an associate gets the split, cut to themselves whatever owner they ask for',
+        aSplit.status === 200 && !!aSplit.body.owner && aSplit.body.owner !== 'Priya Deshmukh', `status ${aSplit.status} owner ${aSplit.body.owner}`);
+  const aRca = await aGet(1595, '/rca?owner=Priya%20Deshmukh');
+  check('an associate\'s /rca is cut to themselves too',
+        aRca.status === 200 && aRca.body.owner === aSplit.body.owner && (aRca.body.due || []).every((d) => d.owner === aSplit.body.owner), `status ${aRca.status} owner ${aRca.body.owner}`);
+  const aLog = await aGet(1596, '/rca-log');
+  check('an associate\'s reasons-given log is only their own',
+        aLog.status === 200 && aLog.body.owner === aSplit.body.owner && (aLog.body.log || []).every((d) => d.owner === aSplit.body.owner), `status ${aLog.status} owner ${aLog.body.owner}`);
   const mine = await get(await coldWorker(1594), '/mode-split', { RESEARCH_BASE: 'appRESEARCH' });
+  const adminLog = await get(await coldWorker(1597), '/rca-log', { RESEARCH_BASE: 'appRESEARCH' });
+  check('an admin reads the whole log (no owner cut)', adminLog.status === 200 && adminLog.body.owner === '' && Array.isArray(adminLog.body.log), `status ${adminLog.status} owner ${JSON.stringify(adminLog.body.owner)}`);
   check('an admin gets the split: the four modes, rows and totals',
         mine.status === 200 && (mine.body.modes || []).join() === 'In Person,Virtual,Calls,Text' && Array.isArray(mine.body.rows) &&
         Number.isFinite(mine.body.totals?.contacts), `status ${mine.status} ${JSON.stringify(mine.body).slice(0, 160)}`);

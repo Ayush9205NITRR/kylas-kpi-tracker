@@ -1781,7 +1781,7 @@
       <b>${n}</b>
       <span>contact${n === 1 ? "" : "s"} stalled with no reason recorded${
         worst ? ` — longest is <b>${esc(worst.name)}</b>${worst.owner ? ` (${esc(worst.owner)})` : ""}, ${worst.days} days` : ""}</span>
-      ${API.isAdmin || owners > 1 ? `<button class="gbtn sm" id="rcaTable" type="button">Who owes</button>` : ""}
+      ${API.isAdmin || owners > 1 ? `<button class="gbtn sm" id="rcaTable" type="button">Who owes &amp; reasons given</button>` : ""}
       ${mine ? `<button class="gbtn sm" id="rcaOpen" type="button">Give reasons${API.isAdmin && mine < n ? ` (${mine} yours)` : ""}</button>` : ""}
     </div>`;
   }
@@ -1789,11 +1789,11 @@
   /* One account at a time, largest stall first, with the reasons as chips.
      Typing is optional and the note is the only free text — the whole point is
      that an answer costs one click, or it will not be given. */
-  function openRcaSheet(repaint) {
+  function openRcaSheet(repaint, items) {
     const s = document.createElement("div");
     s.className = "scrim";
     let i = 0;
-    const queue = RCA.due.filter(rcaMine);
+    const queue = (items || RCA.due).filter(rcaMine);
     const draw = () => {
       const item = queue[i];
       if (!item) {
@@ -1838,7 +1838,9 @@
           /* Removed from the list here rather than re-fetching: the proxy would
              give the same answer, and a round trip between two clicks is how a
              nine-account queue stops being worth finishing. */
-          RCA.due.splice(RCA.due.indexOf(item), 1);
+          const ri = RCA.due.indexOf(item);
+          if (ri >= 0) RCA.due.splice(ri, 1);
+          bellAnswered(item);
           queue.splice(i, 1);
           draw();
         } catch (e) {
@@ -1853,36 +1855,99 @@
     s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); repaint?.(); } });
   }
 
-  /* WHO OWES WHAT. The sheet above asks one person one question; this answers the
-     question an admin actually has — which contacts, whose, how long — and
-     answers none of them: each reason is given by that contact's owner. */
-  function openRcaTable() {
+  /* THE BELL (top bar, every screen). Ayush, 2026-10-26: "mein BD hoon, mere
+     console mein notification aani chahiye … reason do, submit ho — aur yeh admin
+     ko dikhe (poora), BD ko sirf uska". So: one number in the top bar that says
+     how many stalled contacts are waiting for a reason — an associate's own, the
+     whole team's for an admin — and one panel behind it. The numbers come from
+     /rca, which the server already cuts to the caller's own contacts. */
+  const BELL = { n: 0, mine: 0, at: 0, loading: false, on: [], nudged: false };
+  const bellEmit = () => BELL.on.forEach((f) => { try { f(BELL.n, BELL.mine); } catch (_) {} });
+  const bellSet = (due) => {
+    BELL.n = due.length; BELL.mine = due.filter(rcaMine).length; BELL.at = Date.now(); bellEmit();
+  };
+  const bellAnswered = (item) => {
+    BELL.n = Math.max(0, BELL.n - 1);
+    if (rcaMine(item)) BELL.mine = Math.max(0, BELL.mine - 1);
+    bellEmit();
+  };
+  async function bellRefresh() {
+    if (BELL.loading || !API.state?.user) return;
+    BELL.loading = true;
+    try {
+      const r = await API.rca("");
+      if (r.gates?.length) RCA.gates = r.gates;
+      bellSet(r.due || []);
+    } catch (_) { /* a bell that cannot reach the server says nothing */ }
+    finally { BELL.loading = false; }
+  }
+
+  /* One panel, two tabs. "To give" is who owes (the whole team for an admin, the
+     signed-in person's own for an associate — the server decides which); "Given"
+     is what has been said. Each reason is given by the contact's owner, from their
+     own console. */
+  function openRcaPanel(tab = "owe") {
     const s = document.createElement("div");
     s.className = "scrim";
-    const rows = RCA.due.slice().sort((a, b) => b.days - a.days);
-    const per = {};
-    for (const d of rows) per[d.owner || "No owner"] = (per[d.owner || "No owner"] || 0) + 1;
-    const chips = Object.entries(per).sort((a, b) => b[1] - a[1])
-      .map(([o, n]) => `<span class="rcaOwn"><b>${n}</b> ${esc(o)}</span>`).join("");
-    s.innerHTML = `<div class="sheet xwide">
-      <div class="h"><h3>Stalled contacts — who owes a reason</h3>
-        <span class="vsub">${rows.length} contact${rows.length === 1 ? "" : "s"}</span>
-        <button class="gbtn" id="rx" type="button">Close</button></div>
-      <div class="b">
-        <div class="rcaOwners">${chips}</div>
-        <div class="vsteps"><table class="rcaTable">
-          <thead><tr><th>Contact</th><th>Company</th><th>Owner</th><th>Stalled at</th>
-            <th class="tnum">Days</th><th>Since</th></tr></thead>
-          <tbody>${rows.map((d) => {
-            const g = rcaGate(d.gate);
-            return `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.company || "—")}</td>
+    let T = tab, DUE = null, LOG = null, err = "";
+    const reasonLabel = (gate, code) =>
+      rcaGate(gate)?.reasons?.find((r) => r.code === code)?.label || code;
+    const when = (v) => (v ? day(String(v).slice(0, 10)) : "—");
+    const draw = () => {
+      const mineItems = (DUE || []).filter(rcaMine);
+      const head = `<div class="h"><h3>${API.isAdmin ? "Stalled contacts — reasons" : "My stalled contacts"}</h3>
+        <span class="vsub">${DUE ? `${DUE.length} to give · ${(LOG || []).length} given` : ""}</span>
+        <button class="gbtn" id="rx" type="button">Close</button></div>`;
+      let body;
+      if (err) body = `<p class="vwarn">Could not read this — ${esc(err)}.</p>`;
+      else if (!DUE || !LOG) body = `<p class="vnote">Reading…</p>`;
+      else {
+        const tabs = `<div class="rcaTabs">
+          <button class="rcaTab${T === "owe" ? " on" : ""}" data-t="owe" type="button">To give (${DUE.length})</button>
+          <button class="rcaTab${T === "given" ? " on" : ""}" data-t="given" type="button">Given (${LOG.length})</button></div>`;
+        if (T === "owe") {
+          const rows = DUE.slice().sort((a, b) => b.days - a.days);
+          const per = {};
+          for (const d of rows) per[d.owner || "No owner"] = (per[d.owner || "No owner"] || 0) + 1;
+          const chips = Object.keys(per).length > 1
+            ? `<div class="rcaOwners">${Object.entries(per).sort((a, b) => b[1] - a[1])
+              .map(([o, n]) => `<span class="rcaOwn"><b>${n}</b> ${esc(o)}</span>`).join("")}</div>` : "";
+          body = tabs + chips + (mineItems.length
+            ? `<div class="dactions"><button class="pbtn" id="rcaGive" type="button">Give my reasons (${mineItems.length})</button></div>` : "")
+            + (rows.length ? `<div class="vsteps"><table class="rcaTable">
+              <thead><tr><th>Contact</th><th>Company</th><th>Owner</th><th>Stalled at</th>
+                <th class="tnum">Days</th><th>Since</th></tr></thead>
+              <tbody>${rows.map((d) => `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.company || "—")}</td>
+                <td>${esc(d.owner || "—")}${rcaMine(d) ? ' <em class="rcaYou">you</em>' : ""}</td>
+                <td>${esc(rcaGate(d.gate)?.title || d.gate)}</td><td class="tnum">${d.days}</td><td>${esc(day(d.since))}</td></tr>`).join("")}</tbody>
+            </table></div>` : `<p class="vnote">Nothing is waiting for a reason.</p>`)
+            + `<p class="vnote">The reason for each contact is given by its owner, from their own console.</p>`;
+        } else {
+          body = tabs + (LOG.length ? `<div class="vsteps"><table class="rcaTable">
+            <thead><tr><th>Contact</th><th>Company</th><th>Owner</th><th>Stalled at</th><th>Reason</th><th>Note</th>
+              <th>Given by</th><th>When</th></tr></thead>
+            <tbody>${LOG.map((d) => `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.company || "—")}</td>
               <td>${esc(d.owner || "—")}${rcaMine(d) ? ' <em class="rcaYou">you</em>' : ""}</td>
-              <td>${esc(g?.title || d.gate)}</td><td class="tnum">${d.days}</td><td>${esc(day(d.since))}</td></tr>`;
-          }).join("")}</tbody>
-        </table></div>
-        <p class="vnote">The reason for each contact is given by its owner, from their own console.</p>
-      </div></div>`;
-    s.querySelector("#rx").onclick = () => s.remove();
+              <td>${esc(rcaGate(d.gate)?.title || d.gate)}</td><td>${esc(reasonLabel(d.gate, d.reason))}</td>
+              <td class="rcaNoteCell">${esc(d.note || "—")}</td><td>${esc(d.by || "—")}</td><td>${esc(when(d.at))}</td></tr>`).join("")}</tbody>
+          </table></div>` : `<p class="vnote">No reason has been given yet.</p>`)
+            + (API.isAdmin ? "" : `<p class="vnote">Only your own contacts are shown here.</p>`);
+        }
+      }
+      s.innerHTML = `<div class="sheet xwide">${head}<div class="b">${body}</div></div>`;
+      s.querySelector("#rx").onclick = () => s.remove();
+      s.querySelectorAll(".rcaTab").forEach((b) => b.onclick = () => { T = b.dataset.t; draw(); });
+      const g = s.querySelector("#rcaGive");
+      if (g) g.onclick = () => openRcaSheet(() => { load(); }, mineItems);
+    };
+    const load = () => {
+      Promise.all([API.rca(""), API.rcaLog("")]).then(([a, b]) => {
+        DUE = a.due || []; LOG = b.log || [];
+        if (a.gates?.length) RCA.gates = a.gates;
+        bellSet(DUE); err = ""; draw();
+      }).catch((e) => { err = e.message || String(e); draw(); });
+    };
+    draw(); load();
     s.addEventListener("click", (e) => { if (e.target === s) s.remove(); });
     document.body.appendChild(s);
   }
@@ -1891,17 +1956,17 @@
     const b = host.querySelector("#rcaOpen");
     if (b) b.addEventListener("click", () => openRcaSheet(repaint));
     const t = host.querySelector("#rcaTable");
-    if (t) t.addEventListener("click", openRcaTable);
+    if (t) t.addEventListener("click", () => openRcaPanel("owe"));
   }
 
   /* ── STAGE × MODE OF MEETING (admin only) ──────────────────────────────
      Ayush, 2026-10-26: "stage ke hisab se mode of meeting split — sirf admin ko
-     dikhe". Contacts by the stage they are at now and the mode of their meeting,
-     from the server (/mode-split). An associate never asks for it and the
-     server refuses them if they try. */
+     dikhe", then "same for the BD". Contacts by the stage they are at now and the
+     mode of their meeting, from the server (/mode-split). An admin sees the team
+     or whoever the selector names; an associate gets only their own contacts —
+     the server cuts it, whatever is asked. */
   const MODE = { data: null, owner: null, loading: false, error: "", at: 0 };
   function ensureModeSplit(sel, repaint) {
-    if (!API.isAdmin) return;
     const owner = rcaOwner(sel);
     if (MODE.loading || (MODE.owner === owner && MODE.at && Date.now() - MODE.at < SWR_TTL)) return;
     MODE.loading = true; MODE.owner = owner;
@@ -1911,9 +1976,9 @@
       .finally(() => { MODE.loading = false; MODE.at = Date.now(); repaint?.(); });
   }
   function modeSplitSection() {
-    if (!API.isAdmin) return "";
     const head = `<div class="vhead sm"><h2>Meeting mode by stage</h2>
-      <span class="vsub">contacts, by the stage they are at now · admin only</span></div>`;
+      <span class="vsub">contacts, by the stage they are at now · ${
+        API.isAdmin ? (MODE.owner ? esc(MODE.owner) : "the whole team") : "your contacts"}</span></div>`;
     if (MODE.error) return head + `<p class="vwarn">Could not read the split — ${esc(MODE.error)}.</p>`;
     const d = MODE.data;
     if (!d) return head + `<p class="vnote">Reading the contacts…</p>`;
@@ -2093,7 +2158,7 @@
            Same numbers, same report, one request. */
         ladderHTML(REP.data)}
       <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
-      ${API.isAdmin ? `<div class="vsec">${modeSplitSection()}</div>` : ""}
+      <div class="vsec">${modeSplitSection()}</div>
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
            something. On your own numbers it is one row saying what the four
            tiles above already said; across the team it is the only place you
@@ -5160,5 +5225,7 @@
     paint();
   }
 
-  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded };
+  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded,
+                  rcaBell: { refresh: bellRefresh, onChange: (f) => BELL.on.push(f), open: (t) => openRcaPanel(t || "owe"),
+                             count: () => ({ n: BELL.n, mine: BELL.mine }) } };
 })(window);

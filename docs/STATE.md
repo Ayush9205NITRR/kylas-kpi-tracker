@@ -1984,26 +1984,34 @@ server (renee-cosmetics, ats-global, cloudextel render; DDN stays "—"). The ta
 column reads from the D1 copy of Company List, rebuilt once a day, so it follows
 within a day; the pane reads Airtable live. Tests: `test-worker` 182.
 
-## 3l7 · Who owes the RCA reason, and the stage × meeting-mode split (2026-10-26, 1.72.0)
+## 3l7 · Stalled-contact reasons: the bell, who owes, what was said; stage × meeting-mode for everyone (2026-10-26, 1.72.0 → 1.73.0)
 
-Ayush, with the "Discovery done, no SQL meeting booked" modal open: "table bana do — pata nahi
-chal raha owner kaun hai, aur yeh contact owner ko bharna hai"; and "mode of meeting ka dashboard —
-Stage → mode of meeting split (sirf admin ko dikhe)".
+Ayush: "table bana do — owner kaun hai pata nahi chalta, aur reason contact ke owner ko bharna hai";
+then "BD ke console mein notification aani chahiye, reason submit ho, admin ko poora dikhe, BD ko sirf
+uska; meeting-by-stage bhi same".
 
-* **Who owes** — the RCA strip has a "Who owes" button (admin, or whenever more than one owner has
-  stalled contacts). `openRcaTable()` lists every stalled contact: Contact, Company, **Owner** (with a
-  "you" tag), the gate it stalled at, days, since; owner chips on top give the count per person.
-  `/rca` now returns `company` (resolved from the Companies name map; `readRcaDue` carries `companyRec`).
-* **Only the owner answers.** The "Give reasons (n yours)" queue is `RCA.due.filter(rcaMine)`; the
-  server enforces it too — `/rca-answer` runs `mayAnswerRca({role,user,owner})` (scripts/rca-owner.mjs)
-  and 403s anyone but the contact's owner. Admin is allowed server-side so a contact whose owner has
-  left is not stranded. `body.by` is the signed-in name, not whatever the client sent.
-* **Meeting mode by stage** — `/mode-split` (admin only, 403 otherwise), `stageModeSplit()` in
-  scripts/mode-split.mjs. Counts **contacts** (not companies) by the stage they are at now × Mode of
-  Meeting (In Person | Virtual | Calls | Text); only stages with at least one mode are listed, highest
-  rung first; "With a mode" vs "All at stage" shows how many still have none. Follows the dashboard's
-  owner selector; cached per owner. The section is not rendered for an associate (`API.isAdmin`).
-* Tests: test-mode-split.mjs (17), test-worker §15f (associate 403 on both routes).
+* **Rule: the BD sees only their own, the admin sees everything — enforced on the server**
+  (`nameScope()` in handlers.mjs): `/rca`, `/rca-log` and `/mode-split` ignore `?owner=` for an
+  associate and use their own name (a name the server cannot resolve gets nothing, not everything).
+  Admin may pass `?owner=` or leave it empty for the whole team.
+* **The notification is a bell in the top bar** (`#rcaBtn`, "Reasons n", amber when n > 0), on every
+  screen. n = an associate's own stalled contacts; for an admin, the whole team's. Refreshed on sign-in
+  and every 15 minutes while the tab is visible. Once per session, when some of the person's own are
+  waiting, a toast says so. Nothing is pushed by mail or phone: that needs the MAIL_* secrets (still
+  open, §6) — the morning tracker mail is the natural place to add "you owe n reasons".
+* **Acting on it:** the bell opens one panel with two tabs. *To give* — who owes (contact, company,
+  owner, gate, days) and, if any are the viewer's own, "Give my reasons (n)" which runs the one-click
+  chip sheet; the bell count drops as each is saved. *Given* — what was said (reason, note, given by,
+  when) from the RCA table, `GET /rca-log` (`readRcaLog`). Admin sees every owner's; a BD their own.
+* **Only the owner answers** (`mayAnswerRca`, scripts/rca-owner.mjs): `/rca-answer` 403s anyone but the
+  contact's owner; admin is allowed server-side so an orphaned contact is not stranded. `Answered By`
+  is the signed-in name, not what the client sent.
+* **Meeting mode by stage** (`/mode-split`, `stageModeSplit`, scripts/mode-split.mjs): contacts by the
+  stage they are at now × Mode of Meeting (In Person | Virtual | Calls | Text). On every dashboard: an
+  admin follows the Who selector (Me / Everyone / a person), a BD gets their own contacts. "With a mode"
+  vs "All at stage" shows how many still have none.
+* Tests: test-mode-split.mjs (17), test-worker §15f (associate cut to self on all three routes,
+  403 on someone else's answer, admin reads the whole log).
 
 ## 3m · The duplicate check (phone and email, against the whole account)
 

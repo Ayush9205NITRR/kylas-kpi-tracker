@@ -694,6 +694,36 @@
     setInterval(sync, 5 * 60 * 1000);
   }
 
+  /* THE REASONS BELL. One button for everyone, with the number of stalled
+     contacts waiting for a reason: an associate's own, the whole team's for an
+     admin. Once a session, when it is the person's own that are waiting, a toast
+     says so — a count on a button is easy to walk past, and a modal on open would
+     cost every dialler a click. */
+  const rcaBtn = document.getElementById("rcaBtn");
+  if (rcaBtn && Views.rcaBell) {
+    const bell = Views.rcaBell;
+    let nudged = false;
+    bell.onChange((n, mine) => {
+      rcaBtn.textContent = n ? `Reasons ${n}` : "Reasons";
+      rcaBtn.classList.toggle("warn", n > 0);
+      rcaBtn.title = mine ? `${mine} of your contacts need a reason — click to give them`
+        : n ? `${n} stalled contact${n === 1 ? "" : "s"} waiting for a reason` : "Nothing is waiting for a reason";
+      if (mine && !nudged && typeof toast === "function") {
+        nudged = true;
+        toast(`${mine} of your contact${mine === 1 ? " needs" : "s need"} a reason — tap Reasons at the top`);
+      }
+    });
+    rcaBtn.onclick = () => bell.open("owe");
+    const sync = () => {
+      const on = !!(API.state && API.state.online && API.state.user);
+      rcaBtn.hidden = !on;
+      if (on) bell.refresh();
+    };
+    if (window.API && API.onChange) API.onChange(sync);
+    sync();
+    setInterval(() => { if (!document.hidden) sync(); }, 15 * 60 * 1000);
+  }
+
   /* Catch up on any days that ended while the console was closed. */
   Store.freezeDays();
 })();
