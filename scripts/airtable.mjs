@@ -995,7 +995,7 @@ export async function readRcaDue(at, { owner = "", now = Date.now(), log = () =>
     if (answered.has(key)) continue;
     out.push({ key, kid, recordId: r.id, name: f.Name || kid, owner: f.Owner || "",
                gate: hit.gate, days: hit.days, since: hit.since,
-               stage: f["Current Stage"] || "" });
+               stage: f["Current Stage"] || "", companyRec: (f.Company || [])[0] || "" });
   }
   /* Longest stuck first. The oldest stall is both the least likely to be
      remembered and the most likely to be dead, so it is the one worth asking

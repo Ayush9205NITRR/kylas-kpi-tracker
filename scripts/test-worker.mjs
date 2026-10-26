@@ -1207,6 +1207,26 @@ console.log('\n11. a copy that is short of the account is not the account');
         JSON.stringify(r.body.next));
 }
 
+/* ── 15f · STALLED CONTACTS: WHOSE TO ANSWER; STAGE × MODE: ADMIN ONLY ──
+   Ayush, 2026-10-26: the owner gives the reason; the meeting-mode split is
+   for the admin. */
+{
+  console.log('\n15f. RCA is answered by the owner; the mode split is admin-only');
+  const assocEnv = { ...ENV, DB: fakeD1(), ADMIN_EMAILS: 'somebody.else@enout.in', RESEARCH_BASE: 'appRESEARCH' };
+  const aPost = await (await coldWorker(1592)).fetch(new Request('https://bd.enout.website/rca-answer', {
+    method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ kid: '1', gate: 'discoveryNoBooking', reason: 'NO_ACTIONABLE_REQUIREMENT', owner: 'Sejal Agrawal' }) }),
+    assocEnv, { waitUntil() {} });
+  check('an associate cannot answer for a contact that is not theirs', aPost.status === 403, `status ${aPost.status}`);
+  const aSplit = await (await coldWorker(1593)).fetch(new Request('https://bd.enout.website/mode-split', { headers: { Origin: ORIGIN } }),
+    assocEnv, { waitUntil() {} });
+  check('an associate cannot read the meeting-mode split', aSplit.status === 403, `status ${aSplit.status}`);
+  const mine = await get(await coldWorker(1594), '/mode-split', { RESEARCH_BASE: 'appRESEARCH' });
+  check('an admin gets the split: the four modes, rows and totals',
+        mine.status === 200 && (mine.body.modes || []).join() === 'In Person,Virtual,Calls,Text' && Array.isArray(mine.body.rows) &&
+        Number.isFinite(mine.body.totals?.contacts), `status ${mine.status} ${JSON.stringify(mine.body).slice(0, 160)}`);
+}
+
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────
    Cloudflare runs several isolates, each with its own memory. If a save is
    noted onto the copy an isolate happened to be holding, an isolate that

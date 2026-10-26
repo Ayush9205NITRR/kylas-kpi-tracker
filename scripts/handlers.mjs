@@ -41,6 +41,8 @@ import { createAirtable, syncContact, readCompanyKpis,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
+import { stageModeSplit } from "./mode-split.mjs";
+import { mayAnswerRca } from "./rca-owner.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung, setReportTz } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
@@ -818,6 +820,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const flat = (v) => Array.isArray(v) ? [...new Set(v.map(flat).filter((x) => x !== "" && x != null))].join(", ")
     : v && typeof v === "object" ? (v.name ?? v.url ?? "") : (v ?? "");
   const researchRows = new Map();
+  const modeSplitCache = new Map();
   function curatedResearch(id) {
     const key = `research:${id}`;
     if (!researchRows.has(key)) {
@@ -2729,6 +2732,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const owner = url.searchParams.get("owner") || "";
       const watch = {};
       const due = await readRcaDue(airtable, { owner, log, watch });
+      /* THE COMPANY, for the table the admin reads ("pta nahi chal raha owner
+         kaun hai" — and which account it is). The Contacts row only carries a
+         link, so the names are read once, by record id. A company the copy does
+         not hold stays blank rather than blocking the list. */
+      if (due.length) {
+        const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 200 })
+          .catch(() => [])).map((r) => [r.id, r.fields?.Name || ""]));
+        for (const d of due) { d.company = names.get(d.companyRec) || ""; delete d.companyRec; }
+      }
       return { due, gates: RCA_GATES, configured: true, owner,
                watching: watch.watching || 0, next: watch.next || null };
     },
@@ -2744,6 +2756,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (!gate.reasons.some((r) => r.code === body.reason))
         throw Object.assign(new Error(`${body.reason} is not a reason offered for ${gate.key}`), { status: 400 });
       if (!body.kid) throw Object.assign(new Error("kid is required"), { status: 400 });
+      /* THE OWNER GIVES THE REASON (Ayush, 2026-10-26: "yeh contact owner ko
+         bharne hai"). Who answered is read from the sign-in, never from the
+         request: a client that says it is somebody else is not believed. */
+      const who = await whoami();
+      if (!mayAnswerRca({ role: roleOf(who), user: userName(who), owner: body.owner }))
+        throw Object.assign(new Error(`Only ${body.owner || "the contact's owner"} can give the reason for this contact.`), { status: 403 });
+      body.by = userName(who) || body.by;
       const rec = await writeRcaAnswer(airtable, {
         key: `${body.kid}|${gate.key}`,
         kid: String(body.kid), recordId: body.recordId || "", gate: gate.key,
@@ -2753,6 +2772,25 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       });
       log(`rca: ${body.kid} ${gate.key} -> ${body.reason}`);
       return { ok: true, id: rec?.id || null };
+    },
+
+    /* ── STAGE × MODE OF MEETING (admin only) ───────────────────────────
+       Ayush, 2026-10-26: "stage ke hisab se mode of meeting split — sirf admin
+       ko dikhe". Contacts by Current Stage and Mode of Meeting, from the Contacts
+       table (the D1 copy when it is built). ?owner=<name> narrows it to one
+       person; empty is the whole team. Held two minutes — the table is read in
+       full and nobody needs it to the second. */
+    "/mode-split": async (url) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin")
+        throw Object.assign(new Error("The meeting-mode split is an admin view."), { status: 403 });
+      if (!airtable) return { configured: false, modes: [], rows: [], totals: {} };
+      const owner = url.searchParams.get("owner") || "";
+      return perKey(modeSplitCache, `mode-split:${owner}`, async () => {
+        const rows = await listTolerant(airtable, "Contacts", {
+          fields: ["Current Stage", "Mode of Meeting", "Owner"], pageSize: 100, maxPages: 400 });
+        return { configured: true, ...stageModeSplit(rows, { owner }) };
+      })();
     },
 
     /* ── the team roster ────────────────────────────────────────────────

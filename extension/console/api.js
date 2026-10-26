@@ -317,6 +317,7 @@
     /* Which accounts owe an explanation, and the reasons on offer. The proxy
        decides both — the rule is a management policy and the console is told
        what it is, so six browsers cannot hold six versions of it. */
+    modeSplit: (owner) => req(`/mode-split${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
     rca: (owner) => req(`/rca${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 30000 }),
     rcaAnswer: (answer) => req("/rca-answer", { method: "POST", body: answer, timeout: 20000 }),
     /* Who the funnel counts, and every name it could count. */

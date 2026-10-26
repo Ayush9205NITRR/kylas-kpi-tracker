@@ -137,6 +137,7 @@ body.framed .ovOnly{display:inline-block}
 .scrim{position:fixed;inset:0;background:rgba(22,32,46,.45);display:grid;place-items:center;padding:18px;z-index:60}
 .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(520px,100%);max-height:86vh;overflow:auto;box-shadow:var(--sh)}
 .sheet.wide{width:min(680px,100%)}
+.sheet.xwide{width:min(1000px,100%)}
 .sheet .h{padding:18px 20px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
 .sheet .h h3{margin:0;font-size:var(--t-sec);font-weight:var(--w-strong);letter-spacing:-.028em;flex:1}
 .sheet .b{padding:16px 20px 20px}
@@ -1367,3 +1368,12 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .flres b{color:var(--text);font-weight:var(--w-strong)}
 .flempty{margin-top:12px}
 #flagsBtn.warn{border-color:var(--amber);color:var(--amber);background:var(--amberSoft)}
+
+/* The stalled-contacts table and the meeting-mode split (2026-10-26). */
+.rcaOwners{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.rcaOwn{border:1px solid var(--line2);border-radius:999px;padding:3px 11px;font-size:var(--t-meta);color:var(--text2)}
+.rcaOwn b{color:var(--text);font-weight:var(--w-strong);margin-right:3px}
+.rcaTable td,.rcaTable th{text-align:left}
+.rcaTable td.tnum,.rcaTable th.tnum{text-align:right}
+.rcaYou{font-style:normal;font-size:var(--t-meta);color:var(--blue);margin-left:4px}
+.vsteps td .dim{color:var(--text3)}

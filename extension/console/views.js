@@ -1706,6 +1706,14 @@
     return CACHE.owners.find((o) => String(o.id) === String(sel))?.name || "";
   }
 
+  /* WHOSE TO ANSWER. A stalled contact's reason is its OWNER's to give (Ayush,
+     2026-10-26: "yeh contact owner ko bharne hai"), so the sheet lists only the
+     signed-in person's own. With no name known, an associate's list is all
+     theirs (it was asked for by owner), an admin's is none — never somebody
+     else's by default. The server enforces the same rule (rca-owner.mjs). */
+  const nameKey = (s) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const rcaMine = (it) => { const me = nameKey(API.state.user?.name); return me ? nameKey(it.owner) === me : !API.isAdmin; };
+
   /* Keyed on the resolved owner: the cache must not answer for one person with
      another's list, which a plain 5-minute timer would do the moment an admin
      switched the selector. */
@@ -1767,11 +1775,14 @@
        name shown is a POC's. This said "accounts" and named a contact, which
        reads as a count of companies and is not one. */
     const worst = RCA.due[0];
+    const mine = RCA.due.filter(rcaMine).length;
+    const owners = new Set(RCA.due.map((d) => nameKey(d.owner))).size;
     return `<div class="vrca">
       <b>${n}</b>
       <span>contact${n === 1 ? "" : "s"} stalled with no reason recorded${
-        worst ? ` — longest is <b>${esc(worst.name)}</b>, ${worst.days} days` : ""}</span>
-      <button class="gbtn sm" id="rcaOpen" type="button">Give reasons</button>
+        worst ? ` — longest is <b>${esc(worst.name)}</b>${worst.owner ? ` (${esc(worst.owner)})` : ""}, ${worst.days} days` : ""}</span>
+      ${API.isAdmin || owners > 1 ? `<button class="gbtn sm" id="rcaTable" type="button">Who owes</button>` : ""}
+      ${mine ? `<button class="gbtn sm" id="rcaOpen" type="button">Give reasons${API.isAdmin && mine < n ? ` (${mine} yours)` : ""}</button>` : ""}
     </div>`;
   }
 
@@ -1782,8 +1793,9 @@
     const s = document.createElement("div");
     s.className = "scrim";
     let i = 0;
+    const queue = RCA.due.filter(rcaMine);
     const draw = () => {
-      const item = RCA.due[i];
+      const item = queue[i];
       if (!item) {
         s.innerHTML = `<div class="sheet"><div class="h"><h3>Done</h3>
           <button class="gbtn" id="rx" type="button">Close</button></div>
@@ -1794,7 +1806,7 @@
       const g = rcaGate(item.gate);
       s.innerHTML = `<div class="sheet wide">
         <div class="h"><h3>${esc(g?.title || "Why has this stalled?")}</h3>
-          <span class="vsub">${i + 1} of ${RCA.due.length}</span>
+          <span class="vsub">${i + 1} of ${queue.length}</span>
           <button class="gbtn" id="rx" type="button">Close</button></div>
         <div class="b">
           <div class="rcaWho"><b>${esc(item.name)}</b>
@@ -1826,7 +1838,8 @@
           /* Removed from the list here rather than re-fetching: the proxy would
              give the same answer, and a round trip between two clicks is how a
              nine-account queue stops being worth finishing. */
-          RCA.due.splice(i, 1);
+          RCA.due.splice(RCA.due.indexOf(item), 1);
+          queue.splice(i, 1);
           draw();
         } catch (e) {
           s.querySelectorAll(".rchip").forEach((x) => { x.disabled = false; });
@@ -1840,9 +1853,85 @@
     s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); repaint?.(); } });
   }
 
+  /* WHO OWES WHAT. The sheet above asks one person one question; this answers the
+     question an admin actually has — which contacts, whose, how long — and
+     answers none of them: each reason is given by that contact's owner. */
+  function openRcaTable() {
+    const s = document.createElement("div");
+    s.className = "scrim";
+    const rows = RCA.due.slice().sort((a, b) => b.days - a.days);
+    const per = {};
+    for (const d of rows) per[d.owner || "No owner"] = (per[d.owner || "No owner"] || 0) + 1;
+    const chips = Object.entries(per).sort((a, b) => b[1] - a[1])
+      .map(([o, n]) => `<span class="rcaOwn"><b>${n}</b> ${esc(o)}</span>`).join("");
+    s.innerHTML = `<div class="sheet xwide">
+      <div class="h"><h3>Stalled contacts — who owes a reason</h3>
+        <span class="vsub">${rows.length} contact${rows.length === 1 ? "" : "s"}</span>
+        <button class="gbtn" id="rx" type="button">Close</button></div>
+      <div class="b">
+        <div class="rcaOwners">${chips}</div>
+        <div class="vsteps"><table class="rcaTable">
+          <thead><tr><th>Contact</th><th>Company</th><th>Owner</th><th>Stalled at</th>
+            <th class="tnum">Days</th><th>Since</th></tr></thead>
+          <tbody>${rows.map((d) => {
+            const g = rcaGate(d.gate);
+            return `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.company || "—")}</td>
+              <td>${esc(d.owner || "—")}${rcaMine(d) ? ' <em class="rcaYou">you</em>' : ""}</td>
+              <td>${esc(g?.title || d.gate)}</td><td class="tnum">${d.days}</td><td>${esc(day(d.since))}</td></tr>`;
+          }).join("")}</tbody>
+        </table></div>
+        <p class="vnote">The reason for each contact is given by its owner, from their own console.</p>
+      </div></div>`;
+    s.querySelector("#rx").onclick = () => s.remove();
+    s.addEventListener("click", (e) => { if (e.target === s) s.remove(); });
+    document.body.appendChild(s);
+  }
+
   function wireRca(host, repaint) {
     const b = host.querySelector("#rcaOpen");
     if (b) b.addEventListener("click", () => openRcaSheet(repaint));
+    const t = host.querySelector("#rcaTable");
+    if (t) t.addEventListener("click", openRcaTable);
+  }
+
+  /* ── STAGE × MODE OF MEETING (admin only) ──────────────────────────────
+     Ayush, 2026-10-26: "stage ke hisab se mode of meeting split — sirf admin ko
+     dikhe". Contacts by the stage they are at now and the mode of their meeting,
+     from the server (/mode-split). An associate never asks for it and the
+     server refuses them if they try. */
+  const MODE = { data: null, owner: null, loading: false, error: "", at: 0 };
+  function ensureModeSplit(sel, repaint) {
+    if (!API.isAdmin) return;
+    const owner = rcaOwner(sel);
+    if (MODE.loading || (MODE.owner === owner && MODE.at && Date.now() - MODE.at < SWR_TTL)) return;
+    MODE.loading = true; MODE.owner = owner;
+    API.modeSplit(owner)
+      .then((r) => { MODE.data = r; MODE.error = ""; })
+      .catch((e) => { MODE.error = e.message || String(e); })
+      .finally(() => { MODE.loading = false; MODE.at = Date.now(); repaint?.(); });
+  }
+  function modeSplitSection() {
+    if (!API.isAdmin) return "";
+    const head = `<div class="vhead sm"><h2>Meeting mode by stage</h2>
+      <span class="vsub">contacts, by the stage they are at now · admin only</span></div>`;
+    if (MODE.error) return head + `<p class="vwarn">Could not read the split — ${esc(MODE.error)}.</p>`;
+    const d = MODE.data;
+    if (!d) return head + `<p class="vnote">Reading the contacts…</p>`;
+    if (d.configured === false) return head + `<p class="vnote">Needs the Airtable base.</p>`;
+    if (!d.rows.length) return head + `<p class="vnote">No contact has a mode of meeting yet${
+      MODE.owner ? ` for ${esc(MODE.owner)}` : ""}.</p>`;
+    const t = d.totals;
+    return head + `<div class="vsteps"><table>
+      <thead><tr><th>Stage</th>${d.modes.map((m) => `<th class="tnum">${esc(m)}</th>`).join("")}
+        <th class="tnum">With a mode</th><th class="tnum">All at stage</th></tr></thead>
+      <tbody>${d.rows.map((r) => `<tr><td>${esc(label(r.code) || r.label)}</td>
+        ${d.modes.map((m) => `<td class="tnum">${r.counts[m] || '<span class="dim">·</span>'}</td>`).join("")}
+        <td class="tnum"><b>${r.withMode}</b></td><td class="tnum">${r.all}</td></tr>`).join("")}
+        <tr class="all"><td>All stages</td>${d.modes.map((m) => `<td class="tnum"><b>${t[m] || 0}</b></td>`).join("")}
+        <td class="tnum"><b>${t.withMode}</b></td><td class="tnum">${t.contacts}</td></tr></tbody>
+    </table></div>
+    <p class="vnote">A contact's mode is asked for when a discovery call is saved; "All at stage" is every
+      contact there, so the gap between the last two columns is how many still have no mode recorded.</p>`;
   }
 
   /* ── dashboard ─────────────────────────────────────────────────────── */
@@ -2004,6 +2093,7 @@
            Same numbers, same report, one request. */
         ladderHTML(REP.data)}
       <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
+      ${API.isAdmin ? `<div class="vsec">${modeSplitSection()}</div>` : ""}
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
            something. On your own numbers it is one row saying what the four
            tiles above already said; across the team it is the only place you
@@ -2077,6 +2167,7 @@
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
     ensureRca(DASH_OWNER, () => dashboard(host));
+    ensureModeSplit(DASH_OWNER, () => dashboard(host));
     wireRca(host, () => dashboard(host));
     ensureTeam(() => dashboard(host));
     const tb = host.querySelector("#teamBtn");
