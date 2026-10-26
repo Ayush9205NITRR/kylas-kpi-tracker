@@ -107,6 +107,18 @@ ALLOWED_EMAIL_DOMAIN = "enout.in"
 # starts, so a change needs `npx wrangler deploy`.
 ADMIN_EMAILS = "ayush@enout.in,crmadmin@enout.in,lakshaya.sharma@enout.in"
 
+# THE MORNING MAILS (not secrets — the only secret is MAIL_SMTP_PASS, set with
+# `npx wrangler secret put MAIL_SMTP_PASS`).
+#   MAIL_SMTP_USER  the Gmail / Workspace address the mail is sent AS, and the one
+#                   the app password belongs to.
+#   MAIL_TO         the team-wide mails (daily write-back digest, called-below-
+#                   Activation): the admins.
+#   Each BD also gets their own called-below-Activation mail at their Kylas
+#   e-mail (scripts/bd-mail.mjs); MAIL_PER_BD = "0" turns that off.
+MAIL_SMTP_USER = "automations@enout.in"
+MAIL_TO = "ayush@enout.in,crmadmin@enout.in,lakshaya.sharma@enout.in"
+MAIL_PER_BD = "1"
+
 # Which Airtable base holds the KPIs. Not a secret — the token is.
 AIRTABLE_BASE = "appEwJu0bleHh9b8t"
 

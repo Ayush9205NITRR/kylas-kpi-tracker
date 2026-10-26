@@ -55,6 +55,7 @@ import { accountProgress, focusStanding, median } from "./progress.mjs";
 import { tzMinOf, today as todayIn, dayOf } from "./day.mjs";
 import { resolveWriteFields, extraCustomFields, describeWriteMap } from "./kylas-write-map.mjs";
 import { summarise, sendDigest, sendReport, windowFor, yesterdayIn } from "./digest.mjs";
+import { planBdMails as bdPlan, nameKey as bdNameKey } from "./bd-mail.mjs";
 import { stuckAccounts, changes as stuckChanges, snapshotOf, subjectOf as stuckSubject,
          renderText as stuckText, renderHtml as stuckHtml } from "./below-activation.mjs";
 import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
@@ -3321,26 +3322,60 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const prev = cache ? JSON.parse((await cache.get(STUCK_SNAPSHOT).catch(() => null)) || "null") : null;
     return { today, stuck, ch: stuckChanges(prev, stuck, byCompany), prevDay: prev?.__day || null };
   }
-  /* Once a day, after DIGEST_AFTER_MIN, to MAIL_TO_STUCK (or MAIL_TO). The
-     snapshot is written only when the mail went, so a failed send is retried
-     against the same yesterday rather than losing a day's changes. */
+  /* Once a day, after DIGEST_AFTER_MIN. TWO KINDS OF MAIL (Ayush, 2026-10-26):
+       - the team-wide one, to MAIL_TO_STUCK (or MAIL_TO) — the admins, as before;
+       - one per BD, to their own Kylas e-mail: their accounts that are called but
+         below Activation, what changed since yesterday, and how many stalled
+         contacts still owe a reason (bd-mail.mjs). MAIL_PER_BD=0 turns it off.
+     Each recipient is claimed in the shared store before the send, so a second
+     instance, or a retry after one failure, never mails anybody twice. The
+     snapshot of "yesterday" is written only when EVERY mail of the day went, so
+     a retry compares against the same yesterday. */
   async function stuckMail() {
-    if (!cache || !(env.MAIL_TO_STUCK || env.MAIL_TO)) return { skipped: "not configured" };
+    const adminTo = env.MAIL_TO_STUCK || env.MAIL_TO;
+    const perBd = String(env.MAIL_PER_BD ?? "1") !== "0";
+    if (!cache || !(adminTo || perBd)) return { skipped: "not configured" };
     const d = new Date(Date.now() + TZ_MIN * 60000);
     if (d.getUTCHours() * 60 + d.getUTCMinutes() < DIGEST_AFTER_MIN) return { skipped: "too early" };
     const today = todayLocal();
-    const mark = `below-activation-sent-${today}`;
-    if (await cache.get(mark).catch(() => null)) return { skipped: "already sent" };
-    await cache.put(mark, new Date().toISOString(), { ttlSeconds: 14 * 86400 }).catch(() => {});
+    const done = `below-activation-done-${today}`;
+    if (await cache.get(done).catch(() => null)) return { skipped: "already sent" };
     const r = await stuckReport();
     const opts = { labels: STAGE_LABEL };
-    const sent = await sendReport(env, { subject: stuckSubject(r.today, r.stuck, r.ch),
-      text: stuckText(r.today, r.stuck, r.ch, opts), html: stuckHtml(r.today, r.stuck, r.ch, opts),
-      to: env.MAIL_TO_STUCK || env.MAIL_TO, label: "below-activation mail" }, { log });
-    if (sent.sent) await cache.put(STUCK_SNAPSHOT, JSON.stringify({ ...snapshotOf(r.stuck), __day: r.today }),
-                                   { ttlSeconds: 60 * 86400 }).catch(() => {});
-    else await cache.delete(mark).catch(() => {});
-    return { day: r.today, accounts: r.stuck.length, sent: sent.sent, why: sent.why };
+    let sentN = 0, failed = 0, skipped = [];
+
+    /* claim → send → release on failure */
+    const once = async (key, send) => {
+      if (await cache.get(key).catch(() => null)) return;
+      await cache.put(key, new Date().toISOString(), { ttlSeconds: 14 * 86400 }).catch(() => {});
+      const res = await send();
+      if (res.sent) sentN++;
+      else { failed++; await cache.delete(key).catch(() => {}); }
+    };
+
+    if (adminTo) await once(`below-activation-sent-${today}`, () => sendReport(env, {
+      subject: stuckSubject(r.today, r.stuck, r.ch), text: stuckText(r.today, r.stuck, r.ch, opts),
+      html: stuckHtml(r.today, r.stuck, r.ch, opts), to: adminTo, label: "below-activation mail" }, { log }));
+
+    if (perBd) {
+      const due = airtable ? await readRcaDue(airtable, { log }).catch(() => []) : [];
+      const { users } = await kylasUsers().catch(() => ({ users: [] }));
+      const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+      const plan = bdPlan({ stuck: r.stuck, ch: r.ch, due, users, domain: env.ALLOWED_EMAIL_DOMAIN || "", apiUser,
+                            labels: STAGE_LABEL, day: r.today });
+      skipped = plan.skipped;
+      for (const m of plan.mails)
+        await once(`below-activation-bd-${today}-${bdNameKey(m.owner)}`, () => sendReport(env, {
+          subject: m.subject, text: m.text, html: m.html, to: m.email, label: "bd mail" }, { log }));
+      if (skipped.length) log(`bd mail: ${skipped.length} owner(s) skipped — ${skipped.map((x) => x.why).join(", ")}`);
+    }
+
+    if (sentN && !failed) {
+      await cache.put(STUCK_SNAPSHOT, JSON.stringify({ ...snapshotOf(r.stuck), __day: r.today }),
+                      { ttlSeconds: 60 * 86400 }).catch(() => {});
+      await cache.put(done, new Date().toISOString(), { ttlSeconds: 14 * 86400 }).catch(() => {});
+    }
+    return { day: r.today, accounts: r.stuck.length, sent: sentN, failed, skipped: skipped.length };
   }
 
   return { routes, version: VERSION, startedAt: STARTED, maintain,

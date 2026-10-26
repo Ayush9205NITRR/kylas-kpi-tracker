@@ -1909,6 +1909,29 @@ body and sends nothing. `GET /below-activation` (admins) previews it;
 workflow **Preview — called, below Activation** prints the live counts (no
 names — public logs). Tests: `test-below-activation` 25.
 
+### 3l4b · One mail per BD, and the only secret is the password (2026-10-26)
+
+Ayush: each BD gets their own morning mail; the admins keep the team-wide one; "I will only
+enter MAIL_SMTP_PASS, rest all details you have".
+
+* **Per BD** (`scripts/bd-mail.mjs`, sent from `stuckMail()` in handlers.mjs): their accounts that
+  are called but below Activation, what changed since yesterday, and "n of your contacts have
+  stalled and the reason is still owed" (from `readRcaDue`, pointing at the console's Reasons
+  bell). Address = the BD's own Kylas user e-mail, matched on the owner's name. **Skipped, with the
+  reason logged:** the API user, a deactivated user, two users sharing a name, no e-mail, an
+  address outside `ALLOWED_EMAIL_DOMAIN`. **No mail** when a BD has nothing stuck, no change and
+  nothing owed. `MAIL_PER_BD = "0"` turns it off.
+* **Admins:** the team-wide mail, unchanged, to `MAIL_TO_STUCK` or else `MAIL_TO`. The daily
+  write-back digest is still team-wide, to `MAIL_TO` only.
+* **Once only:** each recipient is claimed in the shared store (`below-activation-sent-<day>`,
+  `below-activation-bd-<day>-<owner>`) before the send and released on failure; yesterday's snapshot
+  is written only when every mail of the day went, so a retry compares against the same yesterday.
+* **Config:** `MAIL_SMTP_USER = "automations@enout.in"`, `MAIL_TO` (the three admins) and
+  `MAIL_PER_BD` are plain `[vars]` in wrangler.toml. **The one secret:**
+  `npx wrangler secret put MAIL_SMTP_PASS` (the app password of automations@enout.in), then
+  `npx wrangler deploy`. Until it is set nothing is sent and the body is logged.
+* Tests: test-bd-mail.mjs (20), test-worker §15e2.
+
 ## 3l5 · Every contact belongs to whoever owns its account (2026-10-22, 1.71.0)
 
 Ayush: *"all associated contacts for that account should be allotted to

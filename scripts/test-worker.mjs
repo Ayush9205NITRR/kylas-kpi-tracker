@@ -1207,6 +1207,31 @@ console.log('\n11. a copy that is short of the account is not the account');
         JSON.stringify(r.body.next));
 }
 
+/* ── 15e2 · THE MORNING MAIL ─────────────────────────────────────────
+   The team-wide called-below-Activation mail goes to MAIL_TO only, once a day,
+   however many isolates run the maintenance (the per-BD mails are tested in
+   test-bd-mail.mjs, where the data can be shaped). A local HTTP endpoint stands
+   in for the mail provider. */
+{
+  console.log('\n15e2. below-Activation mail: the admins\' copy goes once, to MAIL_TO only');
+  const { createServer } = await import('node:http');
+  const got = [];
+  const srv = createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
+    try { got.push(JSON.parse(b)); } catch (_) {} res.end('{}'); }); });
+  await new Promise((r) => srv.listen(9956, '127.0.0.1', r));
+  const MAILENV = { ...MAINT_ENV, MAIL_URL: 'http://127.0.0.1:9956/send', MAIL_KEY: 'k', MAIL_FROM: 'automations@enout.in',
+                    MAIL_TO: 'ayush@enout.in', DIGEST_AFTER_MIN: '0', ALLOWED_EMAIL_DOMAIN: 'enout.in' };
+  await fire(MAINT, MAILENV, await coldWorker(1591));
+  const team = got.filter((m) => /called, below Activation/.test(m.subject));
+  check('the admins get the team-wide mail', team.length === 1 && team[0].to.join() === 'ayush@enout.in',
+        got.map((m) => m.to.join() + ' | ' + m.subject).join(' // ').slice(0, 300));
+  check('nobody else is mailed when no BD has anything to say', got.every((m) => m.to.join() === 'ayush@enout.in'), JSON.stringify(got.map((m) => m.to)));
+  const before = got.length;
+  await fire(MAINT, MAILENV, await coldWorker(1590));
+  check('a second run, on another isolate, the same day mails nobody twice', got.length === before, `${before} -> ${got.length}`);
+  srv.close();
+}
+
 /* ── 15f · STALLED CONTACTS: WHOSE TO ANSWER; STAGE × MODE: ADMIN ONLY ──
    Ayush, 2026-10-26: the owner gives the reason; the meeting-mode split is
    for the admin. */
