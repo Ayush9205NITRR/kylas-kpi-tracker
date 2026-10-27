@@ -67,6 +67,13 @@ const all = Array.isArray(fl) ? fl : fl?.content || fl?.data || [];
 /* Found the way the server finds it (handlers.mjs companyFieldsShared): by LABEL,
    offsite in the name, with options. Every candidate is printed — field metadata,
    no company data — so a wrong pick is visible in the log. */
+console.log(`company fields from Kylas: ${all.length}; response shape ${Array.isArray(fl) ? "array" : Object.keys(fl || {}).join(",")}`);
+for (const f of all.filter((x) => /off|quarter|timeline|site/i.test(`${x.name} ${x.displayName}`)))
+  console.log(`  like: ${f.name} · "${f.displayName}" · type ${f.type}`);
+{ const seen = new Set(); let n = 0;
+  for (const kid of fromContacts.keys()) { if (n++ >= 6) break;
+    try { for (const k of Object.keys((await kylas.company(kid))?.customFieldValues || {})) if (/off|quarter|timeline|site/i.test(k)) seen.add(k); } catch (_) {} }
+  console.log(`  custom keys on a few of those companies: ${[...seen].join(", ") || "none"}`); }
 const cands = all.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`) && (findOptions(f) || []).length);
 for (const f of all.filter((x) => /offsite/i.test(`${x.name} ${x.displayName}`)))
   console.log(`  candidate: ${f.name} · "${f.displayName}" · type ${f.type} · ${(findOptions(f) || []).length} options · keys ${Object.keys(f).filter((k) => /multi|pick|allow|array|list/i.test(k)).join(",") || "-"}`);
