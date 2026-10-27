@@ -1,0 +1,54 @@
+# ADD THE CONTACTS' OFFSITE QUARTER TO THE COMPANY IN KYLAS.
+#
+# scripts/offsite-to-company.mjs. Ayush, 2026-10-27: "contact se uthao aur
+# company ke existing mein usko add kar do". The company keeps every quarter it
+# already has; the quarters its contacts name (Event Rows, Past and Now) are
+# added. Company's one offsite field only, by JSON PATCH — the owner is read
+# before and after every write and the first change stops the run.
+#
+# Steps, in order:
+#   dry-run    reads everything, writes nothing: the field, the counts, the ids
+#   first-one  ONE company written and read back — look at it in Kylas
+#   all        the rest (companies already holding the quarters are skipped)
+#
+# Logs print Kylas ids and quarters only: this repository's Actions logs are public.
+name: Offsite quarter, contacts to company
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: 'dry-run, first-one or all'
+        type: choice
+        default: 'dry-run'
+        options: [dry-run, first-one, all]
+
+concurrency:
+  group: offsite-to-company
+  cancel-in-progress: false
+
+jobs:
+  offsite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KYLAS_KEY: ${{ secrets.KYLAS_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check the secrets are there
+        run: |
+          for v in KYLAS_KEY AIRTABLE_PAT; do
+            if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
+          done
+      - name: Dry run (always first)
+        run: node scripts/offsite-to-company.mjs
+      - name: First company
+        if: ${{ github.event.inputs.step == 'first-one' }}
+        run: node scripts/offsite-to-company.mjs --apply --limit 1
+      - name: All companies
+        if: ${{ github.event.inputs.step == 'all' }}
+        run: node scripts/offsite-to-company.mjs --apply --all

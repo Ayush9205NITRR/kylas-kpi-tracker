@@ -1932,6 +1932,18 @@ enter MAIL_SMTP_PASS, rest all details you have".
   `npx wrangler deploy`. Until it is set nothing is sent and the body is logged.
 * Tests: test-bd-mail.mjs (20), test-worker §15e2.
 
+### 3l4c · The company's offsite quarter = its contacts' quarters, added (2026-10-27)
+
+The digest's audit said 52 companies have a quarter from their contacts, 22 of them differ on the
+company in Kylas (nothing writes the company field). Ayush: *"contact se uthao aur company ke existing
+mein usko add kar do"* — a **union**: nothing on the company is removed, the contacts' quarters are added.
+`scripts/offsite-sync.mjs` (rule, pure, `test-offsite-sync` 10) and `scripts/offsite-to-company.mjs`
+(runner). Quarters from the Event Rows exactly as the console derives them; written with the same one-field
+JSON PATCH as the Source-of-Data tag (owner never moves; read before and after, first change stops the run).
+A **single-select** company field cannot hold two quarters: reported, never overwritten. A company whose
+owner is deactivated is refused by Kylas and listed. Workflow **Offsite quarter, contacts to company**:
+`dry-run` → `first-one` → `all`. Not run yet: the dry run says what the field is and how many are affected.
+
 ## 3l5 · Every contact belongs to whoever owns its account (2026-10-22, 1.71.0)
 
 Ayush: *"all associated contacts for that account should be allotted to
