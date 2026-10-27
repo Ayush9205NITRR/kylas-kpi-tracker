@@ -61,6 +61,35 @@ for (const r of rows) {
 }
 console.log(`contacts name a quarter on ${fromContacts.size} companies`);
 
+/* 1b · --probe: how Kylas hands the company's offsite values back (the fields
+   list is empty on this account, so the option ids have to be learned from the
+   values). Option ids and labels only; nothing identifies a company. */
+if (has("probe")) {
+  const shapes = new Map();
+  let n = 0;
+  for (const kid of fromContacts.keys()) {
+    if (n++ >= 25) break;
+    let rec; try { rec = await kylas.company(kid); } catch (_) { continue; }
+    for (const k of ["cfOffsiteTimelineBdNew", "cfOffsiteTimeline"]) {
+      const v = rec?.customFieldValues?.[k];
+      if (v === undefined || v === null || v === "") continue;
+      shapes.set(`${k} = ${JSON.stringify(v)}`, (shapes.get(`${k} = ${JSON.stringify(v)}`) || 0) + 1);
+    }
+    for (const [k, v] of Object.entries(rec?.metaData?.idNameStore || {}))
+      if (/offsite|custom/i.test(k)) shapes.set(`idNameStore.${k} = ${JSON.stringify(v).slice(0, 300)}`, 1);
+  }
+  console.log(`values seen on the first ${Math.min(n, 25)} companies:`);
+  for (const [k, c] of shapes) console.log(`  x${c}  ${k}`);
+  /* and the contact side, whose offsite field has the same name */
+  try {
+    const cf = await kylas.raw("GET", "/v1/entities/contact/fields?entityType=contact&custom-only=false&sort=createdAt,asc&page=0&size=200");
+    const list = Array.isArray(cf) ? cf : cf?.content || cf?.data || [];
+    for (const f of list.filter((x) => /offsite/i.test(`${x.name} ${x.displayName}`)))
+      console.log(`  CONTACT field ${f.name} · type ${f.type} · options ${JSON.stringify((findOptions(f) || []).map((o) => [o.id, o.label]))}`);
+  } catch (e) { console.log(`  contact fields: ${e.status || e.message}`); }
+  process.exit(0);
+}
+
 /* 2 · the company's offsite field in Kylas */
 /* The first form returned nothing on 2026-10-27 (0 fields, an array), so the
    others the contact side works with are tried in turn; each count is printed. */

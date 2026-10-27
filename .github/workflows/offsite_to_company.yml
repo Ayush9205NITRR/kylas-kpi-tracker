@@ -21,7 +21,7 @@ on:
         description: 'dry-run, first-one or all'
         type: choice
         default: 'dry-run'
-        options: [dry-run, first-one, all]
+        options: [dry-run, first-one, all, probe]
 
 concurrency:
   group: offsite-to-company
@@ -44,7 +44,11 @@ jobs:
           for v in KYLAS_KEY AIRTABLE_PAT; do
             if [ -z "${!v}" ]; then echo "::error::the repository secret $v is not set"; exit 1; fi
           done
+      - name: Probe (how Kylas returns the company's offsite values)
+        if: ${{ github.event.inputs.step == 'probe' }}
+        run: node scripts/offsite-to-company.mjs --probe
       - name: Dry run (always first)
+        if: ${{ github.event.inputs.step != 'probe' }}
         run: node scripts/offsite-to-company.mjs
       - name: First company
         if: ${{ github.event.inputs.step == 'first-one' }}
