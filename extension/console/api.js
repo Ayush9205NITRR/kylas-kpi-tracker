@@ -162,6 +162,16 @@
       }
       const e = e0;
       if (e.building) throw e;
+      /* AN ANSWER IS NOT AN OUTAGE. Any HTTP error reply (a 403 on somebody else's
+         reason, a 404 on a route an older server lacks, a 500 from one slow table)
+         threw into this block and turned the whole badge to "offline", while the
+         rest of the screen was loading fine from the same server. Only a request
+         that got NO answer — or a 401, which is "sign in" — may say offline.
+         /health is the exception: its answer is the verdict. */
+      if (e.status && e.status !== 401 && path !== "/health") {
+        if (!state.online && !state.needsSignIn) { state = { ...state, online: true, reason: "" }; announce(); }
+        throw e;
+      }
       const reason = e.message;
       /* needsSignIn is what lets the badge say "sign in" and mean it, instead
          of "offline" and a prompt for a server address that was never wrong. */
