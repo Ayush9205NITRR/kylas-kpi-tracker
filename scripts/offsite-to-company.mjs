@@ -21,7 +21,6 @@ import { createClient } from "./kylas.mjs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { companyOwnerOf } from "./reassign.mjs";
 import { findOptions } from "./kylas-options.mjs";
-import { resolveWriteFields } from "./kylas-write-map.mjs";
 import { offsiteOf } from "./offsite.mjs";
 import { planCompany } from "./offsite-sync.mjs";
 import { offsiteFrom } from "./kylas-write-map.mjs";
@@ -64,11 +63,17 @@ console.log(`contacts name a quarter on ${fromContacts.size} companies`);
 
 /* 2 · the company's offsite field in Kylas */
 const fl = await kylas.companyFields();
-const fields = (Array.isArray(fl) ? fl : fl?.content || fl?.data || []).map((f) => ({
-  name: f.name, label: f.displayName || f.name, type: f.type || f.fieldType || "", _raw: f }));
-const picklists = Object.fromEntries(fields.map((f) => [f.name, findOptions(f._raw) || []]));
-const map = resolveWriteFields(fields, picklists);
-const field = map.offsite;
+const all = Array.isArray(fl) ? fl : fl?.content || fl?.data || [];
+/* Found the way the server finds it (handlers.mjs companyFieldsShared): by LABEL,
+   offsite in the name, with options. Every candidate is printed — field metadata,
+   no company data — so a wrong pick is visible in the log. */
+const cands = all.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`) && (findOptions(f) || []).length);
+for (const f of all.filter((x) => /offsite/i.test(`${x.name} ${x.displayName}`)))
+  console.log(`  candidate: ${f.name} · "${f.displayName}" · type ${f.type} · ${(findOptions(f) || []).length} options · keys ${Object.keys(f).filter((k) => /multi|pick|allow|array|list/i.test(k)).join(",") || "-"}`);
+const score = (f) => (/timeline|quarter/i.test(`${f.name} ${f.displayName}`) ? 2 : 0) + (/multi/i.test(String(f.type)) ? 1 : 0);
+const pick = cands.sort((a, b) => score(b) - score(a))[0];
+const isMultiRaw = (f) => /MULTI/i.test(String(f?.type)) || f?.multiValue === true || f?.isMultiValue === true || f?.allowMultiple === true;
+const field = pick ? { name: pick.name, label: pick.displayName || pick.name, type: String(pick.type || ""), multi: isMultiRaw(pick), options: findOptions(pick) } : null;
 if (!field) { console.error("No offsite picklist field on the company in Kylas — nothing to write."); process.exit(1); }
 console.log(`company field: ${field.name} (${field.type}${field.multi ? ", multi" : ", single"}, ${field.options.length} options)`);
 
