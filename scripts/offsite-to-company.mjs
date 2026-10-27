@@ -126,8 +126,16 @@ for (const f of all.filter((x) => /offsite/i.test(`${x.name} ${x.displayName}`))
 const score = (f) => (/BD\s*-\s*New/i.test(`${f.displayName}`) ? 5 : 0) + (/timeline|quarter/i.test(`${f.name} ${f.displayName}`) ? 2 : 0) + (/multi/i.test(String(f.type)) ? 1 : 0);
 const pick = cands.sort((a, b) => score(b) - score(a))[0];
 const isMultiRaw = (f) => /MULTI/i.test(String(f?.type)) || f?.multiValue === true || f?.isMultiValue === true || f?.allowMultiple === true;
-const field = pick ? { name: pick.name, label: pick.displayName || pick.name, type: String(pick.type || ""), multi: isMultiRaw(pick), options: findOptions(pick) } : null;
-if (!field) { console.error("No offsite picklist field on the company in Kylas — nothing to write."); process.exit(1); }
+/* KYLAS GIVES NO FIELD LIST FOR COMPANIES on this account (every URL answers 0
+   fields), so the field is the one the probe read off the companies themselves
+   on 2026-10-27: cfOffsiteTimelineBdNew, a multi-select whose values arrive as
+   [{id, name}], options 258137..258140. Each write is read back, so a wrong id
+   shows as "not as written" on the first company and nothing else is touched. */
+const KNOWN = { name: "cfOffsiteTimelineBdNew", label: "Offsite Timeline (BD - New)", type: "MULTI_PICKLIST", multi: true,
+  options: [{ id: 258137, code: "JAN_MAR", label: "Jan - Mar" }, { id: 258138, code: "APR_JUN", label: "Apr - Jun" },
+            { id: 258139, code: "JUL_SEP", label: "Jul - Sep" }, { id: 258140, code: "OCT_DEC", label: "Oct - Dec" }] };
+let field = pick ? { name: pick.name, label: pick.displayName || pick.name, type: String(pick.type || ""), multi: isMultiRaw(pick), options: findOptions(pick) } : null;
+if (!field) { console.log("  (no field list from Kylas — using the field the probe found on the companies)"); field = KNOWN; }
 console.log(`company field: ${field.name} (${field.type}${field.multi ? ", multi" : ", single"}, ${field.options.length} options)`);
 
 /* 3 · plan every company */
@@ -165,7 +173,7 @@ const refusedWhy = {};
 for (const p of todo) {
   if (wrote >= LIMIT) break;
   const ownerBefore = await companyOwnerOf(kylas, p.kid, null);
-  try { await patch(p.kid, p.value); }
+  try { try { await patch(p.kid, p.value); } catch (e1) { if (e1.status === 400 && Array.isArray(p.value)) await patch(p.kid, p.value.map((id) => ({ id }))); else throw e1; } }
   catch (e) { refused++; const w = String(e.message).replace(/[^\x20-\x7e]/g, "").slice(0, 70); refusedWhy[w] = (refusedWhy[w] || 0) + 1;
     console.log(`  ${p.kid}: refused — ${w}`); await sleepGap(); continue; }
   const after = await kylas.company(p.kid);
