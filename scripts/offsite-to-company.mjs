@@ -62,7 +62,24 @@ for (const r of rows) {
 console.log(`contacts name a quarter on ${fromContacts.size} companies`);
 
 /* 2 · the company's offsite field in Kylas */
-const fl = await kylas.companyFields();
+/* The first form returned nothing on 2026-10-27 (0 fields, an array), so the
+   others the contact side works with are tried in turn; each count is printed. */
+let fl = [];
+for (const path of [
+  "/v1/entities/company/fields?entityType=company&custom-only=false&page=0&size=200",
+  "/v1/entities/company/fields?entityType=company&custom-only=false&sort=createdAt,asc&page=0&size=200",
+  "/v1/entities/company/fields?entityType=company&custom-only=true&page=0&size=200",
+  "/v1/entities/company/fields?page=0&size=200",
+  "/v1/entities/company/fields",
+  "/v1/entities/COMPANY/fields?entityType=COMPANY&custom-only=false&page=0&size=200",
+]) {
+  try {
+    const r = await kylas.raw("GET", path);
+    const list = Array.isArray(r) ? r : r?.content || r?.data || [];
+    console.log(`  ${path.replace("/v1/entities/", "")} -> ${list.length} fields`);
+    if (list.length) { fl = list; break; }
+  } catch (e) { console.log(`  ${path.replace("/v1/entities/", "")} -> ${e.status || e.message}`); }
+}
 const all = Array.isArray(fl) ? fl : fl?.content || fl?.data || [];
 /* Found the way the server finds it (handlers.mjs companyFieldsShared): by LABEL,
    offsite in the name, with options. Every candidate is printed — field metadata,
@@ -77,7 +94,7 @@ for (const f of all.filter((x) => /off|quarter|timeline|site/i.test(`${x.name} $
 const cands = all.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`) && (findOptions(f) || []).length);
 for (const f of all.filter((x) => /offsite/i.test(`${x.name} ${x.displayName}`)))
   console.log(`  candidate: ${f.name} · "${f.displayName}" · type ${f.type} · ${(findOptions(f) || []).length} options · keys ${Object.keys(f).filter((k) => /multi|pick|allow|array|list/i.test(k)).join(",") || "-"}`);
-const score = (f) => (/timeline|quarter/i.test(`${f.name} ${f.displayName}`) ? 2 : 0) + (/multi/i.test(String(f.type)) ? 1 : 0);
+const score = (f) => (/BD\s*-\s*New/i.test(`${f.displayName}`) ? 5 : 0) + (/timeline|quarter/i.test(`${f.name} ${f.displayName}`) ? 2 : 0) + (/multi/i.test(String(f.type)) ? 1 : 0);
 const pick = cands.sort((a, b) => score(b) - score(a))[0];
 const isMultiRaw = (f) => /MULTI/i.test(String(f?.type)) || f?.multiValue === true || f?.isMultiValue === true || f?.allowMultiple === true;
 const field = pick ? { name: pick.name, label: pick.displayName || pick.name, type: String(pick.type || ""), multi: isMultiRaw(pick), options: findOptions(pick) } : null;
