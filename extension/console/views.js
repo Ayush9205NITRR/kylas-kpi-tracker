@@ -214,6 +214,8 @@
          company the Company Database has no row for, which is what the
          Unknown chips count. */
       if (seed?.enrich && !co.enrich) co.enrich = seed.enrich;
+      /* Open account (picked, not yet SQL) — open-accounts.mjs on the server. */
+      if (seed?.open && !co.open) co.open = seed.open;
       return co;
     };
 
@@ -234,7 +236,7 @@
                            /* How many contacts the account has in Kylas. Present
                               only once the server's contact index exists — and
                               then the stage above is from contacts, full stop. */
-                           acctN: co.acctN });
+                           acctN: co.acctN, open: co.open });
     }
 
     for (const c of data) {
@@ -2411,7 +2413,7 @@
      has a chip for the blank. */
   /* The search box's operators — see Q_OPS, where each is defined. */
   const Q_OPS_KEYS = ["contains", "equal", "not_equal", "not_contains", "begins_with"];
-  const ACC = { stages: new Set(), stageOpen: false, stageFind: "",
+  const ACC = { openNeed: "", stages: new Set(), stageOpen: false, stageFind: "",
                 /* OWNERS, PLURAL. A manager's question is "Gurnoor and Muskan
                    together", and a single select answered "one, or everyone".
                    Empty means every owner, exactly as the old "All owners"
@@ -2641,6 +2643,7 @@
      chip counting rows the search has already ruled out would be lying. */
   function accMatch(co, skip) {
     if (!qMatch(co)) return false;
+    if (skip !== "open" && ACC.openNeed && !(co.open && (ACC.openNeed === "all" || co.open.need === ACC.openNeed))) return false;
     /* THE ACCOUNT'S stage, not one contact's. A row here is an account, so the
        question "show me everything at Discovery" is a question about how far
        the account got — the furthest rung any of its POCs reached. Filtering on
@@ -3485,6 +3488,7 @@
     { k: "company", label: "Company", w: "1.6fr", fixed: true, cls: "co",
       ff: { type: "text", get: (c) => c.name || "" },
       cell: (c) => `${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
+        c.open ? ` <i class="needs oa-${c.open.need}" title="Picked ${esc(day(c.open.firstCallAt))} · ${c.open.calls} call(s)">${OPEN_NEED[c.open.need]}</i>` : ""}${
         focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}` },
     /* NO "PIPELINE STAGE" COLUMN. The company record's own Pipeline Stage - BD
        is still read and kept (the backend, the push, the board's fallback for
@@ -3770,6 +3774,30 @@
 
   /* `owners` was the list the old single select was built from; the picker
      reads the rows themselves, so nothing is passed in any more. */
+  /* ── OPEN ACCOUNTS ──────────────────────────────────────────────────
+     Ayush, 2026-10-28: an account a BD has picked (first call) stays in front of
+     them until it reaches SQL — Right POC, then discovery, then SQL. The server
+     puts `open: { need, firstCallAt, lastCallAt, calls }` on each account
+     (scripts/open-accounts.mjs); this view counts them, pins them to the top of
+     every sort and badges the row. Shown, never blocking. */
+  const OPEN_NEED = { right: "Needs Right POC", discovery: "Needs discovery call", sql: "Needs SQL" };
+  const OPEN_ORDER = { right: 0, discovery: 1, sql: 2 };
+  const OPEN_STALE_DAYS = 5;
+  const openStale = (c) => !!c.open && (!c.open.lastCallAt
+    || Date.now() - Date.parse(c.open.lastCallAt) > OPEN_STALE_DAYS * 86400000);
+  function openStrip(all) {
+    const open = all.filter((c) => c.open);
+    if (!open.length) return "";
+    const n = (k) => open.filter((c) => c.open.need === k).length;
+    const card = (k, num, text) => `<button type="button" class="oaCard${ACC.openNeed === k ? " on" : ""}" data-open="${k}">
+      <b class="oa-${k}">${num}</b><small>${text}</small></button>`;
+    return `<div class="oaStrip">${card("all", open.length, "Open — picked, not yet SQL")}${
+      card("right", n("right"), OPEN_NEED.right)}${card("discovery", n("discovery"), OPEN_NEED.discovery)}${
+      card("sql", n("sql"), OPEN_NEED.sql)}</div>
+      <div class="oaPin">Open accounts stay on top until they reach SQL${
+        open.some(openStale) ? ` · <em>${open.filter(openStale).length} not called in ${OPEN_STALE_DAYS}+ days</em>` : ""}</div>`;
+  }
+
   function explorerHTML(all) {
     const cols = colsOn();
     /* Rebuilt each paint so a value list offers what the data holds now. */
@@ -3803,7 +3831,10 @@
       revenue: byNum((c) => (c.enrich?.rev ?? null)),
       az: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
     }[ACC.sort];
-    const rows = all.filter((c) => accMatch(c)).sort(cmp);
+    const pin = (a, b) => (a.open ? 0 : 1) - (b.open ? 0 : 1)
+      || (a.open && b.open ? OPEN_ORDER[a.open.need] - OPEN_ORDER[b.open.need]
+           || String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")) : 0);
+    const rows = all.filter((c) => accMatch(c)).sort((a, b) => pin(a, b) || cmp(a, b));
     EXPLORER_ROWS = rows;
     const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
       || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
@@ -3915,13 +3946,14 @@
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         ${moreFilters(all)}
+        ${openStrip(all)}
         ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
           <div class="vr vh">${cols.map((col) =>
             `<span class="${col.num ? "num" : ""}">${esc(col.label)}<i class="cgrip" data-grip="${esc(col.k)}"
               title="Drag to resize · double-click to reset" role="separator" aria-hidden="true"></i></span>`).join("")}</div>
           ${shown.length ? shown.map((c) =>
-            `<div class="vr" data-id="${esc(c.id)}">${cols.map((col) =>
+            `<div class="vr${openStale(c) ? " oaStale" : ""}" data-id="${esc(c.id)}">${cols.map((col) =>
               cellHTML(col, c)).join("")}</div>`
           ).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
         </div></div>
@@ -4893,6 +4925,9 @@
     global.Focus?.load();
     on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
+    /* An open-accounts card filters to it; the same card again clears it. */
+    host.querySelectorAll(".oaCard").forEach((b) => b.addEventListener("click", () => {
+      ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.limit = 100; redraw(); }));
     /* ── ticking accounts, and handing them over ───────────────────────── */
     /* Delegated, because the rows are re-rendered on every keystroke in the
        search box and per-row listeners would be rebound hundreds of times. */

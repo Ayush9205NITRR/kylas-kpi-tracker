@@ -62,6 +62,7 @@ import { resolveFieldMap, problemsOf, lackingOnSave } from "./field-map.mjs";
 import { checkContact as dedupeCheck } from "./dedupe.mjs";
 import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
+import { openOf } from "./open-accounts.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -613,9 +614,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const p = prog?.get(String(coId));
     const k = idx?.get(String(coId));
     const best = higherStage(k, p?.stage ? { stage: p.stage, rung: p.rung } : null);
+    const open = openOf(p);
     return {
       ...(best ? { acctStage: best.stage, acctRung: best.rung } : {}),
       ...(idx ? { acctN: k?.n || 0 } : {}),
+      ...(open ? { open } : {}),
     };
   };
 
@@ -1755,7 +1758,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   }, async () => {
     const [companies, contacts, transitions, calls, dialler] = await Promise.all([
       airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
-      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date", "Kylas Contact ID"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date", "Kylas Contact ID", "Has Signal", "Has Complete Row"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Stage Transitions", { fields: ["To Stage", "Changed At", "Contact"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Contact", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
       /* The Kylas dialler's calls — "called" includes them (below-activation.mjs). */

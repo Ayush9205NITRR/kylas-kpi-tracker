@@ -1384,3 +1384,18 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .rcaTabs .rcaTab{border:1px solid var(--line);background:var(--panel);color:var(--text2);border-radius:999px;padding:4px 12px;font:inherit;font-size:var(--t-meta);cursor:pointer}
 .rcaTabs .rcaTab.on{border-color:var(--blue);color:var(--blue);background:var(--blueSoft)}
 .rcaNoteCell{max-width:260px;white-space:normal;color:var(--text2)}
+
+/* Open accounts (views.js openStrip): four cards above the accounts table, a pin
+   note, the "Needs …" badge on the company cell, amber for not called in 5+ days.
+   The rung ramp colours the three needs; amber only flags. */
+.oaStrip{display:flex;gap:10px;margin:10px 0 8px}
+.oaCard{flex:1;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;color:var(--text2);cursor:pointer}
+.oaCard.on{border-color:var(--blue);background:var(--blueSoft)}
+.oaCard b{display:block;font:var(--w-max) var(--t-name) var(--display);color:var(--text)}
+.oaCard small{font-size:var(--t-meta)}
+.oaCard b.oa-right,.needs.oa-right{color:var(--r3)}.oaCard b.oa-discovery,.needs.oa-discovery{color:var(--r4)}.oaCard b.oa-sql,.needs.oa-sql{color:var(--r5)}
+.oaPin{font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-strong);margin:0 0 8px}
+.oaPin em{color:var(--amber);font-style:normal}
+.needs{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);background:var(--blueSoft);border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap}
+.acctable .vr.oaStale{background:var(--amberSoft)}
+@media (max-width:960px){.oaStrip{flex-wrap:wrap}.oaCard{flex:1 1 45%}}

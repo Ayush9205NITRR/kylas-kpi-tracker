@@ -45,7 +45,7 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
   const co = (kid) => {
     if (!byCo.has(kid)) byCo.set(kid, { rung: 0, stage: "", sqlAt: null, done: false, contacts: 0,
                                         exited: 0, lastCallAt: null, firstCallAt: null, calls: 0, nextCall: null,
-                                        dialCalls: 0, dialFirstAt: null, dialLastAt: null });
+                                        dialCalls: 0, dialFirstAt: null, dialLastAt: null, right: false, discovery: false });
     return byCo.get(kid);
   };
 
@@ -74,6 +74,10 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
        disagree. Where the rank came from the current stage they are the same
        string anyway, so this only changes the rows that were misreading. */
     if (rung > p.rung) { p.rung = rung; p.stage = STAGE_AT_RUNG[rung] || stage; }
+    /* The two data rungs (CLAUDE.md #6): Has Signal is Right POC, Has Complete Row a
+       successful discovery. Read for open-accounts.mjs. */
+    if (Number(f["Has Signal"] || 0) === 1) p.right = true;
+    if (Number(f["Has Complete Row"] || 0) === 1) p.discovery = true;
     if (QUALIFIED.includes(stage)) p.done = true;
     /* A call-back only counts while the contact is still in play. */
     const next = at(f["Next Call Date"]);

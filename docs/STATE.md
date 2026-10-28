@@ -2048,6 +2048,27 @@ uska; meeting-by-stage bhi same".
 * Tests: test-mode-split.mjs (17), test-worker §15f (associate cut to self on all three routes,
   403 on someone else's answer, admin reads the whole log).
 
+## 3l8 · Open accounts — a picked account stays on top until SQL (2026-10-28, 1.74.0)
+
+Ayush: an account a BD has picked must stay in front of them until it moves — Right POC, then a
+discovery call, then SQL — "clearly visible", not blocking. Decided: picked = the **first call**
+(console Call Log or the Kylas dialler), no click; **shown, never blocking**; English wording; in the
+**Accounts (company) pane**, not a separate panel.
+
+* Rule: `scripts/open-accounts.mjs` `needOf(p)` over `accountProgress().byCompany` — `right` (called, no
+  Has Signal), `discovery` (Right POC, no Has Complete Row), `sql` (discovery done or a meeting booked,
+  not SQL); nothing when never called, SQL reached, or every contact closed. progress.mjs now reads
+  Has Signal / Has Complete Row into `p.right` / `p.discovery`.
+* Server: `/companies` carries `open: { need, firstCallAt, lastCallAt, calls }` per account (acctFields).
+  No new route; owner scoping is the list's own.
+* Accounts view (views.js `openStrip`): four cards above the table (Open / Needs Right POC / Needs
+  discovery call / Needs SQL — click filters, again clears); open accounts are pinned above every sort
+  (Right POC first, oldest pick first); a "Needs …" badge on the company cell; amber row when not
+  called in 5+ days. Updates after a save through the existing re-read (savedLanded).
+* "+ New contact" removed from the top bar (Ayush).
+* Tests: test-open-accounts (11). test-accounts-ux-live has 5 failures that are identical on the
+  previous build (tick/narrow cases), not from this change.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
