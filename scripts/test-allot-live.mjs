@@ -56,6 +56,10 @@ const shown = await F().evaluate(() => document.querySelectorAll('#vwrap .vr').l
 console.log(`rows on screen: ${shown}`);
 await F().evaluate(() => document.getElementById('accPickAll')?.click());
 await page.waitForTimeout(1500);
+ok('ticking rows brings up the floating bar', await F().evaluate(() => !!document.querySelector('.abar #accReassign')));
+if (SHOTS) await page.screenshot({ path: `${SHOTS}/rd-1-bar.png` });
+await F().evaluate(() => document.getElementById('accReassign').click());
+await page.waitForTimeout(800);
 
 const opts = await F().evaluate(() => [...document.querySelectorAll('[data-allot-who="0"] option')].map((o) => o.textContent.trim()));
 ok('the people are the active list', opts.includes('Sejal One') && opts.includes('Mayra Five'), opts.join(', '));
@@ -76,34 +80,34 @@ await F().evaluate(() => document.getElementById('accAllotAdd').click()); await 
 await pick(1, 'Mayra Five'); await page.waitForTimeout(400);
 await pct(0, 40); await page.waitForTimeout(300);
 await pct(1, 60); await page.waitForTimeout(500);
-const preview = await F().evaluate(() => document.querySelector('.exbulk')?.innerText || '');
-ok('the preview splits the ticked accounts 40/60', /Sejal One\s*2/.test(preview) && /Mayra Five\s*2/.test(preview) || /Sejal One\s*1/.test(preview),
+const preview = await F().evaluate(() => document.querySelector('.rdPanel')?.innerText || '');
+ok('the panel shows 2 each for a 40/60 split of 4', (preview.match(/\n2\n/g) || []).length >= 2 || /2\s+\d+ contacts[\s\S]*2\s+\d+ contacts/.test(preview),
    preview.replace(/\s+/g, ' ').slice(0, 300));
-ok('the button says how many', /Allot 4 accounts/.test(preview), preview.replace(/\s+/g, ' ').slice(0, 200));
-if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-ready.png` });
+ok('the button says how many', /Re-assign 4 accounts/.test(preview), preview.replace(/\s+/g, ' ').slice(0, 200));
+if (SHOTS) await page.screenshot({ path: `${SHOTS}/rd-2-choose.png` });
 
 /* Go: accept the confirm. It becomes a job on the server; the top-bar chip
    follows it (2026-10-29, re-assignment as a background job). */
 page.on('dialog', (d) => d.accept());
 const tStart = Date.now();
 await F().evaluate(() => document.getElementById('accAllotGo').click());
-let chipSeen = '', chipEnd = '';
+let chipSeen = '', chipEnd = '', shotRun = false;
 for (let i = 0; i < 120; i++) {
   await page.waitForTimeout(500);
   const t = await F().evaluate(() => { const b = document.getElementById('jobBtn'); return b && !b.hidden ? b.textContent : ''; });
   if (t && !chipSeen) { chipSeen = t; console.log(`    chip after ${Date.now() - tStart} ms: "${t}"`); if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-running.png` }); }
+  if (SHOTS && !shotRun && /Re-assigning/.test(await F().evaluate(() => document.querySelector('.rdPanel')?.innerText || ''))) { shotRun = true; await page.screenshot({ path: `${SHOTS}/rd-3-running.png` }); }
   if (/moved ✓/.test(t)) { chipEnd = t; break; }
 }
 ok('Start hands it to the server at once — the chip shows the job', /Re-assigning|moved/.test(chipSeen), chipSeen);
 ok('the chip ends with what moved', /4 moved ✓/.test(chipEnd), chipEnd);
 const msg = await F().evaluate(() => document.querySelector('.exbmsg')?.innerText || '');
 ok('the panel says it runs in the background', /in the background/.test(msg), msg);
-if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-done.png` });
-await F().evaluate(() => document.getElementById('jobBtn').click()); await page.waitForTimeout(800);
-const sheet = await F().evaluate(() => document.querySelector('.sheet')?.innerText.replace(/\s+/g, ' ') || '');
-ok('the job sheet says 4 moved and read back', /4 moved and read back/.test(sheet), sheet.slice(0, 200));
-if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-sheet.png` });
-await F().evaluate(() => document.querySelector('.scrim #ajx')?.click());
+await page.waitForTimeout(800);
+ok('the panel turns into the result', /4 moved ✓/.test(await F().evaluate(() => document.querySelector('.rdPanel')?.innerText || '')));
+if (SHOTS) await page.screenshot({ path: `${SHOTS}/rd-4-done.png` });
+await F().evaluate(() => document.getElementById('rdDone')?.click()); await page.waitForTimeout(500);
+ok('Close clears the chip', await F().evaluate(() => document.getElementById('jobBtn').hidden));
 
 const owners = await Promise.all(['903', '1776620', '1778327', '1810449'].map(async (id) => (await get(`/v1/companies/${id}`)).ownerId));
 ok('in Kylas: every account on Sejal or Mayra', owners.every((o) => o === 80001 || o === 80005), JSON.stringify(owners));

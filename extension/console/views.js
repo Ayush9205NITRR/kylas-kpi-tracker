@@ -3236,31 +3236,19 @@
         <button class="gbtn sm" id="accPickAll" type="button">Select these ${shown}</button>
         <span class="exbh">…or tick rows, to add them to your Focus list${API.isAdmin ? ", or allot them — with their contacts — to your BDs" : ""}.</span>
       </div>${awayRow}${prog}${msg}</div>`;
-    const batches = Math.ceil(n / focusBulk());
-    return `<div class="exbulk">
-      <div class="exbrow exbsel">
-        <span class="exbk">Selected</span>
-        <span class="exbn tnum">${n} of ${shown} in this list</span>
-        <button class="gbtn sm" id="accPickAll" type="button">${
-          allShown ? "Select none" : `Select all ${shown}`}</button>
-        <button class="gbtn sm" id="accPickClear" type="button">Clear selection</button>
-      </div>
-      ${awayRow}
-      <div class="exbrow">
-        <span class="exbk">Focus</span>
-        <button class="gbtn sm pri" id="accFocusMany" type="button"${ACC.adding ? " disabled" : ""}>★ Add ${n} to my Focus</button>
-        <span class="exbh">${batches > 1 ? `Sent in ${batches} batches of up to ${focusBulk()}. ` : ""}Accounts already on a list or deprioritized are left as they are.</span>
-      </div>
-      ${/* SAY WHAT IT DOES NOT DO, ON THE CONTROL ITSELF. Kylas accepts a
-           company PUT carrying ownerId and silently drops it, so the account's
-           own owner cannot be set through the API at all — an earlier version
-           of this button erased one instead of moving it. The contacts are
-           what move, and a person about to click needs to know that here,
-           not in a release note. */ ""}
-      ${API.isAdmin ? allotRows(mine) : ""}
-      ${prog}
-      ${msg}
-    </div>`;
+    /* A SELECTION IS A FLOATING BAR (2026-10-29, the re-assignment redesign):
+       nothing on the page moves when rows are ticked; the actions sit at the
+       bottom of the view. Re-assign opens the side panel (reassignDrawer). */
+    const contacts = mine.some((r) => r.acctN != null) ? mine.reduce((a, r) => a + (Number(r.acctN) || 0), 0) : 0;
+    return `<div class="exbulk idle">${awayRow}${prog}${msg}</div>
+      <div class="abar" role="toolbar" aria-label="Selected accounts">
+        <b class="tnum">${n} selected</b>${contacts ? `<span class="abar-sub">· ${contacts} contacts</span>` : ""}
+        <span class="abar-sep"></span>
+        <button class="ab" id="accFocusMany" type="button"${ACC.adding ? " disabled" : ""}>★ Add to Focus</button>
+        ${API.isAdmin ? `<button class="ab p" id="accReassign" type="button">Re-assign →</button>` : ""}
+        <button class="ab" id="accPickAll" type="button">${allShown ? "Select none" : `Select all ${shown}`}</button>
+        <button class="ab x" id="accPickClear" type="button">Clear</button>
+      </div>`;
   }
   /* The people an account can be handed TO. Names alone are not enough — the
      write goes by Kylas id, and a dropdown of names that carried no ids is
@@ -3306,41 +3294,6 @@
   }
   const personName = (id) => ((CACHE.allotPeople || []).find((p) => String(p.id) === String(id))
     || ownerOptions().find((o) => String(o.id) === String(id)) || {}).name || String(id);
-  function allotRows(mine) {
-    const people = allotPeople();
-    const ids = mine.map((r) => String(r.id));
-    const plan = allotSplit(ids);
-    const per = {};
-    for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
-    const total = allotRowsOk().reduce((a, r) => a + Number(r.pct), 0);
-    const preview = plan.length ? Object.entries(per).map(([id, n]) => `${esc(personName(id))} <b class="tnum">${n}</b>`).join(" \u00b7 ") : "";
-    const rowHTML = ACC.allot.map((r, i) => `<span class="exbto allotp">
-        <select data-allot-who="${i}" aria-label="Person ${i + 1}">
-          <option value="">${people ? "choose a person…" : "loading people…"}</option>
-          ${(people || []).map((p) => `<option value="${esc(p.id)}"${String(r.id) === String(p.id) ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
-        </select>
-        <input class="allotpct tnum" data-allot-pct="${i}" type="number" min="1" max="100" step="1" inputmode="numeric"
-          value="${esc(r.pct)}" aria-label="Share for person ${i + 1}, percent"><span>%</span>
-        ${ACC.allot.length > 1 ? `<button class="linkbtn" data-allot-del="${i}" type="button" aria-label="Remove person ${i + 1}">remove</button>` : ""}
-      </span>`).join("");
-    const ready = plan.length && !ACC.allotting;
-    return `<div class="exbrow">
-        <span class="exbk">Allot</span>
-        ${rowHTML}
-        <button class="linkbtn" id="accAllotAdd" type="button">+ add person</button>
-        ${ACC.allot.length > 1 ? `<button class="linkbtn" id="accAllotEven" type="button">split evenly</button>` : ""}
-      </div>
-      <div class="exbrow">
-        <span class="exbk"></span>
-        <span class="exbh">${preview ? `${preview}${total !== 100 ? ` <span class="allotwarn">(shares add to ${total}% — used as proportions)</span>` : ""}` : "Choose who gets them."}</span>
-        <button class="gbtn sm pri" id="accAllotGo" type="button"${ready ? "" : " disabled"}>${
-          ACC.allotting ? "Allotting…" : `Allot ${plan.length || ""} account${plan.length === 1 ? "" : "s"}`}</button>
-      </div>
-      <p class="exbnote">The <b>account</b> and <b>every one of its contacts</b> move to the person shown, ${ALLOT_BATCH} at a time.
-        Every account's owner is read back from Kylas. Stop whenever you like — what has moved stays moved,
-        the rest stay ticked.</p>`;
-  }
-
   function ownerPicker(all) {
     const cnt = new Map();
     for (const c of all.filter((x) => accMatch(x, "owner"))) {
@@ -5092,54 +5045,7 @@
       API.allotPeople().then((r) => { CACHE.allotPeople = r.people || []; redraw(); })
         .catch(() => { CACHE.allotPeopleAsked = false; });
     }
-    /* The bar is redrawn on every change (the preview counts follow the
-       shares), so its inputs are wired by data attribute, not id. */
-    host.querySelectorAll("[data-allot-who]").forEach((n) => n.addEventListener("change", (e) => {
-      ACC.allot[Number(n.dataset.allotWho)].id = e.target.value; redraw();
-    }));
-    host.querySelectorAll("[data-allot-pct]").forEach((n) => n.addEventListener("change", (e) => {
-      ACC.allot[Number(n.dataset.allotPct)].pct = Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))); redraw();
-    }));
-    host.querySelectorAll("[data-allot-del]").forEach((n) => n.addEventListener("click", () => {
-      ACC.allot.splice(Number(n.dataset.allotDel), 1); redraw();
-    }));
-    const evenly = () => {
-      const n = ACC.allot.length, base = Math.floor(100 / n);
-      ACC.allot.forEach((r, i) => { r.pct = base + (i < 100 - base * n ? 1 : 0); });
-    };
-    on("accAllotAdd", "click", () => { ACC.allot.push({ id: "", pct: 0 }); evenly(); redraw(); });
-    on("accAllotEven", "click", () => { evenly(); redraw(); });
-    on("accAllotStop", "click", () => { ACC.allotStop = true; redraw(); });
-    on("accAllotGo", "click", async () => {
-      if (ACC.allotting) return;
-      const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
-      const plan = allotSplit(ids);
-      if (!plan.length) return;
-      const per = {};
-      for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
-      const lines = Object.entries(per).map(([id, n]) => `  ${personName(id)}: ${n}`).join("\n");
-      const yes = confirm(
-        `Re-assign ${plan.length} account${plan.length === 1 ? "" : "s"}:\n${lines}\n\n` +
-        `Every contact on each account goes to the same person.\n\n` +
-        `It runs in the background on the server — you can keep working or close this tab. ` +
-        `Every owner is read back from Kylas; anything that does not move is listed with the reason.\n\n` +
-        `This writes to Kylas and cannot be undone from here.`);
-      if (!yes) return;
-      ACC.allotting = true; ACC.busy = "Starting…"; redraw();
-      try {
-        const r = await API.allotJob("company", plan.map((a) => ({ companyId: a.company, to: a.ownerId })));
-        /* SHOWN AT ONCE: the rows say the new owner now; the job confirms it. */
-        for (const a of plan) {
-          ACC.picked.delete(String(a.company));
-          (CACHE.allotted ||= new Map()).set(String(a.company), { ownerId: String(a.ownerId), owner: personName(a.ownerId), at: Date.now() });
-        }
-        applyAllotted(CACHE.companies);
-        ACC.busy = `Re-assigning ${plan.length} account${plan.length === 1 ? "" : "s"} in the background — progress at the top.`;
-        AllotJobs.track(r.job);
-      } catch (e) {
-        ACC.busy = `Could not start: ${String(e.message || e).slice(0, 160)}. Nothing was changed.`;
-      } finally { ACC.allotting = false; redraw(); }
-    });
+    on("accReassign", "click", () => openReassign(redraw));
 
     on("accClear", "click", () => {
       ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
@@ -5321,6 +5227,165 @@
     paint();
   }
 
+  /* ── RE-ASSIGN, THE SIDE PANEL (2026-10-29, approved mock reassign-ui.png) ──
+     Select → choose people → watch (or close) → result. One panel that lives
+     outside the accounts view, so following a job does not redraw 18k rows.
+       choose   what moves (accounts + their contacts | contacts only), one card
+                per person with a % and what they get, + Add person, Split evenly
+       running  a ring, a bar per person, the latest few moved, Run in background,
+                Cancel the rest
+       done     moved / not moved with the reason, Retry, Download CSV, Close
+     The job itself is AllotJobs (server-side, read back, resumable). */
+  const rdInitials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+  const coName = (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.name || `#${id}`;
+  function openReassign(redraw) {
+    document.querySelector(".rdScrim")?.remove();
+    const rows = pickedIn(EXPLORER_ROWS);
+    if (!rows.length) return;
+    if (!ACC.allot.length) ACC.allot.push({ id: "", pct: 100 });
+    ACC.allotMode ||= "company";
+    const el = document.createElement("div");
+    el.className = "rdScrim";
+    let phase = "choose", started = 0, unsub = null;
+    const close = () => { el.remove(); if (unsub) unsub(); };
+    const evenly = () => {
+      const n = ACC.allot.length, base = Math.floor(100 / n);
+      ACC.allot.forEach((r, i) => { r.pct = base + (i < 100 - base * n ? 1 : 0); });
+    };
+    const loadOf = (id) => (CACHE.companies || []).filter((c) => String(c.ownerId) === String(id) && c.open).length;
+    const ring = (part, total, color) => {
+      const p = total ? Math.round((part / total) * 100) : 0;
+      return `<div class="rdRing" style="background:conic-gradient(${color} 0 ${p}%,var(--panel3) 0)"><span>${part}/${total}</span></div>`;
+    };
+    const chooseHTML = () => {
+      const people = allotPeople();
+      const ids = rows.map((r) => String(r.id));
+      const plan = allotSplit(ids);
+      const per = {}, perC = {};
+      for (const a of plan) { per[a.ownerId] = (per[a.ownerId] || 0) + 1;
+        perC[a.ownerId] = (perC[a.ownerId] || 0) + (Number(rows.find((r) => String(r.id) === a.company)?.acctN) || 0); }
+      /* acctN exists once the server's contact index is built; until then the
+         number is unknown, and unknown is not 0. */
+      const known = rows.some((r) => r.acctN != null);
+      const contacts = rows.reduce((a, r) => a + (Number(r.acctN) || 0), 0);
+      const total = allotRowsOk().reduce((a, r) => a + Number(r.pct), 0);
+      const contactsOnly = ACC.allotMode === "contacts";
+      const cards = ACC.allot.map((r, i) => {
+        const name = r.id ? personName(r.id) : "";
+        return `<div class="rdPerson">
+          <span class="rdAv">${r.id ? esc(rdInitials(name)) : "?"}</span>
+          <span class="rdPm">
+            <select data-allot-who="${i}" aria-label="Person ${i + 1}">
+              <option value="">${people ? "Choose a person…" : "Loading people…"}</option>
+              ${(people || []).map((p) => `<option value="${esc(p.id)}"${String(r.id) === String(p.id) ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+            </select>
+            <span class="rdLoad">${r.id ? `${loadOf(r.id)} open accounts now` : "&nbsp;"}</span>
+          </span>
+          <span class="rdPct"><input data-allot-pct="${i}" type="number" min="0" max="100" inputmode="numeric" value="${esc(r.pct)}" aria-label="Share, percent">%</span>
+          <span class="rdCnt"><b class="tnum">${r.id ? per[r.id] || 0 : "–"}</b><small>${r.id && known ? `${perC[r.id] || 0} contacts` : r.id ? "accounts" : ""}</small></span>
+          ${ACC.allot.length > 1 ? `<button class="rdDel" data-allot-del="${i}" type="button" aria-label="Remove">×</button>` : ""}
+        </div>`;
+      }).join("");
+      const bar = plan.length ? `<div class="rdSplit">${ACC.allot.filter((r) => r.id && per[r.id]).map((r, i) =>
+        `<i style="flex:${per[r.id]};opacity:${1 - i * 0.22}"></i>`).join("")}</div>` : "";
+      return `<div class="rdHead"><div><b>Re-assign ${rows.length} account${rows.length === 1 ? "" : "s"}</b>
+          <span>${contactsOnly ? "only their contacts move — the accounts stay" : known ? `${contacts} contacts move with them` : "every contact moves with its account"}</span></div>
+          <button class="rdX" id="rdX" type="button" aria-label="Close">×</button></div>
+        <div class="rdLbl">What moves</div>
+        <div class="rdMode"><button type="button" data-mode="company" class="${contactsOnly ? "" : "on"}">Accounts + their contacts</button>
+          <button type="button" data-mode="contacts" class="${contactsOnly ? "on" : ""}">Contacts only</button></div>
+        <div class="rdLbl">Who gets them</div>
+        ${cards}
+        <div class="rdAdd"><button class="linkbtn" id="accAllotAdd" type="button">+ Add person</button>${ACC.allot.length > 1 ? ` · <button class="linkbtn" id="accAllotEven" type="button">Split evenly</button>` : ""}</div>
+        ${bar}
+        <div class="rdSum">${plan.length ? `<b>${plan.length} account${plan.length === 1 ? "" : "s"}</b>${contactsOnly ? "' contacts" : known ? ` and <b>${contacts} contacts</b>` : " and all their contacts"} will move.${
+          total !== 100 ? ` <span class="rdWarn">Shares add to ${total}% — used as proportions.</span>` : ""}<br>` : "Choose who gets them.<br>"}
+          Never to Super Admin or a deactivated user · runs on the server — you can close this.</div>
+        <button class="rdGo" id="accAllotGo" type="button"${plan.length ? "" : " disabled"}>${plan.length ? `Re-assign ${plan.length} account${plan.length === 1 ? "" : "s"}` : "Choose a person"}</button>
+        <p class="rdNote">Every owner is read back from Kylas before it counts as done.</p>`;
+    };
+    const runHTML = (j) => {
+      if (!j) return `<div class="rdHead"><div><b>Starting…</b></div></div>`;
+      const fin = j.finished;
+      const moved = j.done, total = j.total;
+      const secs = Math.max(1, Math.round((Date.now() - started) / 1000));
+      const left = !fin && moved ? Math.round((secs / moved) * (total - moved)) : null;
+      const perRows = Object.entries(j.perTo || {}).map(([to, o]) => `<div class="rdProw"><span>${esc(personName(to))}</span>
+        <span class="rdPb"><i style="width:${o.total ? Math.round((o.done / o.total) * 100) : 0}%"></i></span><span class="tnum">${o.done}/${o.total}</span></div>`).join("");
+      const feed = (j.recent || []).map((r) => `<div class="rdFi ${r.state === "done" ? "ok" : r.state === "failed" ? "bad" : ""}">
+        <span>${r.state === "done" ? "✓" : r.state === "failed" ? "✕" : "…"} ${esc(coName(r.companyId))} → ${esc(personName(r.to).split(" ")[0])}</span>
+        <span>${r.state === "running" ? "moving" : r.contacts != null ? `${r.contacts} contact${r.contacts === 1 ? "" : "s"}` : ""}</span></div>`).join("");
+      const fails = (j.failures || []).slice(0, 20).map((f) => `<div class="rdFi bad"><span>${esc(coName(f.companyId))} → ${esc(personName(f.to).split(" ")[0])}</span><span>${esc(f.why)}</span></div>`).join("");
+      return `<div class="rdHead"><div><b>${fin ? "Done" : "Re-assigning…"}</b>
+          <span>${fin ? `${total} account${total === 1 ? "" : "s"} · ${j.contacts || 0} contacts` : "you can close this — it carries on"}</span></div>
+          <button class="rdX" id="rdX" type="button" aria-label="Close">×</button></div>
+        <div class="rdRingRow">${ring(moved, total, fin && j.failed ? "var(--amber)" : fin ? "var(--f-fresh)" : "var(--blue)")}
+          <div><b class="${fin ? (j.failed ? "rdBad" : "rdOk") : ""}">${fin ? `${moved} moved ✓` : `${total ? Math.round((moved / total) * 100) : 0}% done`}</b>
+          <span>${fin ? (j.failed ? `${j.failed} not moved — reason below` : "every owner read back from Kylas")
+            : `${left != null ? (left >= 90 ? `~${Math.round(left / 60)} min left` : `~${left}s left`) + " · " : ""}${j.contacts || 0} contacts moved`}</span></div></div>
+        ${fin ? "" : perRows}
+        ${fin ? fails : `<div class="rdLbl">Live</div><div class="rdFeed">${feed || '<div class="rdFi"><span>… starting</span></div>'}</div>`}
+        <div class="rdBtns">${fin
+          ? `${j.failed ? `<button class="p" id="ajRetry" type="button">Retry ${j.failed}</button><button id="ajCsv" type="button">Download CSV</button>` : ""}<button id="rdDone" type="button">Close</button>`
+          : `<button id="rdBg" type="button">Run in background</button><button id="ajCancel" type="button">Cancel the rest</button>`}</div>`;
+    };
+    const paint = () => {
+      el.innerHTML = `<div class="rdPanel" role="dialog" aria-label="Re-assign">${phase === "choose" ? chooseHTML() : runHTML(AllotJobs.job)}</div>`;
+      el.querySelector("#rdX")?.addEventListener("click", close);
+      el.querySelector("#rdBg")?.addEventListener("click", close);
+      el.querySelector("#rdDone")?.addEventListener("click", () => { AllotJobs.dismiss(); close(); });
+      el.querySelector("#ajRetry")?.addEventListener("click", () => AllotJobs.retry());
+      el.querySelector("#ajCancel")?.addEventListener("click", () => AllotJobs.cancel());
+      el.querySelector("#ajCsv")?.addEventListener("click", () => {
+        const j = AllotJobs.job;
+        const out = [["company_id", "company", "to", "why"], ...(j.failures || []).map((f) => [f.companyId, coName(f.companyId), personName(f.to), f.why])];
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([out.map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" }));
+        a.download = `reassign-not-moved-${j.id.slice(0, 8)}.csv`; a.click();
+      });
+      el.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { ACC.allotMode = b.dataset.mode; paint(); }));
+      el.querySelectorAll("[data-allot-who]").forEach((n) => n.addEventListener("change", (e) => { ACC.allot[Number(n.dataset.allotWho)].id = e.target.value; paint(); }));
+      el.querySelectorAll("[data-allot-pct]").forEach((n) => n.addEventListener("change", (e) => {
+        ACC.allot[Number(n.dataset.allotPct)].pct = Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))); paint(); }));
+      el.querySelectorAll("[data-allot-del]").forEach((n) => n.addEventListener("click", () => { ACC.allot.splice(Number(n.dataset.allotDel), 1); paint(); }));
+      el.querySelector("#accAllotAdd")?.addEventListener("click", () => { ACC.allot.push({ id: "", pct: 0 }); evenly(); paint(); });
+      el.querySelector("#accAllotEven")?.addEventListener("click", () => { evenly(); paint(); });
+      el.querySelector("#accAllotGo")?.addEventListener("click", go);
+    };
+    async function go() {
+      const plan = allotSplit(rows.map((r) => String(r.id)));
+      if (!plan.length) return;
+      const contactsOnly = ACC.allotMode === "contacts";
+      const per = {};
+      for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
+      const lines = Object.entries(per).map(([id, n]) => `  ${personName(id)}: ${n}`).join("\n");
+      if (!confirm(`Re-assign ${plan.length} account${plan.length === 1 ? "" : "s"}${contactsOnly ? " (contacts only)" : ""}:\n${lines}\n\n` +
+        `${contactsOnly ? "Only the contacts move; each account stays with its owner." : "Every contact on each account goes to the same person."}\n\n` +
+        `This writes to Kylas and cannot be undone from here.`)) return;
+      phase = "run"; started = Date.now(); paint();
+      try {
+        const r = await API.allotJob(contactsOnly ? "contacts" : "company", plan.map((a) => ({ companyId: a.company, to: a.ownerId })));
+        for (const a of plan) {
+          ACC.picked.delete(String(a.company));
+          if (!contactsOnly) (CACHE.allotted ||= new Map()).set(String(a.company), { ownerId: String(a.ownerId), owner: personName(a.ownerId), at: Date.now() });
+        }
+        if (!contactsOnly) applyAllotted(CACHE.companies);
+        ACC.busy = `Re-assigning ${plan.length} account${plan.length === 1 ? "" : "s"} in the background — progress at the top.`;
+        AllotJobs.track(r.job);
+        redraw();
+      } catch (e) {
+        phase = "choose"; paint();
+        el.querySelector(".rdNote").textContent = `Could not start: ${String(e.message || e).slice(0, 160)}. Nothing was changed.`;
+      }
+    }
+    const onJob = () => { if (phase === "run" && el.isConnected) paint(); };
+    AllotJobs.onChange(onJob);
+    unsub = () => AllotJobs.off?.(onJob);
+    el.addEventListener("click", (e) => { if (e.target === el) close(); });
+    document.body.appendChild(el);
+    paint();
+  }
+
   /* ── RE-ASSIGNMENT JOBS, followed from the console ────────────────────
      The server holds the job (allot-jobs.mjs). While this console is open it
      asks the server to run the next few items, again and again, so the job goes
@@ -5354,7 +5419,7 @@
     }
     return {
       get job() { return job; }, get error() { return err; },
-      onChange(f) { on.add(f); },
+      onChange(f) { on.add(f); }, off(f) { on.delete(f); },
       track(j) { job = j; save(); tell(); loop(); },
       async resume() {
         let id = null; try { id = localStorage.getItem(KEY); } catch (_) {}

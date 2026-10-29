@@ -141,11 +141,28 @@ export function createAllotJobs({ db, log = () => {}, now = () => Date.now() }) 
     const fails = ((await db.prepare(
       "SELECT company_id, to_id, error FROM allot_items WHERE job_id = ? AND state = 'failed' ORDER BY seq LIMIT 200").bind(jobId).all()).results || [])
       .map((r) => ({ companyId: r.company_id, to: r.to_id, why: r.error || "" }));
+    /* Per person and the latest few, for the console's progress panel. */
+    const perTo = {};
+    for (const r of ((await db.prepare("SELECT to_id, state, COUNT(*) n FROM allot_items WHERE job_id = ? GROUP BY to_id, state")
+      .bind(jobId).all()).results || [])) {
+      const o = (perTo[r.to_id] ||= { total: 0, done: 0, failed: 0 });
+      o.total += Number(r.n); if (r.state === "done") o.done += Number(r.n); if (r.state === "failed") o.failed += Number(r.n);
+    }
+    const recent = ((await db.prepare(
+      "SELECT company_id, to_id, state, result FROM allot_items WHERE job_id = ? AND state IN ('done', 'failed', 'running') ORDER BY updated_at DESC, seq DESC LIMIT 6")
+      .bind(jobId).all()).results || []).map((r) => {
+      let moved = null; try { moved = JSON.parse(r.result || "null")?.contactsMoved ?? null; } catch (_) {}
+      return { companyId: r.company_id, to: r.to_id, state: r.state, contacts: moved };
+    });
+    const contacts = Number((await db.prepare(
+      "SELECT COALESCE(SUM(json_extract(result, '$.contactsMoved')), 0) n FROM allot_items WHERE job_id = ? AND state = 'done'")
+      .bind(jobId).first())?.n || 0);
     const sum = (k) => counts[k] || 0;
     const left = sum("queued") + sum("running");
     return { id: job.id, kind: job.kind, by: job.by_name, total: Number(job.total), createdAt: job.created_at,
              done: sum("done"), failed: sum("failed"), superseded: sum("superseded"), cancelled: sum("cancelled"),
-             queued: sum("queued"), running: sum("running"), left, finished: left === 0, failures: fails };
+             queued: sum("queued"), running: sum("running"), left, finished: left === 0, failures: fails,
+             perTo, recent, contacts, updatedAt: job.updated_at };
   }
 
   async function list(limit = 10) {

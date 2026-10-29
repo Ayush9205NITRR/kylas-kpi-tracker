@@ -2128,6 +2128,13 @@ open, a 429 or closed tab left it half done); wants it full-proof and rolled out
   and resumable. The big speed-up needs Kylas' own bulk call (the one its UI uses); not built — needs the
   request captured once from the Kylas screen.
 * Rungs renamed "SQL Meeting Booked" / "SQL Meeting Done" (views.js RUNG + copies, report.mjs).
+* **1.77.0 — the re-assignment UI redesign** (approved mock `reassign-ui.png`): ticking rows shows a floating
+  bar at the bottom ("N selected · ★ Add to Focus · Re-assign → · Select all · Clear"); Re-assign opens a
+  side panel (views.js `openReassign`, outside the accounts view so following a job never redraws 18k rows):
+  Accounts + their contacts | Contacts only, one card per person (load, %, what they get), + Add person,
+  Split evenly, split bar, summary, one button. The same panel then shows a ring, a bar per person and the
+  last few moved (allot-jobs `status` now returns perTo / recent / contacts), and ends with moved / not moved
+  + reason, Retry, Download CSV, Close. test-allot-live 18/18.
 
 ## 3m · The duplicate check (phone and email, against the whole account)
 
