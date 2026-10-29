@@ -2497,3 +2497,10 @@ Do not re-propose these; they were built and thrown away.
   numbers, reads as a bug.
 - Searching the queue. The scope filter runs first, so it could only ever find
   what was already on screen.
+
+## 3l13 · The Accounts table had no tick boxes (1.77.2)
+
+Ayush, 2026-10-29: "no option of ticking rows". The explorer table (`explorerHTML`) never rendered the
+`.cpick` box — only the older `companies()` list did — so the floating Re-assign bar could only be reached
+through "Select these N". The Company cell now carries the box; the existing delegated `.cpick` wiring does
+the rest. Checked in Chrome: two ticks → "2 selected · Add to Focus · Re-assign →", row did not open.

@@ -3466,7 +3466,8 @@
   const ACOLS = [
     { k: "company", label: "Company", w: "1.6fr", fixed: true, cls: "co",
       ff: { type: "text", get: (c) => c.name || "" },
-      cell: (c) => `${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
+      cell: (c) => `<input class="cpick" type="checkbox" data-pick="${esc(c.id)}" aria-label="Select ${esc(c.name)}"${
+        ACC.picked.has(String(c.id)) ? " checked" : ""}>${focusOf(c) === "focus" ? `<i class="fstar" title="On a focus list">★</i> ` : ""}${esc(c.name)}${
         c.open ? ` <i class="needs oa-${c.open.need}" title="Picked ${esc(day(c.open.firstCallAt))} · ${c.open.calls} call(s)">${OPEN_NEED[c.open.need]}</i>` : ""}${
         focusOf(c) === "depri" ? ` <i class="dp" title="${esc([Focus.entry(c.id)?.reason, Focus.entry(c.id)?.note].filter(Boolean).join(" — "))}">deprioritized</i>` : ""}` },
     /* NO "PIPELINE STAGE" COLUMN. The company record's own Pipeline Stage - BD
@@ -4006,7 +4007,7 @@
             `<span class="${col.num ? "num" : ""}">${esc(col.label)}<i class="cgrip" data-grip="${esc(col.k)}"
               title="Drag to resize · double-click to reset" role="separator" aria-hidden="true"></i></span>`).join("")}</div>
           ${shown.length ? shown.map((c) =>
-            `<div class="vr${openStale(c) ? " oaStale" : ""}" data-id="${esc(c.id)}">${cols.map((col) =>
+            `<div class="vr${openStale(c) ? " oaStale" : ""}${ACC.picked.has(String(c.id)) ? " on" : ""}" data-id="${esc(c.id)}">${cols.map((col) =>
               cellHTML(col, c)).join("")}</div>`
           ).join("") : `<div class="vempty">Nothing matches these filters.</div>`}
         </div></div>
