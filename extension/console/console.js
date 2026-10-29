@@ -399,8 +399,8 @@ function renderCallbar(){
   bits.push(`<span class="mi kid" title="Kylas contact id"><em>ID</em><span>${esc(a.kid||"unsaved")}</span></span>`);
   meta.innerHTML=bits.join("");
   C.appendChild(meta);
-  const pn=prevNotes(a,HIST.get(String(a.kid||""))||[]);
-  if(pn)C.appendChild(pn);
+  /* "Said before" left the callbar on 2026-10-29 (Ayush): the history lives
+     under Notes from the call now (notesHist). Still fetched here, early. */
   loadHistory(a);
   const nb=el("div","nextbtn");
   const btn=el("button","pbtn",`Save &amp; next <kbd style="border-color:rgba(255,255,255,.35);background:transparent;color:inherit">⏎</kbd>`);
@@ -467,10 +467,8 @@ function loadHistory(a){
       HIST_WAIT.delete(kid);
       const cur=rec();
       if(String(cur?.kid||"")!==kid||(!(HIST.get(kid)||[]).length&&!HREM.get(kid)))return;
-      const C=document.getElementById("callbar");if(!C)return;
-      const box=prevNotes(cur,HIST.get(kid));if(!box)return;
-      const old=C.querySelector(".pnote");
-      if(old)old.replaceWith(box);else C.appendChild(box);
+      const host=document.getElementById("nhist");if(!host)return;
+      host.replaceWith(notesHist(cur,HIST.get(kid)));
     });
 }
 /* One text, said twice, is read once. The console writes a call's note into
@@ -478,58 +476,44 @@ function loadHistory(a){
    from both — compared without case or spacing, and a call note made only of
    pieces already shown (it joins the rows' remarks with " · ") is dropped. */
 const normNote=s=>String(s||"").toLowerCase().replace(/\s+/g," ").trim();
-function prevNotes(a,hist=[]){
-  const bits=[],seen=new Set();
-  /* Earlier calls first, newest at the top: the last thing said is the one
-     the associate needs before the ringing starts. */
-  const owns=[];
-  /* The team's Remarks field in Kylas first: it is what somebody chose to
-     write down about this person, rather than what a call log caught. */
-  const kr=String(a.kylasRemarks||HREM.get(String(a.kid||""))||"").trim();
-  if(kr)owns.push(["Remarks",kr]);
-  const own=humanNote(a.remarks);
-  const rows=[];
-  for(const r of [...(a.past||[]),...(a.current||[])]){
-    const t=humanNote(r.remarks);
-    if(t)rows.push([[r.eventType,r.period==="past"?"past":""].filter(Boolean).join(" · "),t]);
-  }
-  /* Rows and remarks are claimed before the calls so a call note repeating
-     them is the one dropped, not the labelled original. */
-  if(own)owns.push(["",own]);
-  for(const [f,t] of [...owns,...rows])seen.add(normNote(t));
-  for(const h of hist.slice(0,5)){
+/* EARLIER NOTES, UNDER THE BOX. Ayush, 2026-10-29 (the approved "v2" mock):
+   what was said before sits with the notes, as a small timeline — who, when,
+   how the call went, then the words — newest first, two shown, the rest one
+   click away. Read-only: it is history. Nothing renders when there is none,
+   so the no-answer call pays nothing for it. */
+const NH_TOP=2;
+const fmtWhen=iso=>{const t=new Date(iso);if(!Number.isFinite(t.getTime()))return "";
+  return t.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+", "+
+    t.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"});};
+const initialsOf=n=>String(n||"?").trim().split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
+function noteItems(a,hist=[]){
+  const items=[],seen=new Set([normNote(humanNote(a.remarks))]);
+  for(const r of [...(a.current||[])])seen.add(normNote(humanNote(r.remarks)));
+  for(const h of hist){
     const n=normNote(h.text);
     if(!n||(n.includes(" · ")?n.split(" · ").every(p=>seen.has(p.trim())):seen.has(n)))continue;
     seen.add(n);
-    bits.push({from:[h.at?since(h.at):"",h.outcome&&h.outcome!=="connected"?h.outcome:"",h.by].filter(Boolean).join(" · "),text:h.text});
+    items.push({at:h.at,by:h.by||"",outcome:h.outcome==="connected"?"Connected":h.outcome||"",text:h.text});
   }
-  for(const [f,t] of [...owns,...rows])bits.push({from:f,text:t});
-  if(!bits.length)return null;
-  const box=el("div","pnote");
-  /* WHEN, NOT JUST WHAT. "Wants a Goa venue" means one thing said last week
-     and another said in March, and the associate is deciding in the second
-     before the ringing starts. The contact's last call is the only date the
-     record actually carries for a note, so it labels the whole strip rather
-     than pretending each line has its own. */
-  /* The newest dated thing on the strip: a call log's own time when there is
-     one, the contact's last call otherwise. */
-  const newest=[hist[0]?.at,a.lastCallAt].filter(Boolean).sort().pop();
-  const when=newest?since(newest):"";
-  const full=bits.map(b=>(b.from?b.from+": ":"")+b.text).join("  ·  ");
-  const one=full.length>150?full.slice(0,150).replace(/\s+\S*$/,"")+"…":full;
-  box.innerHTML=`<button type="button" class="pnx" aria-expanded="false">
-      <em>Said before${when?` · ${esc(when)}`:""}</em><span class="pns">${esc(one)}</span>
-      ${full.length>150?'<i class="pnmore">more</i>':""}</button>
-    <div class="pnall" hidden>${bits.map(b=>`<p>${
-      b.from?`<em>${esc(b.from)}</em>`:""}${esc(b.text)}</p>`).join("")}</div>`;
-  const btn=box.querySelector(".pnx"),all=box.querySelector(".pnall"),
-        mo=box.querySelector(".pnmore");
-  btn.onclick=()=>{const open=all.hidden;all.hidden=!open;
-    btn.setAttribute("aria-expanded",String(open));
-    box.classList.toggle("open",open);
-    /* It read "more" while already open, which is the one thing the word
-       cannot mean there. */
-    if(mo)mo.textContent=open?"less":"more";};
+  const kr=humanNote(a.kylasRemarks||HREM.get(String(a.kid||""))||"");
+  if(kr&&!seen.has(normNote(kr))){seen.add(normNote(kr));items.push({at:"",by:"Remarks (Kylas)",outcome:"",text:kr});}
+  for(const r of a.past||[]){const t=humanNote(r.remarks);
+    if(t&&!seen.has(normNote(t))){seen.add(normNote(t));items.push({at:"",by:[r.eventType,"past"].filter(Boolean).join(" · "),outcome:"",text:t});}}
+  return items;
+}
+function notesHist(a,hist,open=false){
+  const box=el("div","nhist");box.id="nhist";
+  const items=noteItems(a,hist||HIST.get(String(a.kid||""))||[]);
+  if(!items.length){box.hidden=true;return box;}
+  const shown=open?items:items.slice(0,NH_TOP);
+  box.innerHTML=`<div class="nhh"><b>Earlier notes</b><span>${items.length} note${items.length===1?"":"s"}</span></div>${
+    shown.map((n,i)=>`<div class="nhi${i?" old":""}"><span class="nhav">${esc(initialsOf(n.by))}</span><div>
+      <div class="nhm">${n.by?`<b>${esc(n.by)}</b>`:""}${n.at?`<span>· ${esc(fmtWhen(n.at))}</span>`:""}${
+        n.outcome?`<span class="nhp">${esc(n.outcome)}</span>`:""}</div>
+      <div class="nhb">${esc(n.text)}</div></div></div>`).join("")}${
+    items.length>NH_TOP?`<button type="button" class="nhall">${open?"Show less":`Show all ${items.length} notes`}</button>`:""}`;
+  const b=box.querySelector(".nhall");
+  if(b)b.onclick=()=>box.replaceWith(notesHist(a,hist,!open));
   return box;
 }
 
@@ -1379,6 +1363,7 @@ function renderBasic(){
      nothing is lost by never showing it. */
   rRow.appendChild(field("Notes from the call","f-rm",false,
     textarea("f-rm",humanNote(a.remarks),"Whatever they said",v=>a.remarks=v)));
+  rRow.lastChild.appendChild(notesHist(a));
   /* Offsite timeline moved to "Before you hang up" on the right. It is not
      where the account STANDS — it is something the prospect tells you, like
      who handles this for them today and whether the pitch got in, and those

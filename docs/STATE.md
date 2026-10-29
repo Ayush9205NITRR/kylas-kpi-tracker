@@ -2504,3 +2504,15 @@ Ayush, 2026-10-29: "no option of ticking rows". The explorer table (`explorerHTM
 `.cpick` box — only the older `companies()` list did — so the floating Re-assign bar could only be reached
 through "Select these N". The Company cell now carries the box; the existing delegated `.cpick` wiring does
 the rest. Checked in Chrome: two ticks → "2 selected · Add to Focus · Re-assign →", row did not open.
+
+## 3l14 · Earlier notes under "Notes from the call"; the "Said before" strip is gone (1.78.0)
+
+Ayush, 2026-10-29, approved mock "v2". `notesHist(a)` (console.js) renders under the `f-rm` textarea: a
+card titled Earlier notes, one row per earlier note: avatar initials, **who · when · outcome pill**, then
+the note in a bubble, newest first. Two are shown, and "Show all N notes" opens the rest in place. The
+rows come from the Kylas call logs (`/history`), Kylas Remarks and past event rows, de-duplicated with
+`normNote` against what the box already holds. Nothing renders when there are none. `loadHistory()`
+swaps `#nhist` in place when the call logs arrive. The callbar's `.pnote` strip and its CSS are removed.
+**Unchanged on purpose:** the textarea still edits the contact's own note (`a.remarks`) and the save
+path is untouched. Making the box start empty per call means changing how Remarks is written, so it
+was left for a separate change.

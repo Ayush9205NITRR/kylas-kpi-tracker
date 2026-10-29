@@ -191,10 +191,10 @@ let pn='';
 /* The notes of earlier calls and the Remarks field arrive in the background
    after the card paints — one Kylas round trip, slower when it is throttled. */
 for(let i=0;i<30&&!/budget sits with the CFO/.test(pn);i++){await page.waitForTimeout(500);
-  pn=await f.evaluate(()=>document.querySelector('.pnote')?.textContent.replace(/\s+/g,' ').trim()||'');}
-await f.evaluate(()=>document.querySelector('.pnote .pnx')?.click());await page.waitForTimeout(300);
+  pn=await f.evaluate(()=>document.querySelector('#nhist')?.textContent.replace(/\s+/g,' ').trim()||'');}
+await f.evaluate(()=>document.querySelector('#nhist .nhall')?.click());await page.waitForTimeout(300);
 const hist=await f.evaluate(async()=>({kid:rec()?.kid,name:rec()?.pocName,view:!document.getElementById('viewport').hidden,held:HIST.has('112936'),rem:HREM.get('112936')||'',wait:HIST_WAIT.has('112936'),cb:!!document.getElementById('callbar')}));
-if(!skipped) ok('the strip shows the cfRemarks text', /budget sits with the CFO/.test(pn), pn.slice(-200)+' || history: '+JSON.stringify(hist).slice(0,200));
+if(!skipped) ok('Earlier notes show the cfRemarks text', /budget sits with the CFO/.test(pn), pn.slice(-200)+' || history: '+JSON.stringify(hist).slice(0,200));
 await page.screenshot({path:(process.env.S||'/tmp')+'/ux3-remarks.png'});
 console.log(`\n${pass} passed, ${fail} failed`);
 await ctx.close();process.exit(fail?1:0);
