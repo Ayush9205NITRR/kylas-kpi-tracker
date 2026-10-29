@@ -3796,36 +3796,33 @@
   const openStale = (c) => !!c.open && (!c.open.lastCallAt
     || Date.now() - Date.parse(c.open.lastCallAt) > OPEN_STALE_DAYS * 86400000);
   /* ── WORK TODAY ─────────────────────────────────────────────────────
-     Ayush, 2026-10-29: "accounts to work today — things to focus for today".
-     Rules first (AI later), from what the list already carries, each with its
-     reason, most urgent first:
-       1 call-back overdue · 2 call-back due today · 3 open account not called in
-       5+ days (Right POC first) · 4 ★ Focus with no call-back · 5 the highest
-       priority accounts never called (three). Fifteen at most. */
-  const TODAY_MAX = 15;
+     Ayush, 2026-10-29: only the accounts on the ★ Focus list, in two groups —
+       Call today     a call-back is due today or already overdue
+       Right POC      called at least once, Right POC still not identified
+     An account in both shows once, under Call today. */
   function todayPlan(all) {
-    const out = [], seen = new Set();
-    const add = (c, rank, why) => { if (seen.has(c.id)) return; seen.add(c.id); out.push({ c, rank, why }); };
+    const focus = all.filter((c) => focusOf(c) === "focus");
+    const call = focus.filter((c) => ["overdue", "today"].includes(nextOf(c)))
+      .sort((a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0))
+      .map((c) => ({ c, why: nextOf(c) === "today" ? "Call-back due today"
+        : `Call-back overdue by ${-nextIn(c)} day${nextIn(c) === -1 ? "" : "s"}`, late: nextOf(c) === "overdue" }));
+    const inCall = new Set(call.map((x) => x.c.id));
     const ago = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000));
-    for (const c of all) {
-      const n = nextOf(c);
-      if (n === "overdue") add(c, 0, `Call-back overdue by ${-nextIn(c)} day${nextIn(c) === -1 ? "" : "s"}`);
-      else if (n === "today") add(c, 1, "Call-back due today");
-    }
-    for (const c of all.filter((x) => openStale(x)).sort((a, b) => OPEN_ORDER[a.open.need] - OPEN_ORDER[b.open.need]))
-      add(c, 2, `Picked ${c.open.firstCallAt ? ago(c.open.firstCallAt) : "?"} days ago, still ${OPEN_NEED[c.open.need].toLowerCase()}`);
-    for (const c of all) if (focusOf(c) === "focus" && !c.nextCall) add(c, 3, "On your Focus list, no call-back set");
-    all.filter((c) => freshOf(c) === "never" && c.enrich?.pri != null).sort((a, b) => b.enrich.pri - a.enrich.pri)
-      .slice(0, 3).forEach((c) => add(c, 4, `High priority (${c.enrich.pri}), never called`));
-    return out.sort((a, b) => a.rank - b.rank).slice(0, TODAY_MAX);
+    const right = focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id))
+      .sort((a, b) => String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")))
+      .map((c) => ({ c, why: `Tapped ${c.open.firstCallAt ? ago(c.open.firstCallAt) : "?"} days ago · ${c.open.calls} call${c.open.calls === 1 ? "" : "s"}`,
+                     late: openStale(c) }));
+    return { call, right };
   }
   function todayCard(all) {
-    const plan = todayPlan(all);
-    if (!plan.length) return "";
-    return `<div class="tdCard"><div class="tdHead"><b>Work today</b><span>${plan.length} account${
-      plan.length === 1 ? "" : "s"}, most urgent first</span></div>
-      <div class="tdList">${plan.map(({ c, rank, why }) => `<button type="button" class="tdRow r${rank}" data-today="${esc(c.id)}">
-        <span class="n">${esc(c.name)}</span><span class="why">${esc(why)}</span></button>`).join("")}</div></div>`;
+    const { call, right } = todayPlan(all);
+    if (!call.length && !right.length) return "";
+    const list = (rows) => rows.length ? `<div class="tdList">${rows.map(({ c, why, late }) =>
+      `<button type="button" class="tdRow${late ? " r0" : ""}" data-today="${esc(c.id)}"><span class="n">${esc(c.name)}</span><span class="why">${esc(why)}</span></button>`).join("")}</div>`
+      : `<p class="vnote">Nothing here.</p>`;
+    return `<div class="tdCard"><div class="tdHead"><b>Work today</b><span>from your ★ Focus list</span></div>
+      <div class="tdSec"><div class="tdSub">Call today <em>${call.length}</em></div>${list(call)}</div>
+      <div class="tdSec"><div class="tdSub">Tapped, Right POC not identified <em>${right.length}</em></div>${list(right)}</div></div>`;
   }
 
   function openStrip(all) {

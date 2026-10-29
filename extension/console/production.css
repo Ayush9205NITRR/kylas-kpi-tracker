@@ -1410,3 +1410,6 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .tdRow:hover{border-color:var(--blue)}
 .tdRow .n{font-weight:var(--w-strong)}.tdRow .why{font-size:var(--t-meta);color:var(--text2)}
 .tdRow.r0{border-color:var(--amberLine);background:var(--amberSoft)}.tdRow.r0 .why{color:var(--amber)}
+.tdSec+.tdSec{margin-top:10px}
+.tdSub{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.tdSub em{font-style:normal;color:var(--text)}

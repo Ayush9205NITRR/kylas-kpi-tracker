@@ -2071,9 +2071,10 @@ discovery call, then SQL — "clearly visible", not blocking. Decided: picked = 
 
 ## 3l9 · Work today, Created/Updated-by filters, research and Demand-stage removals, faster search (2026-10-29, 1.75.0)
 
-* **Work today** (views.js `todayPlan`/`todayCard`, rules, no AI yet): up to 15 accounts, each with its
-  reason — call-back overdue, due today, open account not called in 5+ days (Right POC first), ★ Focus
-  with no call-back, three highest-priority never-called. Card at the top of the Accounts pane; click opens.
+* **Work today** (views.js `todayPlan`/`todayCard`; changed in 1.75.1 per Ayush): only ★ Focus accounts,
+  two groups — **Call today** (call-back due today or overdue) and **Tapped, Right POC not identified**
+  (called, `open.need === "right"`, oldest tap first; amber if not called in 5+ days). An account in both
+  shows under Call today. Card at the top of the Accounts pane; click opens.
 * **Filters:** "Created by" / "Last updated by" chip rows under More filters (`cby`/`uby`).
 * **Removed (Ayush):** "Account pipeline stage" from Account research, the "Open in Airtable" button, and
   the Demand team stage column + filter everywhere. Account stage unchanged. An old saved `aps` filter no
