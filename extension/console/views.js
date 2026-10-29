@@ -2155,6 +2155,8 @@
            this file if the all-time view is wanted back somewhere it cannot be
            mistaken for this one. */""}
       ${rcaStrip()}
+      ${/* WORK TODAY on the dashboard too (Ayush, 2026-10-29): the same block as
+           the Accounts pane, over the same allotted list. */ todayCard(rollup(DATA, dbase, dbase.length > 0))}
       ${/* THE LADDER FIRST, then the period table under it. The ladder is this
            period across the team and each associate; the table is every period.
            Same numbers, same report, one request. */
@@ -2234,6 +2236,15 @@
     /* Fetched once per session; the view repaints when it lands. */
     ensureSnapshots(() => dashboard(host));
     ensureRca(DASH_OWNER, () => dashboard(host));
+    /* Work today, wired for the dashboard: rows open the account; the toggle
+       repaints here; "View all" and the open-account lines go to the accounts
+       table with that filter on. */
+    host.querySelectorAll(".tdRow").forEach((b) => b.addEventListener("click", () =>
+      global.openCompanyFromView?.(b.dataset.today, b.querySelector(".n")?.textContent || "")));
+    host.querySelectorAll(".tdSeg [data-tab]").forEach((b) => b.addEventListener("click", () => { ACC.todayTab = b.dataset.tab; dashboard(host); }));
+    const toAccounts = () => { ACC.limit = 100; global.showConsoleView?.("companies"); };
+    host.querySelector("#tdAll")?.addEventListener("click", () => { ACC.todaySet = ACC.todayTab === "poc" ? "poc" : "call"; ACC.openNeed = ""; toAccounts(); });
+    host.querySelectorAll(".tdNeed").forEach((b) => b.addEventListener("click", () => { ACC.openNeed = b.dataset.open; ACC.todaySet = ""; toAccounts(); }));
     ensureModeSplit(DASH_OWNER, () => dashboard(host));
     wireRca(host, () => dashboard(host));
     ensureTeam(() => dashboard(host));

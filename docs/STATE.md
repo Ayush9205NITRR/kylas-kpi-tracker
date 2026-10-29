@@ -2136,6 +2136,10 @@ open, a 429 or closed tab left it half done); wants it full-proof and rolled out
   last few moved (allot-jobs `status` now returns perTo / recent / contacts), and ends with moved / not moved
   + reason, Retry, Download CSV, Close. test-allot-live 18/18.
 
+## 3l12 · Work today on the Dashboard too (1.77.1)
+
+Ayush, 2026-10-29: the same Work today block (`todayCard`) now sits on the Dashboard under the RCA strip, built from the dashboard's own owner scope. Rows open the account; the tabs redraw the dashboard; "View all" and the need lines set the Accounts filter and switch to the Accounts view via `window.showConsoleView` (overlay.js). Checked in Chrome on the mock stack: View all lands on Accounts with the `Work today: Call today` chip.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

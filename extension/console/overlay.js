@@ -96,6 +96,9 @@
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
   }
 
+  /* Views can move between themselves (the dashboard's Work today → the accounts table). */
+  window.showConsoleView = (w) => showView(w);
+
   /* ── BACK ────────────────────────────────────────────────────────────
      Ayush, 2026-10-10: "Contacts -> going back -> companies -> dashboard —
      this is how the back button should work." So it follows that ladder, not
