@@ -1385,31 +1385,55 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .rcaTabs .rcaTab.on{border-color:var(--blue);color:var(--blue);background:var(--blueSoft)}
 .rcaNoteCell{max-width:260px;white-space:normal;color:var(--text2)}
 
-/* Open accounts (views.js openStrip): four cards above the accounts table, a pin
-   note, the "Needs …" badge on the company cell, amber for not called in 5+ days.
-   The rung ramp colours the three needs; amber only flags. */
-.oaStrip{display:flex;gap:10px;margin:10px 0 8px}
-.oaCard{flex:1;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;color:var(--text2);cursor:pointer}
-.oaCard.on{border-color:var(--blue);background:var(--blueSoft)}
-.oaCard b{display:block;font:var(--w-max) var(--t-name) var(--display);color:var(--text)}
-.oaCard small{font-size:var(--t-meta)}
-.oaCard b.oa-right,.needs.oa-right{color:var(--r3)}.oaCard b.oa-discovery,.needs.oa-discovery{color:var(--r4)}.oaCard b.oa-sql,.needs.oa-sql{color:var(--r5)}
-.oaPin{font-size:var(--t-meta);color:var(--text2);font-weight:var(--w-strong);margin:0 0 8px}
-.oaPin em{color:var(--amber);font-style:normal}
+/* "Needs …" badge on the company cell and the amber row for an open account
+   not called in 5+ days (open-accounts.mjs). The rung ramp colours the needs. */
+.needs.oa-right{color:var(--r3)}.needs.oa-discovery{color:var(--r4)}.needs.oa-sql{color:var(--r5)}
 .needs{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);background:var(--blueSoft);border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap}
 .acctable .vr.oaStale{background:var(--amberSoft)}
-@media (max-width:960px){.oaStrip{flex-wrap:wrap}.oaCard{flex:1 1 45%}}
 
-/* Work today (views.js todayCard): one card above the open-accounts cards. Amber
-   only for the overdue ones, the rest neutral. */
-.tdCard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
-.tdHead{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
-.tdHead b{font:var(--w-strong) var(--t-sec) var(--display)}.tdHead span{color:var(--text2);font-size:var(--t-meta)}
-.tdList{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px}
-.tdRow{display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:6px 10px;font:inherit;color:var(--text);cursor:pointer}
-.tdRow:hover{border-color:var(--blue)}
-.tdRow .n{font-weight:var(--w-strong)}.tdRow .why{font-size:var(--t-meta);color:var(--text2)}
-.tdRow.r0{border-color:var(--amberLine);background:var(--amberSoft)}.tdRow.r0 .why{color:var(--amber)}
-.tdSec+.tdSec{margin-top:10px}
-.tdSub{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
-.tdSub em{font-style:normal;color:var(--text)}
+/* WORK TODAY (views.js todayCard) — the approved full-flow mock. Left: an
+   indigo panel built from the accent ramp (--blue → --blueDeep), white text.
+   Right: a white panel, one list at a time. Avatars are accent tints only;
+   amber marks late, green (the freshness scale's --f-fresh) a row that just
+   moved on. Same height at any count: five rows, the rest in the table. */
+:root{--td-radius:18px;--td-shadow:0 1px 2px rgba(28,27,46,.04),0 8px 24px -12px rgba(28,27,46,.14)}
+.tdWrap{display:grid;grid-template-columns:300px 1fr;gap:16px;margin:0 0 16px}
+.tdHero{border-radius:var(--td-radius);padding:20px;color:var(--onBlue);
+  background:radial-gradient(120% 120% at 0% 0%,var(--r4) 0%,var(--blue) 45%,var(--blueDeep) 100%);box-shadow:0 12px 30px -14px var(--blue)}
+.tdHi{font-size:var(--t-meta);opacity:.8}
+.tdBig{font:var(--w-max) calc(var(--t-name) * 2)/1 var(--display);margin:12px 0 2px;letter-spacing:-.02em}
+.tdLbl{font-size:var(--t-label);opacity:.9}
+.tdBar{height:7px;border-radius:99px;background:rgba(255,255,255,.2);margin:16px 0 6px;overflow:hidden}
+.tdBar i{display:block;height:100%;border-radius:99px;background:var(--onBlue)}
+.tdBt{display:flex;justify-content:space-between;font-size:var(--t-meta);opacity:.85}
+.tdFun{margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,.18)}
+.tdFun .t{font-size:var(--t-meta);opacity:.75;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.tdNeed{display:flex;width:calc(100% + 16px);justify-content:space-between;align-items:center;margin:0 -8px;padding:6px 8px;border:0;border-radius:8px;background:none;color:inherit;font:inherit;font-size:var(--t-label);cursor:pointer;text-align:left}
+.tdNeed b{font:var(--w-strong) var(--t-sec) var(--display)}
+.tdNeed:hover{background:rgba(255,255,255,.1)}
+.tdNeed.on{background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
+.tdPanel{background:var(--panel);border-radius:var(--td-radius);box-shadow:var(--td-shadow);padding:6px}
+.tdSeg{display:inline-flex;background:var(--panel3);border-radius:11px;padding:3px;margin:8px 10px 4px}
+.tdSeg button{border:0;background:none;padding:7px 14px;border-radius:9px;font:inherit;font-size:var(--t-label);color:var(--text2);cursor:pointer}
+.tdSeg button.on{background:var(--panel);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tdSeg em{font-style:normal;margin-left:6px;font-size:var(--t-meta);background:var(--blueSoft);border-radius:99px;padding:1px 7px;color:var(--blue)}
+.tdSeg button.on em{background:var(--blue);color:var(--onBlue)}
+.tdRow{display:flex;width:100%;align-items:center;gap:12px;padding:9px 12px;border:0;border-radius:12px;background:none;font:inherit;color:var(--text);cursor:pointer;text-align:left}
+.tdRow:hover{background:var(--panel2)}
+.tdRow.ok{background:color-mix(in srgb,var(--f-fresh) 10%,var(--panel))}
+.tdAv{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font:var(--w-strong) var(--t-body) var(--display);color:var(--blueDeep);background:var(--blueSoft)}
+.tdMid{flex:1;min-width:0;display:flex;flex-direction:column}
+.tdMid .n{font-weight:var(--w-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tdMid .m{font-size:var(--t-meta);color:var(--text3)}
+.tdTag{flex:none;font-size:var(--t-meta);font-weight:var(--w-strong);border-radius:99px;padding:4px 10px;white-space:nowrap}
+.tdTag.late{background:var(--amberSoft);color:var(--amber)}
+.tdTag.now{background:var(--blueSoft);color:var(--blue)}
+.tdTag.ok{background:var(--panel);color:var(--f-fresh)}
+.tdArr{color:var(--text3);font-size:var(--t-sec)}
+.tdFoot{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 10px;font-size:var(--t-meta);color:var(--text2)}
+.tdFoot .linkbtn{font-weight:var(--w-strong);color:var(--blue)}
+.tdEmpty{margin:10px 14px 14px;color:var(--text2);font-size:var(--t-label)}
+@media (max-width:960px){.tdWrap{grid-template-columns:1fr}}
+/* The call card's "Needs …" line (console.js renderCallbar). */
+.atneed{display:inline-block;margin:2px 0 4px;font-size:var(--t-meta);font-weight:var(--w-strong);background:var(--blueSoft);border-radius:999px;padding:2px 10px}
+.atneed.oa-right{color:var(--r3)}.atneed.oa-discovery{color:var(--r4)}.atneed.oa-sql{color:var(--r5)}

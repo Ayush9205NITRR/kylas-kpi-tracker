@@ -348,6 +348,13 @@ function renderCallbar(){
   /* THE FOCUS LIST, TOP LEFT, UNDER THE COMPANY IT IS ABOUT — all three
      choices spelled out and big enough to hit without looking (Ayush,
      2026-09-27; it sat beside Save & next before, and as a pill before that). */
+  /* WHAT THIS ACCOUNT NEEDS (open-accounts, 1.75.2): picked and not yet SQL,
+     so the card says the next rung before the call starts. */
+  const op=window.Views?.openFor?.(scope?.id||a.companyId);
+  if(op){const need={right:"Right POC",discovery:"discovery call",sql:"SQL"}[op.need];
+    const days=op.firstCallAt?Math.max(0,Math.round((Date.now()-Date.parse(op.firstCallAt))/86400000)):null;
+    const n=el("span","atneed oa-"+op.need,`Needs ${esc(need)}${days!=null?` · tapped ${days}d ago`:""} · ${op.calls} call${op.calls===1?"":"s"}`);
+    const atco=who.querySelector(".atco");if(atco)atco.after(n);else who.prepend(n);}
   const fb=focusBar(a);
   if(fb){const atco=who.querySelector(".atco");if(atco)atco.after(fb);else who.prepend(fb);}
   const d=el("div","dial");

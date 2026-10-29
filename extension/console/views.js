@@ -2413,7 +2413,7 @@
      has a chip for the blank. */
   /* The search box's operators — see Q_OPS, where each is defined. */
   const Q_OPS_KEYS = ["contains", "equal", "not_equal", "not_contains", "begins_with"];
-  const ACC = { openNeed: "", stages: new Set(), stageOpen: false, stageFind: "",
+  const ACC = { openNeed: "", todayTab: "call", todaySet: "", stages: new Set(), stageOpen: false, stageFind: "",
                 /* OWNERS, PLURAL. A manager's question is "Gurnoor and Muskan
                    together", and a single select answered "one, or everyone".
                    Empty means every owner, exactly as the old "All owners"
@@ -2658,6 +2658,7 @@
      chip counting rows the search has already ruled out would be lying. */
   function accMatch(co, skip) {
     if (!qMatch(co)) return false;
+    if (skip !== "today" && !todayMatch(co)) return false;
     if (skip !== "open" && ACC.openNeed && !(co.open && (ACC.openNeed === "all" || co.open.need === ACC.openNeed))) return false;
     /* THE ACCOUNT'S stage, not one contact's. A row here is an account, so the
        question "show me everything at Discovery" is a question about how far
@@ -3796,46 +3797,91 @@
   const openStale = (c) => !!c.open && (!c.open.lastCallAt
     || Date.now() - Date.parse(c.open.lastCallAt) > OPEN_STALE_DAYS * 86400000);
   /* ── WORK TODAY ─────────────────────────────────────────────────────
-     Ayush, 2026-10-29: only the accounts on the ★ Focus list, in two groups —
-       Call today     a call-back is due today or already overdue
-       Right POC      called at least once, Right POC still not identified
-     An account in both shows once, under Call today. */
+     Ayush, 2026-10-29 (the approved full-flow mock): one block above the
+     accounts table, the same height at 10 or 1,000 accounts.
+       left   your day — calls to make today (★ Focus call-backs due or late),
+              done vs to go, and your open accounts split by what each needs
+              (each line filters the table)
+       right  one list at a time: Call today | No Right POC yet (★ Focus, called,
+              no Right POC), top five, "View all in table" filters the table
+     An account in both lists sits under Call today. A row that moved off
+     "No Right POC yet" during this session stays, green, until the next reload. */
+  const TODAY_TOP = 5;
+  const PREV_NEED = new Map();          /* company id -> need first seen this session */
+  const MOVED = new Map();              /* company id -> what it moved to, this session */
+  const isToday = (iso) => !!iso && global.Day.dayOf(iso) === localDay();
+  const daysAgo = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000));
+  /* The two table filters the block sets ("View all"), as a predicate. */
+  const todayMatch = (c) => {
+    if (!ACC.todaySet) return true;
+    if (focusOf(c) !== "focus") return false;
+    const late = ["overdue", "today"].includes(nextOf(c));
+    return ACC.todaySet === "call" ? late : (!late && c.open?.need === "right");
+  };
   function todayPlan(all) {
     const focus = all.filter((c) => focusOf(c) === "focus");
     const call = focus.filter((c) => ["overdue", "today"].includes(nextOf(c)))
-      .sort((a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0))
-      .map((c) => ({ c, why: nextOf(c) === "today" ? "Call-back due today"
-        : `Call-back overdue by ${-nextIn(c)} day${nextIn(c) === -1 ? "" : "s"}`, late: nextOf(c) === "overdue" }));
-    const inCall = new Set(call.map((x) => x.c.id));
-    const ago = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000));
-    const right = focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id))
-      .sort((a, b) => String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")))
-      .map((c) => ({ c, why: `Tapped ${c.open.firstCallAt ? ago(c.open.firstCallAt) : "?"} days ago · ${c.open.calls} call${c.open.calls === 1 ? "" : "s"}`,
-                     late: openStale(c) }));
-    return { call, right };
-  }
-  function todayCard(all) {
-    const { call, right } = todayPlan(all);
-    if (!call.length && !right.length) return "";
-    const list = (rows) => rows.length ? `<div class="tdList">${rows.map(({ c, why, late }) =>
-      `<button type="button" class="tdRow${late ? " r0" : ""}" data-today="${esc(c.id)}"><span class="n">${esc(c.name)}</span><span class="why">${esc(why)}</span></button>`).join("")}</div>`
-      : `<p class="vnote">Nothing here.</p>`;
-    return `<div class="tdCard"><div class="tdHead"><b>Work today</b><span>from your ★ Focus list</span></div>
-      <div class="tdSec"><div class="tdSub">Call today <em>${call.length}</em></div>${list(call)}</div>
-      <div class="tdSec"><div class="tdSub">Tapped, Right POC not identified <em>${right.length}</em></div>${list(right)}</div></div>`;
-  }
-
-  function openStrip(all) {
+      .sort((a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0));
+    const inCall = new Set(call.map((c) => c.id));
+    const poc = focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id))
+      .sort((a, b) => String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")));
+    for (const c of focus) {
+      const id = String(c.id), now = c.open?.need || "done";
+      if (!PREV_NEED.has(id)) PREV_NEED.set(id, now);
+      else if (PREV_NEED.get(id) === "right" && now !== "right") MOVED.set(id, now);
+    }
+    const moved = focus.filter((c) => MOVED.has(String(c.id)) && !inCall.has(c.id));
+    const done = focus.filter((c) => isToday(c.open?.lastCallAt || c.lastCalledAt) && !inCall.has(c.id)).length;
     const open = all.filter((c) => c.open);
-    if (!open.length) return "";
-    const n = (k) => open.filter((c) => c.open.need === k).length;
-    const card = (k, num, text) => `<button type="button" class="oaCard${ACC.openNeed === k ? " on" : ""}" data-open="${k}">
-      <b class="oa-${k}">${num}</b><small>${text}</small></button>`;
-    return `<div class="oaStrip">${card("all", open.length, "Open — picked, not yet SQL")}${
-      card("right", n("right"), OPEN_NEED.right)}${card("discovery", n("discovery"), OPEN_NEED.discovery)}${
-      card("sql", n("sql"), OPEN_NEED.sql)}</div>
-      <div class="oaPin">Open accounts stay on top until they reach SQL${
-        open.some(openStale) ? ` · <em>${open.filter(openStale).length} not called in ${OPEN_STALE_DAYS}+ days</em>` : ""}</div>`;
+    const need = (k) => open.filter((c) => c.open.need === k).length;
+    return { call, poc, moved, done, open: open.length,
+             needs: { right: need("right"), discovery: need("discovery"), sql: need("sql") } };
+  }
+  const tdRow = (c, tag, cls, meta) => `<button type="button" class="tdRow${cls === "ok" ? " ok" : ""}" data-today="${esc(c.id)}">
+      <span class="tdAv">${esc(String(c.name || "?").trim().charAt(0).toUpperCase())}</span>
+      <span class="tdMid"><span class="n">${esc(c.name)}</span><span class="m">${esc(meta)}</span></span>
+      <span class="tdTag ${cls}">${esc(tag)}</span><span class="tdArr" aria-hidden="true">›</span></button>`;
+  function todayCard(all) {
+    const P = todayPlan(all);
+    if (!P.call.length && !P.poc.length && !P.open && !P.moved.length) return "";
+    const tab = ACC.todayTab === "poc" ? "poc" : "call";
+    const list = tab === "call" ? P.call : P.poc;
+    const who = (c) => (API.isAdmin && c.owner ? String(c.owner).split(" ")[0] : "");
+    const callMeta = (c) => [who(c), c.lastCalledAt ? `last call ${daysAgo(c.lastCalledAt)}d ago` : "not called yet"].filter(Boolean).join(" · ");
+    const pocMeta = (c) => [who(c), `${c.open.calls} call${c.open.calls === 1 ? "" : "s"}`,
+      c.open.lastCallAt ? `last call ${daysAgo(c.open.lastCallAt)}d ago` : ""].filter(Boolean).join(" · ");
+    const rows = tab === "call"
+      ? list.slice(0, TODAY_TOP).map((c) => (nextOf(c) === "overdue"
+          ? tdRow(c, `Overdue ${-nextIn(c)}d`, "late", callMeta(c)) : tdRow(c, "Today", "now", callMeta(c))))
+      : [...P.moved.map((c) => tdRow(c, MOVED.get(String(c.id)) === "discovery" ? "Moved to discovery ✓"
+            : MOVED.get(String(c.id)) === "sql" ? "Moved to SQL stage ✓" : "SQL ✓", "ok", "Right POC found")),
+         ...list.slice(0, TODAY_TOP).map((c) => tdRow(c, `Tapped ${c.open.firstCallAt ? daysAgo(c.open.firstCallAt) : "?"}d`,
+           openStale(c) ? "late" : "now", pocMeta(c)))];
+    const toGo = P.call.length, total = toGo + P.done;
+    const pct = total ? Math.round((P.done / total) * 100) : 0;
+    const first = String(API.state?.user?.name || "").trim().split(/\s+/)[0];
+    const h = new Date().getHours();
+    const hello = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    const when = new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+    const line = (k, text, n) => `<button type="button" class="tdNeed${ACC.openNeed === k ? " on" : ""}" data-open="${k}"><span>${text}</span><b>${n}</b></button>`;
+    return `<div class="tdWrap">
+      <div class="tdHero">
+        <div class="tdHi">${esc(when)}${first ? ` · ${hello}, ${esc(first)}` : ""}</div>
+        <div class="tdBig">${total}</div><div class="tdLbl">call${total === 1 ? "" : "s"} to make today</div>
+        <div class="tdBar"><i style="width:${pct}%"></i></div>
+        <div class="tdBt"><span>${P.done} done</span><span>${toGo} to go</span></div>
+        <div class="tdFun"><div class="t">Your open accounts · ${P.open}</div>
+          ${line("right", "Need Right POC", P.needs.right)}${line("discovery", "Need discovery call", P.needs.discovery)}${line("sql", "Need SQL", P.needs.sql)}</div>
+      </div>
+      <div class="tdPanel">
+        <div class="tdSeg" role="tablist">
+          <button type="button" class="${tab === "call" ? "on" : ""}" data-tab="call">Call today<em>${P.call.length}</em></button>
+          <button type="button" class="${tab === "poc" ? "on" : ""}" data-tab="poc">No Right POC yet<em>${P.poc.length}</em></button>
+        </div>
+        ${rows.length ? rows.join("") : `<p class="tdEmpty">${tab === "call" ? "No call-back due today on your ★ Focus list." : "Every ★ Focus account you called has a Right POC."}</p>`}
+        ${list.length ? `<div class="tdFoot"><span>Showing ${Math.min(TODAY_TOP, list.length)} of ${list.length} · ${tab === "call" ? "late ones first" : "oldest first"}</span>
+          <button type="button" class="linkbtn" id="tdAll">View all ${list.length} in table →</button></div>` : ""}
+      </div></div>`;
   }
 
   function explorerHTML(all) {
@@ -3874,7 +3920,10 @@
     const pin = (a, b) => (a.open ? 0 : 1) - (b.open ? 0 : 1)
       || (a.open && b.open ? OPEN_ORDER[a.open.need] - OPEN_ORDER[b.open.need]
            || String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")) : 0);
-    const rows = all.filter((c) => accMatch(c)).sort((a, b) => pin(a, b) || cmp(a, b));
+    /* "View all" from Work today: the list in the block's own order. */
+    const todaySort = ACC.todaySet === "call" ? (a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0)
+      : ACC.todaySet === "poc" ? (a, b) => String(a.open?.firstCallAt || "").localeCompare(String(b.open?.firstCallAt || "")) : null;
+    const rows = all.filter((c) => accMatch(c)).sort(todaySort || ((a, b) => pin(a, b) || cmp(a, b)));
     EXPLORER_ROWS = rows;
     const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
       || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
@@ -3934,6 +3983,7 @@
     </div>`;
 
     return `
+      ${todayCard(all)}
       ${strip}
       <div class="card explorer">
         <div class="exhead">
@@ -3986,8 +4036,6 @@
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         ${moreFilters(all)}
-        ${todayCard(all)}
-        ${openStrip(all)}
         ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
           <div class="vr vh">${cols.map((col) =>
@@ -4215,11 +4263,13 @@
       for (const v of st.values) add(key, v, `${name}: ${not}${lab(v)}`);
     }
     if (FILTERS.calledSince) add("calledSince", "", `Called since ${FILTERS.calledSince}`);
+    if (ACC.todaySet) add("today", "", `Work today: ${ACC.todaySet === "call" ? "Call today" : "No Right POC yet"}`);
+    if (ACC.openNeed && ACC.openNeed !== "all") add("open", "", `Open: ${{ right: "Need Right POC", discovery: "Need discovery call", sql: "Need SQL" }[ACC.openNeed]}`);
 
     if (!chips.length) return "";
     return `<div class="vchips">${chips.join("")}
       <button class="vchip clr" type="button" data-kind="all">Clear all</button>
-      <span class="vcount">${rows.length} of ${all.length}</span></div>`;
+      ${ACC.todaySet || ACC.openNeed ? "" : `<span class="vcount">${rows.length} of ${all.length}</span>`}</div>`;
   }
 
   async function companies(host) {
@@ -4967,12 +5017,18 @@
     global.Focus?.load();
     on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
-    host.querySelectorAll(".tdRow").forEach((b) => b.addEventListener("click", () => {
-      const c = (CACHE.companies || []).find((x) => String(x.id) === b.dataset.today);
-      global.openCompanyFromView?.(b.dataset.today, b.querySelector(".n")?.textContent || c?.name || ""); }));
-    /* An open-accounts card filters to it; the same card again clears it. */
-    host.querySelectorAll(".oaCard").forEach((b) => b.addEventListener("click", () => {
-      ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.limit = 100; redraw(); }));
+    /* Work today: a row opens the account; the toggle switches list; "View all"
+       and the three open-account lines filter the table and scroll to it. */
+    host.querySelectorAll(".tdRow").forEach((b) => b.addEventListener("click", () =>
+      global.openCompanyFromView?.(b.dataset.today, b.querySelector(".n")?.textContent || "")));
+    host.querySelectorAll(".tdSeg [data-tab]").forEach((b) => b.addEventListener("click", () => {
+      ACC.todayTab = b.dataset.tab; if (ACC.todaySet) ACC.todaySet = b.dataset.tab; redraw(); }));
+    const toTable = () => keepPlace(redraw).then(() =>
+      host.querySelector(".card.explorer")?.scrollIntoView({ block: "start", behavior: "smooth" })).catch(() => {});
+    on("tdAll", "click", () => { ACC.todaySet = ACC.todayTab === "poc" ? "poc" : "call"; ACC.openNeed = ""; ACC.limit = 100; toTable(); });
+    host.querySelectorAll(".tdNeed").forEach((b) => b.addEventListener("click", () => {
+      ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.todaySet = ""; ACC.limit = 100;
+      if (ACC.openNeed) toTable(); else redraw(); }));
     /* ── ticking accounts, and handing them over ───────────────────────── */
     /* Delegated, because the rows are re-rendered on every keystroke in the
        search box and per-row listeners would be rebound hundreds of times. */
@@ -5182,8 +5238,10 @@
     function wireChips() {
       host.querySelectorAll(".vchips .vchip").forEach((b) => b.addEventListener("click", () => {
         const { kind, value } = b.dataset;
-        if (kind === "all") {
-          FILTERS.owner = ""; FILTERS.calledSince = "";
+        if (kind === "today") ACC.todaySet = "";
+        else if (kind === "open") ACC.openNeed = "";
+        else if (kind === "all") {
+          FILTERS.owner = ""; FILTERS.calledSince = ""; ACC.todaySet = ""; ACC.openNeed = "";
           for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
         } else if (kind === "owner") FILTERS.owner = "";
         else if (kind === "calledSince") FILTERS.calledSince = "";
@@ -5306,6 +5364,8 @@
   }
 
   global.Views = { rollup, dashboard, companies, FILTERS, savedLanded,
+                  /* The account's open-account state, for the call card (console.js). */
+                  openFor: (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.open || null,
                   rcaBell: { refresh: bellRefresh, onChange: (f) => BELL.on.push(f), open: (t) => openRcaPanel(t || "owe"),
                              count: () => ({ n: BELL.n, mine: BELL.mine }) } };
 })(window);

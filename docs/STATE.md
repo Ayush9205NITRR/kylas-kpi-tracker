@@ -2086,6 +2086,22 @@ discovery call, then SQL — "clearly visible", not blocking. Decided: picked = 
   flags) — the console's 41/16/5/8/40 matches within a day's drift. The flags are not cumulative
   (Discovery is a data rung, booked a stage), which is why the rows do not shrink step by step.
 
+## 3l10 · Work today, the approved full-flow design (2026-10-29, 1.75.2)
+
+Replaces the 1.75.1 Work today card and the four Open-accounts cards (views.js `todayPlan`/`todayCard`;
+mock scratchpad `full-flow.png`). One block between the RCA strip and the accounts table, the same height
+at any count:
+* **Left (indigo panel):** calls to make today = ★ Focus call-backs due/late + done today; progress bar;
+  "Your open accounts · N" with Need Right POC / discovery / SQL — each line filters the table (`ACC.openNeed`).
+* **Right:** toggle **Call today** | **No Right POC yet** (★ Focus, called, `open.need === "right"`; an
+  account in both sits under Call today). Top 5 rows (avatar, one meta line, status pill, opens the account).
+  A row that moved off "No Right POC yet" this session stays, green, "Moved to discovery ✓".
+* **View all N in table:** sets `ACC.todaySet` ("call" | "poc"), a removable chip "Work today: …" in the
+  filter bar, table sorted late-first / oldest-tap-first, scrolls to it. × or Clear all restores.
+* **Call card:** "Needs Right POC · tapped 5d ago · 2 calls" under the company name (`Views.openFor`; only
+  when the accounts list has been loaded this session).
+* The hero number uses `calc(var(--t-name) * 2)` — the one place larger than the five sizes.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow
