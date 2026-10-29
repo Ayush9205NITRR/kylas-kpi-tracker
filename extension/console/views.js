@@ -2452,7 +2452,7 @@
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
                 /* the focus list and the call-back, as chip rows on top of
                    every other filter */
-                focusSet: new Set(), nextSet: new Set(),
+                focusSet: new Set(), nextSet: new Set(), coldSet: new Set(),
                 /* which columns are shown, and whether the picker is open.
                    Filled from the stored choice on first paint. */
                 cols: new Set(), colsOpen: false,
@@ -2538,7 +2538,7 @@
      being an error, because a link outlives the filter it was made with. */
   const LINK_SETS = { stage: "stages", src: "sources", kpi: "kpis", fresh: "fresh", next: "nextSet",
                       focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage",
-                      off: "offsiteSet", cby: "cbySet", uby: "ubySet" };
+                      off: "offsiteSet", cby: "cbySet", uby: "ubySet", cold: "coldSet" };
   function filtersToQuery() {
     const q = new URLSearchParams();
     for (const [short, prop] of Object.entries(LINK_SETS))
@@ -2693,6 +2693,8 @@
     /* The condition builder, ANDed after everything the chips said. */
     if (skip !== "fb" && !fbMatchNode(co, FB.tree)) return false;
     if (skip !== "focus" && ACC.focusSet.size && !ACC.focusSet.has(focusOf(co))) return false;
+    /* The amber row, as a filter (2026-10-29): open, and no call in OPEN_STALE_DAYS. */
+    if (skip !== "cold" && ACC.coldSet.size && !ACC.coldSet.has(openStale(co) ? "cold" : "")) return false;
     if (skip !== "next" && ACC.nextSet.size && !ACC.nextSet.has(nextOf(co))) return false;
     if (skip !== "kpi" && ACC.kpis.size && !ACC.kpis.has(kpiOf(co))) return false;
     if (skip !== "fresh" && ACC.fresh.size && !ACC.fresh.has(freshOf(co))) return false;
@@ -2713,6 +2715,7 @@
      rather than named directly: half of these are declared further down the
      file, and naming them here would read them before they exist. */
   const VALUE_OF = {
+    cold: (c) => (openStale(c) ? "cold" : ""),
     source: (c) => c.source || "—",
     kpi: (c) => kpiOf(c),
     focus: (c) => focusOf(c),
@@ -3891,7 +3894,7 @@
     const rows = all.filter((c) => accMatch(c)).sort(todaySort || ((a, b) => pin(a, b) || cmp(a, b)));
     EXPLORER_ROWS = rows;
     const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
-      || ACC.focusSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
+      || ACC.focusSet.size || ACC.coldSet.size || ACC.nextSet.size || moreActive() || fbActive() || !!ACC.q;
 
     /* A sentence about what is on screen, so the number at the top is not the
        only thing the header says. Only the parts that are true. */
@@ -4000,6 +4003,7 @@
           (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
+        ${chipRow(all, "Highlight", "cold", ["cold"], () => `Going cold · open, no call in ${OPEN_STALE_DAYS}d+`, ACC.coldSet, () => `<span class="sw cold"></span>`)}
         ${moreFilters(all)}
         ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
@@ -4585,7 +4589,7 @@
                    next: () => ACC.nextSet, stage: () => ACC.stages, fresh: () => ACC.fresh,
                    rev: () => ACC.rev, emp: () => ACC.emp, round: () => ACC.round,
                    fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet,
-                   cby: () => ACC.cbySet, uby: () => ACC.ubySet };
+                   cby: () => ACC.cbySet, uby: () => ACC.ubySet, cold: () => ACC.coldSet };
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
       const set = SETS[f]?.();
@@ -4609,7 +4613,7 @@
     /* "...across all accounts" clears everything else, as Show them used to. */
     on("accTodayAll", "click", () => {
       ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
-      ACC.focusSet.clear();
+      ACC.focusSet.clear(); ACC.coldSet.clear();
       for (const st of moreSets()) st.clear();
       ACC.priMin = ""; ACC.q = ""; FB.tree = { join: "and", items: [] };
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
@@ -5061,7 +5065,7 @@
 
     on("accClear", "click", () => {
       ACC.stages.clear(); ACC.owners.clear(); ACC.sources.clear(); ACC.kpis.clear(); ACC.fresh.clear();
-      ACC.focusSet.clear(); ACC.nextSet.clear();
+      ACC.focusSet.clear(); ACC.coldSet.clear(); ACC.nextSet.clear();
       for (const s of moreSets()) s.clear();
       ACC.priMin = ""; FB.tree = { join: "and", items: [] }; ACC.q = "";
       ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";

@@ -1390,6 +1390,7 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .needs.oa-right{color:var(--r3)}.needs.oa-discovery{color:var(--r4)}.needs.oa-sql{color:var(--r5)}
 .needs{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-med);background:var(--blueSoft);border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap}
 .acctable .vr.oaStale{background:var(--amberSoft)}
+.chip .sw.cold{background:var(--amberSoft);border:1px solid var(--amber)}
 
 /* WORK TODAY (views.js todayCard) — the approved full-flow mock. Left: an
    indigo panel built from the accent ramp (--blue → --blueDeep), white text.

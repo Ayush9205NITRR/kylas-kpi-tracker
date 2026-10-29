@@ -2516,3 +2516,11 @@ swaps `#nhist` in place when the call logs arrive. The callbar's `.pnote` strip 
 **Unchanged on purpose:** the textarea still edits the contact's own note (`a.remarks`) and the save
 path is untouched. Making the box start empty per call means changing how Remarks is written, so it
 was left for a separate change.
+
+## 3l15 · "Going cold" as a filter: the amber row has a chip (1.78.1)
+
+Ayush, 2026-10-29: put the highlighter in the filters. The Accounts filter pane now has a **Highlight**
+row with one chip: "Going cold · open, no call in 5d+". It has an amber swatch and uses the same
+`openStale()` rule as the amber row. It is wired like any chip row: `ACC.coldSet`, `VALUE_OF.cold`,
+`accMatch`, SETS, the link (`cold=`) and Clear all. Checked in Chrome on mock data: 4 rows → 1 row,
+the amber one.
