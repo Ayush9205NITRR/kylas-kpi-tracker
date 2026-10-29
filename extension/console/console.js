@@ -1376,7 +1376,6 @@ const RESEARCH_SECTIONS=[
     {l:"Annual revenue",k:["Annual Revenue"],money:1},
     {l:"Revenue per employee",k:["at_rev_per_employee"],money:1}]},
   {t:"Pipeline & signals",f:[
-    {l:"Account pipeline stage",k:["Account Pipeline Stage"]},
     {l:"Boolean post",k:["Boolean Post link - kylas","Boolean - New","Boolean Post Link (Demand Team)","Boolean (linked)"],link:1,wide:1}]}];
 /* companyId -> { state: "loading"|"ok"|"error", data, error } */
 const RES=new Map();
@@ -1467,7 +1466,6 @@ function researchCard(a){
   const more=el("button","gbtn sm",RES_OPEN?"Show less":"Show all research");more.type="button";
   more.onclick=()=>{RES_OPEN=!RES_OPEN;paintResearch();};
   acts.appendChild(more);
-  if(d.url){const o=el("a","gbtn sm","Open in Airtable ↗");o.href=d.url;o.target="_blank";o.rel="noopener";acts.appendChild(o);}
   b.appendChild(acts);
   return c;
 }

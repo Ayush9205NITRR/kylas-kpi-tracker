@@ -2069,6 +2069,22 @@ discovery call, then SQL — "clearly visible", not blocking. Decided: picked = 
 * Tests: test-open-accounts (11). test-accounts-ux-live has 5 failures that are identical on the
   previous build (tick/narrow cases), not from this change.
 
+## 3l9 · Work today, Created/Updated-by filters, research and Demand-stage removals, faster search (2026-10-29, 1.75.0)
+
+* **Work today** (views.js `todayPlan`/`todayCard`, rules, no AI yet): up to 15 accounts, each with its
+  reason — call-back overdue, due today, open account not called in 5+ days (Right POC first), ★ Focus
+  with no call-back, three highest-priority never-called. Card at the top of the Accounts pane; click opens.
+* **Filters:** "Created by" / "Last updated by" chip rows under More filters (`cby`/`uby`).
+* **Removed (Ayush):** "Account pipeline stage" from Account research, the "Open in Airtable" button, and
+  the Demand team stage column + filter everywhere. Account stage unchanged. An old saved `aps` filter no
+  longer applies.
+* **Search:** the match per account is cached per query (accMatch ran once per chip row per account per
+  keystroke); debounce 200→150 ms.
+* **KPI status chips checked against Airtable (2026-10-29):** each company is counted once, at the highest
+  rung it has reached (Right POC 40, Discovery 16, SQL booked 5, SQL done 8, SQL 41 from Airtable's own
+  flags) — the console's 41/16/5/8/40 matches within a day's drift. The flags are not cumulative
+  (Discovery is a data rung, booked a stage), which is why the rows do not shrink step by step.
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

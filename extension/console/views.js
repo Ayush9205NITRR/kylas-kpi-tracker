@@ -2452,7 +2452,7 @@
                 rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(),
                 offsiteSet: new Set(), priMin: "", moreOpen: false,
                 /* the demand team's own pipeline stage, out of Company List */
-                apsSet: new Set(),
+                apsSet: new Set(), cbySet: new Set(), ubySet: new Set(),
                 /* How the board piles accounts: the six call buckets, or one
                    column per account pipeline stage. Both read the same
                    calculated field — see boardHTML. */
@@ -2527,7 +2527,7 @@
      being an error, because a link outlives the filter it was made with. */
   const LINK_SETS = { stage: "stages", src: "sources", kpi: "kpis", fresh: "fresh", next: "nextSet",
                       focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage",
-                      off: "offsiteSet", aps: "apsSet" };
+                      off: "offsiteSet", cby: "cbySet", uby: "ubySet" };
   function filtersToQuery() {
     const q = new URLSearchParams();
     for (const [short, prop] of Object.entries(LINK_SETS))
@@ -2584,7 +2584,7 @@
      rather than a number: the company, who owns it, where it came from, both
      pipeline stages. Not the money — "100" would match half the list through
      a revenue figure nobody was searching for. */
-  const textOf = (co) => [co.name, co.owner, co.source, label(acctStageOf(co)), co.enrich?.aps]
+  const textOf = (co) => [co.name, co.owner, co.source, label(acctStageOf(co))]
     .filter(Boolean).join(" ").toLowerCase();
   /* Every word has to land, in any order and anywhere on the row: "acme ravi"
      finds Ravi's Acme without caring which column holds which.
@@ -2618,7 +2618,22 @@
     not_contains: { label: "does not contain", multi: "none" },
     begins_with: { label: "begins with", multi: "any" },
   };
+  /* ONE ANSWER PER ACCOUNT PER QUERY (Ayush, 2026-10-29: "results dhire aate
+     hain"). accMatch runs once per chip row for every account, so a keystroke
+     asked the same account the same question a dozen times, each time joining
+     its text again. The answer is kept per account object until the query (or
+     its operator) changes; a re-read of the list brings new objects, so a
+     changed name is never matched against old text. */
+  let QM = new WeakMap(), QM_FOR = null, QM_OP = null;
   const qMatch = (co) => {
+    if (ACC.q !== QM_FOR || ACC.qOp !== QM_OP) { QM = new WeakMap(); QM_FOR = ACC.q; QM_OP = ACC.qOp; }
+    const hit = QM.get(co);
+    if (hit !== undefined) return hit;
+    const ok = qMatchRaw(co);
+    QM.set(co, ok);
+    return ok;
+  };
+  const qMatchRaw = (co) => {
     if (!String(ACC.q || "").trim()) return true;
     const op = ACC.qOp || "contains";
     /* contains, one value: the old search, every word anywhere on the row. */
@@ -2658,7 +2673,8 @@
     if (skip !== "emp" && ACC.emp.size && !ACC.emp.has(VALUE_OF.emp(co))) return false;
     if (skip !== "round" && ACC.round.size && !ACC.round.has(VALUE_OF.round(co))) return false;
     if (skip !== "fstage" && ACC.fstage.size && !ACC.fstage.has(VALUE_OF.fstage(co))) return false;
-    if (skip !== "aps" && ACC.apsSet.size && !ACC.apsSet.has(VALUE_OF.aps(co))) return false;
+    if (skip !== "cby" && ACC.cbySet.size && !ACC.cbySet.has(VALUE_OF.cby(co))) return false;
+    if (skip !== "uby" && ACC.ubySet.size && !ACC.ubySet.has(VALUE_OF.uby(co))) return false;
     /* "at least N". A company with no score is not "0" — it is unscored, so it
        drops out of a floor rather than sitting at the bottom of it. */
     if (ACC.priMin !== "" && !(Number(co.enrich?.pri) >= Number(ACC.priMin))) return false;
@@ -2691,6 +2707,9 @@
     next: (c) => nextOf(c),
     fresh: (c) => freshOf(c),
     stage: (c) => acctStageOf(c) || "",
+    /* Who created / last updated the company in Kylas (Ayush, 2026-10-29). */
+    cby: (c) => c.createdBy || "—",
+    uby: (c) => c.updatedBy || "—",
     /* THE BANDS. Computed from the raw number on every read — nobody types
        "₹50–100 Cr" into a field, and a band that was written down once is
        wrong the day the number behind it changes. */
@@ -3397,13 +3416,8 @@
         ${open ? "▾" : "▸"} More filters${moreActive() ? `<span class="k tnum">${moreCount()}</span>` : ""}
       </button>
       ${open ? `<div class="morebody">
-        ${/* The DEMAND TEAM's own read, under the name of its own column: it was
-             labelled "Account stage", which is the calculated field in the
-             toolbar, so a row reading "Unknown 151" looked like the calculation
-             had failed when it only meant Company List has no value for these.
-             Two facts can share a screen; they cannot share a name. */ ""}
-        ${chipRow(all, "Demand team stage", "aps", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.apsSet,
-          null, { limit: 10, expanded: ACC.apsMore, moreNoun: "stages", moreOne: "stage" })}
+        ${chipRow(all, "Created by", "cby", null, (v) => (v === "—" ? "Not known" : v), ACC.cbySet, null, { limit: 10 })}
+        ${chipRow(all, "Last updated by", "uby", null, (v) => (v === "—" ? "Not known" : v), ACC.ubySet, null, { limit: 10 })}
         ${bandRow("Revenue", "rev", E.REVENUE_BANDS, ACC.rev)}
         ${chipRow(all, "Employees", "emp", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.emp,
           null, { byFloor: true })}
@@ -3420,7 +3434,7 @@
       </div>` : ""}
     </div>`;
   }
-  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet, ACC.apsSet];
+  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet, ACC.cbySet, ACC.ubySet];
   const moreCount = () => moreSets().reduce((n, s) => n + s.size, 0) + (ACC.priMin === "" ? 0 : 1);
   const moreActive = () => moreCount() > 0;
 
@@ -3584,12 +3598,8 @@
         return acctStageFrom(c) === "company"
           ? `<span class="acctown" title="From the company's own Pipeline Stage - BD in Kylas — no contact of this account has been saved here yet, so there is nothing to calculate from.">${esc(label(v) || v)}</span>`
           : esc(label(v) || v); } },
-    /* The demand team's own read, kept and clearly named rather than confused
-       with the calculated one above. Off by default — it is a second opinion,
-       not the answer. */
-    { k: "aps", label: "Demand team stage", w: "1.1fr",
-      ff: { type: "enum", get: (c) => en(c).aps || "" },
-      cell: (c) => dash(esc(en(c).aps || "")) },
+    /* "Demand team stage" (Company List's Account Pipeline Stage) was a column and
+       a filter here; removed 2026-10-29 (Ayush) — only the Account stage is shown. */
     /* A url is not text. "Which accounts still have no LinkedIn" is the
        question actually asked of these two, every week, and on a text field
        that is "is empty" hidden among five operators that make no sense for
@@ -3785,6 +3795,39 @@
   const OPEN_STALE_DAYS = 5;
   const openStale = (c) => !!c.open && (!c.open.lastCallAt
     || Date.now() - Date.parse(c.open.lastCallAt) > OPEN_STALE_DAYS * 86400000);
+  /* ── WORK TODAY ─────────────────────────────────────────────────────
+     Ayush, 2026-10-29: "accounts to work today — things to focus for today".
+     Rules first (AI later), from what the list already carries, each with its
+     reason, most urgent first:
+       1 call-back overdue · 2 call-back due today · 3 open account not called in
+       5+ days (Right POC first) · 4 ★ Focus with no call-back · 5 the highest
+       priority accounts never called (three). Fifteen at most. */
+  const TODAY_MAX = 15;
+  function todayPlan(all) {
+    const out = [], seen = new Set();
+    const add = (c, rank, why) => { if (seen.has(c.id)) return; seen.add(c.id); out.push({ c, rank, why }); };
+    const ago = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000));
+    for (const c of all) {
+      const n = nextOf(c);
+      if (n === "overdue") add(c, 0, `Call-back overdue by ${-nextIn(c)} day${nextIn(c) === -1 ? "" : "s"}`);
+      else if (n === "today") add(c, 1, "Call-back due today");
+    }
+    for (const c of all.filter((x) => openStale(x)).sort((a, b) => OPEN_ORDER[a.open.need] - OPEN_ORDER[b.open.need]))
+      add(c, 2, `Picked ${c.open.firstCallAt ? ago(c.open.firstCallAt) : "?"} days ago, still ${OPEN_NEED[c.open.need].toLowerCase()}`);
+    for (const c of all) if (focusOf(c) === "focus" && !c.nextCall) add(c, 3, "On your Focus list, no call-back set");
+    all.filter((c) => freshOf(c) === "never" && c.enrich?.pri != null).sort((a, b) => b.enrich.pri - a.enrich.pri)
+      .slice(0, 3).forEach((c) => add(c, 4, `High priority (${c.enrich.pri}), never called`));
+    return out.sort((a, b) => a.rank - b.rank).slice(0, TODAY_MAX);
+  }
+  function todayCard(all) {
+    const plan = todayPlan(all);
+    if (!plan.length) return "";
+    return `<div class="tdCard"><div class="tdHead"><b>Work today</b><span>${plan.length} account${
+      plan.length === 1 ? "" : "s"}, most urgent first</span></div>
+      <div class="tdList">${plan.map(({ c, rank, why }) => `<button type="button" class="tdRow r${rank}" data-today="${esc(c.id)}">
+        <span class="n">${esc(c.name)}</span><span class="why">${esc(why)}</span></button>`).join("")}</div></div>`;
+  }
+
   function openStrip(all) {
     const open = all.filter((c) => c.open);
     if (!open.length) return "";
@@ -3946,6 +3989,7 @@
         ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
         ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
         ${moreFilters(all)}
+        ${todayCard(all)}
         ${openStrip(all)}
         ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
@@ -4528,7 +4572,8 @@
     const SETS = { source: () => ACC.sources, kpi: () => ACC.kpis, focus: () => ACC.focusSet,
                    next: () => ACC.nextSet, stage: () => ACC.stages, fresh: () => ACC.fresh,
                    rev: () => ACC.rev, emp: () => ACC.emp, round: () => ACC.round,
-                   fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet, aps: () => ACC.apsSet };
+                   fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet,
+                   cby: () => ACC.cbySet, uby: () => ACC.ubySet };
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
       const set = SETS[f]?.();
@@ -4584,7 +4629,7 @@
          in typing, and the next letters went nowhere (Ayush, 2026-10-10:
          "search pane se bahar nikal ja rahe hoon"). keepPlace waits for the
          paint and then puts the caret and the scroll back. */
-      qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 200);
+      qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 150);
     });
     on("accQOp", "change", (e) => {
       ACC.qOp = Q_OPS_KEYS.includes(e.target.value) ? e.target.value : "contains";
@@ -4925,6 +4970,9 @@
     global.Focus?.load();
     on("accSort", "change", (e) => { ACC.sort = e.target.value; saveAccPrefs(); redraw(); });
     on("accMore", "click", () => { ACC.limit += 100; redraw(); });
+    host.querySelectorAll(".tdRow").forEach((b) => b.addEventListener("click", () => {
+      const c = (CACHE.companies || []).find((x) => String(x.id) === b.dataset.today);
+      global.openCompanyFromView?.(b.dataset.today, b.querySelector(".n")?.textContent || c?.name || ""); }));
     /* An open-accounts card filters to it; the same card again clears it. */
     host.querySelectorAll(".oaCard").forEach((b) => b.addEventListener("click", () => {
       ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.limit = 100; redraw(); }));
