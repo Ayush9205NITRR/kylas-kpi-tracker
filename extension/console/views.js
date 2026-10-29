@@ -68,8 +68,8 @@
     reached:   { label: "Worked",     sub: "at least one call logged, ever" },
     right:     { label: "Right POC",  sub: "any of budget, timeline or pax" },
     discovery: { label: "Discovery",  sub: "one complete row" },
-    booked:    { label: "SQL booked", sub: "booked, regardless of outcome" },
-    done:      { label: "SQL done",   sub: "the call was held" },
+    booked:    { label: "SQL Meeting Booked", sub: "booked, regardless of outcome" },
+    done:      { label: "SQL Meeting Done",   sub: "the call was held" },
     sql:       { label: "SQL",        sub: "qualified" },
   };
   const rung = (k) => (RUNG[k] || {}).label || k;
@@ -793,7 +793,7 @@
       { k: "reached",   label: rung("reached"),     sub: RUNG.reached.sub },
       { k: "right",     label: rung("right"),       sub: `of ${rung("reached").toLowerCase()}` },
       { k: "discovery", label: "Discovery",         sub: "of right POC" },
-      { k: "booked",    label: "SQL booked",        sub: "of discovery" },
+      { k: "booked",    label: "SQL Meeting Booked", sub: "of discovery" },
     ];
     return `<div class="vgrid vhead4">${tiles.map((t, i) => {
       const r = at(t.k);
@@ -1086,8 +1086,8 @@
     { key: "connects", label: "Connected" },
     { key: "right", label: "Right POC" },
     { key: "discovery", label: "Discovery" },
-    { key: "booked", label: "SQL booked" },
-    { key: "done", label: "SQL done" },
+    { key: "booked", label: "SQL Meeting Booked" },
+    { key: "done", label: "SQL Meeting Done" },
     { key: "sql", label: "SQL" },
   ];
 
@@ -2313,7 +2313,7 @@
     { key: "working",   label: "Working",   hint: "called, no signal yet" },
     { key: "right",     label: "Right POC", hint: "budget, timeline or pax" },
     { key: "discovery", label: "Discovery", hint: "one complete row" },
-    { key: "booked",    label: "SQL booked", hint: "meeting in the diary" },
+    { key: "booked",    label: "SQL Meeting Booked", hint: "meeting in the diary" },
     { key: "closed",    label: "Closed",    hint: "every POC on a dead end" },
   ];
 
@@ -5118,69 +5118,27 @@
       const per = {};
       for (const a of plan) per[a.ownerId] = (per[a.ownerId] || 0) + 1;
       const lines = Object.entries(per).map(([id, n]) => `  ${personName(id)}: ${n}`).join("\n");
-      /* ONE AGREEMENT, TO THE WHOLE RUN, with the split in front of it. */
       const yes = confirm(
-        `Allot ${plan.length} account${plan.length === 1 ? "" : "s"}:\n${lines}\n\n` +
-        `Every contact on each account goes to the same person, whoever holds it now.` +
-        `\n\nIt goes ${ALLOT_BATCH} accounts at a time and every account's owner is read back from Kylas. ` +
-        `You can stop at any point: what has moved stays moved, the rest stay ticked.\n\n` +
+        `Re-assign ${plan.length} account${plan.length === 1 ? "" : "s"}:\n${lines}\n\n` +
+        `Every contact on each account goes to the same person.\n\n` +
+        `It runs in the background on the server — you can keep working or close this tab. ` +
+        `Every owner is read back from Kylas; anything that does not move is listed with the reason.\n\n` +
         `This writes to Kylas and cannot be undone from here.`);
       if (!yes) return;
-
-      ACC.allotting = true; ACC.allotStop = false; ACC.busy = "";
-      const t0 = Date.now();
-      let done = 0, contacts = 0, kept = 0;
-      const got = {}, failed = [];
-      const batches = inBatches(plan, ALLOT_BATCH);
-      const progress = () => {
-        const spent = Date.now() - t0;
-        const left = done ? Math.round(((spent / done) * (plan.length - done)) / 1000) : null;
-        const eta = left == null ? "" : left >= 90 ? ` · ~${Math.round(left / 60)} min left` : ` · ~${left}s left`;
-        ACC.prog = { done, total: plan.length, label: "Allotting",
-          note: `${contacts} contact${contacts === 1 ? "" : "s"} moved` +
-            (Object.keys(got).length ? ` · ${Object.entries(got).map(([id, n]) => `${personName(id)} ${n}`).join(", ")}` : "") +
-            (failed.length ? ` · ${failed.length} not moved` : "") + eta };
-        redraw();
-      };
-      progress();
+      ACC.allotting = true; ACC.busy = "Starting…"; redraw();
       try {
-        for (const batch of batches) {
-          if (ACC.allotStop) break;
-          let r;
-          try { r = await API.allot(batch); }
-          catch (e) {
-            /* A WHOLE BATCH REFUSED (network, timeout, 5xx): those accounts stay
-               ticked and the run goes on — one bad request is not the run. */
-            for (const a of batch) failed.push({ id: a.company, why: String(e.message || e).slice(0, 100) });
-            done += batch.length; progress(); continue;
-          }
-          for (const x of r.results || []) {
-            if (x.ok) {
-              ACC.picked.delete(String(x.id)); got[x.to] = (got[x.to] || 0) + 1;
-              (CACHE.allotted ||= new Map()).set(String(x.id), { ownerId: String(x.to), owner: personName(x.to), at: Date.now() });
-            }
-            else failed.push({ id: x.id, why: x.why || "" });
-            contacts += x.contactsMoved || 0; kept += x.contactsKept || 0;
-          }
-          done += batch.length;
-          applyAllotted(CACHE.companies);
-          progress();
+        const r = await API.allotJob("company", plan.map((a) => ({ companyId: a.company, to: a.ownerId })));
+        /* SHOWN AT ONCE: the rows say the new owner now; the job confirms it. */
+        for (const a of plan) {
+          ACC.picked.delete(String(a.company));
+          (CACHE.allotted ||= new Map()).set(String(a.company), { ownerId: String(a.ownerId), owner: personName(a.ownerId), at: Date.now() });
         }
-      } finally {
-        const secs = Math.round((Date.now() - t0) / 1000);
-        const moved = Object.values(got).reduce((a, n) => a + n, 0);
-        ACC.prog = null; ACC.allotting = false;
-        ACC.busy = `${ACC.allotStop ? "Stopped. " : ""}Allotted ${moved} account${moved === 1 ? "" : "s"} with ${contacts} contact${contacts === 1 ? "" : "s"} in ${
-          secs >= 90 ? `${Math.round(secs / 60)} min` : `${secs}s`}` +
-          (moved ? ` — ${Object.entries(got).map(([id, n]) => `${personName(id)} ${n}`).join(", ")}` : "") +
-          (kept ? ` · ${kept} contact(s) left with the BD already working them` : "") +
-          (failed.length ? ` · ${failed.length} NOT moved and still ticked (${failed.slice(0, 3).map((f) => `${f.id}: ${f.why}`).join("; ")}${failed.length > 3 ? "; …" : ""})` : "") +
-          (ACC.allotStop && done < plan.length ? ` · ${plan.length - done} not tried, still ticked` : "") + ".";
-        ACC.allotStop = false;
-        /* Kylas is right and the copy is not, until the sync catches up. */
-        ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, redraw, true);
-        redraw();
-      }
+        applyAllotted(CACHE.companies);
+        ACC.busy = `Re-assigning ${plan.length} account${plan.length === 1 ? "" : "s"} in the background — progress at the top.`;
+        AllotJobs.track(r.job);
+      } catch (e) {
+        ACC.busy = `Could not start: ${String(e.message || e).slice(0, 160)}. Nothing was changed.`;
+      } finally { ACC.allotting = false; redraw(); }
     });
 
     on("accClear", "click", () => {
@@ -5363,8 +5321,98 @@
     paint();
   }
 
+  /* ── RE-ASSIGNMENT JOBS, followed from the console ────────────────────
+     The server holds the job (allot-jobs.mjs). While this console is open it
+     asks the server to run the next few items, again and again, so the job goes
+     at full speed; closed, the server's minute job carries on alone. The job
+     being followed is remembered, so reopening the console picks it up. */
+  const AllotJobs = (() => {
+    let job = null, running = false, err = "";
+    const on = new Set();
+    const tell = () => on.forEach((f) => { try { f(job, err); } catch (_) {} });
+    const KEY = "enout-allot-job";
+    const save = () => { try { job && !job.finished ? localStorage.setItem(KEY, job.id) : localStorage.removeItem(KEY); } catch (_) {} };
+    async function loop() {
+      if (running || !job) return;
+      running = true;
+      try {
+        while (job && !job.finished) {
+          try {
+            const r = await API.allotStep(job.id);
+            if (r.job) job = r.job;
+            err = "";
+          } catch (e) { err = String(e.message || e).slice(0, 120); tell(); await new Promise((r) => setTimeout(r, 5000)); }
+          tell(); save();
+          if (job && !job.finished) await new Promise((r) => setTimeout(r, 250));
+        }
+        if (job?.finished) {
+          const wrap = document.getElementById("vwrap");
+          CACHE.at = 0;
+          if (wrap && document.getElementById("accQ")) ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, () => companies(wrap).catch(() => {}), true);
+        }
+      } finally { running = false; save(); tell(); }
+    }
+    return {
+      get job() { return job; }, get error() { return err; },
+      onChange(f) { on.add(f); },
+      track(j) { job = j; save(); tell(); loop(); },
+      async resume() {
+        let id = null; try { id = localStorage.getItem(KEY); } catch (_) {}
+        if (!id || !API.isAdmin) return;
+        try { const r = await API.allotJobStatus(id); if (r.job) { job = r.job; tell(); if (!job.finished) loop(); else save(); } } catch (_) {}
+      },
+      async retry() { if (!job) return; await API.allotRetry(job.id); job = { ...job, finished: false }; tell(); loop(); },
+      async cancel() { if (!job) return; await API.allotCancel(job.id); const r = await API.allotJobStatus(job.id); job = r.job; save(); tell(); },
+      dismiss() { job = null; save(); tell(); },
+      /* The job, opened from the top-bar chip. */
+      open() {
+        if (!job) return;
+        const s = document.createElement("div");
+        s.className = "scrim";
+        const draw = () => {
+          const j = job; if (!j) { s.remove(); return; }
+          const moved = j.done, pct = j.total ? Math.round(((j.done + j.failed + j.superseded + j.cancelled) / j.total) * 100) : 0;
+          s.innerHTML = `<div class="sheet wide"><div class="h"><h3>${j.finished ? "Re-assignment finished" : "Re-assigning"}</h3>
+            <span class="vsub">${j.total} ${j.kind === "contacts" ? "contact batch(es)" : "account(s)"} · started by ${esc(j.by || "?")}</span>
+            <button class="gbtn" id="ajx" type="button">Close</button></div>
+            <div class="b">
+              <div class="ajBar"><i style="width:${pct}%"></i></div>
+              <p class="dnote"><b>${moved}</b> moved and read back · <b>${j.left}</b> to go${j.failed ? ` · <b class="ajBad">${j.failed}</b> not moved` : ""}${
+                j.superseded ? ` · ${j.superseded} taken over by a newer re-assignment` : ""}${j.cancelled ? ` · ${j.cancelled} cancelled` : ""}</p>
+              ${j.finished ? "" : `<p class="vnote">Runs on the server. You can close this or the whole console — it carries on (slower while nobody has the console open).</p>`}
+              ${err ? `<p class="vwarn">Last step: ${esc(err)} — trying again.</p>` : ""}
+              ${j.failures?.length ? `<div class="vsteps"><table class="rcaTable"><thead><tr><th>Company</th><th>To</th><th>Why</th></tr></thead><tbody>${
+                j.failures.slice(0, 50).map((f) => `<tr><td>${esc(f.companyId)}</td><td>${esc(personName(f.to))}</td><td>${esc(f.why)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+              <div class="dactions">
+                ${j.failed ? `<button class="pbtn" id="ajRetry" type="button">Retry the ${j.failed} not moved</button>
+                  <button class="gbtn" id="ajCsv" type="button">Download CSV</button>` : ""}
+                ${!j.finished ? `<button class="gbtn" id="ajCancel" type="button">Cancel what has not started</button>` : `<button class="gbtn" id="ajDone" type="button">Done</button>`}
+              </div></div></div>`;
+          s.querySelector("#ajx").onclick = () => { s.remove(); off(); };
+          s.querySelector("#ajRetry")?.addEventListener("click", () => AllotJobs.retry());
+          s.querySelector("#ajCancel")?.addEventListener("click", () => AllotJobs.cancel());
+          s.querySelector("#ajDone")?.addEventListener("click", () => { AllotJobs.dismiss(); s.remove(); off(); });
+          s.querySelector("#ajCsv")?.addEventListener("click", () => {
+            const rows = [["company_id", "to", "why"], ...j.failures.map((f) => [f.companyId, personName(f.to), f.why])];
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([rows.map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" }));
+            a.download = `reassign-not-moved-${j.id.slice(0, 8)}.csv`; a.click();
+          });
+        };
+        const f = () => draw();
+        on.add(f);
+        const off = () => on.delete(f);
+        draw();
+        s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); off(); } });
+        document.body.appendChild(s);
+      },
+    };
+  })();
+  global.AllotJobs = AllotJobs;
+
   global.Views = { rollup, dashboard, companies, FILTERS, savedLanded,
                   /* The account's open-account state, for the call card (console.js). */
+                  companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },
                   openFor: (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.open || null,
                   rcaBell: { refresh: bellRefresh, onChange: (f) => BELL.on.push(f), open: (t) => openRcaPanel(t || "owe"),
                              count: () => ({ n: BELL.n, mine: BELL.mine }) } };

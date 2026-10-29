@@ -945,6 +945,35 @@ function renderFocusPane(){
   }
 }
 
+async function moveContactsSheet(sc){
+  const s=el("div","scrim");
+  s.innerHTML=`<div class="sheet"><div class="h"><h3>Move contacts — ${esc(sc.name)}</h3><button class="gbtn" id="mvx" type="button">Close</button></div>
+    <div class="b"><p class="dnote">Loading people…</p></div></div>`;
+  document.body.appendChild(s);
+  s.querySelector("#mvx").onclick=()=>s.remove();
+  let people=[];try{people=(await API.allotPeople()).people||[];}catch(e){s.querySelector(".b").innerHTML=`<p class="vwarn">${esc(e.message)}</p>`;return;}
+  const roster=companyRoster(sc.id);
+  const coOwner=window.Views?.companyOwner?.(sc.id)||null;
+  s.querySelector(".b").innerHTML=`
+    ${coOwner?`<button class="pbtn" id="mvAlign" type="button">Move every contact to the account owner (${esc(coOwner.name)})</button><p class="vnote">The common case: contacts sitting on somebody else.</p><hr>`:""}
+    <label class="dnote">Or pick contacts and a person</label>
+    <div class="mvList">${roster.map(a=>`<label><input type="checkbox" value="${esc(a.kylasId||"")}" ${a.kylasId?"":"disabled"}> ${esc(a.pocName||"Contact")} <span class="vsub">${esc(a.owner||"")}</span></label>`).join("")||'<p class="vnote">No contacts loaded for this company.</p>'}</div>
+    <select id="mvTo"><option value="">Move to…</option>${people.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select>
+    <div class="dactions"><button class="pbtn" id="mvGo" type="button">Move selected</button><span class="vsub" id="mvMsg"></span></div>`;
+  const start=async(items)=>{
+    const msg=s.querySelector("#mvMsg");if(msg)msg.textContent="Starting…";
+    try{const r=await API.allotJob("contacts",items);AllotJobs.track(r.job);s.remove();toast("Moving contacts in the background — progress at the top");}
+    catch(e){if(msg)msg.textContent=`Not started: ${e.message}`.slice(0,140);}
+  };
+  s.querySelector("#mvAlign")?.addEventListener("click",()=>start([{companyId:sc.id,to:coOwner.id}]));
+  s.querySelector("#mvGo").onclick=()=>{
+    const ids=[...s.querySelectorAll(".mvList input:checked")].map(i=>i.value).filter(Boolean);
+    const to=s.querySelector("#mvTo").value;
+    if(!ids.length||!to){s.querySelector("#mvMsg").textContent="Tick at least one contact and pick a person.";return;}
+    start([{companyId:sc.id,to,contactIds:ids}]);
+  };
+}
+
 function renderScope(){
   const w=document.getElementById("qscope");
   if(!w)return;
@@ -956,6 +985,15 @@ function renderScope(){
   w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
     +`<span class="cc">${n} contact${n===1?"":"s"}</span>`
     +(scope.offline?`<span class="cwarn" title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`:"");
+  /* RE-ASSIGN THIS COMPANY'S CONTACTS (admin) — the company stays where it
+     is. "To the account's owner" is the common case: contacts that sit on
+     somebody else. Runs as a background job (views.js AllotJobs). */
+  if(window.API?.isAdmin&&window.AllotJobs){
+    const mv=el("button","cmv","Move contacts…");mv.type="button";
+    mv.title="Re-assign this company's contacts (the company stays with its owner)";
+    mv.onclick=()=>moveContactsSheet(scope);
+    w.appendChild(mv);
+  }
   const x=el("button","cx","×");x.type="button";x.title="Leave this company and show today's calls";
   x.onclick=()=>{scope=null;mode="session";render();};
   w.appendChild(x);

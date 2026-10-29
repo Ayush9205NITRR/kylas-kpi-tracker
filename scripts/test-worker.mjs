@@ -1262,6 +1262,30 @@ console.log('\n11. a copy that is short of the account is not the account');
         Number.isFinite(mine.body.totals?.contacts), `status ${mine.status} ${JSON.stringify(mine.body).slice(0, 160)}`);
 }
 
+/* ── 15g · RE-ASSIGNMENT AS A JOB ───────────────────────────────────── */
+{
+  console.log('\n15g. re-assignment jobs: Start answers at once, the step runs it, associates cannot');
+  const post = async (n, path, body, extra = {}) => {
+    const r = await (await coldWorker(n)).fetch(new Request('https://bd.enout.website' + path, {
+      method: 'POST', headers: { Origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      withStore({ ...ENV, ...extra }), { waitUntil() {} });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  const t0 = performance.now();
+  const made = await post(1701, '/allot-jobs', { kind: 'company', items: [{ companyId: 903, to: 74726 }] });
+  const ms = performance.now() - t0;
+  check('an admin starts a job and gets its id back', made.status === 200 && made.body.job?.id && made.body.job.total === 1,
+        `${made.status} ${JSON.stringify(made.body).slice(0, 160)}`);
+  console.log(`    (Start answered in ${ms.toFixed(0)} ms on a cold isolate, local SQLite)`);
+  const step = await post(1702, '/allot-jobs/step', { id: made.body.job?.id });
+  check('a step runs the item and reports progress', step.status === 200 && step.body.ran?.ran === 1 && step.body.job?.finished === true,
+        `${step.status} ${JSON.stringify(step.body).slice(0, 220)}`);
+  const api = await post(1703, '/allot-jobs', { items: [{ companyId: 903, to: 74725 }] });
+  check('never to the API user', api.status === 400, `${api.status} ${api.body.error}`);
+  const assoc = await post(1704, '/allot-jobs', { items: [{ companyId: 903, to: 74726 }] }, { ADMIN_EMAILS: 'somebody.else@enout.in' });
+  check('an associate cannot start one', assoc.status === 403, `${assoc.status}`);
+}
+
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────
    Cloudflare runs several isolates, each with its own memory. If a save is
    noted onto the copy an isolate happened to be holding, an isolate that

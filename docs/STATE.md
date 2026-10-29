@@ -2102,6 +2102,33 @@ at any count:
   when the accounts list has been loaded this session).
 * The hero number uses `calc(var(--t-name) * 2)` — the one place larger than the five sizes.
 
+## 3l11 · Re-assignment as a background job; "SQL Meeting Booked / Done" (2026-10-29, 1.76.0)
+
+Ayush: allotting from the console "is not scalable" (the work ran inside the request, tab had to stay
+open, a 429 or closed tab left it half done); wants it full-proof and rolled out only after a stress test.
+
+* **Engine** `scripts/allot-jobs.mjs`: Start writes a job (D1 `allot_jobs` / `allot_items`, one row per
+  account or contact batch) and answers — **12 ms** on a cold Worker isolate in test-worker. Items are claimed
+  by one atomic UPDATE, leased 2 min (a dead claim is taken again), retried with back-off on 429/5xx/timeouts
+  (6 tries), final with the reason on a data refusal. A newer job for the same account supersedes a queued
+  older one. Done = read back: the company owner AND (new) every contact (`allotOne(verifyContacts)`).
+* **Who runs it:** the console calls `POST /allot-jobs/step` again and again while open (each a fresh
+  invocation, 4 items); the minute cron drains 3 items when nobody is watching. Laptop proxy: a local
+  SQLite file (`.allot-jobs.sqlite`, `jobsDb`).
+* **Console:** the Allot panel creates the job, shows the new owners at once, a top-bar chip
+  "Re-assigning n/N" → "N moved ✓ · k failed"; click → sheet with progress, failures (reason), Retry,
+  Download CSV, Cancel. **Move contacts…** on a company (admin): "every contact to the account owner" or
+  pick contacts + a person; the company does not move.
+* **Stress test** `scripts/test-allot-jobs.mjs` (28, the release gate): 2,000 accounts × 5 contacts nothing
+  lost; 30% 429s all finish; 60% 429s → leftovers fail with "429" and Retry; 3 crashes mid-item → resumes,
+  no double writes; two admins → newer wins, each account written once; 5% silent drops all caught and
+  never shown as done; contacts-only; cancel. Live UI: test-allot-live 16/16 on the job path.
+* **Speed, honestly:** the moves are bound by Kylas' API rate. With Kylas answering in 400 ms, one account
+  with 5 contacts is ~11 requests ≈ 4.4 s (measured), so 500 accounts ≈ 35–40 min — but in the background
+  and resumable. The big speed-up needs Kylas' own bulk call (the one its UI uses); not built — needs the
+  request captured once from the Kylas screen.
+* Rungs renamed "SQL Meeting Booked" / "SQL Meeting Done" (views.js RUNG + copies, report.mjs).
+
 ## 3m · The duplicate check (phone and email, against the whole account)
 
 Ayush, 2026-10-16: *"Duplicate check -> system kya hai.."* and, in the workflow

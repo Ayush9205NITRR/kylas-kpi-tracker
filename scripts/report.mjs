@@ -183,8 +183,8 @@ export const METRICS = [
      booked" / "SQL meeting done" while views.js' legend and columns said
      "SQL booked" / "SQL done" for the same rung, so the email and the screen
      disagreed about what a thing is called. views.js `RUNG` is the list. */
-  { key: "booked", label: "SQL booked", kind: "first" },
-  { key: "done", label: "SQL done", kind: "first" },
+  { key: "booked", label: "SQL Meeting Booked", kind: "first" },
+  { key: "done", label: "SQL Meeting Done", kind: "first" },
   { key: "sql", label: "SQL", kind: "first" },
 ];
 

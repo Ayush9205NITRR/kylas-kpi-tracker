@@ -58,7 +58,11 @@ const store = fileStore(new URL("../.save-journal.json", import.meta.url), { log
 
 let routes, maintain;
 try {
-  ({ routes, maintain } = await createHandlers({ env: { ...process.env, VERSION }, store, log }));
+  /* Re-assignment jobs need a table; on the laptop that is a SQLite file. */
+  let jobsDb = null;
+  try { const { fakeD1 } = await import("./d1-fake.mjs"); jobsDb = fakeD1(process.env.JOBS_DB || new URL("../.allot-jobs.sqlite", import.meta.url).pathname); }
+  catch (e) { log(`allot jobs: no local database (${e.message}) — background re-assignment is off`); }
+  ({ routes, maintain } = await createHandlers({ env: { ...process.env, VERSION }, store, log, jobsDb }));
 } catch (e) {
   /* A misconfiguration, not a crash — say which one, and nothing else. The
      handlers throw rather than exit precisely so this can be one sentence

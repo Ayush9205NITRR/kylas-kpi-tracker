@@ -63,12 +63,13 @@ import { checkContact as dedupeCheck } from "./dedupe.mjs";
 import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 import { openOf } from "./open-accounts.mjs";
+import { createAllotJobs, performItem as performAllotItem } from "./allot-jobs.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
    file, and anywhere else it is a network call that cannot be pretended
    otherwise. Call it once per instance, not once per request. */
-export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null, shadowDb = null,
+export async function createHandlers({ env = {}, store, log = () => {}, cache = null, mirror = null, db = null, shadowDb = null, jobsDb = null,
                                       callerOf = () => null } = {}) {
   const VERSION = env.VERSION || "unknown";
 
@@ -192,6 +193,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   /* Saves queued in D1 and carried out behind the reply (save-queue.mjs).
      Hosted runtime only — on a laptop there is nothing to gain. */
   const saves = db ? createSaveQueue({ db, log }) : null;
+  /* The re-assignment jobs live in D1 on the Worker; the laptop proxy hands in
+     a local SQLite file (jobsDb) so the same flow works there. */
+  const allotJobs = (jobsDb || db) ? createAllotJobs({ db: jobsDb || db, log }) : null;
   /* Say so either way. On a fresh install the absence of a warning is not a
      signal anyone can act on — it reads the same as a line that never printed. */
   if (airtable) log(`airtable: ${AT_BASE}`);
@@ -449,6 +453,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 200 })
       .catch(() => [])).map((r) => [r.id, r.fields?.Name || ""]));
     for (const d of rows) { d.company = names.get(d.companyRec) || ""; delete d.companyRec; }
+  }
+
+  /* One re-assignment item (allot-jobs.mjs). Guards as /allot: never the API
+     user; contacts of an active other owner are moved too (the account's
+     people follow it, Ayush 2026-10-22). Done only when read back. */
+  async function performAllot(item) {
+    const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+    return performAllotItem({ kylas, item, apiUser });
   }
 
   const companyCache = new Map();
@@ -2437,6 +2449,52 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return out;
     },
 
+    /* ── RE-ASSIGNMENT JOBS (allot-jobs.mjs) ─────────────────────────────
+       POST /allot-jobs        { kind: "company"|"contacts", items: [{ companyId, to, contactIds? }] }
+                               writes the job and answers — nothing waits on Kylas
+       GET  /allot-jobs[?id=]  one job's progress, or the recent ones
+       POST /allot-jobs/step   { id } runs a few items now (the console calls it while open)
+       POST /allot-jobs/cancel { id } · /allot-jobs/retry { id }
+       Admin only. Targets must be active Kylas users, never the API user. */
+    "/allot-jobs": async (url, body) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin") throw Object.assign(new Error("Re-assigning is an admin action."), { status: 403 });
+      if (!allotJobs) throw Object.assign(new Error("Background re-assignment needs the server's database (D1)."), { status: 503 });
+      if (!body || !Array.isArray(body.items)) {
+        const id = url.searchParams.get("id");
+        return id ? { job: await allotJobs.status(id) } : { jobs: await allotJobs.list(10) };
+      }
+      const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+      const { users } = await kylasUsers().catch(() => ({ users: [] }));
+      const active = new Map(users.map((u) => [String(u.id), u.active]));
+      const targets = [...new Set(body.items.map((x) => String(x.to ?? x.ownerId ?? "")))];
+      for (const t of targets) {
+        if (t === apiUser) throw Object.assign(new Error("Never to the API user (Enout Super Admin)."), { status: 400 });
+        if (active.get(t) === false) throw Object.assign(new Error(`User ${t} is deactivated in Kylas.`), { status: 400 });
+      }
+      const kind = body.kind === "contacts" ? "contacts" : "company";
+      const job = await allotJobs.create({ kind, by: userName(who), items: body.items });
+      if (mirror) await mirror.markStale().catch(() => {});
+      return { job: await allotJobs.status(job.id) };
+    },
+    "/allot-jobs/step": async (_url, body) => {
+      const who = await whoami();
+      if (roleOf(who) !== "admin") throw Object.assign(new Error("Re-assigning is an admin action."), { status: 403 });
+      if (!allotJobs) throw Object.assign(new Error("no database"), { status: 503 });
+      const ran = await allotJobs.drain(performAllot, { jobId: body?.id || null,
+        max: Number(env.ALLOT_STEP_MAX || 4), budgetMs: Number(env.ALLOT_STEP_MS || 20000) });
+      if (ran.done && mirror) await mirror.markStale().catch(() => {});
+      return { ran, job: body?.id ? await allotJobs.status(body.id) : null };
+    },
+    "/allot-jobs/cancel": async (_url, body) => {
+      if (roleOf(await whoami()) !== "admin") throw Object.assign(new Error("admin only"), { status: 403 });
+      return allotJobs.cancel(String(body?.id || ""));
+    },
+    "/allot-jobs/retry": async (_url, body) => {
+      if (roleOf(await whoami()) !== "admin") throw Object.assign(new Error("admin only"), { status: 403 });
+      return allotJobs.retry(String(body?.id || ""));
+    },
+
     /* THE "CALLED, BELOW ACTIVATION" MAIL, previewed: what tomorrow's would
        say, against the last snapshot, sending nothing and keeping nothing.
        ?format=text for the mail body as it would go. Admins only. */
@@ -3147,6 +3205,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        does at most one of them; the next run, a minute later, does the
        next. Nothing waits on these — readers are served the copy in hand. */
     if (saves) out.saves = await saves.drain(performSave, { max: 15 }).catch((e) => ({ error: e.message }));
+    /* Re-assignment nobody is watching: a few accounts a minute, so a closed
+       tab only slows a job down. */
+    if (allotJobs) out.allot = await allotJobs.drain(performAllot, { max: Number(env.ALLOT_MAINT_MAX || 3), budgetMs: 25000 })
+      .catch((e) => ({ error: e.message }));
     if (rebuild) {
       /* After the nightly sync or rollup: mark, do not rebuild here — the job
          that just ran has already spent this invocation's allowance. */

@@ -1437,3 +1437,12 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 /* The call card's "Needs …" line (console.js renderCallbar). */
 .atneed{display:inline-block;margin:2px 0 4px;font-size:var(--t-meta);font-weight:var(--w-strong);background:var(--blueSoft);border-radius:999px;padding:2px 10px}
 .atneed.oa-right{color:var(--r3)}.atneed.oa-discovery{color:var(--r4)}.atneed.oa-sql{color:var(--r5)}
+/* Re-assignment job: top-bar chip and the sheet's bar. */
+#jobBtn{border-color:var(--blue);color:var(--blue);background:var(--blueSoft)}
+#jobBtn.ok{border-color:var(--f-fresh);color:var(--f-fresh);background:var(--panel)}
+#jobBtn.warn{border-color:var(--amber);color:var(--amber);background:var(--amberSoft)}
+.ajBar{height:8px;border-radius:99px;background:var(--panel3);overflow:hidden;margin:4px 0 10px}
+.ajBar i{display:block;height:100%;background:var(--blue);border-radius:99px;transition:width .3s}
+.ajBad{color:var(--amber)}
+.qscope .cmv{margin-left:auto;font-size:var(--t-meta);border:1px solid var(--line2);background:var(--panel);border-radius:6px;padding:2px 8px;color:var(--text2);cursor:pointer}
+.mvList{display:flex;flex-direction:column;gap:6px;margin:8px 0 10px;max-height:260px;overflow:auto}

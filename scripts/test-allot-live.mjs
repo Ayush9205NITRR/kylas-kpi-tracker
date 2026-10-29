@@ -49,7 +49,7 @@ const ownerSel = await F().evaluate(() => { const s = document.getElementById('f
   const o = [...s.options].find((x) => x.value === 'all'); if (o) { s.value = 'all'; s.dispatchEvent(new Event('change', { bubbles: true })); }
   return [...s.options].map((x) => x.value); });
 console.log('owner select:', JSON.stringify(ownerSel));
-await page.waitForTimeout(5000);
+for (let i = 0; i < 40; i++) { if ((await F().evaluate(() => document.querySelectorAll('#vwrap .vr[data-id]').length)) >= 4) break; await page.waitForTimeout(1000); }
 
 /* Owner filter: everyone, so all four mock companies are on screen. */
 const shown = await F().evaluate(() => document.querySelectorAll('#vwrap .vr').length);
@@ -82,24 +82,28 @@ ok('the preview splits the ticked accounts 40/60', /Sejal One\s*2/.test(preview)
 ok('the button says how many', /Allot 4 accounts/.test(preview), preview.replace(/\s+/g, ' ').slice(0, 200));
 if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-ready.png` });
 
-/* Go: accept the confirm, watch the bar move. */
+/* Go: accept the confirm. It becomes a job on the server; the top-bar chip
+   follows it (2026-10-29, re-assignment as a background job). */
 page.on('dialog', (d) => d.accept());
-F().evaluate(() => document.getElementById('accAllotGo').click());
-let sawBar = false, sawStop = false;
-for (let i = 0; i < 40; i++) {
-  await page.waitForTimeout(300);
-  const st = await F().evaluate(() => ({ bar: !!document.querySelector('.exbprog .pbar'), stop: !!document.getElementById('accAllotStop'),
-    text: document.querySelector('.exbprog')?.innerText || '' }));
-  if (st.bar) sawBar = true;
-  if (st.stop) sawStop = true;
-  if (SHOTS && st.bar && i === 1) await page.screenshot({ path: `${SHOTS}/allot-running.png` });
-  if (!st.bar && sawBar) break;
+const tStart = Date.now();
+await F().evaluate(() => document.getElementById('accAllotGo').click());
+let chipSeen = '', chipEnd = '';
+for (let i = 0; i < 120; i++) {
+  await page.waitForTimeout(500);
+  const t = await F().evaluate(() => { const b = document.getElementById('jobBtn'); return b && !b.hidden ? b.textContent : ''; });
+  if (t && !chipSeen) { chipSeen = t; console.log(`    chip after ${Date.now() - tStart} ms: "${t}"`); if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-running.png` }); }
+  if (/moved ✓/.test(t)) { chipEnd = t; break; }
 }
-ok('a progress bar ran, with a Stop button', sawBar && sawStop);
-await page.waitForTimeout(1500);
+ok('Start hands it to the server at once — the chip shows the job', /Re-assigning|moved/.test(chipSeen), chipSeen);
+ok('the chip ends with what moved', /4 moved ✓/.test(chipEnd), chipEnd);
 const msg = await F().evaluate(() => document.querySelector('.exbmsg')?.innerText || '');
-ok('the result says what moved, to whom', /Allotted 4 accounts/.test(msg) && /Sejal One/.test(msg) && /Mayra Five/.test(msg), msg);
+ok('the panel says it runs in the background', /in the background/.test(msg), msg);
 if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-done.png` });
+await F().evaluate(() => document.getElementById('jobBtn').click()); await page.waitForTimeout(800);
+const sheet = await F().evaluate(() => document.querySelector('.sheet')?.innerText.replace(/\s+/g, ' ') || '');
+ok('the job sheet says 4 moved and read back', /4 moved and read back/.test(sheet), sheet.slice(0, 200));
+if (SHOTS) await page.screenshot({ path: `${SHOTS}/allot-sheet.png` });
+await F().evaluate(() => document.querySelector('.scrim #ajx')?.click());
 
 const owners = await Promise.all(['903', '1776620', '1778327', '1810449'].map(async (id) => (await get(`/v1/companies/${id}`)).ownerId));
 ok('in Kylas: every account on Sejal or Mayra', owners.every((o) => o === 80001 || o === 80005), JSON.stringify(owners));

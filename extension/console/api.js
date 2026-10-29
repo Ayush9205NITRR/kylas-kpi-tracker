@@ -351,6 +351,12 @@
        the bar moves. assignments: [{ company, ownerId }]. */
     allot: (assignments) =>
       req("/allot", { method: "POST", body: { assignments }, timeout: 180000 }),
+    /* Re-assignment as a background job (allot-jobs.mjs). */
+    allotJob: (kind, items) => req("/allot-jobs", { method: "POST", body: { kind, items }, timeout: 30000 }),
+    allotJobStatus: (id) => req(`/allot-jobs${id ? `?id=${encodeURIComponent(id)}` : ""}`, { timeout: 20000 }),
+    allotStep: (id) => req("/allot-jobs/step", { method: "POST", body: { id }, timeout: 60000 }),
+    allotCancel: (id) => req("/allot-jobs/cancel", { method: "POST", body: { id }, timeout: 20000 }),
+    allotRetry: (id) => req("/allot-jobs/retry", { method: "POST", body: { id }, timeout: 20000 }),
     /* Who an account can be allotted TO: active Kylas users, never the API user. */
     allotPeople: () => req("/allot-people", { timeout: 30000 }),
     /* Every company's focus-list status, and setting one. */

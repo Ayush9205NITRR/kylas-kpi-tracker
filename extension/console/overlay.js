@@ -724,6 +724,24 @@
     setInterval(() => { if (!document.hidden) sync(); }, 15 * 60 * 1000);
   }
 
+  /* THE RE-ASSIGNMENT CHIP. Shows while a job is running or has just finished;
+     click opens it (views.js AllotJobs). */
+  const jobBtn = document.getElementById("jobBtn");
+  if (jobBtn && window.AllotJobs) {
+    AllotJobs.onChange((j) => {
+      if (!j) { jobBtn.hidden = true; return; }
+      jobBtn.hidden = false;
+      const moved = j.done, all = j.total;
+      jobBtn.textContent = j.finished ? `${moved} moved ✓${j.failed ? ` · ${j.failed} failed` : ""}` : `Re-assigning ${moved}/${all}`;
+      jobBtn.classList.toggle("ok", !!j.finished && !j.failed);
+      jobBtn.classList.toggle("warn", !!j.finished && !!j.failed);
+    });
+    jobBtn.onclick = () => AllotJobs.open();
+    const go = () => { if (API.state?.online && API.isAdmin) AllotJobs.resume(); };
+    if (window.API && API.onChange) API.onChange(go);
+    go();
+  }
+
   /* Catch up on any days that ended while the console was closed. */
   Store.freezeDays();
 })();

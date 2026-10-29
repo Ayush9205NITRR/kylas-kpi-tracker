@@ -119,7 +119,7 @@ ok("...and the two windows of Worked DO share one",
    ladder's own list was missed the first time and kept the long old names. */
 ok("the ladder builds its rows from RUNG", /const RUNGS = LADDER_ORDER\.map/.test(views));
 ok("the report's labels match RUNG's",
-   /{ key: "worked", label: "Worked"/.test(report) && /{ key: "booked", label: "SQL booked"/.test(report));
+   /{ key: "worked", label: "Worked"/.test(report) && /{ key: "booked", label: "SQL Meeting Booked"/.test(report) && /{ key: "done", label: "SQL Meeting Done"/.test(report));
 
 /* ── the stages themselves ──────────────────────────────────────────── */
 /* Ayush, 2026-10-04: "check for pipeline stages, check also for all the

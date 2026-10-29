@@ -379,6 +379,88 @@ export async function contactsOfCompany(kylas, companyId) {
    the Super Admin or the deactivated user the check saw). An account whose
    owner reads back as anyone else — somebody allotted it meanwhile — is left
    untouched. */
+/* ONE ACCOUNT: contacts first, then the company, then the owner read back.
+   Shared by allot() (a request) and allot-jobs.mjs (the background job). */
+export async function allotOne({ kylas, id, to, leaveActive = false, apiUser = "", isActive = async () => null,
+                               keepOwner = false, fromAny = null, verifyContacts = false }) {
+  id = String(id); to = String(to);
+  const out = { id, to, from: "", ok: false, ownerAfter: "", contactsMoved: 0, contactsKept: 0, contactsFailed: [] };
+  try {
+    const co = await kylas.company(id);
+    out.from = await companyOwnerOf(kylas, id, co);
+    if (keepOwner && out.from !== to) { out.why = `owner is now ${out.from || "nobody"}, not ${to} — left as it is`; return out; }
+    if (fromAny && !new Set([...fromAny].map(String)).has(out.from)) { out.why = `owner is now ${out.from || "nobody"} — left as it is`; return out; }
+    /* CONTACTS FIRST: a stop part-way must never leave the account handed
+       over with its people behind (rule 4 of the header). */
+    const people = await contactsOfCompany(kylas, id);
+    for (const p of people) {
+      const owner = String(lookupId(p?.ownerId) ?? "");
+      if (owner === to) continue;
+      if (leaveActive && owner && owner !== out.from && owner !== String(apiUser) && (await isActive(owner)) === true) {
+        out.contactsKept++; (out.keptIds ||= []).push(String(p.id)); continue;
+      }
+      try {
+        const r = await kylas.raw("PUT", `/v1/contacts/${p.id}/owner`, { ownerId: Number(to) });
+        /* The contact endpoint says what it did — believe that, not the 200. */
+        if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(p.id), why: `owner is ${r.newOwnerId}` });
+        else out.contactsMoved++;
+      } catch (e) {
+        /* 002109 "Entity is already owned by given user": the search was a
+           moment behind a contact that is already on `to` — done, not failed
+           (2026-10-22, two of 1,294 in the live align run). */
+        if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
+        out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) });
+      }
+    }
+    if (out.from !== to) await kylas.setCompanyOwner(id, to);
+    out.ownerAfter = await companyOwnerOf(kylas, id, await kylas.company(id));
+    out.ok = out.ownerAfter === to;
+    if (!out.ok) out.why = `owner reads back as ${out.ownerAfter || "nobody"}`;
+    /* THE CONTACTS READ BACK TOO (2026-10-29, the re-assignment job): one search
+       after the writes. A contact Kylas answered OK for but did not move is a
+       failure, never "moved". Contacts deliberately kept (leaveActive) are not
+       expected to move. */
+    if (verifyContacts && out.contactsMoved) {
+      const kept = new Set(out.keptIds || []);
+      const stray = (await contactsOfCompany(kylas, id))
+        .filter((p) => !kept.has(String(p.id)) && String(lookupId(p?.ownerId) ?? "") !== to);
+      for (const p of stray) {
+        if (out.contactsFailed.some((f) => f.id === String(p.id))) continue;
+        out.contactsFailed.push({ id: String(p.id), why: `reads back on ${lookupId(p?.ownerId) ?? "nobody"}` });
+        out.contactsMoved--;
+      }
+    }
+  } catch (e) { out.why = String(e.message || e).slice(0, 160); }
+  return out;
+}
+
+/* CONTACTS ONLY — the company stays where it is. contactIds null means every
+   contact of the company not already on `to`. Each move is believed only from
+   what Kylas says it did (newOwnerId), and "already owned by given user" is
+   done, not failed. */
+export async function allotContacts({ kylas, companyId, contactIds = null, to, apiUser = "" }) {
+  to = String(to);
+  const out = { id: String(companyId), to, ok: false, contactsMoved: 0, contactsFailed: [] };
+  if (apiUser && to === String(apiUser)) { out.why = "never to the API user"; return out; }
+  let ids = contactIds;
+  if (!ids) ids = (await contactsOfCompany(kylas, companyId))
+    .filter((p) => String(lookupId(p?.ownerId) ?? "") !== to).map((p) => String(p.id));
+  for (const cid of ids) {
+    try {
+      const r = await kylas.raw("PUT", `/v1/contacts/${cid}/owner`, { ownerId: Number(to) });
+      if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(cid), why: `owner is ${r.newOwnerId}` });
+      else out.contactsMoved++;
+    } catch (e) {
+      if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
+      if (e?.status === 429 || e?.status >= 500) throw e;          /* the job retries the whole batch */
+      out.contactsFailed.push({ id: String(cid), why: String(e.message || e).slice(0, 120) });
+    }
+  }
+  out.ok = !out.contactsFailed.length;
+  if (!out.ok) out.why = `${out.contactsFailed.length} contact(s) not moved — ${out.contactsFailed[0].why}`;
+  return out;
+}
+
 export async function allot({ kylas, assignments = [], leaveActive = true, apiUser = "",
                               isActive = async () => null, log = () => {}, concurrency = 3, keepOwner = false,
                               fromAny = null }) {
@@ -393,42 +475,7 @@ export async function allot({ kylas, assignments = [], leaveActive = true, apiUs
   if (new Set(list.map((a) => a.id)).size !== list.length)
     throw Object.assign(new Error("the same account twice in one request"), { status: 400 });
 
-  const one = async ({ id, to }) => {
-    const out = { id, to, from: "", ok: false, ownerAfter: "", contactsMoved: 0, contactsKept: 0, contactsFailed: [] };
-    try {
-      const co = await kylas.company(id);
-      out.from = await companyOwnerOf(kylas, id, co);
-      if (keepOwner && out.from !== to) { out.why = `owner is now ${out.from || "nobody"}, not ${to} — left as it is`; return out; }
-      if (fromAny && !new Set([...fromAny].map(String)).has(out.from)) { out.why = `owner is now ${out.from || "nobody"} — left as it is`; return out; }
-      /* CONTACTS FIRST: a stop part-way must never leave the account handed
-         over with its people behind (rule 4 of the header). */
-      const people = await contactsOfCompany(kylas, id);
-      for (const p of people) {
-        const owner = String(lookupId(p?.ownerId) ?? "");
-        if (owner === to) continue;
-        if (leaveActive && owner && owner !== out.from && owner !== String(apiUser) && (await isActive(owner)) === true) {
-          out.contactsKept++; continue;
-        }
-        try {
-          const r = await kylas.raw("PUT", `/v1/contacts/${p.id}/owner`, { ownerId: Number(to) });
-          /* The contact endpoint says what it did — believe that, not the 200. */
-          if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(p.id), why: `owner is ${r.newOwnerId}` });
-          else out.contactsMoved++;
-        } catch (e) {
-          /* 002109 "Entity is already owned by given user": the search was a
-             moment behind a contact that is already on `to` — done, not failed
-             (2026-10-22, two of 1,294 in the live align run). */
-          if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
-          out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) });
-        }
-      }
-      if (out.from !== to) await kylas.setCompanyOwner(id, to);
-      out.ownerAfter = await companyOwnerOf(kylas, id, await kylas.company(id));
-      out.ok = out.ownerAfter === to;
-      if (!out.ok) out.why = `owner reads back as ${out.ownerAfter || "nobody"}`;
-    } catch (e) { out.why = String(e.message || e).slice(0, 160); }
-    return out;
-  };
+  const one = ({ id, to }) => allotOne({ kylas, id, to, leaveActive, apiUser, isActive, keepOwner, fromAny });
 
   const k = Math.max(1, Math.min(Number(concurrency) || 1, list.length));
   const was = k > 1 && kylas.setConcurrency ? kylas.setConcurrency(k) : null;

@@ -29,3 +29,4 @@ bulk-tag-*.json
 offsite-source-*.csv
 offsite-source-undo-*.json
 reassign-snapshot-*.json
+.allot-jobs.sqlite
