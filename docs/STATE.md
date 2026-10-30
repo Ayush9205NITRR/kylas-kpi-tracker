@@ -2524,3 +2524,9 @@ row with one chip: "Going cold · open, no call in 5d+". It has an amber swatch 
 `openStale()` rule as the amber row. It is wired like any chip row: `ACC.coldSet`, `VALUE_OF.cold`,
 `accMatch`, SETS, the link (`cold=`) and Clear all. Checked in Chrome on mock data: 4 rows → 1 row,
 the amber one.
+
+## 3l16 · "+ New contact" is back in the top bar (1.78.2)
+
+Ayush, 2026-10-30: "Add contacts ka button remove ho gaye, fix karo". 1.74.0 had removed `#newBtn` from
+the top bar on his 2026-10-28 ask. It is restored next to ← Back. The `newContact` wiring had never been
+removed, and the "+ New contact" link in the contact list stays as well.
