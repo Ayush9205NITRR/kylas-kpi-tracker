@@ -2530,3 +2530,15 @@ the amber one.
 Ayush, 2026-10-30: "Add contacts ka button remove ho gaye, fix karo". 1.74.0 had removed `#newBtn` from
 the top bar on his 2026-10-28 ask. It is restored next to ← Back. The `newContact` wiring had never been
 removed, and the "+ New contact" link in the contact list stays as well.
+
+## 3l17 · Add-contact stress test, and new contacts that landed on the API user (1.78.3)
+
+Ayush, 2026-10-30: "stress test karo, can I add contacts". `addstress.mjs` drove the real console 20 times
+through + New contact → name, phone, owner, stage, Tomorrow → Save & next, against mock Kylas.
+Result: 20 of 20 created, no duplicates, about 1 s per contact.
+**Bug found:** `newContact()` set `owner = ME` without its id. The create then carried no `ownerId`, and
+Kylas puts such a contact on the API key's user (crmadmin). Two fixes:
+- `newContact` and the save path now resolve the id with `ownerIdFor`.
+- Validation blocks a NEW contact whose owner has no Kylas id ("Owner that Kylas knows").
+
+Re-run: 20 of 20 created with the chosen owner's id. An id-less owner is blocked before save.

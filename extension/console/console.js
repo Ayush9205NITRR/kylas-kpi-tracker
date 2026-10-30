@@ -1836,6 +1836,9 @@ function missing(){
   need(!a.pocName.trim(),"Name","f-poc");
   need(!a.phones.some(p=>p.value.trim()),"Phone number","f-poc");
   need(!a.owner,"Owner","f-ow");
+  /* A NEW contact whose owner has no Kylas id would be created on the API
+     user (crmadmin) — found by the 2026-10-30 stress test. Block it. */
+  need(!!a.owner&&!a.kid&&!(a.ownerId||ownerIdFor(a.owner)),"Owner that Kylas knows (refresh the owner list)","f-ow");
 
   /* VALUES KYLAS WILL REJECT, caught here rather than as a 400 after the save.
      Kylas answers a malformed phone number with
@@ -2001,6 +2004,8 @@ function saveNext(){
      above those. With the field never arriving, every one of them was pinned
      to zero for ever — the dashboard's talk-time tile read 0m because the
      provenance never made the trip, not because nobody dialled. */
+  /* Any card whose owner was set without its id (a default, an older build). */
+  if(a.owner&&!a.ownerId)a.ownerId=ownerIdFor(a.owner);
   syncToKylas(a,{outcome:outcome?outcome.t:null,duration,durationSource,createdHere:wasNew,
                  at:new Date().toISOString(),
                  note:(a.current||[]).map(r=>r.remarks).filter(Boolean).join(" · ")});
@@ -2063,7 +2068,9 @@ function newContact(){
   const b=blank();
   /* Inside a company scope the new POC belongs to that company. */
   if(scope){b.company=scope.name;b.companyId=String(scope.id);}
-  if(ME)b.owner=ME;
+  /* The id with the name (2026-10-30 stress test): a default owner with no
+     id sent no ownerId, so every new contact landed on the API user. */
+  if(ME){b.owner=ME;b.ownerId=ownerIdFor(ME);}
   DATA=[b,...DATA];cur=0;isNew=true;filter="all";renderFilters();render();
   resetScroll();setTab("basic");
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
