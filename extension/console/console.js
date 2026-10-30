@@ -690,7 +690,13 @@ function paintQueue(){
         ${sig.length?`<i class="asked" title="Asked and answered: ${esc(sig.join(", "))}">${
             esc(sig.join(" · "))}</i>`:""}
       </span>`;
-    b.onclick=()=>{cur=i;isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
+    b.onclick=()=>{
+      /* A "+ New contact" card left empty is dropped, not kept as a nameless
+         row in the list (2026-10-30). Nothing was sent: an unsaved card has no
+         Kylas id, and save is blocked until name, phone and owner are in. */
+      const to=DATA[i];
+      DATA=DATA.filter(x=>x===to||x.kid||x.done||String(x.pocName||"").trim()||(x.phones||[]).some(p=>String(p.value||"").trim()));
+      cur=Math.max(0,DATA.indexOf(to));isNew=false;tried=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
     li.appendChild(b);L.appendChild(li);
   });
 }

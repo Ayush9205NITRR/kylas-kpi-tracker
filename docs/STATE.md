@@ -2542,3 +2542,16 @@ Kylas puts such a contact on the API key's user (crmadmin). Two fixes:
 - Validation blocks a NEW contact whose owner has no Kylas id ("Owner that Kylas knows").
 
 Re-run: 20 of 20 created with the chosen owner's id. An id-less owner is blocked before save.
+
+## 3l18 · Junk-looking rows: what the console creates and what it does not (1.78.4)
+
+Ayush, 2026-10-30, about the qapita screenshot ("may, dom,50", a nameless row):
+
+- **"may, dom,50"** is two OLD Kylas contacts, 5354758 and 5370713. They came in from a broken CSV
+  import and were copied to Airtable by the sync on 2026-09-30. They have no phone, no owner and no
+  call. The console did not create them, and it cannot save them as they are: Still needed: Phone, Owner.
+- **The nameless "LinkedIn Outreach Initiated" row** was an unsaved "+ New contact" card. It has no
+  Kylas id, so nothing was sent to Kylas.
+- A new contact cannot reach Kylas without name + phone + owner (with its Kylas id, since 1.78.3).
+- **Fix:** an empty unsaved new-contact card (no name, no phone) is now dropped when another contact is
+  opened. A half-typed one is kept. Checked in Chrome: 9 → 10 → 9, and the typed draft is kept.
