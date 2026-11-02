@@ -84,7 +84,7 @@ export function createAirtable(pat, baseId, {
   /* Pages of up to 2,000 on D1: Airtable's 100 is a limit of its API, not of
      the data, and on D1 each page is a query. listAll keeps every caller's
      own total (pageSize × maxPages) exactly as before. */
-  const engine = store ? airtableOverD1(store, { maxPageSize: D1_PAGE }) : null;
+  const engine = store ? airtableOverD1(store, { maxPageSize: D1_PAGE, ensure: true, log }) : null;
   const doFetch = engine ? engine.fetch : (...a) => fetch(...a);
   const API = engine ? "https://d1.local/v0" : apiUrl;
   /* D1 has no five-a-second ceiling; the gap would only add latency. */

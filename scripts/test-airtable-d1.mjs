@@ -155,5 +155,26 @@ const q1 = db.queries();
 await at.listAll("Contacts", { formula: "{Kylas Contact ID} = '700'" });
 is("one read is one query", db.queries() - q1, 1);
 
+console.log("\n8. the tables follow the code (d1-schema-sync.mjs)");
+{
+  const { ensureSchema } = await import("./d1-schema-sync.mjs");
+  const old = fakeD1();
+  /* a D1 built before a field existed: Contacts without First Right POC At */
+  await old.exec(sqlSchema({ looseSelects: true }).replace(/\n\s*, "first_right_poc_at"[^\n]*/, ""));
+  const before = (await old.prepare(`PRAGMA table_info("contacts")`).all()).results.map((c) => c.name);
+  ok("(the old copy really lacks the column)", !before.includes("first_right_poc_at"));
+  await old.exec(`INSERT INTO contacts (kylas_contact_id, name) VALUES ('1', 'Kept')`);
+  const r = await ensureSchema(old);
+  const after = (await old.prepare(`PRAGMA table_info("contacts")`).all()).results.map((c) => c.name);
+  ok("a missing column is added on the first query", after.includes("first_right_poc_at") && r.added.includes("contacts.first_right_poc_at"), JSON.stringify(r));
+  ok("…without touching the row already there", (await old.prepare(`SELECT name FROM contacts`).first()).name === "Kept");
+  const c = createAirtable("x", "appKPI", { d1: old, log: () => {} });
+  const w = await c.upsert("Contacts", "Kylas Contact ID", { "Kylas Contact ID": "1", "First Right POC At": "2026-10-01T00:00:00Z" });
+  is("…and a save can write the new field", w.fields["First Right POC At"], "2026-10-01T00:00:00.000Z");
+  const q0 = old.queries();
+  await ensureSchema(old);
+  is("unchanged code costs one query per server start", old.queries() - q0, 2);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

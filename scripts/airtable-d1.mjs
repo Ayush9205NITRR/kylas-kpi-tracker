@@ -49,6 +49,7 @@ import { TABLES, FOLLOWUPS } from "./schema.mjs";
 import { tableName, columnName, OWN_ROW_DERIVED } from "./sql-schema.mjs";
 import { VIEW_FOR, ROW_VIEW_FOR } from "./sql-derived.mjs";
 import { LINKS_BY_TABLE } from "./sql-store.mjs";
+import { ensureSchema } from "./d1-schema-sync.mjs";
 
 const qi = (c) => `"${String(c).replace(/"/g, '""')}"`;
 const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -340,10 +341,15 @@ export function newRecordId() {
 }
 
 /* ── the engine ───────────────────────────────────────────────────────── */
-export function airtableOverD1(db, { onQuery = null, maxPageSize = 100 } = {}) {
-  const all = async (sql) => { onQuery?.(sql); return (await db.prepare(sql).all()).results || []; };
+export function airtableOverD1(db, { onQuery = null, maxPageSize = 100, ensure = false, log = () => {} } = {}) {
+  /* `ensure`: bring the tables up to the code before the first query of this
+     server start (d1-schema-sync.mjs) — one query when nothing has changed. */
+  let ready = ensure ? null : Promise.resolve();
+  const before = () => (ready ||= ensureSchema(db, { log }).catch((e) => { ready = null; throw e; }));
+  const all = async (sql) => { await before(); onQuery?.(sql); return (await db.prepare(sql).all()).results || []; };
 
   async function readByIds(m, ids, want) {
+    ids = ids.filter((x) => Number.isFinite(Number(x)) && x !== null && x !== undefined);
     if (!ids.length) return [];
     const rows = [];
     for (let i = 0; i < ids.length; i += 90) {
@@ -428,6 +434,7 @@ export function airtableOverD1(db, { onQuery = null, maxPageSize = 100 } = {}) {
 
   async function run(sqls) {
     if (!sqls.length) return;
+    await before();
     sqls.forEach((s) => onQuery?.(s));
     try {
       if (sqls.length === 1) await db.prepare(sqls[0]).run();
@@ -466,6 +473,9 @@ export function airtableOverD1(db, { onQuery = null, maxPageSize = 100 } = {}) {
       /* Two records with one new key in one request: the second updates the
          first, as on Airtable — by record id, since the row id is not known yet. */
       if (hit) {
+        /* A row with no record id (written by hand, never by the console)
+           gets one now, so it can be returned and linked to like any other. */
+        if (!hit.airtable_id) { hit.airtable_id = newRecordId(); x.cols.airtable_id = hit.airtable_id; }
         sqls.push(updateSql(m, x.cols, hit.pending ? { rid: hit.airtable_id } : hit.id)); order.push(hit.airtable_id);
         if (!hit.pending) updated.push(hit.airtable_id);
       } else {

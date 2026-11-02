@@ -73,11 +73,26 @@ export function d1Http({ accountId, token, databaseId, apiBase = "https://api.cl
     async run() { const [res] = await query(sql, params); return { success: true, meta: res?.meta || {} }; },
     _sql: sql, _params: params,
   });
+  /* CAN ONE REQUEST CARRY SEVERAL STATEMENTS? Cloudflare documents it for the
+     query endpoint but it is checked here, once, on a scratch table, rather
+     than trusted: two inserts in one request, then a count. If the answer is
+     not 2, every batch goes statement by statement — slower, never wrong. */
+  let multi = null;
+  async function multiOk() {
+    if (multi !== null) return multi;
+    try {
+      await query(`CREATE TABLE IF NOT EXISTS "_batch_probe" (x INTEGER)`);
+      await query(`DELETE FROM "_batch_probe"; INSERT INTO "_batch_probe" VALUES (1); INSERT INTO "_batch_probe" VALUES (2)`);
+      const [r] = await query(`SELECT COUNT(*) AS n FROM "_batch_probe"`);
+      multi = Number(r?.results?.[0]?.n) === 2;
+    } catch { multi = false; }
+    return multi;
+  }
   return {
     prepare: (sql) => statement(sql),
     async batch(list) {
       /* Inlined statements (airtable-d1 binds nothing) go as one request. */
-      if (list.every((s) => !s._params.length)) {
+      if (list.every((s) => !s._params.length) && await multiOk()) {
         const res = await query(list.map((s) => s._sql.replace(/;\s*$/, "")).join(";\n"));
         return res.map(() => ({ success: true }));
       }
@@ -85,5 +100,6 @@ export function d1Http({ accountId, token, databaseId, apiBase = "https://api.cl
       for (const s of list) out.push(await s.run());
       return out;
     },
+    multiStatement: multiOk,
   };
 }
