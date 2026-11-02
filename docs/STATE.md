@@ -2555,3 +2555,25 @@ Ayush, 2026-10-30, about the qapita screenshot ("may, dom,50", a nameless row):
 - A new contact cannot reach Kylas without name + phone + owner (with its Kylas id, since 1.78.3).
 - **Fix:** an empty unsaved new-contact card (no name, no phone) is now dropped when another contact is
   opened. A half-typed one is kept. Checked in Chrome: 9 → 10 → 9, and the typed draft is kept.
+
+## 3l19 · Score-wise KPI tracker on the Dashboard (1.79.0)
+
+Ayush, 2026-11-02, approved the "v1" mock (v2's tiles and heatmap and v3's neutral table were shown and
+not chosen). `scoreSection()` / `wireScore()` in views.js sit under the ladder:
+
+- **Slabs from today's scores.** Priority = Company List `at_priority` (`enrich.pri`). The allotted
+  accounts are cut top 10% A · next 20% B · next 30% C · rest D. The cut-offs are recomputed on every
+  render, so a score change in Airtable moves the account on the next load. Nothing is stored.
+  Unscored accounts are counted and left out.
+- **Score distribution** (one bar per score, coloured by slab), **KPI by slab** (owned → tapped →
+  picked → Right POC → Discovery → SQL Mtg Booked/Done → SQL; count and % of owned), and, for an admin
+  on Everyone, **Each BD by slab**. It follows the Dashboard's Who.
+- **Every bar, legend chip and cell opens a side panel** with those accounts: company, owner, score,
+  rung, last call. It has search, Download CSV, and **Open all in Accounts**, which sets `ACC.idSet` and
+  shows a "Score: …" chip on the table.
+- The numbers are **all time**, the same booleans the Accounts table counts (`co.reached/right/…`),
+  so the panel and the table agree. A period-scoped version and the ladder click-through are not built.
+
+Live data at approval (939 accounts): A 30–64 · 103, B 18–29 · 193, C 6–17 · 299, D 1–5 · 344.
+Checked in Chrome on mock data (light and dark): legend click → panel (1 account) → Open all → Accounts
+filtered to 1, with the chip.

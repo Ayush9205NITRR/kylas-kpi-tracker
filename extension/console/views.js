@@ -1462,6 +1462,136 @@
     s.addEventListener("click", (e) => { if (e.target === s) { s.remove(); repaint?.(); } });
   }
 
+  /* ── SCORE SLABS ───────────────────────────────────────────────────────
+     Ayush, 2026-11-02 (the approved v1 mock): the allotted accounts by their
+     Priority score (Company List at_priority, enrich.pri), cut into four slabs
+     from TODAY's scores — top 10% / next 20% / next 30% / the rest — so the
+     cut-offs move when the scores do and nothing is stored. Per slab: owned →
+     tapped → the KPI rungs, as the Accounts table counts them (all time).
+     Every bar and cell opens those accounts in a side panel. */
+  const SC_STEPS = [
+    ["owned", "Owned", () => true], ["tapped", "Tapped", (c) => !!c.reached], ["picked", "Picked", (c) => !!c.picked],
+    ["right", "Right POC", (c) => !!c.right], ["discovery", "Discovery", (c) => !!c.discovery],
+    ["booked", rung("booked"), (c) => !!c.booked], ["done", rung("done"), (c) => !!c.done], ["sql", rung("sql"), (c) => !!c.sql],
+  ];
+  const SC_EXTRA = { untapped: ["Not tapped yet", (c) => !c.reached] };
+  const SC = { open: null, cos: [], slabs: [] };
+  const scoreOf = (c) => { const v = Number(c.enrich?.pri); return Number.isFinite(v) && v > 0 ? v : null; };
+  function scoreSlabs(cos) {
+    const all = cos.map(scoreOf).filter((v) => v != null).sort((a, b) => b - a);
+    if (!all.length) return [];
+    const at = (p) => all[Math.min(all.length - 1, Math.floor(all.length * p))];
+    const a = at(0.10), b = Math.min(at(0.30), a - 1), c = Math.min(at(0.60), b - 1);
+    return [{ k: "A", name: "Top", lo: a, hi: all[0], r: 5 }, { k: "B", name: "High", lo: b, hi: a - 1, r: 4 },
+      { k: "C", name: "Mid", lo: c, hi: b - 1, r: 3 }, { k: "D", name: "Low", lo: all[all.length - 1], hi: c - 1, r: 1 }]
+      .filter((s) => s.hi >= s.lo);
+  }
+  const slabFor = (slabs, c) => { const v = scoreOf(c); return v == null ? null : slabs.find((s) => v >= s.lo) || slabs[slabs.length - 1]; };
+  const scPct = (n, o) => (o ? Math.round(n / o * 100) : 0);
+  function scoreSection(cos) {
+    const slabs = scoreSlabs(cos);
+    SC.cos = cos; SC.slabs = slabs;
+    if (!slabs.length) return "";
+    const by = slabs.map((s) => ({ s, l: cos.filter((c) => slabFor(slabs, c) === s) }));
+    const unscored = cos.filter((c) => scoreOf(c) == null).length;
+    const sw = (s) => `<i class="scK${s.r <= 1 ? " lo" : ""}" style="background:var(--r${s.r})">${s.k}</i>`;
+    /* Short rung names in the funnels, where four sit side by side. */
+    const short = (k, l) => ({ booked: "SQL Mtg Booked", done: "SQL Mtg Done" })[k] || l;
+    /* the distribution: one bar per score, coloured by slab */
+    const lo = slabs[slabs.length - 1].lo, hi = slabs[0].hi, W = 640, H = 150, bw = W / (hi - lo + 1);
+    const hist = new Map(); for (const c of cos) { const v = scoreOf(c); if (v != null) hist.set(v, (hist.get(v) || 0) + 1); }
+    const hMax = Math.max(1, ...hist.values());
+    const bars = [...hist].map(([v, n]) => { const h = n / hMax * (H - 22), s = slabFor(slabs, { enrich: { pri: v } });
+      return `<rect class="scHb" data-sc="score:${v}" x="${((v - lo) * bw + 1).toFixed(1)}" y="${(H - 18 - h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" style="fill:var(--r${s.r})"><title>Score ${v} · ${n} account${n === 1 ? "" : "s"}</title></rect>`; }).join("");
+    const marks = slabs.slice(0, -1).map((s) => { const x = ((s.lo - lo) * bw).toFixed(1);
+      return `<line x1="${x}" x2="${x}" y1="0" y2="${H - 18}" class="scHm"/><text x="${+x + 4}" y="11" class="scHt">${s.k} ≥ ${s.lo}</text>`; }).join("");
+    const ticks = [...new Set([lo, ...slabs.map((s) => s.lo), hi])].map((v) =>
+      `<text x="${((v - lo) * bw + bw / 2).toFixed(1)}" y="${H - 4}" class="scHt" text-anchor="middle">${v}</text>`).join("");
+    const on = (slab, step, owner = "") => SC.open && SC.open.slab === slab && SC.open.step === step && SC.open.owner === owner ? " on" : "";
+    const funnels = by.map(({ s, l }) => `<div class="scFun"><div class="scFh">${sw(s)}<b>${s.name}</b><em>score ${s.lo}–${s.hi}</em><span>${l.length} accounts</span></div>
+      ${SC_STEPS.map(([k, lbl, f]) => { const n = l.filter(f).length;
+        return `<button type="button" class="scFr${on(s.k, k)}" data-sc="${s.k}|${k}" title="See these ${n} accounts"><span class="scFl">${esc(short(k, lbl))}</span>
+          <span class="scFb"><i style="width:${l.length ? Math.max(n ? 2 : 0, n / l.length * 100) : 0}%;background:var(--r${s.r})"></i></span>
+          <span class="scFv"><b>${n}</b> ${scPct(n, l.length)}%</span></button>`; }).join("")}</div>`).join("");
+    const team = API.isAdmin && DASH_OWNER === "all";
+    const owners = team ? [...new Set(cos.map((c) => c.owner).filter(Boolean))].sort() : [];
+    const bdRows = owners.map((o) => { const mine = cos.filter((c) => c.owner === o);
+      return `<tr><td>${esc(o)}</td>${slabs.map((s) => { const l = mine.filter((c) => slabFor(slabs, c) === s);
+        const n = (f) => l.filter(f).length;
+        return `<td><button type="button" class="scB${on(s.k, "owned", o)}" data-sc="${s.k}|owned|${esc(o)}"><b>${l.length}</b> owned · <b>${n((c) => c.reached)}</b> tapped · <b>${n((c) => c.right)}</b> RPOC · <b>${n((c) => c.sql)}</b> SQL</button></td>`; }).join("")}</tr>`; }).join("");
+    return `<div class="vsec scSec">
+      <div class="vhead sm"><h2>Score-wise KPI tracker</h2>
+        <span class="vsub">${cos.length} accounts by Priority score (Company List · Airtable), split into slabs from today's scores — the cut-offs move when the scores do${unscored ? ` · ${unscored} unscored, left out` : ""}</span></div>
+      <div class="card scCard">
+        <div class="scSt">Score distribution <em>click a bar to see those accounts</em></div>
+        <svg viewBox="0 0 ${W} ${H}" class="scHist" role="img" aria-label="Accounts by score">${marks}${bars}${ticks}</svg>
+        <div class="scLeg">${by.map(({ s, l }) => `<button type="button" class="scLg${on(s.k, "owned")}" data-sc="${s.k}|owned">${sw(s)}${s.k} · ${s.name} · ${s.lo}–${s.hi} · <b>${l.length}</b></button>`).join("")}</div>
+        <div class="scSt">KPI by slab <em>owned → tapped → rungs · % of owned · click a bar to see those accounts</em></div>
+        <div class="scFuns">${funnels}</div>
+        ${team && owners.length ? `<div class="scSt">Each BD by slab <em>click a cell to see that BD's accounts in that slab</em></div>
+          <div class="scroll"><table class="scBd"><thead><tr><th>BD</th>${slabs.map((s) => `<th>${sw(s)} ${s.name}</th>`).join("")}</tr></thead><tbody>${bdRows}</tbody></table></div>` : ""}
+      </div></div>${scDrawer()}`;
+  }
+  function scPick(o) {
+    const slabs = SC.slabs;
+    let l = o.owner ? SC.cos.filter((c) => c.owner === o.owner) : SC.cos;
+    if (o.score != null) return l.filter((c) => scoreOf(c) === o.score);
+    const f = (SC_STEPS.find((x) => x[0] === o.step) || [, , SC_EXTRA[o.step]?.[1]])[2] || (() => true);
+    return l.filter((c) => (!o.slab || slabFor(slabs, c)?.k === o.slab) && f(c));
+  }
+  function scTitle(o) {
+    const s = SC.slabs.find((x) => x.k === o.slab);
+    const step = SC_STEPS.find((x) => x[0] === o.step)?.[1] || SC_EXTRA[o.step]?.[0] || "Owned";
+    return o.score != null ? `Score ${o.score}` : `${s ? `${s.k} · ${s.name}` : "All"} · ${step}${o.owner ? ` · ${String(o.owner).split(" ")[0]}` : ""}`;
+  }
+  function scDrawer() {
+    if (!SC.open) return "";
+    const L = scPick(SC.open).sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
+    const s = SC.slabs.find((x) => x.k === SC.open.slab);
+    return `<div class="rdScrim" id="scScrim"><aside class="rdPanel scPanel" role="dialog" aria-label="${esc(scTitle(SC.open))}">
+      <div class="rdHead"><div><span>${s ? `score ${s.lo}–${s.hi}` : "accounts"}</span><b>${esc(scTitle(SC.open))} · ${L.length}</b></div>
+        <button class="rdX" type="button" id="scClose" aria-label="Close">×</button></div>
+      <input class="scQ" id="scQ" placeholder="Search ${L.length} accounts" autocomplete="off">
+      <div class="scList">${L.map((c) => `<button type="button" class="scRow" data-open-co="${esc(c.id)}" data-q="${esc(String(c.name || "").toLowerCase())}">
+        <b>${esc(c.name || c.id)}</b><span>${esc(String(c.owner || "—").split(" ")[0])}</span><span class="tnum">${scoreOf(c) ?? "—"}</span>
+        <span>${esc(KPI_LABELS[kpiOf(c) + 1] || "")}</span><span class="tnum">${c.lastCalledAt ? esc(day(c.lastCalledAt)) : "—"}</span></button>`).join("")
+        || `<p class="vnote">No accounts here.</p>`}</div>
+      <div class="scFoot"><button class="gbtn" type="button" id="scCsv">Download CSV</button>
+        <button class="pbtn" type="button" id="scAll"${L.length ? "" : " disabled"}>Open all ${L.length} in Accounts →</button></div>
+    </aside></div>`;
+  }
+  function wireScore(host, repaint, toAccounts) {
+    host.querySelectorAll("[data-sc]").forEach((b) => b.addEventListener("click", () => {
+      const [a, step, owner] = b.dataset.sc.split("|");
+      SC.open = a.startsWith("score:") ? { score: Number(a.slice(6)), slab: "", step: "", owner: "" } : { slab: a, step, owner: owner || "" };
+      repaint();
+    }));
+    const close = () => { SC.open = null; repaint(); };
+    host.querySelector("#scClose")?.addEventListener("click", close);
+    host.querySelector("#scScrim")?.addEventListener("click", (e) => { if (e.target.id === "scScrim") close(); });
+    if (SC.open && !SC.esc) { SC.esc = (e) => { if (e.key === "Escape" && SC.open) close(); }; document.addEventListener("keydown", SC.esc); }
+    host.querySelector("#scQ")?.addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      host.querySelectorAll(".scRow").forEach((r) => { r.hidden = !!q && !r.dataset.q.includes(q); });
+    });
+    host.querySelectorAll(".scRow").forEach((r) => r.addEventListener("click", () =>
+      global.openCompanyFromView?.(r.dataset.openCo, r.querySelector("b")?.textContent || "")));
+    host.querySelector("#scAll")?.addEventListener("click", () => {
+      const L = scPick(SC.open);
+      ACC.idSet = { ids: new Set(L.map((c) => String(c.id))), label: `Score: ${scTitle(SC.open)} (${L.length})` };
+      ACC.todaySet = ""; ACC.openNeed = ""; SC.open = null; toAccounts();
+    });
+    host.querySelector("#scCsv")?.addEventListener("click", () => {
+      const L = scPick(SC.open);
+      const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = [["Company", "Kylas id", "Owner", "Score", "Where it is", "Last call"].map(q).join(","),
+        ...L.map((c) => [c.name, c.id, c.owner, scoreOf(c), KPI_LABELS[kpiOf(c) + 1], c.lastCalledAt || ""].map(q).join(","))].join("\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      a.download = `${scTitle(SC.open).replace(/[^\w]+/g, "-")}.csv`; a.click();
+    });
+  }
+
   function ladderHTML(r) {
     if (!r || !r.current) return "";
     const cur = r.current, prev = r.previous;
@@ -2161,6 +2291,7 @@
            period across the team and each associate; the table is every period.
            Same numbers, same report, one request. */
         ladderHTML(REP.data)}
+      ${scoreSection(rollup(DATA, dbase, dbase.length > 0))}
       <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
       <div class="vsec">${modeSplitSection()}</div>
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
@@ -2245,6 +2376,7 @@
     const toAccounts = () => { ACC.limit = 100; global.showConsoleView?.("companies"); };
     host.querySelector("#tdAll")?.addEventListener("click", () => { ACC.todaySet = ACC.todayTab === "poc" ? "poc" : "call"; ACC.openNeed = ""; toAccounts(); });
     host.querySelectorAll(".tdNeed").forEach((b) => b.addEventListener("click", () => { ACC.openNeed = b.dataset.open; ACC.todaySet = ""; toAccounts(); }));
+    wireScore(host, () => dashboard(host), toAccounts);
     ensureModeSplit(DASH_OWNER, () => dashboard(host));
     wireRca(host, () => dashboard(host));
     ensureTeam(() => dashboard(host));
@@ -2424,7 +2556,7 @@
      has a chip for the blank. */
   /* The search box's operators — see Q_OPS, where each is defined. */
   const Q_OPS_KEYS = ["contains", "equal", "not_equal", "not_contains", "begins_with"];
-  const ACC = { openNeed: "", todayTab: "call", todaySet: "", stages: new Set(), stageOpen: false, stageFind: "",
+  const ACC = { idSet: null, openNeed: "", todayTab: "call", todaySet: "", stages: new Set(), stageOpen: false, stageFind: "",
                 /* OWNERS, PLURAL. A manager's question is "Gurnoor and Muskan
                    together", and a single select answered "one, or everyone".
                    Empty means every owner, exactly as the old "All owners"
@@ -2670,6 +2802,8 @@
   function accMatch(co, skip) {
     if (!qMatch(co)) return false;
     if (skip !== "today" && !todayMatch(co)) return false;
+    /* A hand-picked set (a Score slabs cell, "Open all in Accounts"). */
+    if (ACC.idSet && !ACC.idSet.ids.has(String(co.id))) return false;
     if (skip !== "open" && ACC.openNeed && !(co.open && (ACC.openNeed === "all" || co.open.need === ACC.openNeed))) return false;
     /* THE ACCOUNT'S stage, not one contact's. A row here is an account, so the
        question "show me everything at Discovery" is a question about how far
@@ -4232,6 +4366,7 @@
       for (const v of st.values) add(key, v, `${name}: ${not}${lab(v)}`);
     }
     if (FILTERS.calledSince) add("calledSince", "", `Called since ${FILTERS.calledSince}`);
+    if (ACC.idSet) add("ids", "", ACC.idSet.label);
     if (ACC.todaySet) add("today", "", `Work today: ${ACC.todaySet === "call" ? "Call today" : "No Right POC yet"}`);
     if (ACC.openNeed && ACC.openNeed !== "all") add("open", "", `Open: ${{ right: "Need Right POC", discovery: "Need discovery call", sql: "Need SQL" }[ACC.openNeed]}`);
 
@@ -5119,9 +5254,10 @@
       host.querySelectorAll(".vchips .vchip").forEach((b) => b.addEventListener("click", () => {
         const { kind, value } = b.dataset;
         if (kind === "today") ACC.todaySet = "";
+        else if (kind === "ids") ACC.idSet = null;
         else if (kind === "open") ACC.openNeed = "";
         else if (kind === "all") {
-          FILTERS.owner = ""; FILTERS.calledSince = ""; ACC.todaySet = ""; ACC.openNeed = "";
+          FILTERS.owner = ""; FILTERS.calledSince = ""; ACC.todaySet = ""; ACC.openNeed = ""; ACC.idSet = null;
           for (const k of ["source", "stage", "kpi"]) { FILTERS[k].mode = "any"; FILTERS[k].values = []; }
         } else if (kind === "owner") FILTERS.owner = "";
         else if (kind === "calledSince") FILTERS.calledSince = "";
