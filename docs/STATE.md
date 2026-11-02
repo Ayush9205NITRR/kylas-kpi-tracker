@@ -2648,3 +2648,16 @@ the Airtable contact is linked.
 2026-11-03: **34,812** contacts have no link, almost all imported and never worked. **22** of them have
 a logged call. By default the script fixes only the worked ones (Call Count > 0 or KPI Rank > 1);
 `--all` does every one.
+
+## 3l23 · One switch moves the data to Cloudflare: `STORE=d1` (server only, no extension change)
+
+Ayush: the same system on Cloudflare, plug and play, with writes going straight to Cloudflare.
+`scripts/airtable-d1.mjs` answers the Airtable client's calls from D1, and `STORE = "d1"` in
+`wrangler.toml` turns it on. Every suite gives the same result on both stores
+(`node scripts/test-parity.mjs`), and `scripts/d1-to-airtable.mjs` is the tested way back.
+
+The parity run also fixed four places where the D1 maths had drifted from the live formulas:
+Removed At, Ever Right POC / Ever Discovery, Phone Picked and Reached.
+
+**Off until Ayush cuts over.** The runbook, and what stops updating (the Airtable base and anything
+that reads it), are in `docs/MIGRATION.md` under "Plug and play".

@@ -234,6 +234,13 @@ enabled = true
 #   npx wrangler d1 create enout-kpi
 #   ...then paste the database_id it prints below and uncomment.
 #
+# THE SWITCH (docs/MIGRATION.md, "Cut-over"). With KPI_DB bound, add
+#   STORE = "d1"
+# under [vars] and deploy: every KPI read and write then goes to this
+# database through the same Airtable-shaped client (scripts/airtable-d1.mjs),
+# and Airtable is no longer written. Remove the line and deploy to go back —
+# after scripts/d1-to-airtable.mjs has copied D1's changes home.
+#
 # [[d1_databases]]
 # binding = "KPI_DB"
 # database_name = "enout-kpi"

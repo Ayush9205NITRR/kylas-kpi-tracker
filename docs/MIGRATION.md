@@ -424,3 +424,75 @@ grown to 1,000,000 calls for the read test.
 4. (Earlier the same day) a failed pass no longer moves the watermark.
 
 Run it again before each gate: `node scripts/stress-d1.mjs` takes about 8 minutes; `--quick` about 1.
+
+## 2026-11-03 · Plug and play: `STORE=d1`
+
+Ayush: "If I move the data to Cloudflare, the same system must run without any difference." And:
+"why do we need Airtable — writes can go straight to Cloudflare."
+
+**How it works.** Every read and write in the system already goes through one client,
+`createAirtable()`. `scripts/airtable-d1.mjs` answers that client's REST calls from D1 instead
+of Airtable: the same record shape, the same formulas, the same errors. It is plugged in *below*
+the client, so the save path, the report, RCA, focus, dedupe, the crons and the migrations all
+run unchanged. **One setting picks the store:** `STORE = "d1"` in `wrangler.toml` `[vars]`.
+Node scripts read the same setting from `.env.local` and reach D1 through `D1_SQLITE=<file>` or
+`CF_ACCOUNT_ID` + `CF_API_TOKEN` + `KPI_DB_ID` (`scripts/d1-node.mjs`). The research base's
+Company List stays on Airtable, because the team edits it there.
+
+**Proof that nothing differs:** `node scripts/test-parity.mjs` (~15 min) runs each suite on both
+stores.
+
+| Suite | Airtable | D1 |
+|---|---|---|
+| test-worker | 195 / 195 | 195 / 195 (and 189 / 195 with the Worker writing D1 in-process) |
+| dialler | 30 | 30 |
+| idempotency | 17 | 17 |
+| etag | 33 | 33 |
+| push-track | 74 | 74 |
+| migration | 22 | 22 |
+| ladder-migration | 33 | 33 |
+| bulk-tag | 65 | 65 |
+
+The 6 failures in the in-process run are harness artefacts. Each one is listed with its reason in
+`test-parity.mjs`, so a new failure cannot be waved through.
+
+`test-airtable-d1` (65 checks) covers the engine itself; `test-d1-rollback` (9) covers the way back.
+
+**Gaps the parity work found and fixed.** The D1 copy's own maths had drifted from the live formulas:
+- A removed event row still counted toward Right POC.
+- `Ever Right POC` / `Ever Discovery` were ignored.
+- Phone Picked read the wrong field.
+- Reached ignored the stage date.
+
+Two other fixes:
+- **A save shows on the dashboard in about 0.9 s on D1, as it does today.** D1 keeps its own change
+  stamp, so the save no longer waits for a cache timer.
+- **A new select option from Kylas is accepted, as Airtable's typecast does.** D1 is built with
+  loose selects.
+
+**What is different, said plainly:**
+1. **The Airtable base stops changing.** It stays as a frozen archive. Anything *outside* the
+   console that reads it will stop seeing new data: Airtable views, interfaces and automations,
+   and the "Kylas Sync" Apps Script in automations@enout.in. Check each one before the cut-over.
+2. Creating a second row with an existing key (two call logs with one Key) is refused on D1;
+   Airtable would have kept both. The console upserts, so it never does this.
+3. `createdTime` on a record is when it last changed. Nothing reads it.
+
+### Cut-over (about 15 minutes, after hours)
+```sh
+# once, already given above: create enout-kpi, first lap, deploy with KPI_DB (shadow pull on)
+node scripts/test-parity.mjs                         # must end "No differences."
+curl -s https://bd.enout.website/shadow-status       # lag 0, no rejects
+date -u +%Y-%m-%dT%H:%M:%SZ                          # WRITE THIS DOWN — the cut-over time
+# wrangler.toml [vars]:   STORE = "d1"
+npx wrangler deploy
+# .env.local, for the laptop scripts:  STORE=d1  CF_ACCOUNT_ID=…  CF_API_TOKEN=…  KPI_DB_ID=…
+```
+
+### Rollback, without losing a save
+```sh
+node --env-file=.env.local scripts/d1-to-airtable.mjs --since <cut-over time>           # dry run
+node --env-file=.env.local scripts/d1-to-airtable.mjs --since <cut-over time> --apply
+# wrangler.toml: remove STORE = "d1";  .env.local: remove STORE=d1
+npx wrangler deploy
+```
