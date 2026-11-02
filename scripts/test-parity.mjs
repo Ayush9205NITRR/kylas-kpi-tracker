@@ -23,8 +23,6 @@
  * never waved through as "one of those":
  */
 const BINDING_EXPECTED = {
-  "tables are copied one per run, not all at once":
-    "checks the Airtable read-copy of the KPI tables; on D1 there is no copy (D1 is the store)",
   "a save stores the call-back on the contact and on the call":
     "reads the mock's write log; in-process D1 writes do not pass through the mock (the row is in D1)",
   "Company List is copied from the RESEARCH base, not the KPI one":
@@ -49,26 +47,42 @@ import { join } from "node:path";
 
 const REPO = new URL("..", import.meta.url).pathname;
 const quick = process.argv.includes("--quick");
-const run = (suite, env) => {
+/* A suite spawns its own mocks on 9900/9901; the next one must not start
+   while the last one's are still letting go of the ports. */
+import { createServer } from "node:net";
+const portFree = (port) => new Promise((ok) => {
+  const srv = createServer().once("error", () => ok(false)).once("listening", () => srv.close(() => ok(true)));
+  srv.listen(port, "127.0.0.1");
+});
+const settle = async () => {
+  for (let i = 0; i < 60; i++) {
+    if ((await Promise.all([9900, 9901, 8787].map(portFree))).every(Boolean)) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+};
+const run = async (suite, env) => {
+  await settle();
   const r = spawnSync("node", [`scripts/${suite}.mjs`], { cwd: REPO, env: { ...process.env, ...env },
     encoding: "utf8", timeout: 15 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
   const out = (r.stdout || "") + (r.stderr || "");
   const m = /(\d+) passed, (\d+) failed/.exec(out.split("\n").filter((l) => /passed, \d+ failed/.test(l)).pop() || "");
   const fails = out.split("\n").filter((l) => /^\s*!?\s*FAIL\b/.test(l))
     .map((l) => l.replace(/^\s*!?\s*FAIL\s+/, "").split("  — ")[0].trim());
-  return { passed: m ? +m[1] : 0, failed: m ? +m[2] : (r.status ? 1 : 0), fails, code: r.status };
+  /* NO SUMMARY LINE IS A CRASH, and a crash is a failure — never "ok". */
+  if (!m) fails.push(`(crashed before its summary: exit ${r.status}) ${out.trim().split("\n").slice(-2).join(" / ").slice(0, 160)}`);
+  return { passed: m ? +m[1] : 0, failed: m ? +m[2] : 1, fails, code: r.status };
 };
 
 let bad = 0;
 const rows = [];
 for (const s of quick ? ["test-worker"] : SUITES) {
-  const a = run(s, {});
-  const d = AIRTABLE_ONLY[s] ? null : run(s, { MOCK_AIRTABLE_STORE: "d1" });
+  const a = await run(s, {});
+  const d = AIRTABLE_ONLY[s] ? null : await run(s, { MOCK_AIRTABLE_STORE: "d1" });
   let b = null;
   if (s === "test-worker") {
     const file = join(tmpdir(), `parity-kpi-${process.pid}.sqlite`);
     rmSync(file, { force: true });
-    b = run(s, { MOCK_AIRTABLE_STORE: "d1", MOCK_AIRTABLE_D1_FILE: file, TEST_STORE: "d1-binding" });
+    b = await run(s, { MOCK_AIRTABLE_STORE: "d1", MOCK_AIRTABLE_D1_FILE: file, TEST_STORE: "d1-binding" });
     rmSync(file, { force: true });
     b.unexpected = b.fails.filter((f) => !BINDING_EXPECTED[f]);
   }

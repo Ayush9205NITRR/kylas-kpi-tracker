@@ -152,6 +152,7 @@ const ROUTES = [
   ["snapshots (7 days)", "GET", "/snapshots?days=7"],
 ];
 
+const dataSeen = {};
 const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 
 async function measure(label, env, counter) {
@@ -178,6 +179,22 @@ async function measure(label, env, counter) {
     if (!pending) break;
     if (i % 10 === 0) console.log(`   ${label}: building the read copy — ${pending} table(s) to go`);
   }
+  /* THE SAME DATA ON BOTH SIDES, OR NO COMPARISON. A read copy still filling
+     serves a dashboard of a few calls in a millisecond — which once made
+     Airtable look faster on the very routes it was only half answering. Wait
+     until the month view counts the whole call log before timing anything. */
+  let seen = 0;
+  for (let i = 0; i < 600; i++) {
+    const r = JSON.parse((await call("GET", "/report?period=month&owner=all&fresh=1")).text || "{}");
+    seen = r?.totals?.calls ?? 0;
+    if (seen >= SIZE.calls * 0.98) break;
+    const held = [];
+    await worker.scheduled({ cron: "*/5 * * * *", scheduledTime: Date.now() }, env, { waitUntil: (p) => held.push(p) });
+    await Promise.allSettled(held);
+    if (i % 10 === 0) console.log(`   ${label}: the dashboard sees ${seen} of ${SIZE.calls} calls — still filling`);
+  }
+  console.log(`   ${label}: dashboard counts ${seen} calls — measuring`);
+  dataSeen[label] = seen;
   for (const [, m, p, b] of ROUTES) await call(m, p, b?.());       /* first touch, not timed */
   const out = {};
   for (const [name, method, path, body] of ROUTES) {
@@ -218,7 +235,7 @@ const rows = ROUTES.map(([name]) => {
   return { route: name, airtable: a, d1: b, ok };
 });
 if (OUT) writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), airtableMs: AIRTABLE_MS, d1Ms: D1_MS,
-  size: SIZE, n: N, rows }, null, 2));
+  size: SIZE, n: N, dataSeen, rows }, null, 2));
 console.log(slower ? `\n${slower} route(s) slower on Cloudflare.` : `\nEvery route is as fast or faster on Cloudflare.`);
 rmSync(file, { force: true }); rmSync(seedFile, { force: true });
 done();

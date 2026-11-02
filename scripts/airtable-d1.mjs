@@ -381,15 +381,24 @@ export function airtableOverD1(db, { onQuery = null, maxPageSize = 100, ensure =
        client, which asks for larger pages (createAirtable, D1_PAGE). */
     const size = Math.min(maxPageSize, Math.max(1, Number(sp.get("pageSize") || 100)));
     const max = Number(sp.get("maxRecords") || 0);
-    const from = Number(String(atob(sp.get("offset") || "") || "").replace(/\D/g, "") || 0);
+    /* The offset is opaque, as Airtable's is: "row<how many so far>:<last id>".
+       Unsorted — every whole-table read — the next page starts AFTER the last
+       id rather than counting from the top, so page 500 of a million calls
+       costs what page 1 does (measured: 116s → seconds for the whole table). */
+    const [, fromS, afterS] = /^row(\d+)(?::(\d+))?$/.exec(String(atob(sp.get("offset") || "") || "")) || [];
+    const from = Number(fromS || 0);
+    const keyset = order.length === 1 && afterS !== undefined;
     let take = size;
     if (max) take = Math.max(0, Math.min(size, max - from));
+    const cond = keyset ? `${where ? `${where} AND` : "WHERE"} t."id" > ${Number(afterS)}` : where;
     const rows = take
-      ? await all(`SELECT ${selectList(m, wantSet)} ${fromClause(m, !formula)} ${where} ORDER BY ${order.join(", ")} LIMIT ${take + 1} OFFSET ${from}`)
+      ? await all(`SELECT ${selectList(m, wantSet)} ${fromClause(m, !formula)} ${cond} ORDER BY ${order.join(", ")} LIMIT ${take + 1}${keyset ? "" : ` OFFSET ${from}`}`)
       : [];
     const more = rows.length > take && (!max || from + take < max);
-    const page = rows.slice(0, take).map((r) => toRecord(m, r, wantSet));
-    return { records: page, ...(more ? { offset: btoa(`row${from + take}`) } : {}) };
+    const kept = rows.slice(0, take);
+    const page = kept.map((r) => toRecord(m, r, wantSet));
+    const next = order.length === 1 ? `row${from + take}:${kept.at(-1)?.__id}` : `row${from + take}`;
+    return { records: page, ...(more ? { offset: btoa(next) } : {}) };
   }
 
   /* Field values → { col: value }, checked the way Airtable checks them. */
