@@ -46,7 +46,7 @@ export async function run({ env = process.env, log = console.log, apply = false,
   /* Filtered here, not by formula: a link field nobody has filled yet is
      unknown to a formula on some bases. */
   const rows = (await listTolerant(at, "Contacts", {
-    fields: ["Kylas Contact ID", "Name", "Owner", "Call Count", "KPI Rank", "Company"], pageSize: 100, maxPages: 600 }))
+    fields: ["Kylas Contact ID", "Name", "Owner", "Call Count", "KPI Rank", "Company"], pageSize: 100, maxPages: 5000 }))
     .filter((r) => r.fields?.["Kylas Contact ID"] && !(r.fields?.Company || []).length)
     /* ~35,000 rows have no link (2026-11-03) — almost all imported and never
        touched. By default only the ones that count: a logged call, or a rung
