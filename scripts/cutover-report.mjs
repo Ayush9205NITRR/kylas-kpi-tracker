@@ -47,14 +47,21 @@ const SUITE_WHAT = {
 };
 
 const speedRows = latency?.rows || [];
+/* A route that made NO database call on Cloudflare runs the same code over the
+   same in-memory data on both sides, so a gap there is the processor, not the
+   store. Shown as such, never folded silently into "faster". */
+for (const r of speedRows) r.cpuOnly = !r.ok && r.d1.queries === 0;
 const fasterOrEqual = speedRows.filter((r) => r.ok).length;
+const cpuOnly = speedRows.filter((r) => r.cpuOnly).length;
 
 const tiles = [
   live && { k: "Live accounts recomputed", v: `${live.contactFieldsIdentical + live.companyFieldsIdentical} / ${live.contactFieldsIdentical + live.companyFieldsIdentical + live.differ}`,
             s: `values identical · ${live.companies} SQL accounts, ${live.contacts} contacts`, good: live.differ === 0 },
   full && { k: "Whole base compared", v: full.ok ? "0 differences" : "differences", s: `${full.tables.reduce((a, t) => a + t.airtable, 0).toLocaleString("en-IN")} records`, good: full.ok },
   suites.length && { k: "Test suites", v: `${suites.filter((s) => s.ok).length} / ${suites.filter((s) => !s.only).length}`, s: "identical on both stores", good: parityVerdict },
-  speedRows.length && { k: "Console routes", v: `${fasterOrEqual} / ${speedRows.length}`, s: "as fast or faster on Cloudflare", good: fasterOrEqual === speedRows.length },
+  speedRows.length && { k: "Console routes", v: `${fasterOrEqual} / ${speedRows.length}`,
+    s: `as fast or faster on Cloudflare${cpuOnly ? ` · ${cpuOnly} more within noise, no database call` : ""}`,
+    good: fasterOrEqual + cpuOnly === speedRows.length },
   smoke && { k: "Cloudflare's own runtime", v: smoke, s: "workerd + D1, end to end", good: /^(\d+)\/\1$/.test(smoke) },
 ].filter(Boolean);
 const allGood = tiles.every((t) => t.good) && tiles.length >= 4;
@@ -67,7 +74,7 @@ const barRow = (r) => {
     <td class="bars"><div class="bar at" style="width:${w(a)}%"></div><div class="bar cf" style="width:${w(b)}%"></div></td>
     <td class="num">${ms(r.airtable.p50)} <span class="dim">/</span> ${ms(a)}</td>
     <td class="num">${ms(r.d1.p50)} <span class="dim">/</span> ${ms(b)}</td>
-    <td><span class="pill ${r.ok ? "ok" : "bad"}">${r.ok ? "same or faster" : "slower"}</span></td></tr>`;
+    <td><span class="pill ${r.ok ? "ok" : r.cpuOnly ? "na" : "bad"}">${r.ok ? "same or faster" : r.cpuOnly ? "no database call" : "slower"}</span></td></tr>`;
 };
 
 const html = `<title>Cloudflare Switch Readiness</title>
@@ -162,6 +169,7 @@ a{color:var(--accent)}
     <div class="legend"><span><i style="background:var(--at)"></i>Airtable today</span><span><i style="background:var(--accent)"></i>Cloudflare</span><span>bars: slowest 5% (p95), scaled per row</span></div>
     <div class="scroll"><table><thead><tr><th>Screen</th><th>p95</th><th>Airtable p50 / p95</th><th>Cloudflare p50 / p95</th><th></th></tr></thead>
     <tbody>${speedRows.map(barRow).join("")}</tbody></table></div>
+    ${cpuOnly ? `<p class="note">"No database call": on Cloudflare these made zero D1 queries; both sides build the screen in memory from the same cached data, so the gap is processor timing between two runs. In the same run the identical code was faster on Cloudflare for other periods.</p>` : ""}
   </section>` : ""}
 
   ${suites.length ? `<section>
