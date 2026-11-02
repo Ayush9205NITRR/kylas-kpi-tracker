@@ -17,7 +17,8 @@
  * the contact to it. A contact Kylas has no company for is listed, not touched.
  */
 import { pathToFileURL } from "node:url";
-import { createAirtable, listTolerant, upsertTolerant } from "./airtable.mjs";
+import { createAirtable, listTolerant, upsertManyTolerant } from "./airtable.mjs";
+import { createClient } from "./kylas.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const idOf = (v) => (v && typeof v === "object" ? (v.id ?? v.value) : v);
@@ -57,33 +58,82 @@ export async function run({ env = process.env, log = console.log, apply = false,
 
   let linked = 0, noCompany = 0, failed = 0;
   const whyFailed = new Map();
-  const companyRec = new Map();
+  const fail = (kid, e) => {
+    failed++;
+    const why = e.status ? `Kylas ${e.status}` : String(e.message).slice(0, 40);
+    whyFailed.set(why, (whyFailed.get(why) || 0) + 1);
+    log(`  !  ${kid}: ${String(e.message).slice(0, 120)}`);
+  };
+
+  /* FAST PATH (2026-11-03): ONE crawl of every Kylas contact's company — about
+     200 contacts a request — instead of one request and a quarter-second pause
+     per contact, and the Airtable writes ten to a request. 18,000 contacts went
+     from ~3 hours to minutes. A contact the crawl did not return is still
+     looked up one by one below, so nothing is skipped. */
+  const want = new Set(rows.map((r) => String(r.fields["Kylas Contact ID"])));
+  const fromCrawl = new Map();
+  if (rows.length > 20) {
+    log(`reading every contact's company from Kylas in one pass…`);
+    const client = createClient(KEY, { log: () => {}, ...(env.KYLAS_BASE ? { base: env.KYLAS_BASE } : {}) });
+    const crawl = await client.contactsChangedSince(null, { fields: ["id", "company", "metaData", "updatedAt"] });
+    for (const c of crawl.contacts || []) {
+      const kid = String(c.id);
+      if (!want.has(kid)) continue;
+      const cid = idOf(c.company) ?? c.companyId;
+      const cname = (c?.metaData?.idNameStore?.company || {})[cid] || (typeof c.company === "object" ? c.company?.name : "") || "";
+      fromCrawl.set(kid, { cid: cid ? String(cid) : "", cname });
+    }
+    log(`  Kylas answered for ${fromCrawl.size} of the ${rows.length}`);
+  }
+
+  /* Anything the crawl missed: the old way, one by one. */
   for (const r of rows) {
     const kid = String(r.fields["Kylas Contact ID"]);
+    if (fromCrawl.has(kid)) continue;
     try {
       const c = await kylas(`/v1/contacts/${kid}`);
       const cid = idOf(c?.company) ?? c?.companyId;
-      if (!cid) { noCompany++; log(`  -  ${kid} ${r.fields.Name || ""}: no company in Kylas either`); continue; }
-      const cname = (c?.metaData?.idNameStore?.company || {})[cid] || (typeof c.company === "object" ? c.company.name : "") || "";
-      log(`  ${apply ? "✓" : "→"}  ${kid} ${String(r.fields.Name || "").padEnd(24)} → company ${cid} ${cname}`);
-      if (apply) {
-        let rec = companyRec.get(String(cid));
-        if (!rec) {
-          rec = (await upsertTolerant(at, "Companies", "Kylas Company ID", {
-            "Kylas Company ID": String(cid), ...(cname ? { Name: cname } : {}) })).rec;
-          companyRec.set(String(cid), rec);
-        }
-        await upsertTolerant(at, "Contacts", "Kylas Contact ID", { "Kylas Contact ID": kid, Company: [rec.id] });
-      }
-      linked++;
-    } catch (e) {
-      failed++;
-      const why = e.status ? `Kylas ${e.status}` : String(e.message).slice(0, 40);
-      whyFailed.set(why, (whyFailed.get(why) || 0) + 1);
-      log(`  !  ${kid}: ${String(e.message).slice(0, 120)}`);
-    }
+      const cname = (c?.metaData?.idNameStore?.company || {})[cid] || (typeof c?.company === "object" ? c.company.name : "") || "";
+      fromCrawl.set(kid, { cid: cid ? String(cid) : "", cname });
+    } catch (e) { fail(kid, e); }
     await sleep(250);
   }
+
+  const plan = [];
+  for (const r of rows) {
+    const kid = String(r.fields["Kylas Contact ID"]);
+    const k = fromCrawl.get(kid);
+    if (!k) continue;                                   /* failed above */
+    if (!k.cid) { noCompany++; log(`  -  ${kid} ${r.fields.Name || ""}: no company in Kylas either`); continue; }
+    plan.push({ kid, name: r.fields.Name || "", ...k });
+  }
+  plan.slice(0, apply ? 20 : 40).forEach((p) => log(`  ${apply ? "✓" : "→"}  ${p.kid} ${String(p.name).padEnd(24)} → company ${p.cid} ${p.cname}`));
+  if (plan.length > (apply ? 20 : 40)) log(`  … and ${plan.length - (apply ? 20 : 40)} more`);
+
+  if (apply && plan.length) {
+    /* every company once, ten to a request */
+    const cos = [...new Map(plan.map((p) => [p.cid, p])).values()];
+    const companyRec = new Map();
+    for (let i = 0; i < cos.length; i += 100) {
+      const part = cos.slice(i, i + 100);
+      try {
+        const { recs } = await upsertManyTolerant(at, "Companies", "Kylas Company ID",
+          part.map((p) => ({ "Kylas Company ID": p.cid, ...(p.cname ? { Name: p.cname } : {}) })));
+        recs.forEach((rec) => companyRec.set(String(rec.fields?.["Kylas Company ID"]), rec.id));
+      } catch (e) { part.forEach((p) => fail(`company ${p.cid}`, e)); }
+      log(`  companies ${Math.min(i + 100, cos.length)} / ${cos.length}`);
+    }
+    /* then every contact's link, ten to a request */
+    for (let i = 0; i < plan.length; i += 100) {
+      const part = plan.slice(i, i + 100).filter((p) => companyRec.has(p.cid));
+      try {
+        await upsertManyTolerant(at, "Contacts", "Kylas Contact ID",
+          part.map((p) => ({ "Kylas Contact ID": p.kid, Company: [companyRec.get(p.cid)] })));
+        linked += part.length;
+      } catch (e) { part.forEach((p) => fail(p.kid, e)); }
+      if ((i / 100) % 10 === 0 || i + 100 >= plan.length) log(`  linked ${linked} / ${plan.length}`);
+    }
+  } else linked = plan.length;
   log(`\n${apply ? "linked" : "would link"} ${linked} · no company in Kylas ${noCompany} · failed ${failed}`);
   if (failed) log(`why they failed: ${[...whyFailed].map(([k, n]) => `${k} ×${n}`).join(" · ")}` +
                   `\nRun the same command again — it picks up only the contacts still unlinked.`);

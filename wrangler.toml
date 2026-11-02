@@ -15,6 +15,10 @@
 # only fix for that is a new key.
 
 name = "enout-bd-proxy"
+# The Cloudflare account the live Worker is in. Pinned (2026-11-03) because a
+# login to a different account sent a deploy — and a new D1 database — to the
+# wrong place. `npx wrangler whoami` must list this id before a deploy.
+account_id = "5a73b76e8a1e4266f40291216c664ed4"
 main = "worker/index.mjs"
 compatibility_date = "2026-09-23"
 
@@ -252,10 +256,11 @@ enabled = true
 # and Airtable is no longer written. Remove the line and deploy to go back —
 # after scripts/d1-to-airtable.mjs has copied D1's changes home.
 #
-# Created 2026-11-03 (wrangler d1 create enout-kpi --location=apac). Bound, but
-# nothing reads it until STORE = "d1"; SHADOW_PULL = "0" (in [vars]) keeps the
-# minute cron from copying Airtable into it — the laptop import does that.
-[[d1_databases]]
-binding = "KPI_DB"
-database_name = "enout-kpi"
-database_id = "1dcedd89-cdab-49f7-b05e-073339fff2a9"
+# Uncomment once enout-kpi exists IN THE ACCOUNT ABOVE (5a73b76e…). The first
+# one (1dcedd89-…) was created under a different login, in another account,
+# where this Worker cannot reach it. Nothing reads it until STORE = "d1";
+# SHADOW_PULL = "0" (in [vars]) keeps the minute cron from copying into it.
+# [[d1_databases]]
+# binding = "KPI_DB"
+# database_name = "enout-kpi"
+# database_id = "<from: npx wrangler d1 create enout-kpi --location=apac, logged in to 5a73b76e…>"
