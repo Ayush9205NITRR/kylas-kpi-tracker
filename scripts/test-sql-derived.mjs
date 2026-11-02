@@ -56,8 +56,8 @@ const ctId = (k) => one(`SELECT id FROM contacts WHERE kylas_contact_id=?`, k).i
 
 /* Hema: one complete event row, two calls (one measured), rank 19 at a known
    instant. Shipra: signal only, no calls. Raj: nothing at all. */
-run(`INSERT INTO contacts (kylas_contact_id,name,company_id,kpi_rank,kpi_rank_at,ever_picked)
-     VALUES ('700','Hema',?,19,'2026-09-20T10:00:00.000Z',1)`, coId('900'));
+run(`INSERT INTO contacts (kylas_contact_id,name,company_id,kpi_rank,kpi_rank_at,ever_picked,first_picked_at)
+     VALUES ('700','Hema',?,19,'2026-09-20T10:00:00.000Z',1,'2026-09-20T10:00:00.000Z')`, coId('900'));
 run(`INSERT INTO contacts (kylas_contact_id,name,company_id,kpi_rank)
      VALUES ('701','Shipra',?,14)`, coId('900'));
 run(`INSERT INTO contacts (kylas_contact_id,name,company_id) VALUES ('702','Raj',?)`, coId('901'));

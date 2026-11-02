@@ -30,7 +30,7 @@ const lit = (v) => v === null || v === undefined ? "NULL"
   : typeof v === "number" || typeof v === "bigint" ? String(v)
   : `'${String(v).replace(/'/g, "''")}'`;
 
-const out = ["PRAGMA defer_foreign_keys = true;", sqlSchema(), sqlDerived(),
+const out = ["PRAGMA defer_foreign_keys = true;", sqlSchema({ looseSelects: true }), sqlDerived(),
   `CREATE TABLE IF NOT EXISTS shadow_state (tbl TEXT PRIMARY KEY, since TEXT, rows INTEGER DEFAULT 0, ran_at TEXT, last_error TEXT);`];
 const since = new Date(Date.now() - OVERLAP_H * 3600e3).toISOString();
 let total = 0;

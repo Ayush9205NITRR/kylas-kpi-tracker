@@ -45,7 +45,7 @@ const at = createAirtable(PAT, BASE, {
 mkdirSync(dirname(DB), { recursive: true });
 const db = new DatabaseSync(DB);
 db.exec("PRAGMA foreign_keys = ON");
-db.exec(sqlSchema());
+db.exec(sqlSchema({ looseSelects: true }));
 /* The views are rebuilt on every run. They hold no data — dropping and
    recreating them costs nothing and means a copy can never be left with the
    view definitions of an older build. */

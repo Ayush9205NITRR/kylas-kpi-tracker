@@ -118,7 +118,7 @@ console.log("\n3 · DROPPED: Kylas answers 200 and stores nothing");
   ok("...the next call landed", /Next call/.test(row?.Pushed || ""));
   ok("...the offsite did not, and the row says so", /Offsite/.test(row?.["Not Pushed"] || ""), row?.["Not Pushed"]);
   ok("...with the reason in plain words", /holds nothing/.test(row?.Reason || ""), row?.Reason);
-  ok("...and it is not Verified", row?.Verified === false);
+  ok("...and it is not Verified", !row?.Verified);   /* an unticked box is absent on Airtable and D1, false in the mock */
   const fm = (await rowsOf("Field Map")).find((x) => x.Key === "offsite");
   ok("the Field Map remembers the last error for that datum", /holds nothing/.test(fm?.["Last Error"] || ""), JSON.stringify(fm));
   const s = summarisePush(await readPushLog(at, { fromIso: "2000-01-01T00:00:00Z", toIso: "2100-01-01T00:00:00Z" }));

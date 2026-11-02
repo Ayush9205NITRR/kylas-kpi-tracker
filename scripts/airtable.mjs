@@ -9,6 +9,7 @@
  */
 import { STAGE_RUNG, STAGE_LABEL, EXIT_STAGES, NOT_CONNECTED, MILESTONE } from "./stages.mjs";
 import { gateFor, RCA_GATES } from "./rca.mjs";
+import { airtableOverD1 } from "./airtable-d1.mjs";
 
 /* SETTINGS COME FROM THE CALLER, WITH process.env AS THE FALLBACK, and the
    fallback is guarded because `process` does not exist in every runtime this
@@ -24,6 +25,45 @@ const fromEnv = (name, fallback) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* WHICH STORE A NODE SCRIPT TALKS TO, from its environment — so the crons and
+   one-off scripts follow the same single switch as the Worker:
+     STORE=d1 + D1_SQLITE=<file>                    a local SQLite file (dev, tests, a dry run)
+     STORE=d1 + CF_ACCOUNT_ID, CF_API_TOKEN, KPI_DB_ID   the real D1, over Cloudflare's API
+   (scripts/d1-node.mjs). Only the KPI base (AIRTABLE_BASE) moves. Another
+   base — the research "Company List" — stays on Airtable. A test can hand in
+   its own database with setD1Resolver(). */
+let d1Resolver = null;
+export function setD1Resolver(fn) { d1Resolver = fn; }
+function resolveD1(baseId) {
+  if (fromEnv("STORE", "airtable") !== "d1") return null;
+  if (baseId !== fromEnv("AIRTABLE_BASE", "")) return null;
+  return d1Resolver ? d1Resolver() : nodeD1();
+}
+
+/* A Node script's D1: the adapter is loaded on first use. The specifier is a
+   variable so the Worker's bundler leaves it alone — a Worker passes its binding. */
+export function nodeD1() {
+  const spec = "./d1-node.mjs";
+  let real = null;
+  const get = async () => (real ||= (await import(spec)).d1FromEnv());
+  return {
+    prepare(sql) {
+      const st = (params) => ({
+        bind: (...p) => st(p),
+        all: async () => (await get()).prepare(sql).bind(...params).all(),
+        first: async (c) => (await get()).prepare(sql).bind(...params).first(c),
+        run: async () => (await get()).prepare(sql).bind(...params).run(),
+        _sql: sql, _params: params,
+      });
+      return st([]);
+    },
+    async batch(list) {
+      const db = await get();
+      return db.batch(list.map((x) => db.prepare(x._sql).bind(...x._params)));
+    },
+  };
+}
+
 export function createAirtable(pat, baseId, {
   log = () => {},
   /* Overridable so the mock can stand in during tests. */
@@ -33,9 +73,18 @@ export function createAirtable(pat, baseId, {
      how the D1 copy (mirror.mjs) stays current without reading anything back.
      Its failures are its own: a write that landed is never reported as failed. */
   onWrite = null,
+  /* THE PLUG (2026-11-03). A D1 binding here answers the same REST calls from
+     Cloudflare instead of Airtable — see airtable-d1.mjs. Everything above this
+     client runs unchanged. Left out, a Node script follows STORE=d1 in its
+     environment, for the KPI base only (resolveD1 below). */
+  d1 = undefined,
 } = {}) {
-  const API = apiUrl;
-  const GAP = gap;
+  const store = d1 === undefined ? resolveD1(baseId) : d1;
+  const engine = store ? airtableOverD1(store) : null;
+  const doFetch = engine ? engine.fetch : (...a) => fetch(...a);
+  const API = engine ? "https://d1.local/v0" : apiUrl;
+  /* D1 has no five-a-second ceiling; the gap would only add latency. */
+  const GAP = engine ? 0 : gap;
   /* SPACED BY START, NOT BY FINISH. Airtable's limit is five requests a
      second per base — a rate, not a concurrency. Waiting for each answer
      before sending the next made every request cost a full round trip
@@ -64,7 +113,7 @@ export function createAirtable(pat, baseId, {
   async function send(method, path, body, tries) {
     return queue(async () => {
       for (let i = 0; i < tries; i++) {
-        const res = await fetch(`${API}/${baseId}${path}`, {
+        const res = await doFetch(`${API}/${baseId}${path}`, {
           method,
           headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json" },
           body: body ? JSON.stringify(body) : undefined,
@@ -115,6 +164,8 @@ export function createAirtable(pat, baseId, {
 
   return {
     call,
+    /* "airtable" or "d1" — for a status line, never for branching logic. */
+    store: engine ? "d1" : "airtable",
     /* So callers outside this factory can say something in the same voice —
        listTolerant needs to report a missing column and had nowhere to say it. */
     log,

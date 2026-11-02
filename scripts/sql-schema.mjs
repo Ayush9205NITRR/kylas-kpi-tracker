@@ -57,7 +57,14 @@ const ISO_DATETIME = "GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'";
 
 const sqlLit = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
-function columnFor(field) {
+/* LOOSE SELECTS (2026-11-03). The console writes with typecast:true, and on
+   Airtable that ADDS an option a select has never seen — a new Pipeline Stage
+   in Kylas just works. A CHECK here would refuse the same save. So the
+   database that serves the console (D1, STORE=d1) is built loose and reads a
+   select as plain text, exactly as permissive as the base it replaces; the
+   strict build stays the default for the tests, which is where a value the
+   schema does not know is worth a failure. */
+function columnFor(field, { looseSelects = false } = {}) {
   const col = columnName(field.name);
   const q = `"${col}"`;
   switch (field.type) {
@@ -68,7 +75,7 @@ function columnFor(field) {
     case "singleSelect": {
       const choices = (field.options?.choices || []).map((c) => c.name);
       /* An empty list would make the CHECK reject everything. */
-      if (!choices.length) return { col, sql: `${q} TEXT` };
+      if (!choices.length || looseSelects) return { col, sql: `${q} TEXT` };
       return { col, sql: `${q} TEXT CHECK (${q} IS NULL OR ${q} IN (${choices.map(sqlLit).join(", ")}))` };
     }
     case "checkbox":
@@ -138,9 +145,14 @@ const links = () => FOLLOWUPS
    left to whoever writes the next field. */
 export const OWN_ROW_DERIVED = {
   "Event Rows": {
-    "Has Any Signal": `CASE WHEN COALESCE("budget", '') <> '' OR COALESCE("timeline", '') <> '' ` +
+    /* A REMOVED ROW COUNTS FOR NOTHING — the live formula's IF({Removed At}, 0, …).
+       Missing here until 2026-11-03, so on D1 a removed budget row went on
+       making its contact a Right POC. */
+    "Has Any Signal": `CASE WHEN COALESCE("removed_at", '') <> '' THEN 0 ` +
+      `WHEN COALESCE("budget", '') <> '' OR COALESCE("timeline", '') <> '' ` +
       `OR COALESCE("pax", '') <> '' THEN 1 ELSE 0 END`,
-    "Is Complete": `CASE WHEN COALESCE("budget", '') <> '' AND COALESCE("timeline", '') <> '' ` +
+    "Is Complete": `CASE WHEN COALESCE("removed_at", '') <> '' THEN 0 ` +
+      `WHEN COALESCE("budget", '') <> '' AND COALESCE("timeline", '') <> '' ` +
       `AND COALESCE("pax", '') <> '' THEN 1 ELSE 0 END`,
   },
   "Call Log": {
@@ -169,7 +181,7 @@ const INDEXES = [
   ["call_rollup", ["day", "owner"]],
 ];
 
-export function sqlSchema() {
+export function sqlSchema({ looseSelects = false } = {}) {
   const out = [];
   const byTable = new Map(TABLES.map((t) => [t.name, t]));
   const linkList = links();
@@ -191,7 +203,7 @@ export function sqlSchema() {
     cols.push(`  , "airtable_id" TEXT UNIQUE`);
 
     for (const f of t.fields) {
-      const { sql } = columnFor(f);
+      const { sql } = columnFor(f, { looseSelects });
       if (f.description) cols.push(`  -- ${f.description.replace(/\s+/g, " ").slice(0, 160)}`);
       cols.push(`  , ${sql}`);
     }

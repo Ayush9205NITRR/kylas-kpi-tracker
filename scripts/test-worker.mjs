@@ -104,7 +104,14 @@ const ENV = {
 };
 /* storeFor() insists on a real binding, and rightly — a journal with nowhere
    to live is how a lost reply duplicates a contact. */
-const withStore = (env) => ({ ...env, DB: db });
+/* TEST_STORE=d1-binding: the Worker runs with STORE=d1 and a KPI_DB binding,
+   so every KPI read and write goes to D1 in-process, as on Cloudflare. The mock
+   (MOCK_AIRTABLE_STORE=d1) opens the same file, so the suite's own look-ups
+   through 9901 see what the Worker wrote. */
+const KPI_FILE = process.env.MOCK_AIRTABLE_D1_FILE;
+const kpiDb = process.env.TEST_STORE === 'd1-binding' && KPI_FILE ? fakeD1(KPI_FILE) : null;
+if (kpiDb) Object.assign(ENV, { STORE: 'd1', KPI_DB: kpiDb });
+const withStore = (env) => ({ ...env, DB: db, ...(kpiDb ? { KPI_DB: kpiDb } : {}) });
 const store = d1Store(db);
 
 const call = (path, { method = 'GET', body, origin = ORIGIN, env = ENV, headers = {} } = {}) =>
@@ -1471,7 +1478,7 @@ console.log('\n11. a copy that is short of the account is not the account');
   check('...the contact keeps its mark, now only the flag still open', (await mark('980010')) === 'other-bd', String(await mark('980010')));
 
   const two = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['980010|other-bd|112937'], resolution: 'Handled in Kylas' }, env: withStore(ENV) })).json();
-  check('resolving the last open flag clears the contact\'s mark', two.cleared?.[0] === '980010' && (await mark('980010')) === '', `${JSON.stringify(two)} mark=${JSON.stringify(await mark('980010'))}`);
+  check('resolving the last open flag clears the contact\'s mark', two.cleared?.[0] === '980010' && ((await mark('980010')) ?? '') === '' /* real Airtable (and D1) omit a cleared field; this mock keeps "" */, `${JSON.stringify(two)} mark=${JSON.stringify(await mark('980010'))}`);
   check('...and leaves another contact\'s alone', (await mark('980011')) === 'email-conflict', String(await mark('980011')));
 
   const again = await (await call('/dupe-flags-resolve', { method: 'POST', body: { keys: ['980010|other-bd|112937'], resolution: 'Handled in Kylas' }, env: withStore(ENV) })).json();

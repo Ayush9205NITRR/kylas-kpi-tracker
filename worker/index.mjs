@@ -39,7 +39,8 @@
 import { createHandlers } from "../scripts/handlers.mjs";
 import { d1Store, kvStore } from "../scripts/store.mjs";
 import { createGoogleAuth } from "../scripts/google-auth.mjs";
-import { createMirror } from "../scripts/mirror.mjs";
+import { createMirror, MIRROR_TABLES } from "../scripts/mirror.mjs";
+import { ENRICH_TABLE } from "../scripts/airtable.mjs";
 import { taggedBody, matches, cacheable } from "../scripts/etag.mjs";
 import PRIVACY from "./privacy.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -77,7 +78,11 @@ function handlers(env, log) {
                                         dropped whole without touching the mirror. Absent until a
                                         KPI_DB binding exists, and absent means inert. */
                                      shadowDb: env.KPI_DB || null,
-                                     mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
+                                     /* STORE=d1: the KPI tables ARE in D1 (KPI_DB), so the read
+                                        copy keeps only what still lives in Airtable — the
+                                        research base's Company List. */
+                                     mirror: env.DB ? createMirror({ db: env.DB, log,
+                                       ...(env.STORE === "d1" ? { tables: { [ENRICH_TABLE]: MIRROR_TABLES[ENRICH_TABLE] } } : {}) }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
 

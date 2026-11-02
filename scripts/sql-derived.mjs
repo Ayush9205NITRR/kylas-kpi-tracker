@@ -105,10 +105,12 @@ SELECT
        ELSE 0 END                                    AS "avg_call_seconds",
   st.last_stage_change_at                            AS "last_stage_change_at",
   st.first_stage_change_at                           AS "first_stage_change_at",
-  CASE WHEN COALESCE(ev.has_signal, 0) = 1 THEN 1 ELSE 0 END        AS "is_right_poc",
-  CASE WHEN COALESCE(ev.has_signal, 0) = 1 THEN c."name" ELSE '' END AS "right_poc_name",
-  CASE WHEN COALESCE(ev.has_complete_row, 0) = 1 THEN 1 ELSE 0 END  AS "is_discovery",
-  CASE WHEN COALESCE(ev.has_complete_row, 0) = 1 THEN c."name" ELSE '' END AS "discovery_name",
+  -- ONCE A RIGHT POC, ALWAYS ONE: the live formula ORs in the Ever checkbox,
+  -- so removing the row that carried the budget does not drop the rung
+  CASE WHEN COALESCE(ev.has_signal, 0) = 1 OR c."ever_right_poc" = 1 THEN 1 ELSE 0 END        AS "is_right_poc",
+  CASE WHEN COALESCE(ev.has_signal, 0) = 1 OR c."ever_right_poc" = 1 THEN c."name" ELSE '' END AS "right_poc_name",
+  CASE WHEN COALESCE(ev.has_complete_row, 0) = 1 OR c."ever_discovery" = 1 THEN 1 ELSE 0 END  AS "is_discovery",
+  CASE WHEN COALESCE(ev.has_complete_row, 0) = 1 OR c."ever_discovery" = 1 THEN c."name" ELSE '' END AS "discovery_name",
   ${ladderCase('COALESCE(c."kpi_rank", 0)')}         AS "kpi_stage",
   -- rank in the high digits, the moment it was reached in the low ones, so a
   -- single MAX at company level gives the best rung and, among ties, the most
@@ -174,8 +176,12 @@ SELECT
   COALESCE(ct.contact_count, 0)               AS "contact_count",
   COALESCE(ct.right_poc_contacts, '')         AS "right_poc_contacts",
   COALESCE(ct.discovery_contacts, '')         AS "discovery_contacts",
-  CASE WHEN ct.last_call_at IS NOT NULL THEN 1 ELSE 0 END           AS "reached",
-  CASE WHEN COALESCE(ct.ever_picked, 0) = 1 THEN 1 ELSE 0 END       AS "phone_picked",
+  -- a stage is evidence of a call too: the live formula is
+  -- OR({Last Call At}, {KPI Stage At}), and KPI Stage At is set iff the score is
+  CASE WHEN ct.last_call_at IS NOT NULL OR COALESCE(ct.kpi_score, 0) > 0 THEN 1 ELSE 0 END AS "reached",
+  -- reads First Picked At, as the live base does (Ever Picked's MAX over a
+  -- checkbox reads blank on Airtable — see schema.mjs)
+  CASE WHEN ct.first_picked_at IS NOT NULL THEN 1 ELSE 0 END        AS "phone_picked",
   CASE WHEN COALESCE(ct.right_poc_contacts, '') <> '' THEN 1 ELSE 0 END AS "right_poc",
   -- a complete row has all three filled, so it also has any one: Discovery is
   -- always a subset of Right POC and the funnel reads straight down

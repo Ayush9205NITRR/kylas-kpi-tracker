@@ -42,7 +42,7 @@ export function createShadow({ db, at, log = () => {} }) {
     /* CREATE TABLE IF NOT EXISTS throughout, and the views are dropped and
        recreated — so this is safe on every cold start, and a copy can never be
        left holding an older build's view definitions. */
-    for (const stmt of splitStatements(sqlSchema() + "\n" + sqlDerived()))
+    for (const stmt of splitStatements(sqlSchema({ looseSelects: true }) + "\n" + sqlDerived()))
       await db.prepare(stmt).run();
     await db.prepare(`CREATE TABLE IF NOT EXISTS shadow_state (
       tbl TEXT PRIMARY KEY, since TEXT, rows INTEGER DEFAULT 0,

@@ -13,6 +13,52 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 
 const PORT = Number(process.env.PORT || 9901);
+
+/* MOCK_AIRTABLE_STORE=d1 — THE PARITY RUN (2026-11-03). Every table the KPI
+   schema knows is answered by airtable-d1.mjs over a real SQLite database,
+   exactly as the Worker answers it with STORE=d1; anything else (the research
+   base's Company List) stays in this stand-in's memory. Run any suite with it
+   set and the suite exercises the D1 store through Airtable's own REST
+   surface — so "the same system on Cloudflare" is a pass/fail, not a hope.
+   The hooks (/__writes, /__reads, /__reset, /__count, /__bulk) work in both. */
+const D1_MODE = process.env.MOCK_AIRTABLE_STORE === "d1";
+let ENGINE = null;
+async function freshEngine() {
+  const { fakeD1 } = await import("./d1-fake.mjs");
+  const { sqlSchema } = await import("./sql-schema.mjs");
+  const { sqlDerived } = await import("./sql-derived.mjs");
+  const { airtableOverD1 } = await import("./airtable-d1.mjs");
+  /* MOCK_AIRTABLE_D1_FILE: a file, so a Worker under test can be handed the
+     SAME database as its KPI_DB binding — the console then writes to D1
+     in-process, exactly as on Cloudflare, and this stand-in's hooks still see
+     every row. A reset empties it rather than replacing it. */
+  const file = process.env.MOCK_AIRTABLE_D1_FILE || ":memory:";
+  const db = fakeD1(file);
+  await db.exec(sqlSchema({ looseSelects: true }));
+  await db.exec(sqlDerived());
+  if (ENGINE && file !== ":memory:") {
+    const { TABLES: T } = await import("./schema.mjs");
+    const { tableName } = await import("./sql-schema.mjs");
+    await db.exec("PRAGMA foreign_keys = OFF;" + T.map((t) => `DELETE FROM "${tableName(t.name)}";`).join("") + "PRAGMA foreign_keys = ON;");
+  }
+  ENGINE = airtableOverD1(db);
+}
+if (D1_MODE) await freshEngine();
+const d1Tables = async () => {
+  if (!ENGINE) return {};
+  const { TABLES: T } = await import("./schema.mjs");
+  const out = {};
+  for (const t of T) {
+    const recs = [];
+    let off = "";
+    do {
+      const r = await ENGINE.handle("GET", `/${encodeURIComponent(t.name)}?pageSize=100${off ? `&offset=${encodeURIComponent(off)}` : ""}`);
+      recs.push(...r.body.records); off = r.body.offset || "";
+    } while (off);
+    if (recs.length) out[t.name] = recs;
+  }
+  return out;
+};
 const TABLES = {};                    // name -> [{id, fields}]
 const WRITES = [];
 let READS = 0;           /* GET row pages served — /__reads, so a test can tell a cache hit from a crawl */
@@ -32,15 +78,37 @@ const touch = (r) => { MODIFIED.set(r.id, Date.now()); return r; };
    second implementation rather than the one that ships. Seeding the answers
    tests what actually changed: the read, the join on Kylas company id, and what
    the view does with it. */
-function seed() {
+async function seed() {
   const path = process.env.MOCK_AIRTABLE_SEED;
   if (!path) return;
   const data = JSON.parse(readFileSync(path, "utf8"));
+  if (ENGINE) {
+    /* In D1 mode a seed goes through the engine, so a seeded COMPUTED field is
+       refused — the number has to come from the rows underneath, as it will
+       on Cloudflare. Said, not swallowed: a suite leaning on a seeded formula
+       value is exactly what this run exists to find. */
+    for (const [name, list] of Object.entries(data)) {
+      if (!ENGINE.model(name)) { for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([touch({ id: rec(), fields })]); continue; }
+      const m = ENGINE.model(name);
+      for (const fields of list) {
+        const keep = {}, computed = [];
+        for (const [k, v] of Object.entries(fields)) {
+          if (m.fields.get(k)?.kind === "derived") computed.push(k);
+          else keep[k] = v;
+        }
+        if (computed.length) console.log(`  seed: ${name}.${computed.join(", ")} is computed on D1 — not seeded`);
+        const r = await ENGINE.handle("POST", `/${encodeURIComponent(name)}`, { records: [{ fields: keep }], typecast: true });
+        if (r.status !== 200) console.log(`  seed: ${name} refused — ${JSON.stringify(r.body).slice(0, 160)}`);
+      }
+    }
+    console.log(`  seeded (D1) ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
+    return;
+  }
   for (const [name, list] of Object.entries(data))
     for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([touch({ id: rec(), fields })]);
   console.log(`  seeded ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
 }
-seed();
+await seed();
 const table = (name) => (TABLES[name] = TABLES[name] || []);
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -149,8 +217,12 @@ createServer(async (req, res) => {
   if (parts.length < 2) {
     if (!/^\/__/.test(url.pathname)) console.log(`404 ${req.method} ${url.pathname} parts=${JSON.stringify(parts)}`);
     if (url.pathname === "/__reads") return json(res, 200, { reads: READS });
-    if (url.pathname === "/__writes") return json(res, 200, { writes: WRITES, tables: TABLES });
-    if (url.pathname === "/__reset") { WRITES.length = 0; for (const k of Object.keys(TABLES)) delete TABLES[k]; return json(res, 200, { ok: true }); }
+    if (url.pathname === "/__writes") return json(res, 200, { writes: WRITES, tables: { ...TABLES, ...(await d1Tables()) } });
+    if (url.pathname === "/__reset") {
+      WRITES.length = 0; for (const k of Object.keys(TABLES)) delete TABLES[k];
+      if (D1_MODE) await freshEngine();
+      return json(res, 200, { ok: true });
+    }
     /* POST /__bulk {table, count, fields} — fill a table with `count` rows
        WITHOUT paying the rate limit, so a scale test can stand up an account's
        worth of data in seconds instead of the twenty minutes 50,000 records
@@ -161,6 +233,20 @@ createServer(async (req, res) => {
     if (url.pathname === "/__bulk" && req.method === "POST") {
       const body = await text(req).then((s) => JSON.parse(s)).catch(() => null);
       if (!body?.table || !body?.count) return json(res, 400, { error: "table and count required" });
+      if (ENGINE?.model(body.table)) {
+        for (let i0 = 0; i0 < body.count; i0 += 500) {
+          const records = [];
+          for (let i = i0; i < Math.min(body.count, i0 + 500); i++) {
+            const fields = {};
+            for (const [k, v] of Object.entries(body.fields || {}))
+              fields[k] = typeof v === "string" ? v.replace(/#/g, String(i)) : v;
+            records.push({ fields });
+          }
+          const r = await ENGINE.handle("POST", `/${encodeURIComponent(body.table)}`, { records, typecast: true });
+          if (r.status !== 200) return json(res, r.status, r.body);
+        }
+        return json(res, 200, { table: body.table, rows: (await d1Tables())[body.table]?.length || 0 });
+      }
       TABLES[body.table] = TABLES[body.table] || [];
       const t = TABLES[body.table];
       const base = t.length;
@@ -176,7 +262,7 @@ createServer(async (req, res) => {
     }
     if (url.pathname === "/__count")
       return json(res, 200, Object.fromEntries(
-        Object.entries(TABLES).map(([k, v]) => [k, v.length])));
+        Object.entries({ ...TABLES, ...(await d1Tables()) }).map(([k, v]) => [k, v.length])));
     return json(res, 404, { error: "not found" });
   }
   const name = decodeURIComponent(parts.slice(1).join("/"));
@@ -207,6 +293,32 @@ createServer(async (req, res) => {
     if (!noField.length) return "";
     return Object.keys(fields || {}).find((f) => noField.includes(`${name}.${f}`)) || "";
   };
+
+  /* D1 MODE: a schema table is answered by the engine. The write is logged
+     to /__writes in the same shape as below, so the suites read it unchanged. */
+  const engineName = name.replace(/\/rec[0-9A-Za-z]{14}$/, "");
+  if (ENGINE?.model(engineName)) {
+    let body = null;
+    if (req.method !== "GET" && req.method !== "DELETE") {
+      body = JSON.parse(await text(req) || "{}");
+      for (const r of body.records || []) {
+        const bad = absentField(r.fields);
+        if (bad) return json(res, 422,
+          { error: { type: "UNKNOWN_FIELD_NAME", message: `Unknown field name: "${bad}"` } });
+      }
+    }
+    const out = await ENGINE.handle(req.method, `/${parts.slice(1).join("/")}${url.search}`, body);
+    if (out.status === 200 && req.method !== "GET") {
+      if (req.method === "DELETE")
+        for (const id of url.searchParams.getAll("records[]")) WRITES.push({ kind: "delete", table: name, id });
+      else (out.body.records || []).forEach((r, i) => {
+        const kind = body.performUpsert ? ((out.body.createdRecords || []).includes(r.id) ? "create" : "update")
+          : req.method === "POST" ? "create" : "patch";
+        WRITES.push({ kind, table: name, id: r.id, fields: body.records?.[i]?.fields || {} });
+      });
+    }
+    return json(res, out.status, out.body);
+  }
 
   const rows = table(name);
 
@@ -382,7 +494,7 @@ createServer(async (req, res) => {
   process.exit(1);
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`mock airtable on http://127.0.0.1:${PORT}`);
-  console.log(`  upsert / select / delete · 429s above 5 req/s · /__writes /__reset`);
+  console.log(`  upsert / select / delete · 429s above 5 req/s · /__writes /__reset${D1_MODE ? " · STORE=d1 (schema tables answered from SQLite)" : ""}`);
 });
 
 function text(req) {

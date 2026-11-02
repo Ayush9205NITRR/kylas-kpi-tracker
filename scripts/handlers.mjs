@@ -46,6 +46,10 @@ import { mayAnswerRca } from "./rca-owner.mjs";
 import { report, withDeltas, mergeCalls, arrivalsByCompany, seededRung, setReportTz } from "./report.mjs";
 import { createJournal } from "./journal.mjs";
 import { mirrored } from "./mirror.mjs";
+import { nodeD1 } from "./airtable.mjs";
+import { TABLES as KPI_TABLES } from "./schema.mjs";
+import { tableName as sqlTableName } from "./sql-schema.mjs";
+const KPI_TABLE_NAMES = KPI_TABLES.map((t) => t.name);
 import { createSaveQueue } from "./save-queue.mjs";
 import { createShadow } from "./shadow.mjs";
 import { createShadowReads } from "./shadow-read.mjs";
@@ -129,13 +133,50 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      answers whole-table reads from the D1 copy when there is one (a hosted
      runtime — see mirror.mjs) and is the same client when there is not. Every
      reader uses `airtable`; only the mirror's own upkeep uses the raw one. */
-  const rawAirtable = AT_PAT && AT_BASE ? createAirtable(AT_PAT, AT_BASE, {
+  /* THE ONE SWITCH (2026-11-03): STORE=d1 answers every KPI-base call from
+     Cloudflare D1 (the KPI_DB binding on a Worker; D1_SQLITE or the D1 HTTP API
+     from Node) through the same client — scripts/airtable-d1.mjs. Nothing
+     below this line knows which store it has. With D1 the read copy is not
+     wrapped around it (D1 IS the copy), and the shadow pull is off (there is
+     no Airtable to pull from). STORE=airtable, or unset, is exactly as before. */
+  const ON_D1 = env.STORE === "d1";
+  /* a Worker hands its binding in; Node (shadowDb null) follows its env */
+  const kpiStore = ON_D1 ? (shadowDb || nodeD1()) : null;
+  if (ON_D1 && !shadowDb && !env.D1_SQLITE && !env.CF_API_TOKEN)
+    throw new Error("STORE=d1 but there is no D1 to use: a Worker needs the KPI_DB binding (wrangler.toml); " +
+      "Node needs D1_SQLITE=<file> or CF_ACCOUNT_ID + CF_API_TOKEN + KPI_DB_ID.");
+  const rawAirtable = (AT_PAT && AT_BASE) || ON_D1 ? createAirtable(AT_PAT || "d1", AT_BASE || "appKPI", {
     log,
     ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
     ...(env.AIRTABLE_GAP ? { gap: Number(env.AIRTABLE_GAP) } : {}),
-    ...(mirror ? { onWrite: mirror.written } : {}),
+    ...(mirror && !ON_D1 ? { onWrite: mirror.written } : {}),
+    d1: ON_D1 ? kpiStore : null,
   }) : null;
-  const airtable = rawAirtable && mirror ? mirrored(rawAirtable, mirror) : rawAirtable;
+  if (ON_D1) log(`store: D1 — the KPI base is answered from Cloudflare, Airtable is not written`);
+  const airtable = rawAirtable && mirror && !ON_D1 ? mirrored(rawAirtable, mirror) : rawAirtable;
+
+  /* WHEN DID A TABLE LAST CHANGE — the key the report and dashboard memos are
+     held on, so a save shows on the next read rather than after a TTL. On
+     Airtable the read copy keeps it (mirror.stamp). On D1 the tables say it
+     themselves: a row count and the newest synced_at, one query for the lot,
+     held a second so a burst of reads does not repeat it. A table D1 does not
+     hold (the research base's Company List) still comes from the copy. */
+  const D1_TABLES = new Set(KPI_TABLE_NAMES);
+  const stampHeld = new Map();
+  const d1Stamp = async (list) => {
+    const mine = list.filter((t) => D1_TABLES.has(t)), rest = list.filter((t) => !D1_TABLES.has(t));
+    let tail = "";
+    if (rest.length) { tail = mirror ? await mirror.stamp(rest) : null; if (tail === null) return null; }
+    const k = mine.join("|");
+    const held = stampHeld.get(k);
+    if (held && Date.now() - held.at < 1000) return held.v + tail;
+    const sql = mine.map((t) => `SELECT '${sqlTableName(t)}' AS t, COUNT(*) AS n, MAX("synced_at") AS m FROM "${sqlTableName(t)}"`).join(" UNION ALL ");
+    const rows = sql ? (await kpiStore.prepare(sql).all()).results || [] : [];
+    const v = rows.map((r) => `${r.t}:${r.n}.${r.m || ""}`).join("|");
+    stampHeld.set(k, { at: Date.now(), v });
+    return v + tail;
+  };
+  const stampOf = ON_D1 && kpiStore ? d1Stamp : mirror ? (list) => mirror.stamp(list) : null;
   /* THE CURATED RESEARCH lives in another base the team already keeps — the
      "Company List" in Company Database, one row per company keyed by its
      Kylas id, with industry, size, funding, the V/W scores and the rest.
@@ -161,7 +202,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
      No binding, no shadow. Until KPI_DB exists this is null and every call
      site below skips, so deploying it changes nothing. */
-  const shadow = shadowDb && rawAirtable
+  const shadow = shadowDb && rawAirtable && !ON_D1
     ? createShadow({ db: shadowDb, at: rawAirtable, log })
     : null;
   if (shadow) log(`shadow copy: on (KPI_DB) — pulling on the cron, nothing reads it`);
@@ -640,7 +681,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      tables it reads changes, because /companies asks on every open. */
   const offsiteShared = memo("offsite timeline", {
     ttl: 5 * 60 * 1000,
-    key: mirror ? () => mirror.stamp(["Event Rows", "Contacts", "Companies"]) : null,
+    key: stampOf ? () => stampOf(["Event Rows", "Contacts", "Companies"]) : null,
   }, async () => {
     const [rows, contacts, cos] = await Promise.all([
       listTolerant(airtable, "Event Rows", { fields: ["Event Type", "Timeline", "Contact", "Removed At"], pageSize: 100, maxPages: 2000 }),
@@ -754,7 +795,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   }
 
   const enrichShared = memo("enrichment", {
-    ttl: 10 * 60 * 1000, key: mirror ? () => mirror.stamp([ENRICH_TABLE]) : null,
+    ttl: 10 * 60 * 1000, key: stampOf ? () => stampOf([ENRICH_TABLE]) : null,
   }, async () => {
     const rows = mirror ? await mirror.rows(ENRICH_TABLE) : null;
     return rows ? rowsToEnrichment([...rows.values()]) : new Map();
@@ -1212,7 +1253,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const REPORT_TABLES = ["Call Log", "Call Rollup", "Stage Transitions", "Contacts", "Team"];
   const reportData = memo("report data", {
     ttl: REPORT_TTL,
-    key: mirror ? () => mirror.stamp(REPORT_TABLES) : null,
+    key: stampOf ? () => stampOf(REPORT_TABLES) : null,
   }, async () => {
     /* listTolerant, not listAll. Is Right POC and Is Discovery are FORMULA
        fields, so a base one repair-base behind does not have them — and Airtable
@@ -1545,7 +1586,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                are already in it. What is NOT is what Airtable computed from them —
                the contact's formulas, the company's rollups — so those two records
                are read back, behind the reply. */
-            if (mirror) {
+            /* On D1 the computed fields are views, so they are already current —
+               there is no copy to re-read into. */
+            if (mirror && !ON_D1) {
               inFlight(Promise.all([
                 mirror.refetch(rawAirtable, "Contacts", [result.airtable?.recordId]),
                 mirror.refetch(rawAirtable, "Companies", [result.airtable?.companyRecordId]),
@@ -1780,7 +1823,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   setReportTz(TZ_MIN);
   const progressData = memo("account progress", {
     ttl: REPORT_TTL,
-    key: mirror ? () => mirror.stamp(["Contacts", "Companies", "Stage Transitions", "Call Log", "Dialler Calls"]) : null,
+    key: stampOf ? () => stampOf(["Contacts", "Companies", "Stage Transitions", "Call Log", "Dialler Calls"]) : null,
   }, async () => {
     const [companies, contacts, transitions, calls, dialler] = await Promise.all([
       airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
@@ -1803,7 +1846,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      one of them does. */
   const ladderData = memo("ladder", {
     ttl: REPORT_TTL,
-    key: mirror ? () => mirror.stamp([...REPORT_TABLES, "Companies", "Focus", "Research"]) : null,
+    key: stampOf ? () => stampOf([...REPORT_TABLES, "Companies", "Focus", "Research"]) : null,
   }, async () => {
     const [{ transitions, signals, team }, companies, focus, research] = await Promise.all([
       reportData(),
