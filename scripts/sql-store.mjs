@@ -35,6 +35,9 @@ export const BACKFILL_ORDER = [
   "Event Rows", "Call Log", "Stage Transitions", "RCA",
   "Focus", "Focus History", "Research",
   "Daily Snapshot", "Call Rollup", "Team", "Schema Migrations",
+  /* Added 2026-11-03: the tables built after the September plan. None links to
+     another, so their place in the order does not matter. */
+  "Dialler Calls", "Call Notes", "Push Log", "Duplicate Flags", "Field Map",
 ];
 
 export const LINKS_BY_TABLE = FOLLOWUPS

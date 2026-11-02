@@ -101,6 +101,16 @@ export function createShadow({ db, at, log = () => {} }) {
     return { table, rows: wrote, full: !since, more: recs.length > wrote };
   }
 
+  /* A FAILED PASS DOES NOT MOVE THE WATERMARK (2026-11-03). It used to: the
+     catch below stamped `since = now`, so a first full copy that died (a
+     35,000-row table cannot be read in one Worker invocation) left a fresh
+     watermark behind, every later pass asked only for "changed since then",
+     and the rows never read were never read. An error is recorded; `since`
+     keeps whatever it was — null for a table never copied, so it is retried. */
+  const fail = (t, err) => db.prepare(
+    `INSERT INTO shadow_state (tbl, since, rows, ran_at, last_error) VALUES (?, NULL, 0, ?, ?)
+     ON CONFLICT (tbl) DO UPDATE SET ran_at = excluded.ran_at, last_error = excluded.last_error`)
+    .bind(t, new Date().toISOString(), err).run();
   const stamp = (t, started, rows, err) => db.prepare(
     `INSERT INTO shadow_state (tbl, since, rows, ran_at, last_error) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (tbl) DO UPDATE SET since = excluded.since, rows = shadow_state.rows + excluded.rows,
@@ -119,7 +129,7 @@ export function createShadow({ db, at, log = () => {} }) {
          children cannot resolve their parents. */
       if (!(await watermark(t))) {
         try { out.push(await syncTable(t, { max: Infinity })); }
-        catch (e) { out.push({ table: t, error: e.message.slice(0, 160) }); await stamp(t, Date.now(), 0, e.message.slice(0, 160)); }
+        catch (e) { out.push({ table: t, error: e.message.slice(0, 160) }); await fail(t, e.message.slice(0, 160)); }
         return out;
       }
     }
@@ -130,7 +140,7 @@ export function createShadow({ db, at, log = () => {} }) {
     try { out.push(await syncTable(next, { max })); }
     catch (e) {
       out.push({ table: next, error: e.message.slice(0, 160) });
-      await stamp(next, Date.now(), 0, e.message.slice(0, 160));
+      await fail(next, e.message.slice(0, 160));
       log(`! shadow: ${next} — ${e.message.slice(0, 120)}`);
     }
     return out;

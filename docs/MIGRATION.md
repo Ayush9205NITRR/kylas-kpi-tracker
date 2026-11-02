@@ -367,3 +367,32 @@ nobody can see is the worst state of the three.
 1. **The Kylas write-back** — Gate 4. Waiting on the field list.
 
 Nothing so far changes what an associate sees.
+
+## 2026-11-03 · Turning it on, in one day
+
+Ayush wanted the second copy ready today, with the live system untouched.
+
+**Two fixes first.**
+- **A failed pass no longer moves the watermark** (`shadow.mjs`). Until now, a first full copy that died
+  stamped `since = now`, so the rows never read stayed unread for good. A 35,000-row Contacts table
+  cannot be read in one Worker invocation, so this was certain to happen.
+- **`BACKFILL_ORDER` includes the five tables built since September:** Dialler Calls, Call Notes,
+  Push Log, Duplicate Flags and Field Map.
+
+**The first lap runs on the laptop** (`scripts/sqlite-to-d1.mjs`). backfill.mjs fills a local file
+from Airtable, and this turns the file into one SQL script for `wrangler d1 execute`. The script
+skips generated columns and seeds `shadow_state` with a watermark 6 hours back, so the Worker's
+minute cron continues incrementally from there. On mock: 656 rows, and every table's count matches
+after the import.
+
+```sh
+npx wrangler d1 create enout-kpi        # paste database_id into the KPI_DB block in wrangler.toml
+node --env-file=.env.local scripts/backfill.mjs --db db/kpi.sqlite
+node scripts/sqlite-to-d1.mjs --db db/kpi.sqlite --out db/d1-import.sql
+npx wrangler d1 execute enout-kpi --remote --file db/d1-import.sql
+npx wrangler deploy                     # shadow writes on (Gate 2)
+curl -s https://bd.enout.website/shadow-status
+```
+
+Gate 3 (`SHADOW_READS=1`) compares `/companies` today. The other routes need their SQL readers before
+Gate 4 can serve them. That is the next piece of work.
