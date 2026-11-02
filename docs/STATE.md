@@ -2577,3 +2577,14 @@ not chosen). `scoreSection()` / `wireScore()` in views.js sit under the ladder:
 Live data at approval (939 accounts): A 30–64 · 103, B 18–29 · 193, C 6–17 · 299, D 1–5 · 344.
 Checked in Chrome on mock data (light and dark): legend click → panel (1 account) → Open all → Accounts
 filtered to 1, with the chip.
+
+## 3l20 · Score distribution in bands of five; slabs cut from the whole book (1.79.1)
+
+Ayush, 2026-11-03, about the first build: "this does not make sense". One bar per raw score drew a few
+needles across an empty 1–64 axis.
+- Bars are now **bands of five** (1–5, 6–10, …). Each bar shows its count on top and takes the colour of
+  the slab most of its accounts sit in. Clicking a band opens those accounts.
+- Slabs are cut from **all loaded companies**, not the slice on screen, so "A" means the same scores on a
+  BD's view as on the team's.
+- **Below 40 scored accounts**, the cut-offs the full book gave on 2026-11-02 (30 / 18 / 6) stand in.
+  Before this fix, 4 accounts made four one-account slabs ("A · 54–54").

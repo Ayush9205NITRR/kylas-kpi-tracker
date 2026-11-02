@@ -1480,6 +1480,11 @@
   function scoreSlabs(cos) {
     const all = cos.map(scoreOf).filter((v) => v != null).sort((a, b) => b - a);
     if (!all.length) return [];
+    /* Too few to cut by share — four accounts would make four one-account
+       slabs ("A · 54–54"). Below this the cut-offs the full book gave on
+       2026-11-02 stand in: 30 / 18 / 6. */
+    if (all.length < 40) return [{ k: "A", name: "Top", lo: 30, hi: Math.max(30, all[0]), r: 5 }, { k: "B", name: "High", lo: 18, hi: 29, r: 4 },
+      { k: "C", name: "Mid", lo: 6, hi: 17, r: 3 }, { k: "D", name: "Low", lo: 1, hi: 5, r: 1 }];
     const at = (p) => all[Math.min(all.length - 1, Math.floor(all.length * p))];
     const a = at(0.10), b = Math.min(at(0.30), a - 1), c = Math.min(at(0.60), b - 1);
     return [{ k: "A", name: "Top", lo: a, hi: all[0], r: 5 }, { k: "B", name: "High", lo: b, hi: a - 1, r: 4 },
@@ -1489,7 +1494,9 @@
   const slabFor = (slabs, c) => { const v = scoreOf(c); return v == null ? null : slabs.find((s) => v >= s.lo) || slabs[slabs.length - 1]; };
   const scPct = (n, o) => (o ? Math.round(n / o * 100) : 0);
   function scoreSection(cos) {
-    const slabs = scoreSlabs(cos);
+    /* Cut from the WHOLE book, not the slice on screen, so "A" means the same
+       scores on Sejal's view as on the team's. */
+    const slabs = scoreSlabs(CACHE.companies && CACHE.companies.length ? CACHE.companies : cos);
     SC.cos = cos; SC.slabs = slabs;
     if (!slabs.length) return "";
     const by = slabs.map((s) => ({ s, l: cos.filter((c) => slabFor(slabs, c) === s) }));
@@ -1497,16 +1504,26 @@
     const sw = (s) => `<i class="scK${s.r <= 1 ? " lo" : ""}" style="background:var(--r${s.r})">${s.k}</i>`;
     /* Short rung names in the funnels, where four sit side by side. */
     const short = (k, l) => ({ booked: "SQL Mtg Booked", done: "SQL Mtg Done" })[k] || l;
-    /* the distribution: one bar per score, coloured by slab */
-    const lo = slabs[slabs.length - 1].lo, hi = slabs[0].hi, W = 640, H = 150, bw = W / (hi - lo + 1);
-    const hist = new Map(); for (const c of cos) { const v = scoreOf(c); if (v != null) hist.set(v, (hist.get(v) || 0) + 1); }
-    const hMax = Math.max(1, ...hist.values());
-    const bars = [...hist].map(([v, n]) => { const h = n / hMax * (H - 22), s = slabFor(slabs, { enrich: { pri: v } });
-      return `<rect class="scHb" data-sc="score:${v}" x="${((v - lo) * bw + 1).toFixed(1)}" y="${(H - 18 - h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" style="fill:var(--r${s.r})"><title>Score ${v} · ${n} account${n === 1 ? "" : "s"}</title></rect>`; }).join("");
-    const marks = slabs.slice(0, -1).map((s) => { const x = ((s.lo - lo) * bw).toFixed(1);
-      return `<line x1="${x}" x2="${x}" y1="0" y2="${H - 18}" class="scHm"/><text x="${+x + 4}" y="11" class="scHt">${s.k} ≥ ${s.lo}</text>`; }).join("");
-    const ticks = [...new Set([lo, ...slabs.map((s) => s.lo), hi])].map((v) =>
-      `<text x="${((v - lo) * bw + bw / 2).toFixed(1)}" y="${H - 4}" class="scHt" text-anchor="middle">${v}</text>`).join("");
+    /* THE DISTRIBUTION IN BANDS OF FIVE (2026-11-03, Ayush: "this does not
+       make sense"). One bar per raw score left a few thin spikes across a
+       wide empty axis — at 4 accounts, four needles; at 939, sixty slivers.
+       Bands of five give a dozen readable bars, each with its count on top,
+       coloured by the slab most of its accounts fall in. */
+    const BIN = 5, lo = Math.floor((slabs[slabs.length - 1].lo - 1) / BIN) * BIN + 1, hi = slabs[0].hi;
+    const bins = [];
+    for (let f = lo; f <= hi; f += BIN) bins.push({ f, t: f + BIN - 1, l: [] });
+    for (const c of cos) { const v = scoreOf(c); if (v != null) bins[Math.floor((v - lo) / BIN)]?.l.push(c); }
+    const W = 640, H = 150, gap = 6, bw = W / bins.length, hMax = Math.max(1, ...bins.map((x) => x.l.length));
+    const bars = bins.map((x, i) => {
+      const n = x.l.length, h = n ? Math.max(3, n / hMax * (H - 40)) : 0, X = i * bw + gap / 2, w = bw - gap;
+      const tally = new Map(); for (const c of x.l) { const s = slabFor(slabs, c); tally.set(s, (tally.get(s) || 0) + 1); }
+      const s = [...tally].sort((p, q) => q[1] - p[1])[0]?.[0] || slabFor(slabs, { enrich: { pri: x.f } });
+      return `<g class="scHg"${n ? ` data-sc="score:${x.f}-${x.t}"` : ""}><title>Score ${x.f}–${x.t} · ${n} account${n === 1 ? "" : "s"}</title>
+        <rect x="${X.toFixed(1)}" y="${H - 18 - h}" width="${w.toFixed(1)}" height="${h}" rx="3" class="scHb" style="fill:${n ? `var(--r${s.r})` : "var(--panel3)"}"/>
+        ${n ? `<text x="${(X + w / 2).toFixed(1)}" y="${H - 22 - h}" class="scHn" text-anchor="middle">${n}</text>` : ""}
+        <text x="${(X + w / 2).toFixed(1)}" y="${H - 4}" class="scHt" text-anchor="middle">${x.f}–${x.t}</text></g>`;
+    }).join("");
+    const marks = "", ticks = "";
     const on = (slab, step, owner = "") => SC.open && SC.open.slab === slab && SC.open.step === step && SC.open.owner === owner ? " on" : "";
     const funnels = by.map(({ s, l }) => `<div class="scFun"><div class="scFh">${sw(s)}<b>${s.name}</b><em>score ${s.lo}–${s.hi}</em><span>${l.length} accounts</span></div>
       ${SC_STEPS.map(([k, lbl, f]) => { const n = l.filter(f).length;
@@ -1535,14 +1552,14 @@
   function scPick(o) {
     const slabs = SC.slabs;
     let l = o.owner ? SC.cos.filter((c) => c.owner === o.owner) : SC.cos;
-    if (o.score != null) return l.filter((c) => scoreOf(c) === o.score);
+    if (o.score != null) return l.filter((c) => { const v = scoreOf(c); return v != null && v >= o.score[0] && v <= o.score[1]; });
     const f = (SC_STEPS.find((x) => x[0] === o.step) || [, , SC_EXTRA[o.step]?.[1]])[2] || (() => true);
     return l.filter((c) => (!o.slab || slabFor(slabs, c)?.k === o.slab) && f(c));
   }
   function scTitle(o) {
     const s = SC.slabs.find((x) => x.k === o.slab);
     const step = SC_STEPS.find((x) => x[0] === o.step)?.[1] || SC_EXTRA[o.step]?.[0] || "Owned";
-    return o.score != null ? `Score ${o.score}` : `${s ? `${s.k} · ${s.name}` : "All"} · ${step}${o.owner ? ` · ${String(o.owner).split(" ")[0]}` : ""}`;
+    return o.score != null ? `Score ${o.score[0]}–${o.score[1]}` : `${s ? `${s.k} · ${s.name}` : "All"} · ${step}${o.owner ? ` · ${String(o.owner).split(" ")[0]}` : ""}`;
   }
   function scDrawer() {
     if (!SC.open) return "";
@@ -1563,7 +1580,7 @@
   function wireScore(host, repaint, toAccounts) {
     host.querySelectorAll("[data-sc]").forEach((b) => b.addEventListener("click", () => {
       const [a, step, owner] = b.dataset.sc.split("|");
-      SC.open = a.startsWith("score:") ? { score: Number(a.slice(6)), slab: "", step: "", owner: "" } : { slab: a, step, owner: owner || "" };
+      SC.open = a.startsWith("score:") ? { score: a.slice(6).split("-").map(Number), slab: "", step: "", owner: "" } : { slab: a, step, owner: owner || "" };
       repaint();
     }));
     const close = () => { SC.open = null; repaint(); };
