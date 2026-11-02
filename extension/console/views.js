@@ -1531,7 +1531,10 @@
           <span class="scFb"><i style="width:${l.length ? Math.max(n ? 2 : 0, n / l.length * 100) : 0}%;background:var(--r${s.r})"></i></span>
           <span class="scFv"><b>${n}</b> ${scPct(n, l.length)}%</span></button>`; }).join("")}</div>`).join("");
     const team = API.isAdmin && DASH_OWNER === "all";
-    const owners = team ? [...new Set(cos.map((c) => c.owner).filter(Boolean))].sort() : [];
+    /* Busiest first; a name holding fewer than 3 accounts (a stray re-assign,
+       an admin) would be a row of zeros, so those are left off. */
+    const owned = new Map(); for (const c of cos) if (c.owner) owned.set(c.owner, (owned.get(c.owner) || 0) + 1);
+    const owners = team ? [...owned].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).map(([o]) => o) : [];
     const bdRows = owners.map((o) => { const mine = cos.filter((c) => c.owner === o);
       return `<tr><td>${esc(o)}</td>${slabs.map((s) => { const l = mine.filter((c) => slabFor(slabs, c) === s);
         const n = (f) => l.filter(f).length;

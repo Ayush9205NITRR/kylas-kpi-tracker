@@ -2588,3 +2588,5 @@ needles across an empty 1–64 axis.
   BD's view as on the team's.
 - **Below 40 scored accounts**, the cut-offs the full book gave on 2026-11-02 (30 / 18 / 6) stand in.
   Before this fix, 4 accounts made four one-account slabs ("A · 54–54").
+
+- 1.79.2: "Each BD by slab" lists the busiest BD first, and leaves out names holding fewer than 3 accounts.
