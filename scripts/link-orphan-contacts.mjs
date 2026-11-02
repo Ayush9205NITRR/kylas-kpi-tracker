@@ -28,9 +28,17 @@ export async function run({ env = process.env, log = console.log, apply = false,
   if (!env.AIRTABLE_PAT || !env.AIRTABLE_BASE) throw new Error("Set AIRTABLE_PAT and AIRTABLE_BASE.");
   const at = createAirtable(env.AIRTABLE_PAT, env.AIRTABLE_BASE, {
     log: () => {}, ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}) });
+  /* Retried: a rate limit, a Kylas 5xx and a dropped connection are all
+     temporary — the 2026-11-03 --all run lost 89 of 16,209 to them. A 404 or
+     403 is an answer, not a hiccup, and is not retried. */
   const kylas = async (path, t = 0) => {
-    const r = await fetch(`${BASE}${path}`, { headers: { "api-key": KEY } });
-    if (r.status === 429 && t < 6) { await sleep(500 * 2 ** t); return kylas(path, t + 1); }
+    let r;
+    try { r = await fetch(`${BASE}${path}`, { headers: { "api-key": KEY }, signal: AbortSignal.timeout(20_000) }); }
+    catch (e) {
+      if (t < 5) { await sleep(1000 * 2 ** t); return kylas(path, t + 1); }
+      throw e;
+    }
+    if ((r.status === 429 || r.status >= 500) && t < 6) { await sleep(500 * 2 ** t); return kylas(path, t + 1); }
     if (!r.ok) throw Object.assign(new Error(`GET ${path} -> ${r.status}`), { status: r.status });
     return r.json();
   };
@@ -48,6 +56,7 @@ export async function run({ env = process.env, log = console.log, apply = false,
   log(`${rows.length} contact(s) with no Company link · ${worked} of them have a logged call`);
 
   let linked = 0, noCompany = 0, failed = 0;
+  const whyFailed = new Map();
   const companyRec = new Map();
   for (const r of rows) {
     const kid = String(r.fields["Kylas Contact ID"]);
@@ -67,10 +76,17 @@ export async function run({ env = process.env, log = console.log, apply = false,
         await upsertTolerant(at, "Contacts", "Kylas Contact ID", { "Kylas Contact ID": kid, Company: [rec.id] });
       }
       linked++;
-    } catch (e) { failed++; log(`  !  ${kid}: ${String(e.message).slice(0, 120)}`); }
+    } catch (e) {
+      failed++;
+      const why = e.status ? `Kylas ${e.status}` : String(e.message).slice(0, 40);
+      whyFailed.set(why, (whyFailed.get(why) || 0) + 1);
+      log(`  !  ${kid}: ${String(e.message).slice(0, 120)}`);
+    }
     await sleep(250);
   }
   log(`\n${apply ? "linked" : "would link"} ${linked} · no company in Kylas ${noCompany} · failed ${failed}`);
+  if (failed) log(`why they failed: ${[...whyFailed].map(([k, n]) => `${k} ×${n}`).join(" · ")}` +
+                  `\nRun the same command again — it picks up only the contacts still unlinked.`);
   if (!apply) log("Nothing was written. Re-run with --apply.");
   return { total: rows.length, worked, linked, noCompany, failed };
 }
