@@ -208,7 +208,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
      No binding, no shadow. Until KPI_DB exists this is null and every call
      site below skips, so deploying it changes nothing. */
-  const shadow = shadowDb && rawAirtable && !ON_D1
+  /* SHADOW_PULL = "0": the copy is filled from the laptop instead
+     (backfill → sqlite-to-d1, then cutover.mjs pulls the last changes), so the
+     minute cron does not spend Airtable's 5-a-second budget the team's saves use. */
+  const shadow = shadowDb && rawAirtable && !ON_D1 && String(env.SHADOW_PULL ?? "1") !== "0"
     ? createShadow({ db: shadowDb, at: rawAirtable, log })
     : null;
   if (shadow) log(`shadow copy: on (KPI_DB) — pulling on the cron, nothing reads it`);

@@ -125,6 +125,9 @@ MAIL_PER_BD = "1"
 # cleared one cancels it. Replaced the "Kylas Sync" Apps Script on 2026-11-03.
 # "0" turns it off.
 CALENDAR_INVITES = "1"
+# The minute cron's copy of Airtable into KPI_DB (shadow.mjs): off — the copy is
+# made from the laptop (sqlite-to-d1.mjs) and topped up by cutover.mjs.
+SHADOW_PULL = "0"
 CALL_INVITE_CC = "ayush@enout.in"
 
 # Which Airtable base holds the KPIs. Not a secret — the token is.
@@ -249,7 +252,10 @@ enabled = true
 # and Airtable is no longer written. Remove the line and deploy to go back —
 # after scripts/d1-to-airtable.mjs has copied D1's changes home.
 #
-# [[d1_databases]]
-# binding = "KPI_DB"
-# database_name = "enout-kpi"
-# database_id = "<paste from wrangler d1 create>"
+# Created 2026-11-03 (wrangler d1 create enout-kpi --location=apac). Bound, but
+# nothing reads it until STORE = "d1"; SHADOW_PULL = "0" (in [vars]) keeps the
+# minute cron from copying Airtable into it — the laptop import does that.
+[[d1_databases]]
+binding = "KPI_DB"
+database_name = "enout-kpi"
+database_id = "1dcedd89-cdab-49f7-b05e-073339fff2a9"
