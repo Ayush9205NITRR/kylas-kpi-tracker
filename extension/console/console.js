@@ -496,9 +496,9 @@ function noteItems(a,hist=[]){
     items.push({at:h.at,by:h.by||"",outcome:h.outcome==="connected"?"Connected":h.outcome||"",text:h.text});
   }
   const kr=humanNote(a.kylasRemarks||HREM.get(String(a.kid||""))||"");
-  if(kr&&!seen.has(normNote(kr))){seen.add(normNote(kr));items.push({at:"",by:"Remarks (Kylas)",outcome:"",text:kr});}
+  if(kr&&!seen.has(normNote(kr))){seen.add(normNote(kr));items.push({at:"",by:"Remarks in Kylas",glyph:"K",tag:"no date in Kylas",text:kr});}
   for(const r of a.past||[]){const t=humanNote(r.remarks);
-    if(t&&!seen.has(normNote(t))){seen.add(normNote(t));items.push({at:"",by:[r.eventType,"past"].filter(Boolean).join(" · "),outcome:"",text:t});}}
+    if(t&&!seen.has(normNote(t))){seen.add(normNote(t));items.push({at:"",by:r.eventType||"Event row",glyph:"E",tag:"past event",text:t});}}
   return items;
 }
 function notesHist(a,hist,open=false){
@@ -507,9 +507,9 @@ function notesHist(a,hist,open=false){
   if(!items.length){box.hidden=true;return box;}
   const shown=open?items:items.slice(0,NH_TOP);
   box.innerHTML=`<div class="nhh"><b>Earlier notes</b><span>${items.length} note${items.length===1?"":"s"}</span></div>${
-    shown.map((n,i)=>`<div class="nhi${i?" old":""}"><span class="nhav">${esc(initialsOf(n.by))}</span><div>
+    shown.map((n,i)=>`<div class="nhi${i?" old":""}"><span class="nhav${n.glyph?" src":""}">${esc(n.glyph||initialsOf(n.by))}</span><div>
       <div class="nhm">${n.by?`<b>${esc(n.by)}</b>`:""}${n.at?`<span>· ${esc(fmtWhen(n.at))}</span>`:""}${
-        n.outcome?`<span class="nhp">${esc(n.outcome)}</span>`:""}</div>
+        n.outcome||n.tag?`<span class="nhp">${esc(n.outcome||n.tag)}</span>`:""}</div>
       <div class="nhb">${esc(n.text)}</div></div></div>`).join("")}${
     items.length>NH_TOP?`<button type="button" class="nhall">${open?"Show less":`Show all ${items.length} notes`}</button>`:""}`;
   const b=box.querySelector(".nhall");

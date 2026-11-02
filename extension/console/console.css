@@ -196,6 +196,7 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .nhist .nhi:not(:last-of-type)::before{content:"";position:absolute;left:13px;top:30px;bottom:2px;width:2px;background:var(--line)}
 .nhist .nhav{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:var(--t-meta);
   font-weight:var(--w-strong);background:var(--blueSoft);color:var(--blue)}
+.nhist .nhav.src{background:var(--panel3);color:var(--text2)}
 .nhist .nhi.old .nhav{background:var(--panel3);color:var(--text2)}
 .nhist .nhm{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:var(--t-meta);color:var(--text3);min-height:28px}
 .nhist .nhm b{color:var(--text);font-weight:var(--w-strong)}

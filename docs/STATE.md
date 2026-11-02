@@ -2590,3 +2590,5 @@ needles across an empty 1–64 axis.
   Before this fix, 4 accounts made four one-account slabs ("A · 54–54").
 
 - 1.79.2: "Each BD by slab" lists the busiest BD first, and leaves out names holding fewer than 3 accounts.
+
+- 1.79.3: In Earlier notes, the Kylas Remarks entry reads "K · Remarks in Kylas · no date in Kylas" and a past event row reads "E · <event type> · past event". They used to show initials made from the label, e.g. "R(" for "Remarks (Kylas)". Kylas keeps no per-note date or author for the Remarks field, so none is shown.
