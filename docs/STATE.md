@@ -2620,3 +2620,13 @@ older ones, run on the laptop once:
 `node --env-file=.env.local scripts/import-dialler-calls.mjs --apply --size 9000`
 If Kylas refuses that size, the script falls back to 1000. Calls already gone from Kylas' window cannot
 be recovered, because the read has no paging.
+
+**2026-11-03, after the live dry run:** "0 of 1000 log(s) carry a note". A live probe showed why. The
+LIST item has `notesCount` and `callSummary` but no `notes`; only `GET /v1/call-logs/<id>` carries
+`notes`. `size=9000` → 504, so 1000 (about 5 days, 28 Oct–2 Nov) is the window. The import now:
+- picks the logs with `notesCount > 0`, or a `callSummary`, that Call Notes does not hold yet;
+- reads each such log on its own: at most 25 per hourly Worker run (`DIALLER_NOTE_FETCH`), or all of
+  them with `--all-notes` on the laptop;
+- keeps a `callSummary` as "Call summary: …" when there is no typed note.
+
+Re-running costs nothing: keys already held are skipped.

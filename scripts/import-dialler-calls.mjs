@@ -55,7 +55,7 @@ const mmss = (s) => `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
 /* Exported so the hourly cron and the command line run the SAME code. Throws
    rather than exits: there is no process to exit inside a scheduled Worker,
    and doing so would take down whatever else it was running. */
-export async function run({ env = process.env, log = console.log, apply = false, size } = {}) {
+export async function run({ env = process.env, log = console.log, apply = false, size, noteMax = env?.DIALLER_NOTE_FETCH || 25 } = {}) {
   const APPLY = apply;
   const WANT = Number(size || env.DIALLER_SIZE || 1000);
   const KEY = env.KYLAS_KEY;
@@ -171,9 +171,32 @@ export async function run({ env = process.env, log = console.log, apply = false,
   if (fresh.length > 10) log(`    … and ${fresh.length - 10} more`);
 
   /* ── 4b · the notes typed on any of them (Call Notes) ──────────── */
+  /* THE LIST CARRIES A COUNT, NOT THE NOTES (live probe, 2026-11-03): the
+     list item has `notesCount` and `callSummary`; only GET /v1/call-logs/<id>
+     carries `notes`. So a log with notes is read once on its own — only those,
+     and only ones Call Notes does not hold yet. The hourly Worker is capped
+     (a scheduled run has a small request budget); the laptop backfill passes
+     --all-notes. `callSummary`, when Kylas wrote one, is kept too. */
+  const textOf = (v) => (typeof v === "string" ? v : v?.summary ?? v?.text ?? v?.description ?? "");
+  const heldNotes = await listTolerant(at, NOTES, { fields: ["Key"], pageSize: 100, maxPages: 200 })
+    .then((r) => new Set(r.map((x) => String(x.fields?.Key || "")))).catch(() => new Set());
+  const want = logs.filter((l) => (Number(l.notesCount) > 0 || callNotes([l]).length || String(textOf(l.callSummary)).trim()) && !heldNotes.has(String(l.id)));
+  const cap = Number.isFinite(+noteMax) ? +noteMax : Infinity;
+  let fetched = 0;
+  for (const l of want) {
+    if (!(Number(l.notesCount) > 0) || callNotes([l]).length || fetched >= cap) continue;
+    try { const one = await kylas(`/v1/call-logs/${l.id}`); if (one?.notes) l.notes = one.notes; fetched++; }
+    catch (e) { log(`  ! note of log ${l.id}: ${String(e.message).slice(0, 100)}`); }
+    await sleep(150);
+  }
+  log(`  ${want.length} log(s) have a note or a summary not yet kept · read ${fetched} on their own${
+    want.filter((l) => Number(l.notesCount) > 0).length > fetched ? " (the rest next run)" : ""}`);
   const noteRows = [];
-  for (const l of logs) {
-    const n = callNotes([l])[0];
+  for (const l of want) {
+    let n = callNotes([l])[0];
+    const sum = String(textOf(l.callSummary) || "").trim();
+    if (!n && sum) n = { at: l.startTime || l.createdAt || "", outcome: String(l.outcome || "").replace(/_/g, " ").toLowerCase(),
+                         by: who(l.owner) || who(l.createdBy) || "", text: `Call summary: ${sum}` };
     if (!n) continue;
     const rel = relList(l).find((x) => String(x.entity || "").toLowerCase() === "contact") || relList(l)[0] || {};
     if (!rel.id) continue;
@@ -222,7 +245,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const eq = argv.find((a) => a.startsWith(`--${name}=`));
     return eq ? eq.slice(name.length + 3) : "";
   };
-  run({ apply: argv.includes("--apply"), size: flag("size") })
+  run({ apply: argv.includes("--apply"), size: flag("size"), ...(argv.includes("--all-notes") ? { noteMax: Infinity } : {}) })
     .then(() => process.exit(0))
     .catch((e) => { console.error(e.message || String(e)); process.exit(1); });
 }
