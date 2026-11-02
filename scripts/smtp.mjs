@@ -47,7 +47,10 @@ export const addressOf = (s) => {
 /* A header value that may hold non-ASCII (RFC 2047). */
 const header = (v) => (/^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${b64(v)}?=`);
 
-export function buildMessage({ from, to, subject, text, html, now = new Date(), id = crypto.randomUUID() }) {
+/* `calendar`: an iCalendar body (call-invites.mjs). Sent as a text/calendar
+   part with its METHOD, the way Google's own invites are, so Gmail shows the
+   Yes / No / Maybe card and puts the event on the calendar. */
+export function buildMessage({ from, to, subject, text, html, calendar, now = new Date(), id = crypto.randomUUID() }) {
   const boundary = `=_enout_${id.replace(/-/g, "")}`;
   const domain = addressOf(from).split("@")[1] || "localhost";
   const part = (type, body) =>
@@ -63,6 +66,7 @@ export function buildMessage({ from, to, subject, text, html, now = new Date(), 
     "",
     part("text/plain", text || ""),
     ...(html ? [part("text/html", html)] : []),
+    ...(calendar ? [part(`text/calendar; method=${/METHOD:(\w+)/.exec(calendar)?.[1] || "REQUEST"}`, calendar)] : []),
     `--${boundary}--`,
     "",
   ];
@@ -128,7 +132,7 @@ export async function sendMail(cfg, { connect, timeoutMs = 15000, now, id } = {}
     for (const t of to) { await send(`RCPT TO:<${addressOf(t)}>`); await expect(`recipient ${addressOf(t)}`, 250, 251); }
     await send("DATA");
     await expect("DATA", 354);
-    const msg = buildMessage({ from, to, subject: cfg.subject, text: cfg.text, html: cfg.html, now, id });
+    const msg = buildMessage({ from, to, subject: cfg.subject, text: cfg.text, html: cfg.html, calendar: cfg.calendar, now, id });
     /* dot-stuffing: a line that starts with "." would end the message early. */
     await w.write(enc.encode(msg.replace(/^\./gm, "..") + CRLF + "." + CRLF));
     const done = await expect("message", 250);

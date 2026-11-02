@@ -2681,3 +2681,24 @@ Checked on real data, at full speed and on Cloudflare's own runtime. Full detail
 - Run `cutover.mjs --check` on the laptop. It compares the whole base, which needs the Airtable key.
 - Check the "Kylas Sync" Apps Script. It reads Airtable and will stop seeing new saves after the
   switch.
+
+## 3l25 · Calendar blocks are sent by the Worker now (1.81.0, server only)
+
+The call-scheduled calendar blocks used to come from a Google Apps Script ("Kylas Sync") in
+automations@enout.in. That script was edited on 31 Oct, ran once by hand at 11:01 PM IST, and never
+ran on its own again; no block was made on 1 or 2 Nov. The script sits in an account nothing here can
+open, so the job moved onto the Worker (`scripts/call-invites.mjs`).
+
+**How it works.** Every hour, after the contacts sync, each call-back that was set or moved in Kylas
+gets an invite from automations@enout.in. It goes to the owner and to `CALL_INVITE_CC`
+(ayush@enout.in), and Gmail turns the invite into the calendar block.
+- It looks like the old one: "Call Scheduled: Name (Company) — Nov 02, 2026 at 9:00 AM IST", with the
+  same fields in the body.
+- Each contact gets exactly one event. A moved call-back moves it, a cleared one cancels it, and an
+  unchanged one is not re-sent.
+- The first run starts where the old script stopped, so the 1–2 Nov call-backs go out first.
+
+**Settings.** `CALENDAR_INVITES = "0"` turns it off; switch the old Apps Script off before turning
+this off, or both will send.
+
+**Tests.** `test-call-invites.mjs` passes 18/18. It needs `npx wrangler deploy` to go live.

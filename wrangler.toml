@@ -118,6 +118,14 @@ ADMIN_EMAILS = "ayush@enout.in,crmadmin@enout.in,lakshaya.sharma@enout.in"
 MAIL_SMTP_USER = "automations@enout.in"
 MAIL_TO = "ayush@enout.in,crmadmin@enout.in,lakshaya.sharma@enout.in"
 MAIL_PER_BD = "1"
+# THE CALENDAR BLOCKS (scripts/call-invites.mjs). Every hour, after the contacts
+# sync, each call-back set or moved in Kylas gets an invite from
+# automations@enout.in to the contact's owner and to CALL_INVITE_CC, which Gmail
+# turns into the block. One event per contact: a moved call-back moves it, a
+# cleared one cancels it. Replaced the "Kylas Sync" Apps Script on 2026-11-03.
+# "0" turns it off.
+CALENDAR_INVITES = "1"
+CALL_INVITE_CC = "ayush@enout.in"
 
 # Which Airtable base holds the KPIs. Not a secret — the token is.
 AIRTABLE_BASE = "appEwJu0bleHh9b8t"
@@ -134,7 +142,7 @@ RESEARCH_TABLE = "Company List"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.80.1"
+VERSION = "1.81.0"
 
 # ── the nightly jobs ───────────────────────────────────────────────────────
 # TIMES ARE UTC. IST is UTC+5:30, so a 02:00 IST run is 20:30 the PREVIOUS day

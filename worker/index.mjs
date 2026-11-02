@@ -197,10 +197,18 @@ const json = (body, status, origin, request) => {
 /* The sync and the rollup rewrite tables behind this server's back — and the
    sync can change company rollups a delta cannot see — so each is followed by a
    rebuild of the copies it touched. */
+/* THE CALENDAR BLOCKS (scripts/call-invites.mjs), after every contacts sync:
+   the invite for each call-back set or moved since the last run. Replaced the
+   "Kylas Sync" Apps Script, which stopped on 31 Oct. Its own failure never
+   fails the sync it rides on. */
+const calendar = async (env, log) => {
+  try { return await (await import("../scripts/call-invites.mjs")).run({ env, log, store: storeFor(env) }); }
+  catch (e) { log(`! call invites: ${String(e.message).slice(0, 160)}`); return { error: String(e.message).slice(0, 160) }; }
+};
 const JOBS = {
   sync: async (env, log) => {
     const out = await (await import("../scripts/sync-kylas.mjs")).run({ env, log, apply: true });
-    return { ...out, after: await (await handlers(env, log)).maintain({ rebuild: true }) };
+    return { ...out, after: await (await handlers(env, log)).maintain({ rebuild: true }), calendar: await calendar(env, log) };
   },
   /* HOURLY, AND CONTACTS ONLY. A stage changed straight in Kylas becomes a
      Stage Transition only when the sync sees it, and with one sync a day the
@@ -211,7 +219,7 @@ const JOBS = {
     const out = await (await import("../scripts/sync-kylas.mjs")).run({
       env, log, apply: true, only: "contacts" });
     return { ...out, after: await (await handlers(env, log)).maintain({
-      rebuild: true, only: ["Contacts", "Stage Transitions"] }) };
+      rebuild: true, only: ["Contacts", "Stage Transitions"] }), calendar: await calendar(env, log) };
   },
   rollup: async (env, log) => {
     const out = await (await import("../scripts/rollup-calls.mjs")).run({
