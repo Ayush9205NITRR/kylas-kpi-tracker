@@ -20,6 +20,7 @@ import { writeFileSync } from "node:fs";
 import { sqlSchema, tableName } from "./sql-schema.mjs";
 import { sqlDerived } from "./sql-derived.mjs";
 import { BACKFILL_ORDER } from "./sql-store.mjs";
+import { fingerprint, DDL } from "./d1-schema-sync.mjs";
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const DB = arg("--db", "db/kpi.sqlite"), OUT = arg("--out", "db/d1-import.sql");
@@ -55,6 +56,11 @@ ON CONFLICT (tbl) DO UPDATE SET since = excluded.since, rows = excluded.rows, ra
   total += rows.length;
   console.log(`  ${t.padEnd(18)} ${String(rows.length).padStart(7)} rows`);
 }
+/* The schema this import was built with, stamped so the Worker's first query
+   on STORE=d1 finds the tables already current and rebuilds nothing
+   (d1-schema-sync.mjs). */
+out.push(`CREATE TABLE IF NOT EXISTS "_schema_version" (k TEXT PRIMARY KEY, v TEXT, at TEXT);`,
+  `INSERT OR REPLACE INTO "_schema_version" (k, v, at) VALUES ('kpi', ${lit(fingerprint(DDL()))}, ${lit(new Date().toISOString())});`);
 writeFileSync(OUT, out.join("\n\n") + "\n");
 console.log(`\n${total} rows → ${OUT}. The Worker carries on from ${since} (an ${OVERLAP_H}h overlap).`);
 console.log(`Next: npx wrangler d1 execute enout-kpi --remote --file ${OUT}`);

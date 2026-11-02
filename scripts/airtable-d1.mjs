@@ -343,7 +343,7 @@ export function newRecordId() {
 /* ── the engine ───────────────────────────────────────────────────────── */
 export function airtableOverD1(db, { onQuery = null, maxPageSize = 100, ensure = false, log = () => {} } = {}) {
   /* `ensure`: bring the tables up to the code before the first query of this
-     server start (d1-schema-sync.mjs) — one query when nothing has changed. */
+     server start (d1-schema-sync.mjs) — three small queries when nothing has changed. */
   let ready = ensure ? null : Promise.resolve();
   const before = () => (ready ||= ensureSchema(db, { log }).catch((e) => { ready = null; throw e; }));
   const all = async (sql) => { await before(); onQuery?.(sql); return (await db.prepare(sql).all()).results || []; };

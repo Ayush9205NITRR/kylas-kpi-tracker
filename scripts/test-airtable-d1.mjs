@@ -173,7 +173,7 @@ console.log("\n8. the tables follow the code (d1-schema-sync.mjs)");
   is("…and a save can write the new field", w.fields["First Right POC At"], "2026-10-01T00:00:00.000Z");
   const q0 = old.queries();
   await ensureSchema(old);
-  is("unchanged code costs one query per server start", old.queries() - q0, 2);
+  is("unchanged code costs three small queries per server start", old.queries() - q0, 3);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

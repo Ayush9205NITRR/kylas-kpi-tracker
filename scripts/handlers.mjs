@@ -267,7 +267,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      answer is not an answer: it falls through to Kylas and says which side
      replied, on every response, so nobody has to guess. `strict` exists to test
      the Airtable path honestly, and for the day the sync is trusted. */
-  const READ_SOURCE = String(env.READ_SOURCE || (AT_PAT && AT_BASE ? "airtable" : "kylas")).toLowerCase();
+  /* On STORE=d1 the store is there whether or not an Airtable token is — found
+     by smoke-workerd.mjs: without one, every read silently went to Kylas. */
+  const READ_SOURCE = String(env.READ_SOURCE || ((AT_PAT && AT_BASE) || ON_D1 ? "airtable" : "kylas")).toLowerCase();
   const READS_AIRTABLE = airtable && READ_SOURCE !== "kylas";
   const STRICT_AIRTABLE = airtable && READ_SOURCE === "strict";
   /* How much of the account the Airtable copy has to hold before it is served
