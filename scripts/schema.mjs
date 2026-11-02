@@ -163,6 +163,14 @@ export const TABLES = [
         description: "First call ever logged against this contact. Written once, never updated." },
       { name: "First Picked At", type: "dateTime", options: dateTime,
         description: "First time this contact reached a stage that is not a no-answer — the moment somebody actually spoke to them. Written once, never updated." },
+      /* ON THE LIVE BASE, ABSENT FROM THIS FILE until 2026-11-03, when the
+         Cloudflare move compared the two field by field. Nothing in this repo
+         writes them; they were filled outside it. They are carried so the move
+         loses nothing. */
+      { name: "First Right POC At", type: "dateTime", options: dateTime,
+        description: "First time any event row on this contact carried budget, timeline or pax. Written once, never updated. This is what dates the Right POC rung." },
+      { name: "First Discovery At", type: "dateTime", options: dateTime,
+        description: "First time one event row carried all three. Written once, never updated. This is what dates the Discovery rung." },
       { name: "Pending Create", type: "checkbox", options: check,
         description: "Captured in the console but not yet in Kylas. Tells the writer POST rather than PUT." },
       { name: "Exit Reason", type: "singleSelect", options: sel(...EXIT_STAGES),

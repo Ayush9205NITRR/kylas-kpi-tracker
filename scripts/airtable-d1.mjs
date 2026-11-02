@@ -47,7 +47,7 @@
  */
 import { TABLES, FOLLOWUPS } from "./schema.mjs";
 import { tableName, columnName, OWN_ROW_DERIVED } from "./sql-schema.mjs";
-import { VIEW_FOR } from "./sql-derived.mjs";
+import { VIEW_FOR, ROW_VIEW_FOR } from "./sql-derived.mjs";
 import { LINKS_BY_TABLE } from "./sql-store.mjs";
 
 const qi = (c) => `"${String(c).replace(/"/g, '""')}"`;
@@ -61,11 +61,32 @@ const unknownField = (n) => new AtError(422, "UNKNOWN_FIELD_NAME", `Unknown fiel
 
 /* ── the model: every Airtable field name → where it lives in SQL ───────── */
 const MODELS = new Map();
+/* ROLLUPS AIRTABLE RETURNS AS A DAY. On the live base these are defined with a
+   date result (no time), so the API answers "2026-11-02", in UTC, not an
+   instant — checked field by field on 2026-11-03. The D1 views hold the
+   instant; the record carries the day, exactly as Airtable's does. */
+const DATE_ONLY = new Set(["Contacts.Last Call At", "Contacts.First Call At", "Contacts.Last Stage Change At",
+  "Contacts.First Stage Change At", "Companies.Last Call At", "Companies.First Call At",
+  "Companies.First Worked At", "Companies.First Picked At"]);
+const INSTANT = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?Z$/;
+/* The reverse link's name on the parent, where it is not the child table's. */
+const REVERSE_NAME = {};
+/* NO LOOKUP FIELDS. The code filters Event Rows on "Kylas Contact ID (from
+   Contact)", but the live base has never had that field (checked 2026-11-03):
+   Airtable answers those reads with a 422 that the caller swallows. Answering
+   them here would change what a save does, so they fail here too. */
 function model(name) {
   if (MODELS.has(name)) return MODELS.get(name);
   const t = TABLES.find((x) => x.name === name);
   if (!t) return null;
-  const view = VIEW_FOR[name] || null;
+  /* The per-row views: a read pays for the rows it returns, not the table. */
+  const view = ROW_VIEW_FOR[name] || null;
+  /* …and the whole-table views, which compute every aggregate in one pass —
+     the faster of the two when the read IS the whole table. */
+  /* Measured 2026-11-03 at 35k contacts / 1,000 companies: Companies whole is
+     100ms one-pass vs 760ms per-row; Contacts, read in pages, is the other way
+     round (1.5s vs 0.6s), because a one-pass view recomputes on every page. */
+  const fullView = name === "Companies" ? VIEW_FOR[name] : null;
   const fields = new Map();
   for (const f of t.fields) {
     const col = columnName(f.name);
@@ -75,6 +96,16 @@ function model(name) {
   (LINKS_BY_TABLE[name] || []).forEach((l, i) =>
     fields.set(l.name, { name: l.name, kind: "link", type: "link", to: l.to, col: l.col,
       alias: `l${i}`, expr: `t.${qi(l.col)}` }));
+  /* REVERSE LINKS, as Airtable lists them on the parent: a company's
+     contacts, a contact's event rows, calls, stage changes and RCA rows.
+     Read-only here — the console only ever writes a link from the child. */
+  for (const t2 of TABLES) for (const l of LINKS_BY_TABLE[t2.name] || []) {
+    if (l.to !== name) continue;
+    const back = REVERSE_NAME[`${t2.name}.${l.name}`] || t2.name;
+    const child = tableName(t2.name);
+    fields.set(back, { name: back, kind: "derived", type: "reverse",
+      col: null, expr: `(SELECT group_concat(r."airtable_id", ',') FROM (SELECT x."airtable_id" FROM ${qi(child)} x WHERE x.${qi(l.col)} = t."id" ORDER BY x."id") r)` });
+  }
   for (const f of FOLLOWUPS) {
     if (f.table !== name || !f.field || f.field.type === "multipleRecordLinks") continue;
     const col = columnName(f.field.name);
@@ -82,16 +113,17 @@ function model(name) {
     fields.set(f.field.name, { name: f.field.name, kind: "derived", type: f.field.type, col,
       expr: own ? `t.${qi(col)}` : `v.${qi(col)}` });
   }
-  const m = { name, tbl: tableName(name), view, fields, primary: t.fields[0].name };
+  const m = { name, tbl: tableName(name), view, fullView, fields, primary: t.fields[0].name };
   MODELS.set(name, m);
   return m;
 }
 
 /* The FROM clause every read shares: the table, its view if it has computed
    fields, and one join per link so the parent's record id comes back. */
-function fromClause(m) {
+function fromClause(m, whole = false) {
   let s = `FROM ${qi(m.tbl)} t`;
-  if (m.view) s += ` LEFT JOIN ${qi(m.view)} v ON v."id" = t."id"`;
+  const view = whole && m.fullView ? m.fullView : m.view;
+  if (view) s += ` LEFT JOIN ${qi(view)} v ON v."id" = t."id"`;
   for (const f of m.fields.values())
     if (f.kind === "link") s += ` LEFT JOIN ${qi(model(f.to).tbl)} ${f.alias} ON ${f.alias}."id" = t.${qi(f.col)}`;
   return s;
@@ -116,8 +148,11 @@ function toRecord(m, row, want) {
     const v = row[f.out];
     if (v === null || v === undefined || v === "") continue;
     if (f.kind === "link") { fields[f.name] = [v]; continue; }
+    if (f.type === "reverse") { fields[f.name] = String(v).split(","); continue; }
     if (f.type === "checkbox") { if (Number(v) === 1) fields[f.name] = true; continue; }
     if (f.type === "dateTime") { fields[f.name] = isoMs(v); continue; }
+    if (f.kind === "derived" && DATE_ONLY.has(`${m.name}.${f.name}`)) { fields[f.name] = isoMs(v).slice(0, 10); continue; }
+    if (f.kind === "derived" && typeof v === "string" && INSTANT.test(v)) { fields[f.name] = isoMs(v); continue; }
     fields[f.name] = v;
   }
   return { id: row.__rid, createdTime: isoMs(row.__mod), fields };
@@ -189,18 +224,6 @@ export function formulaToSql(m, src) {
       }
       const derivedNum = f.kind === "derived" && !/name|stage|contacts|kylas id|at$/i.test(f.name);
       return { sql: f.expr, kind: "val", type: derivedNum ? "derivedNum" : f.type };
-    }
-    /* A LOOKUP, "{X (from Link)}": follow the link, read X on the parent. */
-    const lk = /^(.+) \(from (.+)\)$/.exec(name);
-    const via = lk && m.fields.get(lk[2]);
-    if (via?.kind === "link") {
-      const pm = model(via.to);
-      const pf = pm.fields.get(lk[1]);
-      if (!pf || pf.kind === "link") throw new AtError(422, "INVALID_FILTER_BY_FORMULA", `Unknown field names: ${lk[1].toLowerCase()}`);
-      const src2 = pf.expr.startsWith("v.")
-        ? `(SELECT pv.${qi(pf.col)} FROM ${qi(pm.view)} pv WHERE pv."id" = t.${qi(via.col)})`
-        : `${via.alias}.${qi(pf.col)}`;
-      return { sql: src2, kind: "val", type: pf.type };
     }
     throw new AtError(422, "INVALID_FILTER_BY_FORMULA", `Unknown field names: ${name.toLowerCase()}`);
   }
@@ -317,7 +340,7 @@ export function newRecordId() {
 }
 
 /* ── the engine ───────────────────────────────────────────────────────── */
-export function airtableOverD1(db, { onQuery = null } = {}) {
+export function airtableOverD1(db, { onQuery = null, maxPageSize = 100 } = {}) {
   const all = async (sql) => { onQuery?.(sql); return (await db.prepare(sql).all()).results || []; };
 
   async function readByIds(m, ids, want) {
@@ -348,13 +371,15 @@ export function airtableOverD1(db, { onQuery = null } = {}) {
       order.push(`(${e} IS NULL OR ${e} = '') ${desc ? "ASC" : "DESC"}`, `${e} ${desc ? "DESC" : "ASC"}`);
     }
     order.push(`t."id" ASC`);
-    const size = Math.min(100, Math.max(1, Number(sp.get("pageSize") || 100)));
+    /* 100, as Airtable — unless this engine was built for the in-process
+       client, which asks for larger pages (createAirtable, D1_PAGE). */
+    const size = Math.min(maxPageSize, Math.max(1, Number(sp.get("pageSize") || 100)));
     const max = Number(sp.get("maxRecords") || 0);
     const from = Number(String(atob(sp.get("offset") || "") || "").replace(/\D/g, "") || 0);
     let take = size;
     if (max) take = Math.max(0, Math.min(size, max - from));
     const rows = take
-      ? await all(`SELECT ${selectList(m, wantSet)} ${fromClause(m)} ${where} ORDER BY ${order.join(", ")} LIMIT ${take + 1} OFFSET ${from}`)
+      ? await all(`SELECT ${selectList(m, wantSet)} ${fromClause(m, !formula)} ${where} ORDER BY ${order.join(", ")} LIMIT ${take + 1} OFFSET ${from}`)
       : [];
     const more = rows.length > take && (!max || from + take < max);
     const page = rows.slice(0, take).map((r) => toRecord(m, r, wantSet));

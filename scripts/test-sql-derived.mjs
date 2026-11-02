@@ -173,5 +173,40 @@ is("with no company id", C('703').company_id, null);
 is("and no company gained a contact",
   CO('900').contact_count + CO('901').contact_count, 3);
 
+/* THE PER-ROW TWINS AGREE WITH THE ONE-PASS VIEWS — on every row and every
+   column, here and on a few hundred random contacts with every kind of child
+   row. The D1 store reads through the twins (airtable-d1.mjs); a difference
+   between them is a number that changes depending on how it was asked for. */
+console.log("\n11. v_contacts_row and v_companies_row say exactly what the views say");
+{
+  let seed = 7;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let i = 0; i < 40; i++) run(`INSERT INTO companies (kylas_company_id,name) VALUES (?,?)`, `r${i}`, `R${i}`);
+  const cos = db.prepare(`SELECT id FROM companies`).all().map((r) => r.id);
+  for (let i = 0; i < 400; i++) {
+    const rank = rnd(4) ? null : rnd(28);
+    run(`INSERT INTO contacts (kylas_contact_id,name,company_id,kpi_rank,kpi_rank_at,ever_right_poc,ever_discovery,ever_picked,first_picked_at,first_worked_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`, `rc${i}`, rnd(9) ? `P${i}` : null, rnd(10) ? cos[rnd(cos.length)] : null,
+      rank, rank !== null && rnd(2) ? `2026-10-${String(1 + rnd(28)).padStart(2, "0")}T10:00:00.000Z` : null,
+      rnd(6) ? 0 : 1, rnd(9) ? 0 : 1, rnd(3) ? 0 : 1, rnd(3) ? null : "2026-10-02T00:00:00.000Z", rnd(2) ? null : "2026-10-01T00:00:00.000Z");
+  }
+  const cts = db.prepare(`SELECT id FROM contacts`).all().map((r) => r.id);
+  const pick = () => cts[rnd(cts.length)];
+  for (let i = 0; i < 300; i++) run(`INSERT INTO event_rows (row_key,contact_id,budget,timeline,pax,removed_at) VALUES (?,?,?,?,?,?)`,
+    `re${i}`, pick(), rnd(2) ? "5L" : null, rnd(2) ? "Q4" : null, rnd(2) ? "80" : null, rnd(5) ? null : "2026-10-03T00:00:00.000Z");
+  for (let i = 0; i < 900; i++) run(`INSERT INTO call_log (key,contact_id,called_at,duration,duration_source) VALUES (?,?,?,?,?)`,
+    `rk${i}`, pick(), `2026-10-${String(1 + rnd(28)).padStart(2, "0")}T${String(rnd(24)).padStart(2, "0")}:00:00.000Z`, rnd(300), rnd(2) ? "dialed" : "estimated");
+  for (let i = 0; i < 200; i++) run(`INSERT INTO stage_transitions (key,contact_id,changed_at) VALUES (?,?,?)`,
+    `rs${i}`, pick(), `2026-10-${String(1 + rnd(28)).padStart(2, "0")}T10:00:00.000Z`);
+  for (const [a, b] of [["v_contacts", "v_contacts_row"], ["v_companies", "v_companies_row"]]) {
+    const A = new Map(db.prepare(`SELECT * FROM "${a}"`).all().map((r) => [r.id, r]));
+    const B = db.prepare(`SELECT * FROM "${b}"`).all();
+    const bad = [];
+    for (const r of B) for (const k of Object.keys(A.get(r.id) || {}))
+      if (A.get(r.id)[k] !== r[k]) bad.push(`${r.id}.${k}: ${A.get(r.id)[k]} vs ${r[k]}`);
+    ok(`${b} equals ${a} on all ${B.length} rows, every column`, B.length === A.size && !bad.length, bad.slice(0, 3).join(" | "));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

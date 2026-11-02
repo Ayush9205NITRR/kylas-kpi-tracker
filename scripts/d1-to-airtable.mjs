@@ -25,7 +25,8 @@
  */
 import { pathToFileURL } from "node:url";
 import { createAirtable, upsertManyTolerant } from "./airtable.mjs";
-import { TABLES, FOLLOWUPS } from "./schema.mjs";
+import { TABLES } from "./schema.mjs";
+import { airtableOverD1 } from "./airtable-d1.mjs";
 import { BACKFILL_ORDER, LINKS_BY_TABLE } from "./sql-store.mjs";
 
 const KEY_OF = Object.fromEntries(TABLES.map((t) => [t.name,
@@ -42,8 +43,11 @@ export async function run({ env = process.env, log = console.log, since, apply =
     ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}) });
 
   const iso = new Date(Date.parse(since)).toISOString();
-  const computed = new Set(FOLLOWUPS.filter((f) => f.field && f.field.type !== "multipleRecordLinks")
-    .map((f) => `${f.table}.${f.field.name}`));
+  /* Only what is STORED goes back: rollups, formulas and the reverse link
+     lists are Airtable's to compute, and writing a reverse list would relink
+     children behind the copy's back. The engine's model says which is which. */
+  const model = airtableOverD1({ prepare() {} }).model;
+  const stored = (table, k) => ["base", "link"].includes(model(table)?.fields.get(k)?.kind);
   /* D1 record id → Airtable record id, per table, filled as parents land. */
   const idMap = new Map();
   const report = [];
@@ -58,7 +62,7 @@ export async function run({ env = process.env, log = console.log, since, apply =
       if (!String(r.fields[key] ?? "").trim()) { unkeyed.push(r.id); continue; }
       const fields = {};
       for (const [k, v] of Object.entries(r.fields)) {
-        if (computed.has(`${table}.${k}`)) continue;
+        if (!stored(table, k)) continue;
         const l = links.find((x) => x.name === k);
         if (l) {
           const parent = (v || [])[0];

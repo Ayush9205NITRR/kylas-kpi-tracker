@@ -11,9 +11,12 @@
  */
 import { DatabaseSync } from "node:sqlite";
 
-export function fakeD1(path = ":memory:") {
+/* `latencyMs`: what each call costs over the network, for a benchmark that
+   compares stores (latency-compare.mjs). A batch is one call, as on D1. */
+export function fakeD1(path = ":memory:", { latencyMs = 0 } = {}) {
   const sql = new DatabaseSync(path);
   let queries = 0;
+  const wait = () => (latencyMs ? new Promise((r) => setTimeout(r, latencyMs)) : null);
   const plain = (row) => (row ? { ...row } : null);
 
   function statement(text, params = []) {
@@ -26,14 +29,17 @@ export function fakeD1(path = ":memory:") {
         return statement(text, p);
       },
       async all() {
+        await wait();
         const rows = exec((s) => s.all(...params)).map(plain);
         return { results: rows, success: true, meta: { rows_read: rows.length } };
       },
       async first(col) {
+        await wait();
         const row = plain(exec((s) => s.get(...params)));
         return col ? (row ? row[col] : null) : row;
       },
       async run() {
+        await wait();
         const r = exec((s) => s.run(...params));
         return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
       },
@@ -44,6 +50,7 @@ export function fakeD1(path = ":memory:") {
   return {
     prepare: (text) => statement(text),
     async batch(stmts) {
+      await wait();
       sql.exec("BEGIN");
       try {
         const out = stmts.map((st) => { st._sync(); return { success: true }; });

@@ -104,8 +104,15 @@ async function seed() {
     console.log(`  seeded (D1) ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
     return;
   }
-  for (const [name, list] of Object.entries(data))
-    for (const fields of list) TABLES[name] = (TABLES[name] || []).concat([touch({ id: rec(), fields })]);
+  /* An entry may carry its own record id as `__id` — a seed exported from
+     another store, whose links point at those ids. */
+  for (const [name, list] of Object.entries(data)) {
+    const t = (TABLES[name] ||= []);
+    for (const f of list) {
+      const { __id, ...fields } = f;
+      t.push(touch({ id: __id || rec(), fields }));
+    }
+  }
   console.log(`  seeded ${Object.entries(data).map(([k, v]) => `${v.length} ${k}`).join(", ")}`);
 }
 await seed();

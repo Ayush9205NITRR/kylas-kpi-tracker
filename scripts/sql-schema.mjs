@@ -168,6 +168,9 @@ const INDEXES = [
   ["contacts", ["company_id"]],
   ["event_rows", ["contact_id"]],
   ["call_log", ["contact_id"]],
+  /* covering for the per-row rollups (v_contacts_row): count, first and last
+     call for one contact without touching the table */
+  ["call_log", ["contact_id", "called_at"]],
   ["call_log", ["called_at"]],
   ["call_log", ["owner", "called_at"]],
   ["stage_transitions", ["contact_id"]],

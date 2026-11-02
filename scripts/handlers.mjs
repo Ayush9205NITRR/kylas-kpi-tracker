@@ -149,11 +149,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     log,
     ...(env.AIRTABLE_BASE_URL ? { apiUrl: env.AIRTABLE_BASE_URL } : {}),
     ...(env.AIRTABLE_GAP ? { gap: Number(env.AIRTABLE_GAP) } : {}),
-    ...(mirror && !ON_D1 ? { onWrite: mirror.written } : {}),
+    ...(mirror ? { onWrite: mirror.written } : {}),
     d1: ON_D1 ? kpiStore : null,
   }) : null;
   if (ON_D1) log(`store: D1 — the KPI base is answered from Cloudflare, Airtable is not written`);
-  const airtable = rawAirtable && mirror && !ON_D1 ? mirrored(rawAirtable, mirror) : rawAirtable;
+  /* THE READ COPY STAYS ON D1 TOO (2026-11-03, latency-compare.mjs). It
+     answers whole-table reads from the isolate's memory and keeps itself
+     current by deltas — which is what makes today's dashboard fast, and
+     reading D1 instead of Airtable underneath changes none of that. Without
+     it every read paid a D1 round trip and four routes came out slower than
+     Airtable. With it, the same code path as today, over a faster store. */
+  const airtable = rawAirtable && mirror ? mirrored(rawAirtable, mirror) : rawAirtable;
 
   /* WHEN DID A TABLE LAST CHANGE — the key the report and dashboard memos are
      held on, so a save shows on the next read rather than after a TTL. On
@@ -176,7 +182,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     stampHeld.set(k, { at: Date.now(), v });
     return v + tail;
   };
-  const stampOf = ON_D1 && kpiStore ? d1Stamp : mirror ? (list) => mirror.stamp(list) : null;
+  const stampOf = mirror ? (list) => mirror.stamp(list) : ON_D1 && kpiStore ? d1Stamp : null;
   /* THE CURATED RESEARCH lives in another base the team already keeps — the
      "Company List" in Company Database, one row per company keyed by its
      Kylas id, with industry, size, funding, the V/W scores and the rest.
@@ -1586,9 +1592,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                are already in it. What is NOT is what Airtable computed from them —
                the contact's formulas, the company's rollups — so those two records
                are read back, behind the reply. */
-            /* On D1 the computed fields are views, so they are already current —
-               there is no copy to re-read into. */
-            if (mirror && !ON_D1) {
+            if (mirror) {
               inFlight(Promise.all([
                 mirror.refetch(rawAirtable, "Contacts", [result.airtable?.recordId]),
                 mirror.refetch(rawAirtable, "Companies", [result.airtable?.companyRecordId]),

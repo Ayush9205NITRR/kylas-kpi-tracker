@@ -46,9 +46,9 @@ console.log("1. the schema splits into statements D1 can take");
 const stmts = splitStatements(sqlSchema() + "\n" + sqlDerived());
 ok("every statement is non-empty", stmts.every((s) => s.length > 0));
 ok("none carries a stray semicolon", stmts.every((s) => !s.includes(";")));
-ok("the tables and both views are all there",
+ok("the tables and all four views are there (two one-pass, two per-row)",
   stmts.filter((s) => /^CREATE TABLE/.test(s)).length === TABLES.length &&
-  stmts.filter((s) => /^CREATE VIEW/.test(s)).length === 2,
+  stmts.filter((s) => /^CREATE VIEW/.test(s)).length === 4,
   `${stmts.filter((s) => /^CREATE TABLE/.test(s)).length} tables, ${stmts.filter((s) => /^CREATE VIEW/.test(s)).length} views`);
 
 console.log("\n2. no binding, no shadow");

@@ -34,7 +34,10 @@ import { listTolerant } from "./airtable.mjs";
    the mirror uses. */
 const SLACK_MS = 2 * 60 * 1000;
 
-export function createShadow({ db, at, log = () => {} }) {
+/* `keepNewerThan` (ISO): the cut-over's final pull. A row D1 has written
+   since that moment is newer than anything Airtable can hold for it, so the
+   pull never overwrites it — scripts/cutover.mjs. */
+export function createShadow({ db, at, log = () => {}, keepNewerThan = null }) {
   if (!db || !at) return null;
 
   let ready = null;
@@ -82,7 +85,9 @@ export function createShadow({ db, at, log = () => {} }) {
       await stamp(table, started, 0, null);
       return { table, rows: 0, full: !since };
     }
-    const { sql, cols } = upsertSql(table);
+    const { sql: plain, cols } = upsertSql(table);
+    const cut = keepNewerThan && new Date(Date.parse(keepNewerThan)).toISOString();
+    const sql = cut ? `${plain} WHERE "${tableName(table)}"."synced_at" <= '${cut}'` : plain;
     let wrote = 0, rejected = 0;
     /* ONE BATCH PER PASS (2026-11-03 stress test). A statement per row made a
        busy minute cost hundreds of D1 calls in one invocation. The rows go as

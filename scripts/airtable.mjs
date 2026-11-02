@@ -32,6 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
    (scripts/d1-node.mjs). Only the KPI base (AIRTABLE_BASE) moves. Another
    base — the research "Company List" — stays on Airtable. A test can hand in
    its own database with setD1Resolver(). */
+const D1_PAGE = 2000;
 let d1Resolver = null;
 export function setD1Resolver(fn) { d1Resolver = fn; }
 function resolveD1(baseId) {
@@ -80,7 +81,10 @@ export function createAirtable(pat, baseId, {
   d1 = undefined,
 } = {}) {
   const store = d1 === undefined ? resolveD1(baseId) : d1;
-  const engine = store ? airtableOverD1(store) : null;
+  /* Pages of up to 2,000 on D1: Airtable's 100 is a limit of its API, not of
+     the data, and on D1 each page is a query. listAll keeps every caller's
+     own total (pageSize × maxPages) exactly as before. */
+  const engine = store ? airtableOverD1(store, { maxPageSize: D1_PAGE }) : null;
   const doFetch = engine ? engine.fetch : (...a) => fetch(...a);
   const API = engine ? "https://d1.local/v0" : apiUrl;
   /* D1 has no five-a-second ceiling; the gap would only add latency. */
@@ -226,8 +230,11 @@ export function createAirtable(pat, baseId, {
     async listAll(table, { formula = "", fields = [], sort = [], pageSize = 100, maxPages = 40, throwIfMore = false } = {}) {
       const out = [];
       let offset = "";
+      /* On D1 the same total in fewer, larger pages. */
+      const total = pageSize * maxPages;
+      if (engine) { pageSize = Math.min(D1_PAGE, total); maxPages = Math.ceil(total / pageSize); }
       for (let p = 0; p < maxPages; p++) {
-        const q = [`pageSize=${pageSize}`,
+        const q = [`pageSize=${engine ? Math.min(pageSize, total - out.length) : pageSize}`,
                    formula ? `filterByFormula=${encodeURIComponent(formula)}` : "",
                    ...fields.map((f) => `fields[]=${encodeURIComponent(f)}`),
                    ...sort.flatMap((s, i) => [`sort[${i}][field]=${encodeURIComponent(s.field)}`,

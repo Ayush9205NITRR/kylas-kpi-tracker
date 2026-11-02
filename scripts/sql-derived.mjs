@@ -201,6 +201,91 @@ SELECT
 FROM "companies" co
 LEFT JOIN ct ON ct.company_id = co."id";`);
   out.push(``);
+  /* ── the same numbers, one row at a time ─────────────────────────────
+     v_contacts / v_companies compute every aggregate for EVERY row and then
+     join — right for a whole-table read, and 200ms of wasted work for a save
+     that wants one contact (measured 2026-11-03 at 35k contacts). These two
+     answer the same columns with correlated subqueries on the indexed link
+     columns, so a filtered read pays only for the rows it returns. The D1
+     store (airtable-d1.mjs) uses these for every read; test-sql-derived
+     asserts the two pairs agree on every row and every column. */
+  const cl = (agg, extra = "") => `(SELECT ${agg} FROM "call_log" x WHERE x."contact_id" = c."id"${extra})`;
+  const ev = (col) => `COALESCE((SELECT MAX("${col}") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0)`;
+  const st = (agg) => `(SELECT ${agg}("changed_at") FROM "stage_transitions" x WHERE x."contact_id" = c."id")`;
+  const rightPoc = `(${ev("has_any_signal")} = 1 OR c."ever_right_poc" = 1)`;
+  const discovery = `(${ev("is_complete")} = 1 OR c."ever_discovery" = 1)`;
+  const score = (c) => `(CASE WHEN ${c}."kpi_rank_at" IS NOT NULL THEN COALESCE(${c}."kpi_rank", 0) * ${RANK_SCALE} + ${SECONDS(`${c}."kpi_rank_at"`)} ` +
+    `ELSE COALESCE(${c}."kpi_rank", 0) * ${RANK_SCALE} END)`;
+  out.push(`DROP VIEW IF EXISTS "v_contacts_row";`);
+  out.push(`CREATE VIEW "v_contacts_row" AS
+SELECT
+  c."id",
+  c."airtable_id",
+  c."kylas_contact_id",
+  c."name",
+  c."company_id",
+  (SELECT co."kylas_company_id" FROM "companies" co WHERE co."id" = c."company_id") AS "company_kylas_id",
+  ${ev("has_any_signal")} AS "has_signal",
+  ${ev("is_complete")} AS "has_complete_row",
+  COALESCE(${cl('COUNT("called_at")')}, 0) AS "call_count",
+  ${cl('MAX("called_at")')} AS "last_call_at",
+  ${cl('MIN("called_at")')} AS "first_call_at",
+  COALESCE(${cl('SUM("measured_seconds")')}, 0) AS "talk_seconds",
+  COALESCE(${cl("COUNT(*)")}, 0) AS "measured_calls",
+  CASE WHEN COALESCE(${cl('COUNT("called_at")')}, 0) > 0
+       THEN CAST(ROUND(COALESCE(${cl('SUM("measured_seconds")')}, 0) * 1.0 / ${cl('COUNT("called_at")')}) AS INTEGER)
+       ELSE 0 END AS "avg_call_seconds",
+  ${st("MAX")} AS "last_stage_change_at",
+  ${st("MIN")} AS "first_stage_change_at",
+  CASE WHEN ${rightPoc} THEN 1 ELSE 0 END AS "is_right_poc",
+  CASE WHEN ${rightPoc} THEN c."name" ELSE '' END AS "right_poc_name",
+  CASE WHEN ${discovery} THEN 1 ELSE 0 END AS "is_discovery",
+  CASE WHEN ${discovery} THEN c."name" ELSE '' END AS "discovery_name",
+  ${ladderCase('COALESCE(c."kpi_rank", 0)')} AS "kpi_stage",
+  ${score("c")} AS "kpi_score"
+FROM "contacts" c;`);
+  out.push(``);
+
+  /* Per company: the same rollups, over its contacts only. */
+  const ofCo = (expr, agg) => `(SELECT ${agg} FROM "contacts" c WHERE c."company_id" = co."id"${expr})`;
+  const calls = (agg) => `(SELECT ${agg} FROM "call_log" x JOIN "contacts" c ON c."id" = x."contact_id" WHERE c."company_id" = co."id")`;
+  const coScore = `COALESCE(${ofCo("", `MAX(${score("c")})`)}, 0)`;
+  const coRank = `CAST(${coScore} / ${RANK_SCALE} AS INTEGER)`;
+  const names = (cond) => `(SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c ` +
+    `WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND ${cond} ORDER BY c."id"))`;
+  const rpN = names(rightPoc), dN = names(discovery);
+  out.push(`DROP VIEW IF EXISTS "v_companies_row";`);
+  out.push(`CREATE VIEW "v_companies_row" AS
+SELECT
+  co."id",
+  co."airtable_id",
+  co."kylas_company_id",
+  co."name",
+  ${calls('MAX(x."called_at")')} AS "last_call_at",
+  ${calls('MIN(x."called_at")')} AS "first_call_at",
+  ${ofCo("", 'MIN(c."first_worked_at")')} AS "first_worked_at",
+  ${ofCo("", 'MIN(c."first_picked_at")')} AS "first_picked_at",
+  COALESCE(${calls('COUNT(x."called_at")')}, 0) AS "call_count",
+  COALESCE(${calls('SUM(x."measured_seconds")')}, 0) AS "talk_seconds",
+  COALESCE(${ofCo("", 'MAX(c."ever_picked")')}, 0) AS "ever_picked",
+  ${coScore} AS "kpi_score",
+  COALESCE(${ofCo("", 'COUNT(c."name")')}, 0) AS "contact_count",
+  COALESCE(${rpN}, '') AS "right_poc_contacts",
+  COALESCE(${dN}, '') AS "discovery_contacts",
+  CASE WHEN ${calls('MAX(x."called_at")')} IS NOT NULL OR ${coScore} > 0 THEN 1 ELSE 0 END AS "reached",
+  CASE WHEN ${ofCo("", 'MIN(c."first_picked_at")')} IS NOT NULL THEN 1 ELSE 0 END AS "phone_picked",
+  CASE WHEN COALESCE(${rpN}, '') <> '' THEN 1 ELSE 0 END AS "right_poc",
+  CASE WHEN COALESCE(${dN}, '') <> '' THEN 1 ELSE 0 END AS "successful_discovery",
+  ${coRank} AS "kpi_rank",
+  CASE WHEN ${coRank} >= ${M.sqlMeetingBooked.floor} THEN 1 ELSE 0 END AS "sql_meeting_booked",
+  CASE WHEN ${coRank} >= ${M.sqlMeetingDone.floor} THEN 1 ELSE 0 END AS "sql_meeting_done",
+  CASE WHEN ${coRank} >= ${M.sql.floor} THEN 1 ELSE 0 END AS "sql",
+  ${ladderCase(coRank)} AS "kpi_stage",
+  CASE WHEN ${coScore} > 0
+       THEN strftime('%Y-%m-%dT%H:%M:%SZ', ${coScore} % ${RANK_SCALE}, 'unixepoch')
+       ELSE NULL END AS "kpi_stage_at"
+FROM "companies" co;`);
+  out.push(``);
   return out.join("\n");
 }
 
@@ -208,6 +293,8 @@ LEFT JOIN ct ON ct.company_id = co."id";`);
    this, so a field added to schema.mjs with nowhere to live fails rather than
    going missing. */
 export const VIEW_FOR = { Contacts: "v_contacts", Companies: "v_companies" };
+/* The per-row twins, which the D1 store reads through. */
+export const ROW_VIEW_FOR = { Contacts: "v_contacts_row", Companies: "v_companies_row" };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const sql = sqlDerived();

@@ -57,7 +57,7 @@ await at.create("Call Log", [
 const c = await at.find("Contacts", "{Kylas Contact ID} = '700'");
 is("Call Count", c.fields["Call Count"], 2);
 is("Talk Seconds counts only measured time", c.fields["Talk Seconds"], 120);
-is("Last Call At", c.fields["Last Call At"], "2026-10-23T10:00:00.000Z");
+is("Last Call At is a day, as the live rollup returns it", c.fields["Last Call At"], "2026-10-23");
 is("Is Discovery (one complete row)", c.fields["Is Discovery"], 1);
 const removed = await at.find("Event Rows", "{Row Key} = '700-b'");
 is("a removed row has no signal (IF({Removed At}, 0, …))", removed.fields["Has Any Signal"], 0);
@@ -84,7 +84,12 @@ const n = async (t, f) => (await at.listAll(t, { formula: f })).length;
 is("{F} = 'x'", await n("Contacts", "{Kylas Contact ID} = '701'"), 1);
 is("a quoted value with an escaped quote", await n("Companies", "{Name} = 'O\\'Brien'"), 0);
 is("OR of keys", await n("Contacts", "OR({Kylas Contact ID} = '700', {Kylas Contact ID} = '702')"), 2);
-is("the Event Rows lookup", await n("Event Rows", "{Kylas Contact ID (from Contact)} = '700'"), 2);
+/* The live base has no such lookup (checked 2026-11-03); Airtable refuses the
+   read and the caller swallows it. D1 must refuse it the same way. */
+await throws("a lookup the live base does not have is refused, as Airtable refuses it",
+  () => at.listAll("Event Rows", { formula: "{Kylas Contact ID (from Contact)} = '700'" }), /422.*INVALID_FILTER_BY_FORMULA/);
+is("the reverse links are there, as on Airtable: a contact's event rows", (await at.find("Contacts", "{Kylas Contact ID} = '700'")).fields["Event Rows"]?.length, 2);
+is("…and a company's contacts", (await at.find("Companies", "{Kylas Company ID} = '900'")).fields.Contacts?.length, 2);
 is("NOT({F} = '') is 'is filled'", await n("Contacts", "NOT({Ever Right POC} = '')"), 1);
 is("IS_AFTER on a date-time", await n("Call Log", "IS_AFTER({Called At}, '2026-10-22T12:00:00.000Z')"), 1);
 is("IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE(…))", await n("Contacts", "IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('2000-01-01T00:00:00Z'))"), 3);
