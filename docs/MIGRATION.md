@@ -478,21 +478,50 @@ Two other fixes:
    Airtable would have kept both. The console upserts, so it never does this.
 3. `createdTime` on a record is when it last changed. Nothing reads it.
 
-### Cut-over (about 15 minutes, after hours)
+### Since the first write-up (same day): proven on real data and at speed
+- **Live data.** 11 real SQL accounts were read from the live base (54 contacts, 13 event rows,
+  90 calls, 89 stage changes) and recomputed on D1. **1,028 / 1,028 computed values are identical
+  as text.** That match was reached only after fixing three shape differences:
+  - rollup dates come back as a day;
+  - two live fields were missing from `schema.mjs`: `First Right POC At` and `First Discovery At`;
+  - the reverse-link lists.
+- **The lookup the live base never had.** "Kylas Contact ID (from Contact)" on Event Rows does not
+  exist live, so Airtable refuses the two reads that use it. D1 refuses them too, so a save behaves
+  exactly as today. Making those reads work is a separate change, for after the switch.
+- **Speed.**
+  - Filtered reads use per-row views (`v_contacts_row`, `v_companies_row`), which are asserted equal to
+    the one-pass views on every row.
+  - D1 pages hold 2,000 rows and continue from the last id.
+  - The read copy (mirror) stays on under D1.
+  - `latency-compare.mjs` times every console route on both stores, on the same data, and only once
+    both dashboards count the whole call log.
+- **Cloudflare's own runtime.** `smoke-workerd.mjs` runs `wrangler dev --local` with a real D1. It
+  found that, without an Airtable key, the console would have read everything from Kylas. Fixed: it
+  now reads the store.
+- **The tables follow the code** (`d1-schema-sync.mjs`). On the first query after a deploy, the store
+  adds any missing table or column and rebuilds the views in one transaction. This replaces
+  repair-base on D1.
+- **The report.** `cutover-report.mjs` turns all of the above into one page.
+
+### Cut-over (about 20 minutes, after hours)
 ```sh
-# once, already given above: create enout-kpi, first lap, deploy with KPI_DB (shadow pull on)
-node scripts/test-parity.mjs                         # must end "No differences."
-curl -s https://bd.enout.website/shadow-status       # lag 0, no rejects
-date -u +%Y-%m-%dT%H:%M:%SZ                          # WRITE THIS DOWN — the cut-over time
-# wrangler.toml [vars]:   STORE = "d1"
-npx wrangler deploy
-# .env.local, for the laptop scripts:  STORE=d1  CF_ACCOUNT_ID=…  CF_API_TOKEN=…  KPI_DB_ID=…
+npx wrangler d1 create enout-kpi          # paste the id into wrangler.toml (KPI_DB), uncomment
+node --env-file=.env.local scripts/backfill.mjs --db db/kpi.sqlite
+node scripts/sqlite-to-d1.mjs --db db/kpi.sqlite --out db/d1-import.sql
+npx wrangler d1 execute enout-kpi --remote --file db/d1-import.sql
+# .env.local: CF_ACCOUNT_ID, CF_API_TOKEN (D1 edit), KPI_DB_ID
+node --env-file=.env.local scripts/cutover.mjs --check --out cutover.json   # must say READY
+# wrangler.toml [vars]:  STORE = "d1"
+npx wrangler deploy                        # note the time
+node --env-file=.env.local scripts/cutover.mjs --after --cut <deploy time>  # SWITCHED + rollback line
 ```
+`--check` copies Airtable's latest into D1 and compares every record and field. `--after` brings over
+the saves of the last minute before the deploy, but never over a row that D1 has changed since the cut.
 
 ### Rollback, without losing a save
 ```sh
-node --env-file=.env.local scripts/d1-to-airtable.mjs --since <cut-over time>           # dry run
-node --env-file=.env.local scripts/d1-to-airtable.mjs --since <cut-over time> --apply
+node --env-file=.env.local scripts/d1-to-airtable.mjs --since <deploy time>           # dry run
+node --env-file=.env.local scripts/d1-to-airtable.mjs --since <deploy time> --apply
 # wrangler.toml: remove STORE = "d1";  .env.local: remove STORE=d1
 npx wrangler deploy
 ```

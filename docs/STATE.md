@@ -2661,3 +2661,23 @@ Removed At, Ever Right POC / Ever Discovery, Phone Picked and Reached.
 
 **Off until Ayush cuts over.** The runbook, and what stops updating (the Airtable base and anything
 that reads it), are in `docs/MIGRATION.md` under "Plug and play".
+
+## 3l24 · The Cloudflare switch, proven (server only, still off)
+
+Checked on real data, at full speed and on Cloudflare's own runtime. Full detail is in
+`docs/MIGRATION.md` under "Since the first write-up".
+
+**Live data.** 1,028 / 1,028 computed values are identical on 11 live SQL accounts.
+
+**Speed.** Every console route is the same speed or faster (`latency-compare.mjs`).
+
+**Real runtime.** The workerd smoke test passes 20/20.
+
+**Tests.** The suites give the same results on both stores (`test-parity.mjs`).
+
+**Report.** `cutover-report.mjs` puts all of it on one page.
+
+**Two things for Ayush:**
+- Run `cutover.mjs --check` on the laptop. It compares the whole base, which needs the Airtable key.
+- Check the "Kylas Sync" Apps Script. It reads Airtable and will stop seeing new saves after the
+  switch.
