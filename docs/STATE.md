@@ -2592,3 +2592,31 @@ needles across an empty 1–64 axis.
 - 1.79.2: "Each BD by slab" lists the busiest BD first, and leaves out names holding fewer than 3 accounts.
 
 - 1.79.3: In Earlier notes, the Kylas Remarks entry reads "K · Remarks in Kylas · no date in Kylas" and a past event row reads "E · <event type> · past event". They used to show initials made from the label, e.g. "R(" for "Remarks (Kylas)". Kylas keeps no per-note date or author for the Remarks field, so none is shown.
+
+## 3l21 · Earlier notes come from the call logs again, through a Call Notes table (1.80.0)
+
+Ayush, 2026-11-03: "check karo historical data kaise pull ho rahe hai".
+
+**Finding:** `/history` read two places.
+- Kylas call logs per contact. This has been **switched off since 2026-10-12**: Kylas ignores
+  `relatedToId` and returns the account's latest ten for any id, so `callLogFilterHonoured=false`.
+- The contact's Remarks field.
+
+So the console never showed a single call note. Only Remarks reached it.
+
+**Fix:**
+- `import-dialler-calls.mjs` already reads the account-wide `GET /v1/call-logs?size=N` every hour (:10).
+  It now also upserts every log that **carries a note** into the new Airtable table **Call Notes**
+  (`tblxHUU6LqutH3ad7`, created live 2026-11-03): Key = log id · Called At · Owner · Contact Kylas ID ·
+  Outcome · Note · Source (dialler / console). Dialler Calls is unchanged and stays timed calls only,
+  because talk time sums it.
+- `/history` reads Call Notes for the contact first (newest first, de-duplicated), then whatever the
+  dead per-contact read gives. A console log shows **"Saved from the console"** instead of the API
+  user's name.
+- Tested on mock: import → 3 noted logs kept → `/history` returns them with person and time.
+
+**Backfill:** the first hourly run after `npx wrangler deploy` fills the newest 1,000 logs. For
+older ones, run on the laptop once:
+`node --env-file=.env.local scripts/import-dialler-calls.mjs --apply --size 9000`
+If Kylas refuses that size, the script falls back to 1000. Calls already gone from Kylas' window cannot
+be recovered, because the read has no paging.

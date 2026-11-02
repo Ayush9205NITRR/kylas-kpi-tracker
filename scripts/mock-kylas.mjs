@@ -260,6 +260,7 @@ if (process.env.MOCK_DIALLER) {
                      duration: 40 + (i % 5) * 23, callType: "outgoing", outcome: "connected",
                      isManual: false, deviceId: `dev-${i % 3}`,
                      callRecording: `https://rec.example/${i}`, owner: person, createdBy: person,
+                     ...(i % 4 === 0 ? { notes: [{ description: `Dialler note ${i}: asked to call after the board meet.` }] } : {}),
                      relatedTo: [{ id: contact, entity: "contact", name: `contact ${contact}` }] });
     CALL_LOGS.push({ id: 45900001 + i * 2, startTime: new Date(at + 6e4).toISOString(),
                      duration: 0, callType: "outgoing", outcome: "connected", isManual: true,

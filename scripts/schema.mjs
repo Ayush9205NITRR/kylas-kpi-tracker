@@ -336,6 +336,28 @@ export const TABLES = [
       { name: "Imported At", type: "dateTime", options: dateTime },
     ],
   },
+  /* WHAT WAS SAID ON EACH CALL. Ayush, 2026-11-03: "historical data kaise pull
+     ho rahe hai". The per-contact call-log read is dead (Kylas ignores
+     relatedToId), so the only way to a contact's earlier call notes is the
+     account-wide read the dialler import already makes. That import now keeps
+     every log that carries a note here, dialler and console alike, and the
+     console's Earlier notes read this table by contact. Apart from Dialler
+     Calls on purpose: that table is talk time and must stay timed calls only. */
+  {
+    name: "Call Notes",
+    description: "One row per Kylas call log that carries a note, imported by import-dialler-calls.mjs. Read by the console's Earlier notes. Kylas owns these rows.",
+    fields: [
+      { name: "Key", type: "singleLineText", description: "The Kylas call log id. The upsert key." },
+      { name: "Called At", type: "dateTime", options: dateTime },
+      { name: "Owner", type: "singleLineText",
+        description: "Who Kylas says made the call. A console save shows the API key's user here; the console reads the real person from Call Log." },
+      { name: "Contact Kylas ID", type: "singleLineText" },
+      { name: "Outcome", type: "singleLineText" },
+      { name: "Note", type: "multilineText" },
+      { name: "Source", type: "singleLineText", description: "dialler (has a duration) or console (0s)." },
+      { name: "Imported At", type: "dateTime", options: dateTime },
+    ],
+  },
   /* WHAT WAS PUSHED TO KYLAS, AND WHAT WAS NOT. Written by push-kylas.mjs after
      every real run (scripts/push-log.mjs). One row per contact per run, plus a
      "(run)" row carrying what the field map found wrong before any contact was

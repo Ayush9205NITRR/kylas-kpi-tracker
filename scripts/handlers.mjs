@@ -3100,7 +3100,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           kylas.callLogs(id).catch((e) => { logErr = e.message; return null; }),
           kylas.contact(id).catch(() => null)]);
         if (logErr && !/-> 404/.test(logErr)) log(`! history ${id}: call logs — ${logErr.slice(0, 160)}`);
-        const items = callNotes(logs).slice(0, 10);
+        /* THE NOTES THAT ACTUALLY ARRIVE (2026-11-03). Kylas ignores the
+           per-contact filter, so callLogs() above answers nothing on the live
+           account; the hourly import keeps every noted log in Call Notes, and
+           that table is read here by contact. A console save carries the API
+           key's user as its owner, which is not who called — said so rather
+           than named wrong. */
+        const kept = await (async () => {
+          if (!rawAirtable || !/^\d+$/.test(id)) return [];
+          try {
+            const rows = await rawAirtable.listAll("Call Notes", {
+              formula: `{Contact Kylas ID} = '${id}'`, fields: ["Called At", "Owner", "Outcome", "Note", "Source"],
+              sort: [{ field: "Called At", direction: "desc" }], pageSize: 20, maxPages: 1 });
+            const api = String((await keyOwner().catch(() => null))?.name || "");
+            return rows.map((r) => r.fields || {}).filter((f) => f.Note).map((f) => {
+              const by = String(f.Owner || "");
+              const viaConsole = f.Source === "console" || (api && by === api) || /super\s*admin/i.test(by);
+              return { at: f["Called At"] || "", by: viaConsole ? "Saved from the console" : by,
+                       outcome: String(f.Outcome || ""), text: String(f.Note) };
+            });
+          } catch (e) {
+            if (!/NOT_FOUND|TABLE_NOT_FOUND|404/.test(e.message)) log(`! history ${id}: Call Notes — ${e.message.slice(0, 120)}`);
+            return [];
+          }
+        })();
+        const seen = new Set();
+        const items = [...kept, ...callNotes(logs)]
+          .filter((n) => { const k = `${String(n.at).slice(0, 16)}|${n.text}`; if (seen.has(k)) return false; seen.add(k); return true; })
+          .sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
         const remarks = kylasRemarksOf(contact);
         historyCache.set(id, { at: Date.now(), items, remarks });
         if (historyCache.size > 2000) historyCache.delete(historyCache.keys().next().value);

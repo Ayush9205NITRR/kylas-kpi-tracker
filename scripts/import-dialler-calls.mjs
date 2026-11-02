@@ -41,8 +41,10 @@
  */
 import { pathToFileURL } from "node:url";
 import { createAirtable, listTolerant, upsertManyTolerant } from "./airtable.mjs";
+import { callNotes } from "./kylas.mjs";
 
 const TABLE = "Dialler Calls";
+const NOTES = "Call Notes";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const listOf = (j) => j?.content || j?.data || (Array.isArray(j) ? j : []);
 const who = (v) => (v && typeof v === "object" ? (v.name || v.firstName || "") : v) || "";
@@ -168,9 +170,34 @@ export async function run({ env = process.env, log = console.log, apply = false,
       String(mmss(r.Duration)).padStart(7)}  ${r.Owner.padEnd(20)} contact ${r["Contact Kylas ID"]}`);
   if (fresh.length > 10) log(`    … and ${fresh.length - 10} more`);
 
+  /* ── 4b · the notes typed on any of them (Call Notes) ──────────── */
+  const noteRows = [];
+  for (const l of logs) {
+    const n = callNotes([l])[0];
+    if (!n) continue;
+    const rel = relList(l).find((x) => String(x.entity || "").toLowerCase() === "contact") || relList(l)[0] || {};
+    if (!rel.id) continue;
+    noteRows.push({ Key: String(l.id), "Called At": n.at, Owner: n.by, "Contact Kylas ID": String(rel.id),
+      Outcome: n.outcome, Note: n.text.slice(0, 5000), Source: secsOf(l) > 0 ? "dialler" : "console",
+      "Imported At": new Date().toISOString() });
+  }
+  log(`  ${noteRows.length} of ${logs.length} log(s) carry a note`);
+
   const summary = { read: logs.length, timed: rows.length, fresh: fresh.length, seconds, gap,
-                    oldestSeen, newestSeen, newestHeld, written: 0 };
-  if (!rows.length) { log("\nNothing with a duration in this window."); return summary; }
+                    oldestSeen, newestSeen, newestHeld, notes: noteRows.length, written: 0 };
+  const writeNotes = async () => {
+    if (!APPLY || !noteRows.length) return 0;
+    try {
+      const { dropped } = await upsertManyTolerant(at, NOTES, "Key", noteRows);
+      if (dropped?.length) log(`  ! ${NOTES} has no column for: ${dropped.join(", ")} — run scripts/schema.mjs`);
+      log(`  kept ${noteRows.length} call note(s) in ${NOTES}`);
+      return noteRows.length;
+    } catch (e) {
+      log(`  ! could not write ${NOTES} — ${String(e.message || e).slice(0, 200)}`);
+      return 0;
+    }
+  };
+  if (!rows.length) { log("\nNothing with a duration in this window."); return { ...summary, notesWritten: await writeNotes() }; }
   if (!APPLY) {
     log(`\nNothing was written. Re-run with --apply to upsert all ${rows.length} into ${TABLE}.`);
     log(`(Upsert is keyed on the Kylas log id, so re-running a window costs nothing.)`);
@@ -183,7 +210,7 @@ export async function run({ env = process.env, log = console.log, apply = false,
   if (dropped?.length) log(`  ! ${TABLE} has no column for: ${dropped.join(", ")} — run scripts/schema.mjs`);
   log(`\nimported ${rows.length} dialler call(s), ${mmss(seconds)} of talk time.`);
   log(`The dashboard sums this table for Talk time — Refresh to see it.`);
-  return { ...summary, written: rows.length, dropped: dropped || [] };
+  return { ...summary, written: rows.length, dropped: dropped || [], notesWritten: await writeNotes() };
 }
 
 /* ── the command line ─────────────────────────────────────────────── */
