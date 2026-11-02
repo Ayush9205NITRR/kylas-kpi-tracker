@@ -66,6 +66,7 @@ function parentIdOf(table, airtableId) {
 
 const tables = ONLY ? [ONLY] : BACKFILL_ORDER;
 let total = 0, orphans = 0;
+const rejected = [];
 for (const table of tables) {
   let recs;
   try {
@@ -88,7 +89,13 @@ for (const table of tables) {
        real fields end that way and none of them is a link. */
     for (const l of LINKS_BY_TABLE[table] || [])
       if (row[l.col] === null && (rec.fields?.[l.name] || []).length) missingParent++;
-    stmt.run(...cols.map((c) => row[c] ?? null));
+    /* ONE BAD ROW DOES NOT STOP THE COPY (2026-11-03 stress test). A value
+       the CHECK constraints refuse — a select option added in Airtable after
+       schema.mjs was written — used to throw here and end the whole backfill
+       half way. It is set aside with its reason, the rest carries on, and the
+       run ends non-zero naming every one. */
+    try { stmt.run(...cols.map((c) => row[c] ?? null)); }
+    catch (e) { rejected.push({ table, id: rec.id, why: e.message.slice(0, 120) }); continue; }
     idCache.set(`${table}:${rec.id}`, db.prepare(
       `SELECT id FROM "${tableName(table)}" WHERE airtable_id = ?`).get(rec.id)?.id ?? null);
     wrote++;
@@ -101,4 +108,10 @@ for (const table of tables) {
 
 console.log(`\n${total} row(s) copied into ${DB}`);
 if (orphans) console.log(`${orphans} row(s) link to a parent that is not in the copy — run the parent table first`);
+if (rejected.length) {
+  console.log(`\n! ${rejected.length} row(s) REFUSED by the copy's rules — fix schema.mjs and re-run:`);
+  const by = new Map(); for (const r of rejected) by.set(`${r.table}: ${r.why}`, (by.get(`${r.table}: ${r.why}`) || 0) + 1);
+  for (const [k, n] of by) console.log(`    ${String(n).padStart(5)} × ${k}`);
+}
 db.close();
+if (rejected.length) process.exitCode = 2;

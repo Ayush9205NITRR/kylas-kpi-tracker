@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS "call_log" (
   -- Idempotency key from the overlay, so a retried save does not double-count.
   , "key" TEXT
   , "called_at" TEXT CHECK ("called_at" IS NULL OR "called_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
-  , "outcome" TEXT CHECK ("outcome" IS NULL OR "outcome" IN ('No answer', 'Wrong POC', 'Right POC', 'Discovery'))
+  , "outcome" TEXT CHECK ("outcome" IS NULL OR "outcome" IN ('No answer', 'Wrong POC', 'Right POC', 'Discovery', 'SQL'))
   -- Seconds.
   , "duration" INTEGER
   -- dialed is measured; estimated is inferred from the outcome keypress; none means no outcome was set.
@@ -230,6 +230,26 @@ CREATE TABLE IF NOT EXISTS "dialler_calls" (
   , "call_type" TEXT
   , "device" TEXT
   , "recording" TEXT
+  , "imported_at" TEXT CHECK ("imported_at" IS NULL OR "imported_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- when this copy last changed, for the reconciler and for deltas
+  , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- One row per Kylas call log that carries a note, imported by import-dialler-calls.mjs. Read by the console's Earlier notes. Kylas owns these rows.
+CREATE TABLE IF NOT EXISTS "call_notes" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+  -- the Airtable record id, so the backfill can re-run and the reconciler can join
+  , "airtable_id" TEXT UNIQUE
+  -- The Kylas call log id. The upsert key.
+  , "key" TEXT
+  , "called_at" TEXT CHECK ("called_at" IS NULL OR "called_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
+  -- Who Kylas says made the call. A console save shows the API key's user here; the console reads the real person from Call Log.
+  , "owner" TEXT
+  , "contact_kylas_id" TEXT
+  , "outcome" TEXT
+  , "note" TEXT
+  -- dialler (has a duration) or console (0s).
+  , "source" TEXT
   , "imported_at" TEXT CHECK ("imported_at" IS NULL OR "imported_at" GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*')
   -- when this copy last changed, for the reconciler and for deltas
   , "synced_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

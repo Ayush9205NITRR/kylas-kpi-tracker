@@ -47,6 +47,8 @@ export function createShadow({ db, at, log = () => {} }) {
     await db.prepare(`CREATE TABLE IF NOT EXISTS shadow_state (
       tbl TEXT PRIMARY KEY, since TEXT, rows INTEGER DEFAULT 0,
       ran_at TEXT, last_error TEXT)`).run();
+    await db.prepare(`CREATE TABLE IF NOT EXISTS shadow_rejects (
+      tbl TEXT, airtable_id TEXT, why TEXT, at TEXT, PRIMARY KEY (tbl, airtable_id))`).run();
   })().catch((e) => { ready = null; throw e; }));
 
   const watermark = async (t) =>
@@ -62,11 +64,11 @@ export function createShadow({ db, at, log = () => {} }) {
     if (parentCache.size > 5000) parentCache.clear();
     const row = await db.prepare(`SELECT id FROM "${tableName(table)}" WHERE airtable_id = ?`)
       .bind(airtableId).first();
-    parentCache.set(key, row?.id ?? null);
+    if (row?.id != null) parentCache.set(key, row.id);
     return row?.id ?? null;
   }
 
-  async function syncTable(table, { max = 500 } = {}) {
+  async function syncTable(table, { max = 500, depth = 0 } = {}) {
     const since = await watermark(table);
     const started = Date.now();
     /* No watermark yet means this table has never been copied, so take it
@@ -81,8 +83,39 @@ export function createShadow({ db, at, log = () => {} }) {
       return { table, rows: 0, full: !since };
     }
     const { sql, cols } = upsertSql(table);
-    let wrote = 0;
-    for (const rec of recs.slice(0, max === Infinity ? undefined : max)) {
+    let wrote = 0, rejected = 0;
+    /* ONE BATCH PER PASS (2026-11-03 stress test). A statement per row made a
+       busy minute cost hundreds of D1 calls in one invocation. The rows go as
+       one batch; only if that batch is refused are they retried one by one, so
+       the single bad row can be set aside and the rest still land. */
+    const rows = [];
+    const take = recs.slice(0, max === Infinity ? undefined : max);
+    /* Parents looked up IN BULK, ninety ids to a query (D1 binds at most a
+       hundred): a pass of 300 calls used to make 300 lookups. */
+    const lookup = async (l, ids) => {
+      for (let i = 0; i < ids.length; i += 90) {
+        const part = ids.slice(i, i + 90);
+        const found = (await db.prepare(`SELECT id, airtable_id FROM "${tableName(l.to)}" WHERE airtable_id IN (${part.map(() => "?").join(",")})`)
+          .bind(...part).all())?.results || [];
+        const got = new Map(found.map((r) => [String(r.airtable_id), r.id]));
+        for (const id of part) { if (got.has(id)) parentCache.set(`${l.to}:${id}`, got.get(id)); else parentCache.delete(`${l.to}:${id}`); }
+      }
+    };
+    for (const l of LINKS_BY_TABLE[table] || []) {
+      const want = [...new Set(take.map((rec) => { const v = rec.fields?.[l.name]; return Array.isArray(v) ? v[0] : v; })
+        .filter(Boolean).map(String))].filter((id) => parentCache.get(`${l.to}:${id}`) == null);
+      await lookup(l, want);
+      /* A PARENT NOT COPIED YET is copied now, before the child is written —
+         a contact made a minute ago and its first call arrive in the same
+         window, and a call written first would point at nothing for good
+         (its row would never change again to be re-read). */
+      const missing = want.filter((id) => parentCache.get(`${l.to}:${id}`) == null);
+      if (missing.length && depth < 2) {
+        await syncTable(l.to, { max: Infinity, depth: depth + 1 }).catch(() => {});
+        await lookup(l, missing);
+      }
+    }
+    for (const rec of take) {
       const row = recordToRow(table, rec, () => null);
       /* Resolved from the SCHEMA's list of links, never by looking for columns
          whose name ends in _id. Three real fields end that way — kylas_contact_id,
@@ -94,11 +127,35 @@ export function createShadow({ db, at, log = () => {} }) {
         const first = Array.isArray(ids) ? ids[0] : ids;
         row[l.col] = first ? await parentIdOf(l.to, String(first)) : null;
       }
-      await db.prepare(sql).bind(...cols.map((k) => row[k] ?? null)).run();
-      wrote++;
+      rows.push({ rec, args: cols.map((k) => row[k] ?? null) });
     }
-    await stamp(table, started, wrote, null);
-    return { table, rows: wrote, full: !since, more: recs.length > wrote };
+    const CHUNK = 50;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const part = rows.slice(i, i + CHUNK);
+      try {
+        if (db.batch) await db.batch(part.map((r) => db.prepare(sql).bind(...r.args)));
+        else for (const r of part) await db.prepare(sql).bind(...r.args).run();
+        wrote += part.length;
+      } catch {
+        for (const r of part) {
+          /* A row the copy's rules refuse is recorded and passed over, not
+             allowed to stop the table: one bad value would otherwise hold the
+             watermark for ever and nothing after it would arrive. */
+          try { await db.prepare(sql).bind(...r.args).run(); wrote++; }
+          catch (e) {
+            rejected++;
+            await db.prepare(`INSERT INTO shadow_rejects (tbl, airtable_id, why, at) VALUES (?, ?, ?, ?)
+              ON CONFLICT (tbl, airtable_id) DO UPDATE SET why = excluded.why, at = excluded.at`)
+              .bind(table, r.rec.id, e.message.slice(0, 200), new Date().toISOString()).run().catch(() => {});
+          }
+        }
+      }
+    }
+    /* Every row refused is not "a bad value" — it is a table the copy cannot
+       hold (missing, renamed). That is a failure: reported, watermark kept. */
+    if (!wrote && rejected) throw new Error(`all ${rejected} row(s) refused — the table cannot be written`);
+    await stamp(table, started, wrote, rejected ? `${rejected} row(s) refused — see shadow_rejects` : null);
+    return { table, rows: wrote, rejected, full: !since, more: recs.length > wrote + rejected };
   }
 
   /* A FAILED PASS DOES NOT MOVE THE WATERMARK (2026-11-03). It used to: the

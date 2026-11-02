@@ -396,3 +396,31 @@ curl -s https://bd.enout.website/shadow-status
 
 Gate 3 (`SHADOW_READS=1`) compares `/companies` today. The other routes need their SQL readers before
 Gate 4 can serve them. That is the next piece of work.
+
+## 2026-11-03 · Stress test before go-live (`scripts/stress-d1.mjs`)
+
+Ayush: "my entire operation depends on it — mimic, stress test, fill the gaps." The test runs the real
+scripts against the mock Airtable, with its 5 req/s ceiling on, and a real SQLite standing in for D1.
+Size: 1,000 companies, 35,000 contacts, 20,000 call logs, 5,000 dialler calls, 2,000 call notes,
+grown to 1,000,000 calls for the read test.
+
+**Result: 41 / 41.**
+- First lap: every table's count equals Airtable's, and every link resolves.
+- 300 live saves while the cron runs: the copy caught up with no duplicates.
+- Airtable outage: errors are reported, the watermark stays put, and rows written during the outage
+  arrive afterwards.
+- A steady cron run: ≤ 3 Airtable requests and ≤ 31 D1 calls.
+- Companies list: ~50 ms at 35k contacts and ~0.6 s at 1M calls. A day's calls: < 1 ms.
+
+**Gaps it found, now fixed:**
+1. Airtable holds select values the copy's CHECK rules did not know: Call Log Outcome "SQL". One such
+   row crashed the whole backfill. `schema.mjs` now has "SQL". Backfill and shadow **set a refused row
+   aside** (`shadow_rejects` plus the report) instead of stopping. A table where *every* row is
+   refused is still a failure.
+2. One D1 statement per row made a busy minute cost 327 D1 calls. Rows now go **in batches of 50**,
+   parents are looked up **in bulk**, and the busy minute costs 31.
+3. A call copied before its brand-new contact pointed at nothing, for good. A missing parent is now
+   **copied first**, and an absent parent is no longer cached as null.
+4. (Earlier the same day) a failed pass no longer moves the watermark.
+
+Run it again before each gate: `node scripts/stress-d1.mjs` takes about 8 minutes; `--quick` about 1.

@@ -200,7 +200,7 @@ export const TABLES = [
     fields: [
       { name: "Key", type: "singleLineText", description: "Idempotency key from the overlay, so a retried save does not double-count." },
       { name: "Called At", type: "dateTime", options: dateTime },
-      { name: "Outcome", type: "singleSelect", options: sel("No answer", "Wrong POC", "Right POC", "Discovery") },
+      { name: "Outcome", type: "singleSelect", options: sel("No answer", "Wrong POC", "Right POC", "Discovery", "SQL") },
       { name: "Duration", type: "number", options: num, description: "Seconds." },
       { name: "Duration Source", type: "singleSelect", options: sel("dialed", "estimated", "none"),
         description: "dialed is measured; estimated is inferred from the outcome keypress; none means no outcome was set." },
