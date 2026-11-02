@@ -2630,3 +2630,21 @@ LIST item has `notesCount` and `callSummary` but no `notes`; only `GET /v1/call-
 - keeps a `callSummary` as "Call summary: …" when there is no typed note.
 
 Re-running costs nothing: keys already held are skipped.
+
+## 3l22 · Saved contacts with no Company link: the account read "Not worked" (1.80.1)
+
+Ayush, 2026-11-03, curebay. Anshika Mahapatra (5380481) was saved by Muskan on 22 Oct: the Contacts row
+has Call Count 1 and a call-back for 17 Nov, but **no Company link**. The account's rollups never saw
+the call, so it showed KPI "Not worked" and "last call 208d ago".
+
+**Cause:** `syncContact` links the company only when the card carries `companyId`. A card can arrive
+without one.
+
+**Fix:** `/save` (airtableLeg) reads the contact from Kylas when `companyId` is missing and fills it
+before writing, then logs `company … filled from Kylas`. Tested on mock: a save without a company →
+the Airtable contact is linked.
+
+**Repair:** `scripts/link-orphan-contacts.mjs`, dry run by default, `--apply` to write. Live count on
+2026-11-03: **34,812** contacts have no link, almost all imported and never worked. **22** of them have
+a logged call. By default the script fixes only the worked ones (Call Count > 0 or KPI Rank > 1);
+`--all` does every one.

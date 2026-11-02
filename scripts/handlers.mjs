@@ -1515,8 +1515,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                snapshot.mjs counts "Contacts Added" straight off that flag, so one
                new POC read as two. Only one of those saves actually POSTed to Kylas,
                and only this side knows which. */
+            /* THE COMPANY LINK, EVEN WHEN THE CARD HAD NONE (2026-11-03,
+               curebay / Anshika Mahapatra: saved by Muskan, the account still
+               read "Not worked"). A card opened from the Airtable copy, or one
+               whose company Kylas sent as a bare id, can arrive without
+               companyId — and then the Contacts row is written with no Company
+               link, so the account's rollup never sees the call. Kylas knows
+               the company; ask it once, for this case only. */
+            let co = { companyId: c.companyId, company: c.company };
+            if (!co.companyId && result.kid) {
+              const kc = await kylas.contact(result.kid).catch(() => null);
+              const cid = idOf(kc?.company) ?? kc?.companyId;
+              if (cid) co = { companyId: String(cid), company: c.company || lookupName(kc, "company", cid) || "" };
+              if (cid) log(`  /save: company ${cid} filled from Kylas for ${result.kid}`);
+            }
             result.airtable = await syncContact(
-              airtable, { ...c, kid: result.kid },
+              airtable, { ...c, ...co, kid: result.kid },
               body.call ? { ...body.call, createdHere: result.created } : body.call,
               { log });
             /* THE DASHBOARD MUST SEE THE CALL THAT WAS JUST LOGGED.
