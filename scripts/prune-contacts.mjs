@@ -111,7 +111,20 @@ export async function run({ env = process.env, log = console.log, apply = false,
     /* Re-checked right before the delete: a call logged since the plan was read spares it. */
     const batch = full.slice(i, i + 10).filter((r) => !LINKS.some((k) => (r.fields?.[k] || []).length) && !contactWorked(r.fields));
     spared += Math.min(10, full.length - i) - batch.length;
-    if (batch.length) { await at.remove("Contacts", batch.map((r) => r.id)); gone += batch.length; }
+    /* A timeout or a 5xx is retried (2026-11-03: one timeout stopped the live run at 2,010).
+       A batch already deleted answers NOT_FOUND on the retry, which counts as done. */
+    if (batch.length) {
+      for (let a = 0; ; a++) {
+        try { await at.remove("Contacts", batch.map((r) => r.id)); break; }
+        catch (e) {
+          if (/NOT_FOUND|404/.test(e.message)) break;
+          if (a >= 5) throw e;
+          log(`  retrying after: ${String(e.message).slice(0, 80)}`);
+          await new Promise((r) => setTimeout(r, 2000 * 2 ** a));
+        }
+      }
+      gone += batch.length;
+    }
     if ((i / 10) % 100 === 0) log(`  removed ${gone} of ${full.length}`);
   }
   log(`\nRemoved ${gone} contacts${spared ? ` (${spared} spared — worked since the plan)` : ""}. Base now ~${(total - gone).toLocaleString("en-IN")} records.`);
