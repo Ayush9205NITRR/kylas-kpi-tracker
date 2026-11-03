@@ -285,8 +285,10 @@ createServer(async (req, res) => {
   const now = Date.now();
   recent = recent.filter((t) => now - t < 1000);
   recent.push(now);
-  /* Roughly what the real thing does to a burst. */
-  if (recent.length > 4) return json(res, 429, { message: "Too many requests" });
+  /* Roughly what the real thing does to a burst. NOT on this mock's own /__
+     hooks: a test that flips __refuse while the server is busy got a silent 429,
+     the flag never set, and the "refused create" case passed or failed by timing. */
+  if (recent.length > 4 && !url.pathname.startsWith("/__")) return json(res, 429, { message: "Too many requests" });
 
   if (!req.headers["api-key"]) return json(res, 401, { message: "api-key missing" });
 
