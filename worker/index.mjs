@@ -79,7 +79,8 @@ function handlers(env, log) {
                                      shadowDb: env.KPI_DB || null,
                                      /* The same read copy on either store: on STORE=d1 it is
                                         filled from KPI_DB instead of Airtable (handlers.mjs). */
-                                     mirror: env.DB ? createMirror({ db: env.DB, log }) : null })
+                                     mirror: env.DB ? createMirror({ db: env.DB, log,
+                                       writeBudget: Number(env.MIRROR_WRITE_BUDGET ?? 1500000) }) : null })
     .catch((e) => { built = null; throw e; }));   /* never cache a failed build */
 }
 
@@ -218,8 +219,11 @@ const JOBS = {
   syncFast: async (env, log) => {
     const out = await (await import("../scripts/sync-kylas.mjs")).run({
       env, log, apply: true, only: "contacts" });
-    return { ...out, after: await (await handlers(env, log)).maintain({
-      rebuild: true, only: ["Contacts", "Stage Transitions"] }), calendar: await calendar(env, log) };
+    /* NOT a rebuild (2026-11-03): marking Contacts stale every hour rewrote all
+       ~37k rows into D1 every hour — ~100M rows written a month, $51 on the
+       October invoice. The contacts the sync changed reach the copy through
+       the mirror's delta; the nightly sync still rebuilds. */
+    return { ...out, after: await (await handlers(env, log)).maintain(), calendar: await calendar(env, log) };
   },
   rollup: async (env, log) => {
     const out = await (await import("../scripts/rollup-calls.mjs")).run({
@@ -259,8 +263,8 @@ const JOBS = {
   dialler: async (env, log) => {
     const out = await (await import("../scripts/import-dialler-calls.mjs")).run({
       env, log, apply: true, size: Number(env.DIALLER_SIZE || 1000) });
-    return { ...out, after: await (await handlers(env, log)).maintain({
-      rebuild: true, only: ["Dialler Calls"] }) };
+    /* Hourly, so the delta brings the new calls in, not a rebuild (see syncFast). */
+    return { ...out, after: await (await handlers(env, log)).maintain() };
   },
   /* Every few minutes. Idle, it asks nothing of Airtable or Kylas. */
   maintain: async (env, log) => (await handlers(env, log)).maintain(),

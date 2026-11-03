@@ -2725,3 +2725,34 @@ changed, so `VERSION` stays where it is.
 - run `--switch` after hours.
 
 `test-go-live.mjs` passes 27/27.
+
+## 3l27 · The $51 D1 bill: the read copy writes only what changed (1.81.1)
+
+The October Cloudflare invoice was $56: the $5 Workers plan plus $51 for **D1 rows written**, about
+100M against the 50M included. Ayush: stay on $5, "so this doesn't happen again".
+
+**The cause.** The hourly contacts sync, and the hourly dialler import, marked the read copy stale.
+The next minute's run then rebuilt Contacts in full: all ~37k rows written into a new generation and
+the old one deleted, each with its index. That is about 150k rows written an hour.
+
+**The fix:**
+- **No hourly rebuilds.** `syncFast` and `dialler` call `maintain()` plainly; their rows reach the
+  copy through the 10-minute delta. The nightly sync and weekly rollup still rebuild.
+- **A rebuild writes only the rows that differ.** It upserts those in place and tombstones vanished
+  ones. A new generation is made only when the column list changed. An unchanged night now writes
+  ~0 rows.
+- **The delta skips rows identical to the copy.** The two-minute overlap used to rewrite them every
+  ten minutes.
+- **Budget.** Every row written is counted per IST day: `/health` → `mirrorWritesToday`. Past
+  `MIRROR_WRITE_BUDGET` (1.5M ≈ 50M ÷ 31), rebuilds wait for the next day and log
+  `! mirror: daily write budget reached`. Saves are never held back.
+
+**Expected:** well under 2M rows a month, so the bill is the flat $5.
+
+**Ayush, once:** in the Cloudflare dashboard (admin@enout.website) → Notifications → Add →
+Usage Based Billing, set an alert on D1 rows written.
+
+**Tests:**
+- `test-mirror` 41/41, including: no-change rebuild = 0 rows, one change = 1 row, the budget holds
+  rebuilds but not saves.
+- `test-worker` 195/195; a save still costs 38 D1 queries.

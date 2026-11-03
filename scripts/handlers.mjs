@@ -1930,7 +1930,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                                  /* false: signed in, but no Kylas user has this email */
                                  kylasMatch: me?.matched !== false },
                role: roleOf(me), admins: ADMINS.length,
-               version: VERSION, startedAt: STARTED };
+               version: VERSION, startedAt: STARTED,
+               /* rows the read copy wrote to D1 today — the October bill was this number, unwatched */
+               mirrorWritesToday: mirror?.writesToday ? await mirror.writesToday().catch(() => null) : null };
     },
 
     /* Everything the console needs when it opens on a company page: the company

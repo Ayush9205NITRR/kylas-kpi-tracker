@@ -172,9 +172,31 @@ const genBefore = (await A.status()).find((s) => s.table === "Contacts").version
 await A.maintain(rawA, { rebuild: true, only: ["Contacts"] });
 check("and is gone after the rebuild",
       !(await atB.listAll("Contacts", { fields: ["Name"] })).some((r) => r.id === victim.id));
-check("which swapped in a new generation", (await A.status()).find((s) => s.table === "Contacts").version !== genBefore);
-const rows = await db.prepare("SELECT COUNT(*) AS n FROM mirror_rows WHERE tbl = 'Contacts'").first();
-check("and cleared the old one out of D1", rows.n === 129, `${rows.n} rows held`);
+check("which moved the version on, so every instance sees it", (await A.status()).find((s) => s.table === "Contacts").version !== genBefore);
+const rows = await db.prepare("SELECT COUNT(*) AS n FROM mirror_rows WHERE tbl = 'Contacts' AND data IS NOT NULL").first();
+check("and the copy holds exactly the live rows", rows.n === 129, `${rows.n} rows held`);
+
+console.log("\n6b. a rebuild writes only what changed (the $51 in October)");
+const writes = async () => A.writesToday();
+let w0 = await writes();
+let res = await A.build(rawA, "Contacts");
+check("a rebuild with nothing changed writes no row", res.changed === 0 && (await writes()) - w0 <= 4, `${JSON.stringify(res)} · ${(await writes()) - w0} counted`);
+const one = (await outsider.listAll("Contacts", { fields: ["Name"] }))[3];
+await outsider.call("PATCH", "/Contacts", { records: [{ id: one.id, fields: { Name: "Changed Once" } }] });
+w0 = await writes();
+res = await A.build(rawA, "Contacts");
+check("one changed row writes one row", res.changed === 1, JSON.stringify(res));
+check("and the other instance reads it", (await atB.listAll("Contacts", { fields: ["Name"] })).find((r) => r.id === one.id)?.fields.Name === "Changed Once");
+check("the day's writes are counted (and shown on /health)", (await writes()) > w0);
+const C = createMirror({ db, log, checkMs: 0, writeBudget: 1 });
+await C.markStale(["Contacts"]);
+const capped = await C.maintain(client(C), { only: ["Contacts"] });
+check("past the daily budget a rebuild waits for tomorrow", capped.some((x) => x.skipped === "write budget"), JSON.stringify(capped));
+const saved = (await outsider.listAll("Contacts", { fields: ["Name"] }))[4];
+await client(C).call("PATCH", "/Contacts", { records: [{ id: saved.id, fields: { Name: "Saved Over Budget" } }] });
+await Promise.all(C.pending());
+check("but a save still reaches the copy", (await atB.listAll("Contacts", { fields: ["Name"] })).find((r) => r.id === saved.id)?.fields.Name === "Saved Over Budget");
+check("the budget line is in the log", lines.some((l) => /daily write budget reached/.test(l)));
 
 console.log("\n7. formulas and rollups, read back after a save");
 const acmeRec = direct.find((r) => r.fields["Kylas Contact ID"] === "1001");

@@ -108,8 +108,18 @@ export function simpleFilter(formula) {
    So the copy reads it where it lives, through a client of its own.
    `clientFor(table)` says which client; everything else about a mirrored
    table — generations, deltas, the daily rebuild — is the same. */
+/* THE WRITE BUDGET (2026-11-03). D1 bills rows WRITTEN beyond 50M a month,
+   and an hourly full rebuild of Contacts wrote ~100M in October — $51 on top
+   of the $5 plan. Every row this copy writes is now counted per day (IST) in
+   mirror_meta's '_writes' row; past `writeBudget` (default 1.5M ≈ 50M / 31)
+   whole-table rebuilds wait for the next day. Write-through — the console's
+   own saves reaching the copy — is never held back. */
+export const WRITES_ROW = "_writes";
+const dayIst = (ms) => new Date(ms + 330 * 60000).toISOString().slice(0, 10);
+
 export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, checkMs = 1500,
-                               clientFor: clientForOpt = null, now = () => Date.now() }) {
+                               clientFor: clientForOpt = null, now = () => Date.now(),
+                               writeBudget = 1_500_000 }) {
   if (!db) throw new Error("the mirror needs a D1 binding");
   let clientFor = clientForOpt || (() => null);
   const spec = (t) => tables[t] || null;
@@ -133,6 +143,28 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
       v INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tbl, gen, id))`),
     db.prepare("CREATE INDEX IF NOT EXISTS mirror_rows_v ON mirror_rows (tbl, gen, v)"),
   ]).catch((e) => { schema = null; throw e; }));
+
+  /* Rows written today, counted as D1 bills them: a row and its one index. */
+  /* A save's own writes are added in memory and recorded with the next
+     scheduled write, so a save costs no extra query (it is close to the
+     per-request cap). An isolate dropped in between loses a few — saves are
+     a sliver of the total. */
+  let unflushed = 0;
+  const countWrites = (rows) => {
+    rows += unflushed;
+    if (!rows) return null;
+    unflushed = 0;
+    return db.prepare(
+      `INSERT INTO mirror_meta (tbl, delta_from, count) VALUES ('${WRITES_ROW}', ?, ?) ` +
+      "ON CONFLICT (tbl) DO UPDATE SET count = CASE WHEN delta_from = excluded.delta_from " +
+      "THEN count + excluded.count ELSE excluded.count END, delta_from = excluded.delta_from")
+      .bind(dayIst(now()), rows * 2);
+  };
+  async function writesToday() {
+    await ready();
+    const r = await db.prepare("SELECT delta_from, count FROM mirror_meta WHERE tbl = ?").bind(WRITES_ROW).first();
+    return r && r.delta_from === dayIst(now()) ? Number(r.count || 0) : 0;
+  }
 
   /* What this instance has seen. */
   let meta = new Map();                   /* tbl -> row of mirror_meta */
@@ -245,6 +277,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
           "ON CONFLICT (tbl, gen, id) DO UPDATE SET data = excluded.data, v = excluded.v")
           .bind(...part.flat(), t));
       }
+      unflushed += items.length;
       for (const b of chunk(stmts, STMTS_PER_BATCH)) await db.batch(b);
     })());
   }
@@ -308,7 +341,41 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     const started = now();
     try {
       const { recs, fields, missing } = await readAll(at, t);
-      const cur = await db.prepare("SELECT gen FROM mirror_meta WHERE tbl = ?").bind(t).first();
+      const cur = await db.prepare("SELECT gen, full_at, fields FROM mirror_meta WHERE tbl = ?").bind(t).first();
+      /* SAME COLUMNS AS THE COPY IN HAND: write only the rows that differ.
+         A night where nothing changed writes nothing (it used to rewrite every
+         row, twice, with its index). A new column list still builds a fresh
+         generation below, because every row's shape changes then anyway. */
+      if (cur?.full_at && cur.fields === JSON.stringify(fields)) {
+        const had = new Map(((await db.prepare(
+          "SELECT id, data FROM mirror_rows WHERE tbl = ? AND gen = ?").bind(t, cur.gen).all()).results || [])
+          .map((x) => [x.id, x.data]));
+        const items = [];
+        const seen = new Set();
+        for (const r of recs) {
+          seen.add(r.id);
+          const data = JSON.stringify(project(r.fields, spec(t)));
+          if (had.get(r.id) !== data) items.push([r.id, data]);
+        }
+        for (const [id, data] of had) if (!seen.has(id) && data != null) items.push([id, null]);   /* tombstone */
+        const stmts = [db.prepare("UPDATE mirror_meta SET v = v + 1, full_at = ?, delta_from = ?, delta_at = ?, count = ? WHERE tbl = ?")
+          .bind(now(), new Date(started - SLACK_MS).toISOString(), now(), recs.length, t)];
+        for (const part of chunk(items, ROWS_PER_STMT)) {
+          stmts.push(db.prepare(
+            "INSERT INTO mirror_rows (tbl, gen, id, data, v) " +
+            "SELECT m.tbl, m.gen, x.column1, x.column2, m.v FROM mirror_meta m, " +
+            `(VALUES ${part.map(() => "(?, ?)").join(", ")}) x WHERE m.tbl = ? ` +
+            "ON CONFLICT (tbl, gen, id) DO UPDATE SET data = excluded.data, v = excluded.v")
+            .bind(...part.flat(), t));
+        }
+        stmts.push(countWrites(items.length + 1));
+        for (const b of chunk(stmts.filter(Boolean), STMTS_PER_BATCH)) await db.batch(b);
+        log(`  mirror: ${t} refreshed — ${recs.length} row(s), ${items.length} changed ` +
+            `in ${((now() - started) / 1000).toFixed(1)}s`);
+        await check(true);
+        const d = missing ? { changed: 0 } : await delta(at, t, { leased: true });
+        return { table: t, rows: recs.length, changed: items.length, caughtUp: d.changed };
+      }
       const gen = Number(cur?.gen || 0) + 1;
       await db.prepare("DELETE FROM mirror_rows WHERE tbl = ? AND gen = ?").bind(t, gen).run();
       const stmts = chunk(recs, ROWS_PER_BUILD_STMT).map((part) => db.prepare(
@@ -323,7 +390,8 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
           .bind(gen, now(), new Date(started - SLACK_MS).toISOString(), now(), recs.length,
                 JSON.stringify(fields), t),
         db.prepare("DELETE FROM mirror_rows WHERE tbl = ? AND gen <> ?").bind(t, gen),
-      ]);
+        countWrites(recs.length * 2),
+      ].filter(Boolean));
       log(`  mirror: ${t} built — ${recs.length} row(s)${missing ? " (table missing in the base)" : ""} ` +
           `in ${((now() - started) / 1000).toFixed(1)}s`);
       await check(true);
@@ -349,7 +417,20 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
         formula: `IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('${m.delta_from}'))`,
         fields, pageSize: 100, maxPages: 2000,
       });
-      await apply(t, recs);
+      /* Only rows that actually differ from the copy. The two-minute overlap
+         and Airtable counting a computed field as a change brought the same
+         rows back on every delta; each was a billed D1 write. */
+      const keep = spec(t);
+      const same = new Set();
+      for (const part of chunk(recs, 90)) {
+        const r = await db.prepare(`SELECT id, data FROM mirror_rows WHERE tbl = ? AND gen = ? AND id IN (${part.map(() => "?").join(", ")})`)
+          .bind(t, m.gen, ...part.map((x) => x.id)).all();
+        const had = new Map((r.results || []).map((x) => [x.id, x.data]));
+        for (const x of part) if (had.get(x.id) === JSON.stringify(project(x.fields, keep))) same.add(x.id);
+      }
+      await apply(t, recs.filter((x) => !same.has(x.id)));
+      await Promise.all([...pending]);
+      { const c = countWrites(0); if (c) await c.run(); }
       await db.prepare("UPDATE mirror_meta SET delta_from = ?, delta_at = ? WHERE tbl = ?")
         .bind(new Date(started - SLACK_MS).toISOString(), now(), t).run();
       if (recs.length) log(`  mirror: ${t} — ${recs.length} changed row(s) since ${m.delta_from}`);
@@ -371,6 +452,9 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     await check(true);
     const out = [];
     let builds = 0;
+    const spent = await writesToday().catch(() => 0);
+    const overBudget = writeBudget > 0 && spent >= writeBudget;
+    if (overBudget) log(`! mirror: daily write budget reached (${spent} of ${writeBudget} rows) — rebuilds wait for tomorrow`);
     const order = [...(only || Object.keys(tables))].sort((a, b) =>
       Number(meta.get(a)?.full_at || 0) - Number(meta.get(b)?.full_at || 0));
     for (const t of order) {
@@ -378,6 +462,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
       try {
         const due = rebuild || !built(m) || now() - Number(m.full_at) > fullEveryMs;
         if (due && builds >= maxBuilds) continue;
+        if (due && built(m) && overBudget) { out.push({ table: t, skipped: "write budget" }); continue; }
         if (due) { builds++; out.push(await build(at, t)); }
         else if (now() - Number(m.delta_at || 0) > deltaEveryMs &&
                  now() - Number(m.read_at || 0) < activeWithinMs) out.push(await delta(at, t));
@@ -407,7 +492,7 @@ export function createMirror({ db, log = () => {}, tables = MIRROR_TABLES, check
     });
   }
 
-  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, markStale, status, setClientFor,
+  return { spec, rows, stamp, apply, written, refetch, build, delta, maintain, markStale, status, setClientFor, writesToday,
            pending: () => [...pending] };
 }
 
