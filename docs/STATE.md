@@ -2702,3 +2702,26 @@ gets an invite from automations@enout.in. It goes to the owner and to `CALL_INVI
 this off, or both will send.
 
 **Tests.** `test-call-invites.mjs` passes 18/18. It needs `npx wrangler deploy` to go live.
+
+## 3l26 · Going live on Cloudflare is two commands: `scripts/go-live.mjs` (laptop only, no version change)
+
+Ayush, 2026-11-03: "just help me with what I need to execute to make it live." It needs the wrangler
+login that owns `enout-bd-proxy` (account 5a73b76e…; ayush@enout.in cannot see it). Then:
+```sh
+git pull
+node --env-file=.env.local scripts/go-live.mjs            # ends READY; the console stays on Airtable
+node --env-file=.env.local scripts/go-live.mjs --switch   # after hours; ends SWITCHED
+```
+`--rollback` goes back to Airtable without losing a save. Prepare creates or reuses `enout-kpi`,
+binds it, loads the import into an empty database only, deploys and runs the check. There is no API
+token to make: `CF_WRANGLER_LOGIN=1` makes `d1-node.mjs` use the wrangler login and renew it on a
+401. Details are in MIGRATION.md, "Cut-over in two commands". Nothing in the Worker or extension
+changed, so `VERSION` stays where it is.
+
+**Waiting on Ayush:**
+- run prepare;
+- send the `database_id` line it prints, so it goes into git (until then `wrangler.toml` is edited
+  only on his laptop);
+- run `--switch` after hours.
+
+`test-go-live.mjs` passes 27/27.

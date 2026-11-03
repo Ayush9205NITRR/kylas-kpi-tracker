@@ -503,7 +503,42 @@ Two other fixes:
   repair-base on D1.
 - **The report.** `cutover-report.mjs` turns all of the above into one page.
 
-### Cut-over (about 20 minutes, after hours)
+### Cut-over in two commands: `scripts/go-live.mjs`
+Ayush, 2026-11-03: "just help me with what I need to execute to make it live." The steps below are
+now one script, run from the repo folder on the laptop after `npx wrangler login` with the login that
+owns `enout-bd-proxy` (`npx wrangler whoami` lists 5a73b76e…):
+```sh
+git pull
+node --env-file=.env.local scripts/go-live.mjs            # prepare: ends READY (safe any time)
+node --env-file=.env.local scripts/go-live.mjs --switch   # after hours: ends SWITCHED
+node --env-file=.env.local scripts/go-live.mjs --rollback # only if needed: back to Airtable, no save lost
+```
+**Prepare** does six things:
+1. checks the login;
+2. finds or creates `enout-kpi` in APAC;
+3. binds it as `KPI_DB` in `wrangler.toml`;
+4. adds `CF_ACCOUNT_ID`, `KPI_DB_ID` and `CF_WRANGLER_LOGIN=1` to `.env.local`;
+5. loads `db/d1-import.sql`, only into an empty database;
+6. deploys, then runs `cutover.mjs --check`.
+
+**No API token to make.** `CF_WRANGLER_LOGIN=1` lets every laptop script reach D1 on the wrangler
+login (`scripts/wrangler-login.mjs`). That login renews itself when it runs out.
+
+**Switch:**
+- sets `STORE = "d1"` and deploys;
+- runs `cutover.mjs --after`;
+- adds `STORE=d1` to `.env.local`.
+
+If the deploy fails, it puts `STORE` back. `--switch` refuses without a READY from the same database,
+and prepare refuses once switched, so an old copy is never loaded over newer data.
+
+The state is kept in `db/.go-live.json`, which is gitignored. The test is `test-go-live.mjs`.
+
+**Still on Airtable after the switch:** the GitHub Actions jobs (`.github/workflows/*`) run without
+`STORE`. They are run by hand, except `push_to_kylas`, which then finds no new saves in Airtable;
+the Worker's own 02:45 push runs on D1.
+
+### Cut-over by hand (what go-live.mjs does; about 20 minutes, after hours)
 ```sh
 npx wrangler d1 create enout-kpi          # paste the id into wrangler.toml (KPI_DB), uncomment
 node --env-file=.env.local scripts/backfill.mjs --db db/kpi.sqlite

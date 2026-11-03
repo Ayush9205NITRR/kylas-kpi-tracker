@@ -30,3 +30,6 @@ offsite-source-*.csv
 offsite-source-undo-*.json
 reassign-snapshot-*.json
 .allot-jobs.sqlite
+db/.go-live.json
+db/cutover-*.json
+db/d1-import.sql
