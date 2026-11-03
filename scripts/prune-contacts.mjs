@@ -76,13 +76,16 @@ export async function plan(at, { log = console.log } = {}) {
 export const GROWTH = {};
 export async function census(at, { log = console.log, now = new Date() } = {}) {
   const out = {};
-  const since = now.getTime() - 30 * 86400e3;
+  /* The last 7 days, scaled to a month. A 30-day window counted the one-time
+     Companies backfill (9,337 rows made at once) as a month's growth and put
+     the cap 17 days away. */
+  const since = now.getTime() - 7 * 86400e3;
   for (const t of TABLES) {
     const first = t.fields?.[0]?.name;
     try {
       const rows = await at.listAll(t.name, { fields: first ? [first] : [], pageSize: 100, maxPages: 2000 });
       out[t.name] = rows.length;
-      GROWTH[t.name] = rows.filter((r) => Date.parse(r.createdTime || "") >= since).length;
+      GROWTH[t.name] = Math.round(rows.filter((r) => Date.parse(r.createdTime || "") >= since).length * 30 / 7);
     }
     catch (e) { if (!/NOT_FOUND|404/.test(e.message)) log(`  ${t.name}: ${e.message.slice(0, 80)}`); }
   }
@@ -115,7 +118,7 @@ export async function run({ env = process.env, log = console.log, apply = false,
   log(`  keep ${p.keep} (every contact of a worked company, every worked or linked contact)`);
   log(`  remove ${p.drop.length} (companies nobody has worked — their cards read from Kylas)`);
   const fc = forecast(after, GROWTH);
-  log(`\nGrowth, last 30 days (new records): ${Object.entries(GROWTH).filter(([, n]) => n)
+  log(`\nGrowth a month (last 7 days × 30/7): ${Object.entries(GROWTH).filter(([, n]) => n)
     .sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${n}${STEADY.has(t) ? " (trimmed)" : ""}`).join(" · ") || "none"}`);
   log(fc.date ? `At ~${fc.perMonth.toLocaleString("en-IN")} new records a month the base reaches 50,000 around ` +
       `${fc.date.toISOString().slice(0, 10)} (~${fc.months.toFixed(1)} months).` : "The base is not growing.");
