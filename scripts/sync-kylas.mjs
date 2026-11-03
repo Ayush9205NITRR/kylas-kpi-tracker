@@ -39,6 +39,7 @@
 import { createClient, toConsoleContact, toConsoleCompany, idOf } from "./kylas.mjs";
 import { createAirtable } from "./airtable.mjs";
 import { STAGE_RUNG } from "./stages.mjs";
+import { contactRow, movedPastStart } from "./contact-row.mjs";
 
 
 /* Callable, so the same sync runs from a terminal and from a scheduled Worker.
@@ -247,53 +248,48 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
     /* Company links are by Airtable record id, so the ids have to be resolved
        before the contacts are written. */
     const coRec = new Map();
-    for (const r of await readAll("Companies", ["Kylas Company ID"]))
-      coRec.set(String(r.fields?.["Kylas Company ID"] || ""), r.id);
+    /* WORKED COMPANIES: those already holding contacts in Airtable. Only their
+       contacts are written (contact-row.mjs says why). A base without the
+       reverse "Contacts" link, or SYNC_ALL_CONTACTS=1, keeps the old
+       write-everything behaviour. */
+    let coWorked = null;
+    let coRows;
+    try { coRows = await readAll("Companies", ["Kylas Company ID", "Contacts"]); coWorked = new Set(); }
+    catch (e) { if (!/UNKNOWN_FIELD_NAME/.test(e.message)) throw e; coRows = await readAll("Companies", ["Kylas Company ID"]); }
+    for (const r of coRows) {
+      const id = String(r.fields?.["Kylas Company ID"] || "");
+      coRec.set(id, r.id);
+      if (coWorked && (r.fields?.Contacts || []).length) coWorked.add(id);
+    }
+    if (String(env.SYNC_ALL_CONTACTS || "") === "1") coWorked = null;
 
     const rows = [];
     const moves = [];
     let unlinked = 0, firstSeen = 0;
-    for (const raw of want) {
-      const c = toConsoleContact(raw, {
-        ownerName: raw.metaData?.idNameStore?.ownerId?.[String(raw.ownerId)],
-      });
-      const prev = held.get(String(c.kid)) || {};
-      const prevStage = prev["Current Stage"] || "";
-      const prevRank = Number(prev["KPI Rank"] || 0);
-      const rank = Math.max(prevRank, STAGE_RUNG[c.stage] || 0);
-
-      const f = {
-        "Kylas Contact ID": String(c.kid),
-        Name: c.pocName || "",
-        Designation: c.designation || "",
-        LinkedIn: c.linkedin ? (/^https?:/i.test(c.linkedin) ? c.linkedin : "https://" + c.linkedin) : "",
-        Owner: c.owner || "",
-        /* JSON for the console, a plain string for whoever opens the base.
-           Both from the same mapped value, written together, every time. */
-        Phones: c.phones?.length ? JSON.stringify(c.phones) : "",
-        Phone: c.phones?.length
-          ? `${c.phones[0].cc || ""} ${c.phones[0].value || ""}`.trim() : "",
-        Emails: c.emails?.length ? JSON.stringify(c.emails) : "",
-        Email: c.emails?.[0]?.value || "",
-        "Kylas Owner ID": String(c.ownerId || raw.ownerId || ""),
-        Salutation: c.salutation || "",
-        "Source of Data": c.source || "",
-        Remarks: c.remarks || "",
-        "Current Stage": c.stage || "",
-        "KPI Rank": rank,
-        "Kylas Updated At": iso(raw.updatedAt) || undefined,
-      };
-      if (rank > prevRank) f["KPI Rank At"] = new Date().toISOString();
-      if (prevStage && c.stage && prevStage !== c.stage) f["Previous Stage"] = prevStage;
-
-      const coId = String(c.companyId || idOf(raw.company) || "");
-      if (coId && coRec.has(coId)) f.Company = [coRec.get(coId)];
-      else if (coId) unlinked++;
-
-      const row = onlyOwned("Contacts", f);
-      /* The merge key survives the filter whatever else does — an upsert without
-         it would CREATE a duplicate rather than update. */
-      row["Kylas Contact ID"] = String(c.kid);
+    let skipped = 0;
+    const newlyWorked = new Set();
+    const decide = (raw) => {
+      const kid = String(raw.id ?? "");
+      const out = contactRow(raw, held.get(kid) || {}, coRec);
+      const keep = !coWorked || held.has(kid) || coWorked.has(out.coId) || movedPastStart(out.c.stage);
+      if (keep && coWorked && out.coId && !coWorked.has(out.coId)) newlyWorked.add(out.coId);
+      return keep ? out : null;
+    };
+    const kept = [];
+    for (const raw of want) { const o = decide(raw); if (o) kept.push(o); else skipped++; }
+    /* A company that just became worked comes in WHOLE — its other contacts
+       too, so the card read from Airtable is never a partial account. */
+    const have = new Set(kept.map((o) => String(o.c.kid)));
+    for (const coId of [...newlyWorked].slice(0, Number(env.SYNC_FILL_MAX || 50))) {
+      const more = await kylas.contactsForCompany(coId).catch(() => []);
+      for (const raw of (Array.isArray(more) ? more : more?.contacts || [])) {
+        if (have.has(String(raw.id))) continue;
+        have.add(String(raw.id));
+        kept.push(contactRow(raw, held.get(String(raw.id)) || {}, coRec));
+      }
+    }
+    for (const { row, c, coId, prevStage } of kept) {
+      if (coId && !coRec.has(coId)) unlinked++;
       rows.push(row);
 
       /* A MOVE NEEDS A BEFORE. Two cases were being treated as one:
@@ -309,7 +305,7 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
          dashboard Ayush asked to be motivating. An initial state is not an
          event. We record the stage and wait for it to move. */
       if (c.stage && prevStage && prevStage !== c.stage) {
-        const atISO = iso(raw.updatedAt) || new Date().toISOString();
+        const atISO = row["Kylas Updated At"] || new Date().toISOString();
         moves.push({
           kid: String(c.kid),
           Key: `${c.kid}-${atISO}`,
@@ -325,6 +321,8 @@ export async function run({ env = {}, log = () => {}, apply = false, full = fals
     }
 
     log(`  ${want.length} changed · ${rows.length} to write · ${moves.length} stage move(s)` +
+        (skipped ? ` · ${skipped} skipped (company not worked — read from Kylas)` : "") +
+        (newlyWorked.size ? ` · ${newlyWorked.size} compan(ies) newly worked, brought in whole` : "") +
         (firstSeen ? ` · ${firstSeen} seen for the first time (stage recorded, no funnel event)` : "") +
         (unlinked ? ` · ${unlinked} with a company not yet in Airtable` : ""));
     if (!APPLY) {

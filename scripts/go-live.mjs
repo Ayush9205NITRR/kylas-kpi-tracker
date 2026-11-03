@@ -92,6 +92,13 @@ export function jsonOut(s) {
 /* ── the run ── */
 
 export async function main({ argv = process.argv.slice(2), env = process.env, log = console.log } = {}) {
+  /* PAUSED (Ayush, 2026-11-03): "stop all migrations — no cost beyond the $5
+     plan." A second D1 database can only add cost, so nothing here runs until
+     this is lifted on purpose. --rollback stays available. */
+  if (!argv.includes("--rollback") && env.GO_LIVE_UNPAUSE !== "1") {
+    log("The Cloudflare migration is paused (docs/STATE.md 3l28). Nothing was changed.");
+    return { ok: false, reason: "paused" };
+  }
   const ROOT = env.GO_LIVE_ROOT || REPO;
   const P = { toml: join(ROOT, "wrangler.toml"), env: join(ROOT, ".env.local"),
               state: join(ROOT, "db", ".go-live.json"), sql: join(ROOT, "db", "d1-import.sql") };

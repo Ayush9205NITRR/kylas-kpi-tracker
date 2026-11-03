@@ -53,7 +53,7 @@ let out = [];
 const go = async (argv = [], extra = {}) => {
   out = [];
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, GO_LIVE_ROOT: ROOT, WRANGLER_CMD: `${process.execPath} ${join(dir, "wrangler.mjs")}`,
-    GO_LIVE_CUTOVER: cut, ...extra };
+    GO_LIVE_CUTOVER: cut, GO_LIVE_UNPAUSE: "1", ...extra };
   return main({ argv, env, log: (s) => out.push(s) });
 };
 const toml = () => readFileSync(join(ROOT, "wrangler.toml"), "utf8");

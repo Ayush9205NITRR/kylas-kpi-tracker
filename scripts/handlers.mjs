@@ -1932,7 +1932,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                role: roleOf(me), admins: ADMINS.length,
                version: VERSION, startedAt: STARTED,
                /* rows the read copy wrote to D1 today — the October bill was this number, unwatched */
-               mirrorWritesToday: mirror?.writesToday ? await mirror.writesToday().catch(() => null) : null };
+               mirrorWritesToday: mirror?.writesToday ? await mirror.writesToday().catch(() => null) : null,
+               /* records in the copied KPI tables, against Airtable's 50,000-record cap (prune-contacts.mjs) */
+               airtableRecords: mirror ? await mirror.status().then((l) => l.filter((t) => t.table !== ENRICH_TABLE).reduce((a, t) => a + Number(t.rows || 0), 0)).catch(() => null) : null };
     },
 
     /* Everything the console needs when it opens on a company page: the company
@@ -1946,6 +1948,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const held = await fromAirtable("company " + id,
         async () => { const r = await readCompany(airtable, id); return r?.contacts?.length ? r : null; });
       if (held) {
+        /* THE BASE HOLDS ONLY WORKED COMPANIES' CONTACTS (contact-row.mjs). A
+           company that became worked through one save holds that one contact
+           until the others change in Kylas — so the card adds the ones Kylas
+           has and the base does not. Asked of Kylas until the two agree once,
+           then remembered, so a complete account costs nothing more. */
+        const doneKey = `co-complete:${id}`;
+        if (cache && !(await cache.get(doneKey).catch(() => null))) {
+          try {
+            const raw = await kylas.contactsForCompany(id);
+            const list = Array.isArray(raw) ? raw : raw?.contacts || [];
+            const have = new Set(held.contacts.map((x) => String(x.kid)));
+            const missing = list.filter((x) => !have.has(String(x.id)));
+            if (missing.length) held.contacts.push(...await mapContacts(missing, held.company));
+            else await cache.put(doneKey, "1", { ttlSeconds: 365 * 86400 }).catch(() => {});
+          } catch (e) { log(`  company ${id}: could not check Kylas for missing contacts — ${String(e.message).slice(0, 80)}`); }
+        }
         log(`company ${id} — ${held.contacts.length} contact(s) from Airtable`);
         return { company: held.company, contacts: held.contacts, owners: ownerList(),
                  picklists: (await meta()).picklists, source: "airtable" };

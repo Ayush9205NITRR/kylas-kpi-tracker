@@ -2756,3 +2756,38 @@ Usage Based Billing, set an alert on D1 rows written.
 - `test-mirror` 41/41, including: no-change rebuild = 0 rows, one change = 1 row, the budget holds
   rebuilds but not saves.
 - `test-worker` 195/195; a save still costs 38 D1 queries.
+
+## 3l28 · Migration paused; Airtable kept under 50,000 records (no version change beyond 1.81.1)
+
+Ayush, 2026-11-03: "Stop all migrations — no cost beyond the $5 plan. It cannot be that we need more
+than 50K records."
+
+**Migration paused.**
+- `go-live.mjs` refuses to run; only `--rollback` still works. `GO_LIVE_UNPAUSE=1` lifts it, on
+  purpose only.
+- `wrangler.toml` in git has no `KPI_DB` and no `STORE`. Ayush's laptop copy had `KPI_DB` added by
+  the prepare run: `git checkout wrangler.toml`, then `git pull`, then `npx wrangler deploy`.
+- Delete the idle database: `npx wrangler d1 delete enout-kpi`.
+- The billable things are now the Worker, KV and the `enout-bd` mirror. The mirror's writes are held
+  by `MIRROR_WRITE_BUDGET` (3l27).
+
+**Airtable under the cap.** The base held ~57k records, 37.5k of them Contacts: every Kylas contact,
+worked or not. Now (`scripts/contact-row.mjs`):
+- **The sync writes only contacts of worked companies.** A worked company already holds contacts in
+  Airtable, through its reverse `Contacts` link. Contacts already in the base still update. A contact
+  whose stage moves past the first rung in Kylas brings its whole company in.
+- **The company card** (`/company`) adds any contact Kylas has and the base does not. It asks Kylas
+  until the two agree once, then remembers (`co-complete:<id>`).
+- **Unworked companies** keep their Companies row; their card is read from Kylas, as before.
+- **`scripts/prune-contacts.mjs`** removes the contacts of unworked companies.
+  - It is a dry run by default and prints the total against 50,000.
+  - `--apply` writes `prune-undo-*.json` first; `--restore <file>` puts the rows back.
+  - It never removes a contact with a call, event row, stage transition, RCA or flag.
+- **`/health` → `airtableRecords`** shows the count of the copied tables.
+- `SYNC_ALL_CONTACTS=1` restores the old write-everything sync.
+
+**Tests:**
+- test-prune-contacts 12/12, test-worker 195/195, test-mirror 41/41, test-sync-scale 7/7.
+- The `/save` cost cap in test-worker is now 60; it was 50, the Free plan's limit. We run on Workers
+  Paid, and a save right after a card completed from Kylas reads one more call log.
+- test-scale-airtable fails 2 checks, the same as before this change.
