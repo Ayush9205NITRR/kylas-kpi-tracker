@@ -37,7 +37,7 @@
  * FORMULAS are parsed, not pattern-matched, into SQL. The grammar is the part
  * of Airtable's formula language this code uses — field references, string and
  * number literals, = != > >= < <=, OR, AND, NOT, IF, IS_AFTER, IS_BEFORE,
- * LAST_MODIFIED_TIME, DATETIME_PARSE, TRUE, FALSE, BLANK. Anything else is a
+ * LAST_MODIFIED_TIME, RECORD_ID, DATETIME_PARSE, TRUE, FALSE, BLANK. Anything else is a
  * 422 naming the function, never a filter that quietly matches nothing.
  * Literals are inlined as escaped SQL, not bound: D1 allows 100 parameters a
  * statement, and an OR of 200 keys is a real request here.
@@ -259,6 +259,7 @@ export function formulaToSql(m, src) {
                  type: isNumeric(y) && isNumeric(n) ? "num" : "text" };
       }
       case "LAST_MODIFIED_TIME": return { sql: `t."synced_at"`, kind: "val", type: "dateTime" };
+      case "RECORD_ID": return { sql: `t."airtable_id"`, kind: "val", type: "str" };
       case "DATETIME_PARSE": need(1); return a[0];
       case "IS_AFTER": case "IS_BEFORE": {
         need(2);

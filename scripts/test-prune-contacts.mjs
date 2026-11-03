@@ -72,5 +72,17 @@ const row = contactRow({ id: 5, firstName: "Asha", company: { id: 9 }, ownerId: 
   {}, new Map([["9", "recX"]])).row;
 ok("contactRow links the company and keeps the merge key", row["Kylas Contact ID"] === "5" && row.Company?.[0] === "recX", JSON.stringify(row));
 
+console.log("\n4. growth forecast and the push log's 30 days");
+const { forecast } = await import("./prune-contacts.mjs");
+const f = forecast(41000, { "Stage Transitions": 2000, "Push Log": 3000, Contacts: 1000 }, new Date("2026-11-03T00:00:00Z"));
+ok("a trimmed table (Push Log) is not counted as growth", f.perMonth === 3000, JSON.stringify(f));
+ok("9,000 of room at 3,000 a month is three months", Math.abs(f.months - 3) < 0.01 && f.date.toISOString().startsWith("2027-02-01"), f.date?.toISOString());
+const { trimPushLog } = await import("./push-log.mjs");
+const PL = [{ id: "p1", fields: { At: "2026-09-01T00:00:00Z" } }, { id: "p2", fields: { At: "2026-10-30T00:00:00Z" } }];
+const gone = [];
+const plAt = { listAll: async () => PL, list: async () => PL, remove: async (t, ids) => gone.push(...ids) };
+const tr = await trimPushLog(plAt, { days: 30, now: new Date("2026-11-03T00:00:00Z") });
+ok("push log rows older than 30 days are removed, newer kept", tr.removed === 1 && gone.join() === "p1", JSON.stringify(tr));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

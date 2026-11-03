@@ -159,6 +159,10 @@ function matches(row, formula, all) {
     return terms.some((t) => matches(row, t, all));
   }
 
+  /* RECORD_ID() = 'rec…' — one record by its id (a contact's event rows, by its link). */
+  const rid = formula.match(/^RECORD_ID\(\)\s*=\s*'([^']*)'$/i);
+  if (rid) return row.id === rid[1];
+
   /* NOT({Field} = '') — "is filled", as Airtable reads it. */
   const filled = formula.match(/^NOT\(\{([^}]+)\}\s*=\s*''\)$/i);
   if (filled) { const v = row.fields[filled[1]]; return v != null && v !== "" && !(Array.isArray(v) && !v.length); }

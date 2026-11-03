@@ -71,14 +71,33 @@ export async function plan(at, { log = console.log } = {}) {
 }
 
 /* Records per table, the number Airtable counts against the cap. */
-export async function census(at, { log = console.log } = {}) {
+/* Also, per table, how many were CREATED in the last 30 days (Airtable's own
+   createdTime on every record) — the growth the cap has to absorb. */
+export const GROWTH = {};
+export async function census(at, { log = console.log, now = new Date() } = {}) {
   const out = {};
+  const since = now.getTime() - 30 * 86400e3;
   for (const t of TABLES) {
     const first = t.fields?.[0]?.name;
-    try { out[t.name] = (await at.listAll(t.name, { fields: first ? [first] : [], pageSize: 100, maxPages: 2000 })).length; }
+    try {
+      const rows = await at.listAll(t.name, { fields: first ? [first] : [], pageSize: 100, maxPages: 2000 });
+      out[t.name] = rows.length;
+      GROWTH[t.name] = rows.filter((r) => Date.parse(r.createdTime || "") >= since).length;
+    }
     catch (e) { if (!/NOT_FOUND|404/.test(e.message)) log(`  ${t.name}: ${e.message.slice(0, 80)}`); }
   }
   return out;
+}
+
+/* When the base reaches the cap at the last 30 days' net growth. Tables with a
+   retention window (Call Log 30 days, Push Log 30) are at
+   steady state: what they add, the rollup takes away. */
+export const STEADY = new Set(["Call Log", "Push Log"]);
+export function forecast(total, growth, now = new Date()) {
+  const perMonth = Object.entries(growth).filter(([t]) => !STEADY.has(t)).reduce((a, [, n]) => a + n, 0);
+  if (perMonth <= 0) return { perMonth: 0, date: null };
+  const months = (CAP - total) / perMonth;
+  return { perMonth, months, date: new Date(now.getTime() + months * 30 * 86400e3) };
 }
 
 export async function run({ env = process.env, log = console.log, apply = false, at = null, now = new Date(),
@@ -95,6 +114,11 @@ export async function run({ env = process.env, log = console.log, apply = false,
   log(`\nContacts: ${p.contacts} · worked companies: ${p.workedCompanies} of ${p.companies}`);
   log(`  keep ${p.keep} (every contact of a worked company, every worked or linked contact)`);
   log(`  remove ${p.drop.length} (companies nobody has worked — their cards read from Kylas)`);
+  const fc = forecast(after, GROWTH);
+  log(`\nGrowth, last 30 days (new records): ${Object.entries(GROWTH).filter(([, n]) => n)
+    .sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${n}${STEADY.has(t) ? " (trimmed)" : ""}`).join(" · ") || "none"}`);
+  log(fc.date ? `At ~${fc.perMonth.toLocaleString("en-IN")} new records a month the base reaches 50,000 around ` +
+      `${fc.date.toISOString().slice(0, 10)} (~${fc.months.toFixed(1)} months).` : "The base is not growing.");
   log(`\nRecords after: ${after.toLocaleString("en-IN")} of ${CAP.toLocaleString("en-IN")}` +
       (after < CAP * 0.9 ? "  ✓ under the cap with room" : after < CAP ? "  ! under the cap, but close" : "  ✗ still over the cap"));
   if (!apply) { log(`\nDRY RUN — nothing deleted. To delete: add --apply`); return { total, after, drop: p.drop.length, applied: false }; }

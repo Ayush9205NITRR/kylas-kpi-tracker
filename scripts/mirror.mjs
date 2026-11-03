@@ -53,7 +53,7 @@ export const MIRROR_TABLES = {
                   "Is Right POC", "Is Discovery", "KPI Rank At", "First Worked At",
                   "First Picked At", "Company Kylas ID"]),
   "Event Rows": ["Row Key", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks",
-                 "Contact", "Removed At", "Kylas Contact ID (from Contact)"],
+                 "Contact", "Removed At"],
   "Call Log": ["Called At", "Owner", "Outcome", "Contact", "Next Call Date", "Duration", "Stage Set"],
   "Call Rollup": ["Day", "Owner", "Outcome", "Calls", "Talk Seconds", "Stage Set"],
   "Dialler Calls": ["Key", "Called At", "Owner", "Duration", "Contact Kylas ID"],

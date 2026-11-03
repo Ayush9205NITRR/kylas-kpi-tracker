@@ -228,6 +228,11 @@ const JOBS = {
   rollup: async (env, log) => {
     const out = await (await import("../scripts/rollup-calls.mjs")).run({
       env, log, apply: true, retainDays: Number(env.CALL_RETAIN_DAYS || 30) });
+    /* And the push log, to its 30 days — Airtable's 50,000-record cap. */
+    const { createAirtable } = await import("../scripts/airtable.mjs");
+    out.pushLog = await (await import("../scripts/push-log.mjs")).trimPushLog(
+      createAirtable(env.AIRTABLE_PAT, env.AIRTABLE_BASE, { log: () => {} }),
+      { days: Number(env.PUSH_LOG_RETAIN_DAYS || 30), log });
     return { ...out, after: await (await handlers(env, log)).maintain({
       rebuild: true, only: ["Call Log", "Call Rollup"] }) };
   },

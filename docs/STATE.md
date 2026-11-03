@@ -2791,3 +2791,32 @@ worked or not. Now (`scripts/contact-row.mjs`):
 - The `/save` cost cap in test-worker is now 60; it was 50, the Free plan's limit. We run on Workers
   Paid, and a save right after a card completed from Kylas reads one more call log.
 - test-scale-airtable fails 2 checks, the same as before this change.
+
+## 3l29 · Admin sees the person picked; event rows show on the card; Push Log keeps 30 days (1.81.2)
+
+Ayush, 2026-11-03:
+- "Sejal picked as admin, the ladder still shows me."
+- "the POC details Muskan entered do not show to the admin."
+- "when will Airtable overfill?"
+
+**Who → the person.**
+- The dashboard asked the period report for `""` ("me") whenever one person was picked. The report also
+  feeds the ladder, so the admin saw their own numbers.
+- It now passes the id (`reportSection(DASH_OWNER)`). The heading reads "Sejal's funnel".
+
+**Event rows on a contact.**
+- `readContact` and the save's stale-row check read Event Rows by `{Kylas Contact ID (from Contact)}`.
+  The live base has no such lookup. Airtable refused, a `.catch` returned `[]`, and the card was empty.
+- `eventRowsOf()` now reads the ids in the contact's own reverse `Event Rows` link, through
+  `RECORD_ID()`, which the mock and D1 engine now answer too.
+- A save that sends no rows removes none. A card opened before this fix showed none, and its save must
+  not wipe the contact's rows.
+- `test-event-rows` runs against a base without the lookup.
+
+**Airtable growth.**
+- The `prune-contacts.mjs` dry run prints each table's last-30-day creations and the date the base
+  reaches 50,000 at that rate. Call Log and Push Log are left out, because they are trimmed.
+- The weekly rollup now also removes Push Log rows older than `PUSH_LOG_RETAIN_DAYS` (30). At up to
+  100 rows a night, it was the fastest-growing table.
+- Stage Transitions, Focus History and Dialler Calls are kept. The ladder and talk time read them for
+  any period.

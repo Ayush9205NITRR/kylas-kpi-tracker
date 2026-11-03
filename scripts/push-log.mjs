@@ -174,3 +174,21 @@ export function summarisePush(rows) {
   out.mapProblems = out.mapProblems.filter((p) => (seen.has(p.key) ? false : seen.add(p.key)));
   return out;
 }
+
+/* KEEP 30 DAYS (2026-11-03). Up to PUSH_LIMIT rows a night was the base's
+   fastest-growing table, and Airtable stops a base at 50,000 records. The log
+   answers "did last night's push work"; a month of it answers that. Run by
+   the weekly rollup cron. */
+export async function trimPushLog(at, { days = 30, log = () => {}, now = new Date() } = {}) {
+  try {
+    const cut = now.getTime() - days * 86400e3;
+    const old = (await listTolerant(at, PUSH_LOG, { fields: ["At"], pageSize: 100, maxPages: 500 }))
+      .filter((r) => { const t = Date.parse(r.fields?.At || r.createdTime || ""); return Number.isFinite(t) && t < cut; });
+    for (let i = 0; i < old.length; i += 10) await at.remove(PUSH_LOG, old.slice(i, i + 10).map((r) => r.id));
+    if (old.length) log(`push log: removed ${old.length} row(s) older than ${days} days`);
+    return { removed: old.length };
+  } catch (e) {
+    log(`! push log trim: ${short(e.message, 140)}`);
+    return { removed: 0, error: short(e.message, 140) };
+  }
+}

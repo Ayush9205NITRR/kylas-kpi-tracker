@@ -2269,7 +2269,7 @@
 
     host.innerHTML = `
       <div class="vhead">
-        <h2>${team ? "Team" : "My"} funnel</h2>
+        <h2>${team ? "Team" : DASH_OWNER ? `${esc(firstName((CACHE.owners.find((o) => String(o.id) === String(DASH_OWNER)) || {}).name))}'s` : "My"} funnel</h2>
         <span class="vsub">Every number counts companies, not contacts.</span>
       </div>
       <div class="vfilters">
@@ -2312,7 +2312,10 @@
            Same numbers, same report, one request. */
         ladderHTML(REP.data)}
       ${scoreSection(rollup(DATA, dbase, dbase.length > 0))}
-      <div class="vsec">${reportSection(DASH_OWNER === "all" ? "all" : "")}</div>
+      <div class="vsec">${/* THE PERSON PICKED IN "Who", not "me" (Ayush, 2026-11-03: Sejal picked,
+           the ladder still showed Ayush). This report feeds the ladder above too,
+           so a single person used to collapse to the admin's own numbers. */
+        reportSection(DASH_OWNER)}</div>
       <div class="vsec">${modeSplitSection()}</div>
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
            something. On your own numbers it is one row saying what the four

@@ -380,9 +380,7 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
   const prevP = c.kid ? at.find("Contacts", `{Kylas Contact ID} = '${esc(c.kid)}'`) : Promise.resolve(null);
   /* Held for step 4: which rows this contact already has, so one deleted in
      the console can be deleted here. Only needs the Kylas id. */
-  const heldP = c.kid
-    ? at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(c.kid)}'`).catch(() => [])
-    : Promise.resolve([]);
+  const heldP = prevP.then((p) => eventRowsOf(at, p)).catch(() => []);
   const [companyRec, prev] = await Promise.all([companyP, prevP]);
   if (companyRec) wrote.push("company");
   const prevRank = Number(prev?.fields?.["KPI Rank"] || 0);
@@ -515,6 +513,11 @@ export async function syncContact(at, contact, call, { log = () => {} } = {}) {
      counting toward Right POC forever. */
   if (c.kid) after.push((async () => {
     const held = await heldP;
+    /* NEVER FROM AN EMPTY CARD. Until 1.81.2 a card could open with no rows
+       (the lookup bug below), and saving it would now delete every row the
+       contact has. A card that sends none removes none; the last row on a
+       contact is removed by clearing its fields instead. */
+    if (!rows.length) return;
     const keep = new Set(rows.map((r) => r.rowKey));
     const stale = held.filter((h) => h.fields["Row Key"] && !keep.has(h.fields["Row Key"])).map((h) => h.id);
     if (stale.length) { await at.remove("Event Rows", stale); wrote.push(`removed ${stale.length} stale row(s)`); }
@@ -817,6 +820,32 @@ async function companyIndex(at, fresh) {
   return { byRec, byKid };
 }
 
+/* A CONTACT'S EVENT ROWS, BY ITS OWN LINK (2026-11-03). These were read by
+   {Kylas Contact ID (from Contact)}, a lookup field the live base never had:
+   Airtable refused the read, a .catch turned that into "no rows", and an admin
+   opening a contact Muskan had saved saw an empty card. The contact record
+   already lists its rows in the reverse "Event Rows" link, so those ids are
+   read directly, 40 to a request. */
+let noEventLookup = false;
+export async function eventRowsOf(at, contactRec) {
+  if (!contactRec) return [];
+  const ids = contactRec.fields?.["Event Rows"];
+  /* A stand-in that keeps no reverse links (the test mock) — the lookup it can answer. */
+  /* Airtable leaves an empty link out of the record, so on the live base this
+     also runs for a contact with no rows; the base refuses the lookup once and
+     it is not asked again. */
+  if (ids === undefined && contactRec.fields?.["Kylas Contact ID"] && !noEventLookup)
+    return at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(contactRec.fields["Kylas Contact ID"])}'`, 100)
+      .catch(() => { noEventLookup = true; return []; });
+  if (!ids?.length) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += 40) {
+    const part = ids.slice(i, i + 40);
+    out.push(...await at.list("Event Rows", `OR(${part.map((id) => `RECORD_ID() = '${esc(id)}'`).join(", ")})`, 100));
+  }
+  return out;
+}
+
 /* One contact by its Kylas id. Returns null when Airtable does not hold it —
    never a blank contact carrying only the id, which is what made a contact
    page look like a real empty record. */
@@ -825,10 +854,7 @@ export async function readContact(at, kid) {
   if (!rec) return null;
   /* This contact's rows only — the same filter syncContact already uses. The
      bulk scan below is for a whole queue and is the wrong tool for one card. */
-  const [{ byRec }, events] = await Promise.all([
-    companyIndex(at),
-    at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(kid)}'`, 50).catch(() => []),
-  ]);
+  const [{ byRec }, events] = await Promise.all([companyIndex(at), eventRowsOf(at, rec)]);
   const co = byRec.get((rec.fields?.Company || [])[0]) || null;
   return toConsoleContactFromAirtable(rec, { company: co, events });
 }
