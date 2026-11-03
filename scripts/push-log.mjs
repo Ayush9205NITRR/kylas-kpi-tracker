@@ -192,3 +192,18 @@ export async function trimPushLog(at, { days = 30, log = () => {}, now = new Dat
     return { removed: 0, error: short(e.message, 140) };
   }
 }
+
+/* The same, for any dated table nothing reads back (Focus History). */
+export async function trimOld(at, table, field, { days = 30, log = () => {}, now = new Date() } = {}) {
+  try {
+    const cut = now.getTime() - days * 86400e3;
+    const old = (await listTolerant(at, table, { fields: [field], pageSize: 100, maxPages: 500 }))
+      .filter((r) => { const t = Date.parse(r.fields?.[field] || r.createdTime || ""); return Number.isFinite(t) && t < cut; });
+    for (let i = 0; i < old.length; i += 10) await at.remove(table, old.slice(i, i + 10).map((r) => r.id));
+    if (old.length) log(`${table}: removed ${old.length} row(s) older than ${days} days`);
+    return { removed: old.length };
+  } catch (e) {
+    log(`! ${table} trim: ${short(e.message, 140)}`);
+    return { removed: 0, error: short(e.message, 140) };
+  }
+}

@@ -34,3 +34,4 @@ db/.go-live.json
 db/cutover-*.json
 db/d1-import.sql
 prune-undo-*.json
+compact-undo-*.json

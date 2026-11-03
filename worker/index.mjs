@@ -233,6 +233,10 @@ const JOBS = {
     out.pushLog = await (await import("../scripts/push-log.mjs")).trimPushLog(
       createAirtable(env.AIRTABLE_PAT, env.AIRTABLE_BASE, { log: () => {} }),
       { days: Number(env.PUSH_LOG_RETAIN_DAYS || 30), log });
+    /* Focus History: written, never read — 30 days (compact-history.mjs). */
+    out.focusHistory = await (await import("../scripts/push-log.mjs")).trimOld(
+      createAirtable(env.AIRTABLE_PAT, env.AIRTABLE_BASE, { log: () => {} }), "Focus History", "Changed At",
+      { days: Number(env.FOCUS_HISTORY_RETAIN_DAYS || 30), log });
     return { ...out, after: await (await handlers(env, log)).maintain({
       rebuild: true, only: ["Call Log", "Call Rollup"] }) };
   },

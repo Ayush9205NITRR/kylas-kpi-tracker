@@ -2820,3 +2820,25 @@ Ayush, 2026-11-03:
   100 rows a night, it was the fastest-growing table.
 - Stage Transitions, Focus History and Dialler Calls are kept. The ladder and talk time read them for
   any period.
+
+## 3l30 · Old history compacted in Airtable, numbers proven unchanged (1.81.3, Worker only)
+
+Ayush, 2026-11-03: "keep it simple — all data in one place." Everything stays in Airtable.
+
+**`scripts/compact-history.mjs`** (dry run by default; `--apply`; `--restore`). It removes Stage
+Transitions older than 30 days that no number reads. It keeps:
+- per company, owner and floor: the first arrival;
+- per company, owner and day: the first worked row and the first picked row;
+- per company: the first qualified row;
+- per contact: the first row.
+
+**The gate.** It compares every owner's first arrivals, the touches by day through year, and the
+qualified dates, on all rows against the kept rows. One difference and nothing is deleted.
+`test-compact-history` proves the full `report()` is identical at every level, for the team and for
+each owner.
+
+**How much it saves is the dry run's to say.** On random test data it was only 3%. Each day's numbers
+need one row per company, owner and day, and those are mostly distinct already.
+
+**Focus History**, which is written and never read, now keeps 30 days through the weekly cron. The
+dry run removes its older rows too.

@@ -95,7 +95,7 @@ export async function census(at, { log = console.log, now = new Date() } = {}) {
 /* When the base reaches the cap at the last 30 days' net growth. Tables with a
    retention window (Call Log 30 days, Push Log 30) are at
    steady state: what they add, the rollup takes away. */
-export const STEADY = new Set(["Call Log", "Push Log"]);
+export const STEADY = new Set(["Call Log", "Push Log", "Focus History"]);
 export function forecast(total, growth, now = new Date()) {
   const perMonth = Object.entries(growth).filter(([t]) => !STEADY.has(t)).reduce((a, [, n]) => a + n, 0);
   if (perMonth <= 0) return { perMonth: 0, date: null };
