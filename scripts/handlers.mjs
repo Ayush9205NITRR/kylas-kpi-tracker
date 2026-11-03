@@ -512,7 +512,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
      people follow it, Ayush 2026-10-22). Done only when read back. */
   async function performAllot(item) {
     const apiUser = String((await keyOwner().catch(() => null))?.id || "");
-    return performAllotItem({ kylas, item, apiUser });
+    const r = await performAllotItem({ kylas, item, apiUser });
+    /* THE COPY FOLLOWS KYLAS (Ayush, 2026-11-03: "company ho gayi, uske
+       contacts console mein abhi bhi purane owner ke paas"). The move went to
+       Kylas only; the contact card reads Airtable, which kept the old owner
+       until a sync happened to see the contact. So every contact Kylas moved
+       is written here too — only the ones the base already holds, by upsert on
+       the Kylas id with the two owner columns and nothing else. Never fails
+       the move: Kylas is the record, this is the copy. */
+    const moved = r?.movedIds || [];
+    if (airtable && moved.length && item.to_id) {
+      try {
+        const name = (await ownerName(item.to_id)) || "";
+        const held = [];
+        for (let i = 0; i < moved.length; i += 40) {
+          const part = moved.slice(i, i + 40);
+          const f = `OR(${part.map((id) => `{Kylas Contact ID} = '${id}'`).join(", ")})`;
+          held.push(...await airtable.listAll("Contacts", { fields: ["Kylas Contact ID"], formula: f, pageSize: 100, maxPages: 2 }));
+        }
+        const rows = held.map((x) => ({ "Kylas Contact ID": String(x.fields?.["Kylas Contact ID"]),
+          "Kylas Owner ID": String(item.to_id), ...(name ? { Owner: name } : {}) }));
+        if (rows.length) await airtable.upsertMany("Contacts", "Kylas Contact ID", rows);
+        if (item.kind !== "contacts" && r.ok && name)
+          await airtable.upsertMany("Companies", "Kylas Company ID",
+            [{ "Kylas Company ID": String(item.company_id), Owner: name, "Kylas Owner ID": String(item.to_id) }]).catch(() => {});
+        r.airtableOwners = rows.length;
+      } catch (e) { log(`! allot: Kylas moved ${moved.length} contact(s) but the copy kept the old owner — ${String(e.message).slice(0, 120)}`); }
+    }
+    return r;
   }
 
   const companyCache = new Map();

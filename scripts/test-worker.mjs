@@ -1290,6 +1290,15 @@ console.log('\n11. a copy that is short of the account is not the account');
   const step = await post(1702, '/allot-jobs/step', { id: made.body.job?.id });
   check('a step runs the item and reports progress', step.status === 200 && step.body.ran?.ran === 1 && step.body.job?.finished === true,
         `${step.status} ${JSON.stringify(step.body).slice(0, 220)}`);
+  /* THE CONSOLE'S COPY FOLLOWS (2026-11-03): contacts Kylas moved get the new
+     owner in Airtable too, or the contact card keeps showing the old one. */
+  const atW0 = (await (await fetch('http://127.0.0.1:9901/__writes', { headers: { Authorization: 'Bearer x' } })).json()).writes.length;
+  const cj = await post(1705, '/allot-jobs', { kind: 'contacts', items: [{ companyId: 1776620, to: 74726 }] });
+  const cs = await post(1706, '/allot-jobs/step', { id: cj.body.job?.id });
+  const atW = (await (await fetch('http://127.0.0.1:9901/__writes', { headers: { Authorization: 'Bearer x' } })).json()).writes.slice(atW0);
+  check('moved contacts carry the new owner in the copy (Airtable), not only in Kylas',
+        cs.status === 200 && atW.some((w) => w.fields && w.fields['Kylas Owner ID'] === '74726' && /Priya/.test(w.fields.Owner || '')),
+        `${cs.status} ${JSON.stringify(cs.body).slice(0, 200)}`);
   const api = await post(1703, '/allot-jobs', { items: [{ companyId: 903, to: 74725 }] });
   check('never to the API user', api.status === 400, `${api.status} ${api.body.error}`);
   const assoc = await post(1704, '/allot-jobs', { items: [{ companyId: 903, to: 74726 }] }, { ADMIN_EMAILS: 'somebody.else@enout.in' });

@@ -403,12 +403,12 @@ export async function allotOne({ kylas, id, to, leaveActive = false, apiUser = "
         const r = await kylas.raw("PUT", `/v1/contacts/${p.id}/owner`, { ownerId: Number(to) });
         /* The contact endpoint says what it did — believe that, not the 200. */
         if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(p.id), why: `owner is ${r.newOwnerId}` });
-        else out.contactsMoved++;
+        else { out.contactsMoved++; (out.movedIds ||= []).push(String(p.id)); }
       } catch (e) {
         /* 002109 "Entity is already owned by given user": the search was a
            moment behind a contact that is already on `to` — done, not failed
            (2026-10-22, two of 1,294 in the live align run). */
-        if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
+        if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; (out.movedIds ||= []).push(String(p.id)); continue; }
         out.contactsFailed.push({ id: String(p.id), why: String(e.message || e).slice(0, 120) });
       }
     }
@@ -449,9 +449,9 @@ export async function allotContacts({ kylas, companyId, contactIds = null, to, a
     try {
       const r = await kylas.raw("PUT", `/v1/contacts/${cid}/owner`, { ownerId: Number(to) });
       if (r && r.newOwnerId != null && String(r.newOwnerId) !== to) out.contactsFailed.push({ id: String(cid), why: `owner is ${r.newOwnerId}` });
-      else out.contactsMoved++;
+      else { out.contactsMoved++; (out.movedIds ||= []).push(String(cid)); }
     } catch (e) {
-      if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; continue; }
+      if (/002109|already owned by given user/i.test(String(e.message || e))) { out.contactsMoved++; (out.movedIds ||= []).push(String(cid)); continue; }
       if (e?.status === 429 || e?.status >= 500) throw e;          /* the job retries the whole batch */
       out.contactsFailed.push({ id: String(cid), why: String(e.message || e).slice(0, 120) });
     }

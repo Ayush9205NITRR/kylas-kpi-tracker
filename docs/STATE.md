@@ -2842,3 +2842,17 @@ need one row per company, owner and day, and those are mostly distinct already.
 
 **Focus History**, which is written and never read, now keeps 30 days through the weekly cron. The
 dry run removes its older rows too.
+
+## 3l31 · Re-assignment updates the console's copy too (1.81.4)
+
+Ayush, 2026-11-03: "the company is re-assigned, but its contacts still show the old owner in the
+console." The allot job moved the company and its contacts **in Kylas** only. The contact card reads
+Airtable, which kept the old owner until a sync happened to see the contact.
+
+**Fix.** `performAllot` (`handlers.mjs`) now writes `Owner` and `Kylas Owner ID` into Airtable for
+every contact Kylas confirmed moved, plus the company's owner. Only contacts the base already holds
+are written. `reassign.mjs` records `movedIds`. A failure here is logged and never fails the move.
+`test-worker` covers it with a check that fails without the fix.
+
+**Accounts moved before 1.81.4** still show the old owner on their contacts. To repair them once:
+`node --env-file=.env.local scripts/sync-kylas.mjs --contacts --full --apply`.
