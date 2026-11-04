@@ -28,6 +28,7 @@
  */
 import { createClient, toConsoleContact, toConsoleCompany, lookupName, idOf, stageCode, callNotes, kylasRemarksOf,
          toKylasContact, toKylasCallLog, renderRemarks, mergeRemarks, mergeNote, clipBlock, toUser } from "./kylas.mjs";
+import { lastCallsByCompany as lastCallsOf, withLastCall } from "./last-call.mjs";
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
@@ -1925,8 +1926,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* The Kylas dialler's calls — "called" includes them (below-activation.mjs). */
       listTolerant(airtable, "Dialler Calls", { fields: ["Called At", "Contact Kylas ID"], pageSize: 100, maxPages: 2000 }).catch(() => []),
     ]);
-    return accountProgress({ companies, contacts, transitions, calls, dialler, today: todayLocal(), tzMin: TZ_MIN });
+    const out = accountProgress({ companies, contacts, transitions, calls, dialler, today: todayLocal(), tzMin: TZ_MIN });
+    /* The latest Kylas call per CONTACT, for every call kept — so a contact the
+       base no longer holds still dates its company (lastCallFor, below). */
+    out.dialByContact = new Map();
+    for (const r of dialler) {
+      const k = String(r.fields?.["Contact Kylas ID"] || ""), at = r.fields?.["Called At"];
+      if (k && at && (!out.dialByContact.has(k) || at > out.dialByContact.get(k))) out.dialByContact.set(k, at);
+    }
+    return out;
   });
+  /* scripts/last-call.mjs says why. */
+  const lastCallsByCompany = async (prog) => lastCallsOf(prog, await csLoad().catch(() => null));
   const progress = async () => {
     if (!airtable) return { byCompany: new Map(), followups: new Map() };
     try { return await progressData(); }
@@ -2199,6 +2210,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite(), enrichByCompany()]);
           const { byCompany: prog } = await progress();
           const csIdx = await contactStagesByCompany().catch(() => null);
+          const lastCalls = await lastCallsByCompany(await progress());
           const kylasBool = new Map((crawlNow?.companies || []).filter((c) => c.booleanPost).map((c) => [String(c.id), c.booleanPost]));
           for (const co of mirror) {
             /* Only where there is something: a key on every one of six
@@ -2209,6 +2221,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             if (e || kb) co.enrich = kb ? { ...(e || {}), bp: kb } : e;     /* Kylas' Boolean post wins */
             co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
             const p = prog.get(String(co.id));
+            Object.assign(co, withLastCall(co, lastCalls));
             co.nextCall = p?.nextCall || null;
             /* THE ACCOUNT'S OWN STAGE, CALCULATED: the highest stage among
                ALL its Kylas contacts, or the KPI base's floor if that is
@@ -2294,13 +2307,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);
         if (co.id && co.name) companyNames.set(String(co.id), co.name);
       }
-      const [offsite, fromKylas, fromList, enrich, { byCompany: prog }, csIdx] = await Promise.all([
+      const [offsite, fromKylas, fromList, enrich, progAll, csIdx] = await Promise.all([
         offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), enrichByCompany(), progress(),
         contactStagesByCompany().catch(() => null)]);
+      const prog = progAll.byCompany;
+      const lastCalls = await lastCallsByCompany(progAll);
       const companies = crawl.companies.map(({ offsiteRaw: _raw, booleanPost: kb, ...co }) => ({ ...co,
         offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
         /* Only where there is something — see the Airtable path. */
         ...(enrich.get(String(co.id)) || kb ? { enrich: kb ? { ...(enrich.get(String(co.id)) || {}), bp: kb } : enrich.get(String(co.id)) } : {}),
+        ...withLastCall(co, lastCalls),
         nextCall: prog.get(String(co.id))?.nextCall || null,
         /* ACCOUNT PIPELINE STAGE, CALCULATED — Ayush, 2026-09-29: "it is a
            calculated field, not a reference field ... agar mere pass ek

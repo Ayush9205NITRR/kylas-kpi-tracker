@@ -2881,3 +2881,21 @@ dropdown was `ownerList()`: only the owner names this instance happened to have 
 
 All seven routes that return `owners` use it. `test-worker` is 200/200, with two new checks that fail
 without the change.
+
+## 3l34 · Last call from every call kept (1.81.7)
+
+Ayush, 2026-11-04: the accounts list's **Last call** was wrong. Zydus read "113d ago" with its
+call-back overdue 32 days. The Call Log keeps 30 days, so after that the company's rollup forgot the
+call, and the column fell back to Kylas' stale `cfLastCalledAtDate`.
+
+`scripts/last-call.mjs` now gives `/companies` (both paths) the newest of three sources:
+- the console's calls;
+- Dialler Calls, the Kylas call logs, kept for good; a contact no longer in the base is matched to its
+  company through the contact index;
+- the Kylas field, last.
+
+`lastCallSource` says which one it was. No extension change. `test-last-call` is 6/6 and
+`test-worker` 200/200.
+
+**Limit:** a call made outside Kylas (from a personal phone, never logged) cannot be seen by any of
+the three.
