@@ -836,7 +836,9 @@ export async function eventRowsOf(at, contactRec) {
      it is not asked again. */
   if (ids === undefined && contactRec.fields?.["Kylas Contact ID"] && !noEventLookup)
     return at.list("Event Rows", `{Kylas Contact ID (from Contact)} = '${esc(contactRec.fields["Kylas Contact ID"])}'`, 100)
-      .catch(() => { noEventLookup = true; return []; });
+      /* Only a base that does not HAVE the lookup turns it off for good; a 429
+         or a timeout is today's problem, not the base's shape. */
+      .catch((e) => { if (/INVALID_FILTER|UNKNOWN_FIELD|Unknown field|422/i.test(String(e?.message || e))) noEventLookup = true; return []; });
   if (!ids?.length) return [];
   const out = [];
   for (let i = 0; i < ids.length; i += 40) {

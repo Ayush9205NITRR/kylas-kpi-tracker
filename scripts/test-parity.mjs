@@ -27,6 +27,8 @@ const BINDING_EXPECTED = {
     "reads the mock's write log; in-process D1 writes do not pass through the mock (the row is in D1)",
   "Company List is copied from the RESEARCH base, not the KPI one":
     "passes on Airtable only because the mock ignores the base id; the worker that refreshes the copy here has no RESEARCH_BASE, production always does",
+  "moved contacts carry the new owner in the copy (Airtable), not only in Kylas":
+    "reads the mock's write log, like the call-back check above; on the binding the owner is written to D1 in-process",
   "Account Pipeline Stage reaches the accounts list": "follows from the Company List copy above",
   "...and so do the two links the columns render": "follows from the Company List copy above",
   "/enrich-status says where the enrichment came from and how much joined": "follows from the Company List copy above",

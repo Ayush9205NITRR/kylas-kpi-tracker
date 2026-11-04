@@ -1067,8 +1067,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   async function ownerList(mustHave = []) {
     /* The owners this card actually shows are always named, even where Kylas
        offers no user list — so a current owner never reads "Choose". */
-    for (const id of new Set(mustHave.map((x) => String(x || "")).filter(Boolean)))
-      if (!owners.has(id)) await ownerName(id).catch(() => null);
+    /* A name the card already carries is taken as it is — no Kylas request,
+       which thirty cold instances at once turned into a wall of 429s. */
+    for (const x of mustHave) {
+      const id = String((x && typeof x === "object" ? x.id : x) || ""), nm = x && typeof x === "object" ? x.name : "";
+      if (!id || owners.has(id)) continue;
+      if (nm) owners.set(id, nm); else await ownerName(id).catch(() => null);
+    }
     const local = ownerListLocal();
     try {
       /* Its own cache entry: the shared "kylas-users" one also answers who is
@@ -2060,7 +2065,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         }
         log(`company ${id} — ${held.contacts.length} contact(s) from Airtable`);
         return { company: held.company, contacts: held.contacts,
-                 owners: await ownerList([held.company?.ownerId, ...held.contacts.map((x) => x.ownerId)]),
+                 owners: await ownerList([{ id: held.company?.ownerId, name: held.company?.owner }, ...held.contacts.map((x) => ({ id: x.ownerId, name: x.owner }))]),
                  picklists: (await meta()).picklists, source: "airtable" };
       }
       /* Kept for every instance, briefly: reopening an account nobody has
@@ -2073,7 +2078,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       });
       const { company, contacts } = await kc();
       log(`company ${id} — ${contacts.length} contact(s) from Kylas`);
-      return { company, contacts, owners: await ownerList([company?.ownerId, ...contacts.map((x) => x.ownerId)]),
+      return { company, contacts, owners: await ownerList([{ id: company?.ownerId, name: company?.owner }, ...contacts.map((x) => ({ id: x.ownerId, name: x.owner }))]),
                picklists: (await meta()).picklists, source: "kylas" };
     },
 

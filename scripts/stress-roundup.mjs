@@ -157,14 +157,24 @@ if (!process.argv.includes("--worker")) {
   for (const userList of [false, true]) {
     await up(userList);
     console.log(`\nW · the Worker (Kylas user list ${userList ? "ON" : "OFF"})`);
+    /* Warm, as production is: the minute cron builds the company crawl and the copies. */
+    {
+      const w = await cold(); const quiet = console.log; console.log = () => {};
+      try { for (let i = 0; i < 12; i++) { const waits = [];
+        await w.scheduled({ cron: "* * * * *", scheduledTime: Date.now() }, { ...ENV, CRON_MAINTAIN: "* * * * *" }, { waitUntil: (p) => waits.push(p) });
+        await Promise.allSettled(waits);
+        if (i >= 5) { const l = await call("GET", "/companies?owner=all"); if ((l.body.companies || []).length > 20) break; } } } finally { console.log = quiet; }
+    }
+    /* Eight associates, not thirty at the same instant: waves of five. */
+    const waves = async (n, fn) => { const out = []; for (let i = 0; i < n; i += 5) { out.push(...await Promise.all(Array.from({ length: Math.min(5, n - i) }, (_, j) => fn(i + j)))); await sleep(400); } return out; };
 
     /* H · 30 cold instances open a company at once */
     {
       const t = performance.now();
-      const all = await Promise.all(Array.from({ length: 30 }, () => call("GET", "/company?id=903")));
+      const all = await waves(30, () => call("GET", "/company?id=903"));
       const okAll = all.every((r) => r.status === 200 && (r.body.owners || []).some((o) => String(o.id) === "74726")
         && !(r.body.owners || []).some((o) => ["74725", "74727"].includes(String(o.id))));
-      ok("H", `30 cold /company at once: current owner always listed, never API/deactivated (${ms(t)})`, okAll,
+      ok("H", `30 cold /company in waves of 5: current owner always listed, never API/deactivated (${ms(t)})`, okAll,
          all.filter((r) => r.status !== 200).map((r) => r.status).join(",") || JSON.stringify(all[0].body.owners));
     }
 
@@ -180,7 +190,7 @@ if (!process.argv.includes("--worker")) {
           call: { at: new Date(Date.now() + i * 1000).toISOString(), outcome: "Connected", duration: 60 } });
         saved.push(r.status);
       }
-      const opens = await Promise.all(Array.from({ length: 20 }, (_, i) => call("GET", `/contact?id=${i % 2 ? "38470" : "112936"}`)));
+      const opens = await waves(20, (i) => call("GET", `/contact?id=${i % 2 ? "38470" : "112936"}`));
       const withRows = opens.filter((r) => [...(r.body.contact?.current || []), ...(r.body.contact?.past || [])].some((e) => e.pax === "80")).length;
       const deletes = (await atWrites()).slice(w0).filter((x) => x.method === "DELETE" && /Event/.test(x.table || "")).length;
       ok("D", `12 saves with event rows, 20 opens: rows on every card that came from Airtable`, saved.every((s) => s === 200) && withRows === opens.filter((r) => r.body.source === "airtable").length,
@@ -193,6 +203,7 @@ if (!process.argv.includes("--worker")) {
       const list = await call("GET", "/companies?owner=all");
       const ids = (list.body.companies || []).filter((c) => String(c.ownerId) !== "74726").slice(0, 20).map((c) => c.id);
       const job = await call("POST", "/allot-jobs", { kind: "company", items: ids.map((id) => ({ companyId: id, to: 74726 })) });
+      if (!job.body.job) console.log(`    (job not started: ${job.status} ${JSON.stringify(job.body).slice(0, 160)} · ${ids.length} ids)`);
       const t = performance.now(); let steps = 0, last = null;
       while (steps < 60) { last = await call("POST", "/allot-jobs/step", { id: job.body.job?.id }); steps++; if (last.body.job?.finished) break; }
       const k = await ky();

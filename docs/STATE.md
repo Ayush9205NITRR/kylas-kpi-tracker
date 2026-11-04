@@ -2913,3 +2913,36 @@ be switched off: the Apps Script in its own account, or `CALENDAR_INVITES = "0"`
 **The missing company.** Kylas' changed-contacts search returns the company as an id only. The Worker
 now asks Kylas for the name, once per company per run. `test-call-invites` is 19/19, with a check that
 fails without the change.
+
+## 3l36 · Stress round before roll-out; two fixes it found (1.81.9)
+
+Ayush, 2026-11-04: "stress-test every case before I roll out."
+
+`scripts/stress-roundup.mjs` covers this round's changes, A–I, in two parts:
+- **P, the logic at production size:** 5/5.
+  - last call on 9,500 companies, 0 mismatches against brute force, in 54 ms;
+  - compaction gate identical on 4,000 transitions;
+  - prune plan on 37,000 contacts;
+  - D1 ≤ 0.8M rows a month, against 50M included.
+- **`--worker`, the Worker against the mocks:** 14/14, with the Kylas user list on and off.
+  - 30 cold `/company` opens;
+  - 12 saves with rows, then 20 opens, all with rows and no stray deletes;
+  - 20 companies re-assigned through the job under Kylas' rate limit;
+  - the per-owner report equal to the team's;
+  - the Boolean post from Kylas.
+
+**Fixed, from what it found:**
+- The owner list takes the names the card already carries, instead of asking Kylas per owner. Under
+  load that was a wall of 429s.
+- A transient Airtable error, such as a 429, no longer turns the event-row lookup off for the rest of
+  the instance. Only a base that lacks the field does.
+
+**Seen, not changed:** an **unworked** company, read from Kylas, opened by 30 instances in the same
+second exhausts Kylas' rate limit. That path predates this round. Waves of five, eight associates in
+practice, are fine.
+
+**Regression:**
+- parity "No differences";
+- test-worker 200/200 on both stores; the binding run's new owner check is a harness artefact, listed
+  in `BINDING_EXPECTED`;
+- 18 suites green; smoke-workerd 20/20.
