@@ -2856,3 +2856,15 @@ are written. `reassign.mjs` records `movedIds`. A failure here is logged and nev
 
 **Accounts moved before 1.81.4** still show the old owner on their contacts. To repair them once:
 `node --env-file=.env.local scripts/sync-kylas.mjs --contacts --full --apply`.
+
+## 3l32 · Boolean post comes from the Kylas company field (1.81.5)
+
+Ayush, 2026-11-04: "pick the Boolean post from Kylas' field, not Airtable." The company field is
+found by **label** (`/boolean/i`), the same way as Offsite Timeline. The company crawl carries it as
+`booleanPost`.
+- **Accounts list:** `enrich.bp` takes the Kylas value first, and Airtable's four columns only when
+  Kylas is empty.
+- **Research pane (`/research`):** the Kylas value is served under "Boolean Post link - kylas", the
+  column every console already reads first, so no extension change is needed. `booleanSource: "kylas"`
+  marks it.
+- **test-worker 198/198.** Two new checks fail without the change.

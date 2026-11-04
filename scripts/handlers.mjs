@@ -542,6 +542,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     return r;
   }
 
+  /* The Boolean post on a Kylas company: the labelled field, else any custom
+     field whose key says boolean. A URL field can arrive as { value }. */
+  const boolOf = (cf = {}, keys = []) => {
+    const ks = keys.length ? keys : Object.keys(cf).filter((k) => /boolean/i.test(k));
+    for (const k of ks) {
+      const v = cf[k]; const t = String(v && typeof v === "object" ? (v.value ?? v.url ?? v.name ?? "") : (v ?? "")).trim();
+      if (t) return t;
+    }
+    return "";
+  };
   const companyCache = new Map();
   const COMPANY_TTL = Number(env.COMPANY_TTL_MS || 5 * 60 * 1000);
   /* The most accounts one bulk "add to focus" may carry: 50 Airtable requests. */
@@ -559,7 +569,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const raw = await kylas.companies();
       /* Kylas' own Offsite Timeline field(s), found by LABEL — the internal
          key of "Offsite Timeline (BD - New)" need not say "offsite". */
-      const offKeys = new Set(((await companyFieldsShared().catch(() => null))?.offsite || []).map((f) => f.name));
+      const cfDefs = await companyFieldsShared().catch(() => null);
+      const offKeys = new Set((cfDefs?.offsite || []).map((f) => f.name));
+      const boolKeys = (cfDefs?.boolean || []).map((f) => f.name);
       const list = [];
       for (const co of raw) {
         const cf = co?.customFieldValues || {};
@@ -575,6 +587,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           ...mapped,
           offsiteRaw: Object.fromEntries(Object.entries(cf).filter(([k, v]) =>
             (offKeys.has(k) || /offsite/i.test(k)) && v != null && v !== "")),
+          booleanPost: boolOf(cf, boolKeys),
           owner: known || (await ownerName(co.ownerId)) || "",
           ownerId: String(co.ownerId ?? ""),
         });
@@ -750,7 +763,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     const r = await kylas.companyFields();
     const fields = Array.isArray(r) ? r : r?.content || r?.data || [];
     return { offsite: fields.filter((f) => /offsite/i.test(`${f.name} ${f.displayName}`))
-      .map((f) => ({ name: f.name, label: f.displayName || "", options: findOptions(f) || [] })) };
+      .map((f) => ({ name: f.name, label: f.displayName || "", options: findOptions(f) || [] })),
+      /* "Boolean Post link" on the Kylas company (Ayush, 2026-11-04: pick it from
+         Kylas, not Airtable). Found by LABEL, like Offsite. */
+      boolean: fields.filter((f) => /boolean/i.test(`${f.name} ${f.displayName}`))
+        .map((f) => ({ name: f.name, label: f.displayName || "" })) };
   });
   /* ONE COMPANY CAN NAME MORE THAN ONE QUARTER. Kylas' own field is a single
      select today, so it cannot hold two — but the value still arrives as a
@@ -958,6 +975,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       }));
     }
     return researchRows.get(key)();
+  }
+
+  async function kylasBooleanPost(id) {
+    const crawl = await kylasCompanies.peek().catch(() => null);
+    const hit = (crawl?.companies || []).find((c) => String(c.id) === String(id));
+    if (hit) return hit.booleanPost || "";
+    const co = await kylas.company(id);
+    const keys = ((await companyFieldsShared().catch(() => null))?.boolean || []).map((f) => f.name);
+    return boolOf(co?.customFieldValues || {}, keys);
   }
 
   function perKey(map, name, fn) {
@@ -2142,12 +2168,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             offsiteByCompany(), kylasOffsite(crawlNow?.companies || []), listOffsite(), enrichByCompany()]);
           const { byCompany: prog } = await progress();
           const csIdx = await contactStagesByCompany().catch(() => null);
+          const kylasBool = new Map((crawlNow?.companies || []).filter((c) => c.booleanPost).map((c) => [String(c.id), c.booleanPost]));
           for (const co of mirror) {
             /* Only where there is something: a key on every one of six
                thousand rows, holding nine nulls, is the reply's biggest
                single cost and says nothing the absence does not. */
             const e = enrich.get(String(co.id));
-            if (e) co.enrich = e;
+            const kb = kylasBool.get(String(co.id));
+            if (e || kb) co.enrich = kb ? { ...(e || {}), bp: kb } : e;     /* Kylas' Boolean post wins */
             co.offsite = OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q)));
             const p = prog.get(String(co.id));
             co.nextCall = p?.nextCall || null;
@@ -2238,10 +2266,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const [offsite, fromKylas, fromList, enrich, { byCompany: prog }, csIdx] = await Promise.all([
         offsiteByCompany(), kylasOffsite(crawl.companies), listOffsite(), enrichByCompany(), progress(),
         contactStagesByCompany().catch(() => null)]);
-      const companies = crawl.companies.map(({ offsiteRaw: _raw, ...co }) => ({ ...co,
+      const companies = crawl.companies.map(({ offsiteRaw: _raw, booleanPost: kb, ...co }) => ({ ...co,
         offsite: OFFSITE_QUARTERS.filter((q) => [offsite, fromKylas, fromList].some((m) => m.get(String(co.id))?.has(q))),
         /* Only where there is something — see the Airtable path. */
-        ...(enrich.get(String(co.id)) ? { enrich: enrich.get(String(co.id)) } : {}),
+        ...(enrich.get(String(co.id)) || kb ? { enrich: kb ? { ...(enrich.get(String(co.id)) || {}), bp: kb } : enrich.get(String(co.id)) } : {}),
         nextCall: prog.get(String(co.id))?.nextCall || null,
         /* ACCOUNT PIPELINE STAGE, CALCULATED — Ayush, 2026-09-29: "it is a
            calculated field, not a reference field ... agar mere pass ek
@@ -2706,7 +2734,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (askId && !body?.companyId) {
         if (!researchAt) return { configured: false, research: null };
         try {
-          const got = await curatedResearch(askId);
+          const got = { ...(await curatedResearch(askId)) };
+          /* KYLAS' BOOLEAN POST FIRST, under the column every console reads first. */
+          const kb = await kylasBooleanPost(askId).catch(() => "");
+          if (kb) { got.fields = { ...(got.fields || {}), [ENRICH_BOOLEAN_COLUMNS[0]]: kb, booleanSource: "kylas" }; got.found = true; }
           return { configured: true, base: RESEARCH_BASE, table: RESEARCH_TABLE, ...got,
                    url: got.recordId ? `https://airtable.com/${RESEARCH_BASE}/${encodeURIComponent(RESEARCH_TABLE)}/${got.recordId}` : "" };
         } catch (e) {

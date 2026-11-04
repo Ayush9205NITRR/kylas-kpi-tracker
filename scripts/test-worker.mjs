@@ -634,6 +634,17 @@ await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
     'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }],
     /* The fourth home of the Boolean post, the only one filled on 78 rows. */
     'Boolean (linked)': 'https://www.linkedin.com/posts/seats_offsite' } }] }) });
+/* BOOLEAN POST FROM KYLAS (2026-11-04): the company's own "Boolean Post link" field wins. */
+{
+  const kb = await get(await coldWorker(46), '/research?companyId=1810449', { RESEARCH_BASE: 'appRESEARCH' });
+  check('the research pane shows the Boolean post from the Kylas company field',
+        kb.body?.fields?.['Boolean Post link - kylas'] === 'https://www.linkedin.com/posts/temp-offsite-activity-1',
+        JSON.stringify(kb.body).slice(0, 200));
+  const lst = await get(await coldWorker(47), '/companies?owner=all');
+  const temp = (lst.body.companies || []).find((c) => String(c.id) === '1810449');
+  check('…and so does the accounts list', temp?.enrich?.bp === 'https://www.linkedin.com/posts/temp-offsite-activity-1',
+        JSON.stringify(temp?.enrich || null));
+}
 const readR = await get(await coldWorker(43), `/research?companyId=${contact.companyId}`, { RESEARCH_BASE: 'appRESEARCH' });
 check('the card reads the curated Company List row, flattened',
       readR.body.found && readR.body.fields?.['No. of Employees (kylas)'] === '51-200' &&

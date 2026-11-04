@@ -95,7 +95,8 @@ const COMPANIES = {
   /* Allotted, never worked: no contacts point at it. A companies list derived
      from contacts cannot show this row, which is the whole reason /companies
      searches companies directly. */
-  1810449: { id: 1810449, name: "Temp", ownerId: 74725, customFieldValues: {} },
+  1810449: { id: 1810449, name: "Temp", ownerId: 74725,
+    customFieldValues: { cfBooleanPostLink: "https://www.linkedin.com/posts/temp-offsite-activity-1" } },
   1778327: {
     id: 1778327, name: "bbb", ownerId: 74725,
     customFieldValues: { cfSourceOfData: "lifetime-MQL-SQL", cfBatch: "B-12" },
@@ -540,6 +541,7 @@ createServer(async (req, res) => {
           { id: 9104, name: "OCT_DEC", displayName: "Oct - Dec" },
         ] } },
       { name: "cfBatch", displayName: "Batch", type: "TEXT_FIELD" },
+      { name: "cfBooleanPostLink", displayName: "Boolean Post link", type: "URL" },
     ] });
   }
 
