@@ -132,9 +132,21 @@ export async function run({ env = {}, log = () => {}, store, kylas = null, apply
   const today = todayIst(now);
 
   const out = { since, looked: contacts.length, sent: 0, moved: 0, cancelled: 0, unchanged: 0, past: 0, failed: 0, examples: [] };
+  /* THE COMPANY NAME (2026-11-04: the Worker's invites read "Call Scheduled:
+     Aparna Verma —" where the old script's read "(acpl)"). The changed-contacts
+     search returns the company as an id only, so the name is asked of Kylas
+     once per company in this run. */
+  const coNames = new Map();
+  const companyName = async (c) => {
+    if (c.company || !c.companyId) return c.company || "";
+    if (!coNames.has(c.companyId)) coNames.set(c.companyId,
+      await kylas.company(c.companyId).then((co) => co?.name || "").catch(() => ""));
+    return coNames.get(c.companyId);
+  };
   for (const raw of contacts) {
     if (out.sent + out.moved + out.cancelled >= max) { out.capped = true; break; }
     const c = toConsoleContact(raw, { writeMap });
+    c.company = await companyName(c);
     const cf = raw.customFieldValues || {};
     c.rawRemarks = String(cf.cfRemarks ?? raw.remarks ?? "").replace(/<[^>]+>/g, "").trim();
     const key = SENT_KEY(c.kid);

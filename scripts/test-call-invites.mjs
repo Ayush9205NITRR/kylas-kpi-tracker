@@ -64,6 +64,7 @@ const kylas = {
                     { name: "cfRemarks", displayName: "Remarks", type: "TEXT_FIELD" }],
   contactsChangedSince: async (since) => ({ contacts: contacts.filter((c) => c.updatedAt >= since) }),
   users: async () => ({ users: [{ id: "74726", name: "Arshdeep", email: "arshdeep@enout.in" }] }),
+  company: async (id) => ({ id, name: String(id) === "77" ? "acpl" : "getflits" }),
 };
 const contact = (id, nextUtc, extra = {}) => ({
   id, firstName: "Gunjan", lastName: "", ownerId: 74726, updatedAt: "2026-11-01T10:00:00.000Z",
@@ -119,6 +120,13 @@ const r5 = await go();
 ok("a call-back already in the past is not sent", r5.past === 1 && mails.length === before, JSON.stringify(r5));
 ok("the first run starts where the old script stopped", r1.since === FIRST_SINCE);
 ok("later runs start where the last one ended (less a two-minute overlap)", r5.since === new Date(NOW.getTime() - 120000).toISOString(), r5.since);
+
+console.log("\n5b. the company named when Kylas sends only its id");
+const bare = contact(8881, "2026-11-05T03:30:00.000Z", { updatedAt: "2026-11-02T20:29:59.500Z", company: { id: 77 }, metaData: {} });
+contacts = [bare];
+const b0 = mails.length;
+await go();
+ok("the subject carries the company (acpl), as the old script's did", /Call Scheduled: Gunjan \(acpl\)/.test(parts(mails[b0]?.raw || "").subject), parts(mails[b0]?.raw || "").subject);
 
 console.log("\n6. switched off");
 const r6 = await run({ env: { ...env, CALENDAR_INVITES: "0" }, store: kv, kylas, connect, now: NOW });

@@ -2899,3 +2899,17 @@ call, and the column fell back to Kylas' stale `cfLastCalledAtDate`.
 
 **Limit:** a call made outside Kylas (from a personal phone, never logged) cannot be seen by any of
 the three.
+
+## 3l35 · Call invites name the company; two senders running (1.81.8)
+
+Ayush, 2026-11-04, two inboxes side by side:
+- "automations", 1:31 AM: "Call Scheduled: Aparna Verma (acpl) — …";
+- "Automation Team", 1:11 PM: "Call Scheduled: Aparna Verma — …".
+
+**Two senders.** The old Apps Script ("Kylas Sync" in automations@enout.in) is running again
+alongside the Worker's `call-invites.mjs`. With both on, every call-back gets two invites. One must
+be switched off: the Apps Script in its own account, or `CALENDAR_INVITES = "0"` here.
+
+**The missing company.** Kylas' changed-contacts search returns the company as an id only. The Worker
+now asks Kylas for the name, once per company per run. `test-call-invites` is 19/19, with a check that
+fails without the change.
