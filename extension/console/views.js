@@ -3073,8 +3073,13 @@
   const FB_OPS = {
     text: { contains: "contains", ncontains: "does not contain", is: "is", isnot: "is not",
             empty: "is empty", notempty: "is not empty" },
-    enum: { anyof: "is any of", noneof: "is none of", empty: "is empty", notempty: "is not empty" },
-    multi: { anyof: "has any of", noneof: "has none of", empty: "is empty", notempty: "is not empty" },
+    /* "contains" on a select too (Ayush, 2026-11-04): "27 Apr + Boolean New",
+       "Boolean - New", "GPTW + Boolean - New"… one word finds them all. It
+       matches what is SHOWN (the label), not the stored code. */
+    enum: { anyof: "is any of", noneof: "is none of", contains: "contains", ncontains: "does not contain",
+            empty: "is empty", notempty: "is not empty" },
+    multi: { anyof: "has any of", noneof: "has none of", contains: "contains", ncontains: "does not contain",
+             empty: "is empty", notempty: "is not empty" },
     num: { atleast: "is at least", atmost: "is at most", is: "is", between: "is between",
            empty: "is empty", notempty: "is not empty" },
     /* "within" and "ago" are the two a BD actually asks — "due in the next
@@ -3169,8 +3174,14 @@
       case "notempty": return filled;
       case "anyof": return list.some((x) => c.v.includes(String(x)));
       case "noneof": return !list.some((x) => c.v.includes(String(x)));
-      case "contains": return String(raw ?? "").toLowerCase().includes(String(c.v[0]).toLowerCase());
-      case "ncontains": return !String(raw ?? "").toLowerCase().includes(String(c.v[0]).toLowerCase());
+      case "contains": case "ncontains": {
+        const q = String(c.v[0] ?? "").trim().toLowerCase();
+        const shown = (x) => `${String(x ?? "")} ${f.labelOf ? String(f.labelOf(x) ?? "") : ""}`.toLowerCase();
+        const hit = (f.type === "enum" || f.type === "multi")
+          ? list.some((x) => x != null && x !== "" && shown(x).includes(q))
+          : String(raw ?? "").toLowerCase().includes(q);
+        return c.op === "contains" ? hit : !hit;
+      }
       case "is": return f.type === "num"
         ? Number(raw) === fbNum(c.v[0])
         : String(raw ?? "").toLowerCase() === String(c.v[0]).toLowerCase();

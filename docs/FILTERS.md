@@ -34,8 +34,8 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | type | operators | value control |
 |---|---|---|
 | **Text** | contains · does not contain · is · is not · is empty · is not empty | a text box |
-| **Single select** | is any of · is none of · is empty · is not empty | a checklist built from the data |
-| **Multiple select** | has any of · has none of · is empty · is not empty | a checklist; a row matches if it holds *any* picked value |
+| **Single select** | is any of · is none of · contains · does not contain · is empty · is not empty | a checklist built from the data; *contains* matches the label shown, so "boolean" finds every Boolean source |
+| **Multiple select** | has any of · has none of · contains · does not contain · is empty · is not empty | a checklist; a row matches if it holds *any* picked value |
 | **Number** | is at least · is at most · is · is between · is empty · is not empty | a text box that reads `10M`, `1.2b`, `40`, `₹4.2 Cr` |
 | **Date** | is · is before · is after · is within the next *N* days · was in the last *N* days · is empty · is not empty | a date picker, or a day count |
 | **Link** | has a link · has none · URL contains · URL does not contain | nothing, or a text box |

@@ -149,7 +149,7 @@ RESEARCH_TABLE = "Company List"
 # Keep it equal to extension/manifest.json. The console compares the two and
 # says "restart the proxy" when they differ, which is exactly right for a
 # stale deploy and pure noise when they have merely drifted.
-VERSION = "1.81.9"
+VERSION = "1.81.10"
 
 # THE READ COPY'S DAILY D1 WRITE BUDGET (rows, as D1 bills them). The plan
 # includes 50M a month; October's hourly full rebuilds wrote ~100M ($51 extra).
