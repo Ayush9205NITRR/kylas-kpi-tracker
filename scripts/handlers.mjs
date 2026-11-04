@@ -1055,7 +1055,37 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
 
   /* The owner dropdown needs names, not ids, and the console cannot invent them.
      Everyone seen so far, so a fetched owner is always selectable. */
-  const ownerList = () => [...owners.entries()].map(([id, name]) => ({ id, name }));
+  const ownerListLocal = () => [...owners.entries()].map(([id, name]) => ({ id, name }));
+  /* THE OWNER DROPDOWN IS EVERY ACTIVE KYLAS USER (Ayush, 2026-11-04: after a
+     re-assignment the contact's Owner offered two names and "Choose"). It was
+     only the names this instance happened to have met, so a fresh instance, or
+     an owner new to it, was missing. Now: Kylas' active users (cached ten
+     minutes, shared), plus every owner already met — a current owner who is
+     inactive still shows, so the card never reads "Choose" for a real owner. */
+  let ownerUsersShared = null;
+  async function ownerList(mustHave = []) {
+    /* The owners this card actually shows are always named, even where Kylas
+       offers no user list — so a current owner never reads "Choose". */
+    for (const id of new Set(mustHave.map((x) => String(x || "")).filter(Boolean)))
+      if (!owners.has(id)) await ownerName(id).catch(() => null);
+    const local = ownerListLocal();
+    try {
+      /* Its own cache entry: the shared "kylas-users" one also answers who is
+         signed in, and must not be filled from this narrower seed. */
+      const { users = [] } = await (ownerUsersShared ||= shared("kylas-owner-users",
+        { ttl: 10 * 60 * 1000, stale: 7 * 24 * 3600 * 1000 }, () => kylas.users([...owners.keys()])))();
+      const byId = new Map(local.map((o) => [String(o.id), o]));
+      /* Never offered: the API user (Enout Super Admin) — owners are never
+         assigned to it. Still shown if it is somebody's current owner. */
+      const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+      for (const u of users) {
+        if (u.active === false || !u.id || !u.name || String(u.id) === apiUser) continue;
+        if (!byId.has(String(u.id))) byId.set(String(u.id), { id: String(u.id), name: u.name });
+        if (!owners.has(String(u.id))) owners.set(String(u.id), u.name);
+      }
+      return [...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    } catch { return local; }
+  }
 
   /* WHO THIS PROXY IS, asked once rather than four times a request.
      The proxy holds exactly ONE Kylas key and Kylas answers /v1/users/me with
@@ -2018,7 +2048,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           } catch (e) { log(`  company ${id}: could not check Kylas for missing contacts — ${String(e.message).slice(0, 80)}`); }
         }
         log(`company ${id} — ${held.contacts.length} contact(s) from Airtable`);
-        return { company: held.company, contacts: held.contacts, owners: ownerList(),
+        return { company: held.company, contacts: held.contacts,
+                 owners: await ownerList([held.company?.ownerId, ...held.contacts.map((x) => x.ownerId)]),
                  picklists: (await meta()).picklists, source: "airtable" };
       }
       /* Kept for every instance, briefly: reopening an account nobody has
@@ -2031,7 +2062,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       });
       const { company, contacts } = await kc();
       log(`company ${id} — ${contacts.length} contact(s) from Kylas`);
-      return { company, contacts, owners: ownerList(),
+      return { company, contacts, owners: await ownerList([company?.ownerId, ...contacts.map((x) => x.ownerId)]),
                picklists: (await meta()).picklists, source: "kylas" };
     },
 
@@ -2194,7 +2225,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
              on. Without this a short mirror reads as a complete account, which
              is the fault this whole thread has been about. */
           const short = sync?.kylas?.short || 0;
-          const body = { owner: "all", companies: mirror, owners: ownerList(),
+          const body = { owner: "all", companies: mirror, owners: await ownerList(),
                          picklists: (await meta()).picklists,
                          kpiSource: "airtable", kpiError: "", kpiMatched: matched,
                          source: "airtable",
@@ -2253,7 +2284,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
            or it ran and failed (and with what). */
         const lastRun = Number((cache && (await cache.get("maintain-last-run").catch(() => null))) || 0);
         const crawlError = cache ? JSON.parse((await cache.get("companies-crawl-error").catch(() => null)) || "null") : null;
-        return { owner: all ? "all" : String(owner), companies: [], owners: ownerList(),
+        return { owner: all ? "all" : String(owner), companies: [], owners: await ownerList(),
                  picklists: (await meta()).picklists, source: "kylas", building: true,
                  lastRunSecondsAgo: lastRun ? Math.round((Date.now() - lastRun) / 1000) : null,
                  crawlError,
@@ -2340,7 +2371,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          without them the console's SOURCES stayed empty there and the Source
          filter could only offer values it happened to see in the loaded rows.
          meta() is cached, so this is free after the first call. */
-      const body = { owner: "all", companies, owners: ownerList(),
+      const body = { owner: "all", companies, owners: await ownerList(),
                      picklists: (await meta()).picklists,
                      kpiSource, kpiError, kpiMatched: matched,
                      truncated: !!search.truncated, crawled: search.total || companies.length,
@@ -2878,12 +2909,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const held = await fromAirtable("queue", () => readQueue(airtable, name));
       if (held) {
         log(`queue for ${name || owner} — ${held.length} contact(s) from Airtable`);
-        return { owner: String(owner), contacts: held, owners: ownerList(), source: "airtable" };
+        return { owner: String(owner), contacts: held, owners: await ownerList(), source: "airtable" };
       }
       const contacts = await perKey(queueFromKylas, `kylas-queue:${owner}`,
         async () => mapContacts(await kylas.contactsForOwner(owner)))();
       log(`queue for owner ${owner} — ${contacts.length} contact(s) from Kylas`);
-      return { owner: String(owner), contacts, owners: ownerList(), source: "kylas" };
+      return { owner: String(owner), contacts, owners: await ownerList(), source: "kylas" };
     },
 
     /* One save from the console becomes up to three Kylas calls. Ordered so that

@@ -634,6 +634,16 @@ await atPost('http://127.0.0.1:9901/v0/appRESEARCH/Company%20List', {
     'No. of Employees (kylas)': '51-200', 'Total Funding': [8500000], 'Latest Funding Type': [{ name: 'Series A' }],
     /* The fourth home of the Boolean post, the only one filled on 78 rows. */
     'Boolean (linked)': 'https://www.linkedin.com/posts/seats_offsite' } }] }) });
+/* THE OWNER DROPDOWN (2026-11-04): every active Kylas user, on a fresh instance
+   too — not only the names this instance happened to meet. */
+{
+  const co = await get(await coldWorker(48), '/company?id=903');
+  const ids = (co.body.owners || []).map((o) => String(o.id));
+  check('the owner dropdown always holds the card\'s current owners, on a cold instance',
+        ids.includes('74726'), `${co.status} ${JSON.stringify(co.body).slice(0, 200)}`);
+  check('…never the API user (Enout Super Admin), never a deactivated one',
+        !ids.includes('74725') && !ids.includes('74727'), JSON.stringify(co.body.owners));
+}
 /* BOOLEAN POST FROM KYLAS (2026-11-04): the company's own "Boolean Post link" field wins. */
 {
   const kb = await get(await coldWorker(46), '/research?companyId=1810449', { RESEARCH_BASE: 'appRESEARCH' });

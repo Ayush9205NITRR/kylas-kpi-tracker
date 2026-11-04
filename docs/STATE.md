@@ -2868,3 +2868,16 @@ found by **label** (`/boolean/i`), the same way as Offsite Timeline. The company
   column every console already reads first, so no extension change is needed. `booleanSource: "kylas"`
   marks it.
 - **test-worker 198/198.** Two new checks fail without the change.
+
+## 3l33 · The Owner dropdown lists every active user (1.81.6)
+
+Ayush, 2026-11-04: after a re-assignment, a contact's Owner offered two names and "Choose". The
+dropdown was `ownerList()`: only the owner names this instance happened to have met. Now:
+- every active Kylas user, from a cached user list with its own cache entry;
+- plus the card's own company and contact owners, always resolved by name, so a current owner never
+  reads "Choose", even where Kylas offers no user list;
+- never the API user (Enout Super Admin), and never a deactivated user unless they are somebody's
+  current owner.
+
+All seven routes that return `owners` use it. `test-worker` is 200/200, with two new checks that fail
+without the change.
