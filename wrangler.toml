@@ -128,7 +128,7 @@ MAIL_PER_BD = "1"
 # turns into the block. One event per contact: a moved call-back moves it, a
 # cleared one cancels it. Replaced the "Kylas Sync" Apps Script on 2026-11-03.
 # "0" turns it off.
-CALENDAR_INVITES = "1"
+CALENDAR_INVITES = "0"   # off 2026-11-06: the old Apps Script in automations@enout.in still sends; two senders = double invites
 # The minute cron's copy of Airtable into KPI_DB (shadow.mjs): off — the copy is
 # made from the laptop (sqlite-to-d1.mjs) and topped up by cutover.mjs.
 SHADOW_PULL = "0"

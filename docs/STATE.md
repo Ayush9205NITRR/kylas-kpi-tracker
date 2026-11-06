@@ -2946,3 +2946,12 @@ practice, are fine.
 - test-worker 200/200 on both stores; the binding run's new owner check is a harness artefact, listed
   in `BINDING_EXPECTED`;
 - 18 suites green; smoke-workerd 20/20.
+
+## 3l37 · Worker call invites switched off; the Apps Script sends them (no version change)
+
+2026-11-06: invites still arrived twice, "Automati., automati. 2" in one thread. The old Apps Script
+in automations@enout.in is still running, and only that account can stop it. To get one invite per
+call-back now, the Worker's sender is off: `CALENDAR_INVITES = "0"`. To move back to the Worker:
+1. delete the Apps Script's triggers (`stopAllTriggers`);
+2. set `CALENDAR_INVITES = "1"`;
+3. deploy.
