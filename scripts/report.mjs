@@ -403,6 +403,28 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
 
   const inWindow = (at) => dayKey(at) >= start && dayKey(at) <= end;
 
+  /* ── WHERE EACH WORKED COMPANY ENDED THE PERIOD ─────────────────────
+     Ayush, 2026-11-12: "worked (stage count split de do), picked ka split de
+     do — not interested, connect later, all stages under this". The rung says
+     HOW MANY companies were worked; this says what came of them. Per period,
+     per company, the LAST stage it was set to inside that period — from the
+     call's Stage Set and from stage transitions alike. Picked keeps its own
+     latest CONNECTED stage, so a company that answered on Tuesday and rang
+     out on Friday still shows under what Tuesday's call made of it. */
+  const lastStage = new Map();       /* "k|company" and "k|owner|company" -> {at, stage, conn} */
+  const seeStage = (k, owner, company, at, stage) => {
+    stage = String(stage || "").trim();
+    if (!company || !stage) return;
+    const conn = !NOT_CONNECTED.includes(stage);
+    for (const mk of [`${k}|${company}`, owner ? `${k}|${owner}|${company}` : null]) {
+      if (!mk) continue;
+      const cur = lastStage.get(mk) || {};
+      if (!cur.at || String(at) >= String(cur.at)) { cur.at = at; cur.stage = stage; }
+      if (conn && (!cur.cat || String(at) >= String(cur.cat))) { cur.cat = at; cur.conn = stage; }
+      lastStage.set(mk, cur);
+    }
+  };
+
   /* ── TALK TIME, FROM THE DIALLER APP ────────────────────────────────
      One row per call the Kylas dialler app placed, with the length it
      measured and the associate who dialled. These are NOT calls for the
@@ -459,6 +481,7 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
        company; a rolled-up day does not, and those old days keep counting from
        the transitions as before. */
     if (c.company) {
+      seeStage(key(c.at), c.owner, c.company, c.at, c.stage);
       callTouches.push({ k: key(c.at), owner: c.owner, metric: "worked", company: c.company });
       if (callConnected(c)) callTouches.push({ k: key(c.at), owner: c.owner, metric: "picked", company: c.company });
     }
@@ -541,10 +564,32 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
     if (!ownerPeriods.has(pk)) ownerPeriods.set(pk, { owner, ...blank() });
     ownerPeriods.get(pk)[metric] += 1;
   };
+  for (const t of transitions) {
+    if (t.at && t.to && inWindow(t.at)) seeStage(key(t.at), t.owner, t.company || t.contact || "", t.at, t.to);
+  }
   for (const e of touchEvents({ transitions, signals })) {
     if (inWindow(e.at)) touch(key(e.at), e.owner, e.metric, e.company);
   }
   for (const t of callTouches) touch(t.k, t.owner, t.metric, t.company);
+
+  /* One tally per period (team) and per period per owner. `cos` is the worked
+     companies themselves, so the console can cut them by employee size and
+     score — withDeltas keeps it only on the period on screen. */
+  const mixes = new Map();
+  for (const [mk, v] of lastStage) {
+    const parts = mk.split("|");
+    const id = parts.length === 2 ? parts[0] : `${parts[0]}|${parts[1]}`;
+    const company = parts[parts.length - 1];
+    if (!mixes.has(id)) mixes.set(id, { workedStages: {}, pickedStages: {}, cos: [] });
+    const m = mixes.get(id);
+    m.workedStages[v.stage] = (m.workedStages[v.stage] || 0) + 1;
+    if (v.conn) m.pickedStages[v.conn] = (m.pickedStages[v.conn] || 0) + 1;
+    m.cos.push(company);
+  }
+  for (const [id, m] of mixes) {
+    const target = id.includes("|") ? ownerPeriods.get(id) : rows.get(id);
+    if (target) Object.assign(target, m);
+  }
 
   const periods = keys.map((k) => rows.get(k));
   const totals = periods.reduce((acc, r) => {
@@ -615,6 +660,8 @@ export function withDeltas(rep) {
 
   const current = periods[periods.length - 1] || null;
   const previous = periods[periods.length - 2] || null;
+  /* The stage mix and company list travel only on the period on screen. */
+  for (const p of periods) if (p !== current) { delete p.workedStages; delete p.pickedStages; delete p.cos; }
 
   /* Every owner seen anywhere in the window, so an associate who logged nothing
      this period still gets a column of zeros rather than vanishing from the
@@ -625,7 +672,7 @@ export function withDeltas(rep) {
   const forPeriod = (p) => (!p ? [] : names.map((o) =>
     cross[`${p.key}|${o}`] || { owner: o, ...Object.fromEntries(METRICS.map((m) => [m.key, 0])) }));
   const currentByOwner = forPeriod(current);
-  const previousByOwner = forPeriod(previous);
+  const previousByOwner = forPeriod(previous).map(({ workedStages: _a, pickedStages: _b, cos: _c, ...o }) => o);
 
   /* The cross-product is working state, not an answer. Dropped here so the
      payload is the two periods somebody is looking at rather than every owner

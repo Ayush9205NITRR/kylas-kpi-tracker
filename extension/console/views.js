@@ -1612,6 +1612,100 @@
     });
   }
 
+  /* ── WORKED AND PICKED, SPLIT BY STAGE ───────────────────────────────
+     Ayush, 2026-11-12: "worked (stage count split de do), picked ka split de
+     do — a) not interested b) connect later, all stages which are under this".
+     Each worked company counted ONCE, at the last stage it was set to inside
+     the period; picked, at its last CONNECTED stage. So the sub-rows add up to
+     the rung above them. Collapsed by default: a Worked row with nineteen
+     stages under it would push the rest of the ladder off the screen. */
+  const LADDER_OPEN = { workedStages: false, pickedStages: false };
+  const PICKED_FIRST = ["NOT_INTERESTED", "CONNECT_LATER"];
+  function stageRowsHTML(mixKey, cur, people) {
+    const mix = cur[mixKey];
+    if (!mix) return "";
+    const codes = Object.keys(mix).sort((a, b) => {
+      const pa = PICKED_FIRST.indexOf(a), pb = PICKED_FIRST.indexOf(b);
+      if (pa !== pb) return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
+      return mix[b] - mix[a];
+    });
+    if (!codes.length) return "";
+    const open = LADDER_OPEN[mixKey];
+    const total = codes.reduce((n, c) => n + mix[c], 0);
+    const toggle = `<tr class="subtog"><td class="rung" colspan="${3 + people.length}">
+      <button type="button" class="linkbtn" data-stagemix="${mixKey}" aria-expanded="${open}">${open ? "\u25be" : "\u25b8"} ${
+        open ? "Hide" : "Show"} the ${codes.length} stage${codes.length === 1 ? "" : "s"} these ${total} compan${total === 1 ? "y" : "ies"} ended the period at</button></td></tr>`;
+    if (!open) return toggle;
+    return toggle + codes.map((code) => `<tr class="substage">
+      <td class="rung"><span class="rungname sub">${esc(label(code) || code)}</span></td>
+      <td class="teamcol"><span class="tnum">${mix[code]}</span></td>
+      <td class="conv"><span class="tnum">${Math.round(mix[code] / total * 100)}%</span></td>
+      ${people.map((p) => {
+        const v = (p[mixKey] || {})[code] || 0;
+        return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div></td>`;
+      }).join("")}
+    </tr>`).join("");
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-stagemix]");
+    if (!b) return;
+    const k = b.dataset.stagemix;
+    LADDER_OPEN[k] = !LADDER_OPEN[k];
+    const wrap = document.getElementById("vwrap");
+    if (wrap) dashboard(wrap);
+  });
+
+  /* ── THE WORKED ACCOUNTS, BY EMPLOYEE SIZE AND BY SCORE ────────────────
+     Ayush, 2026-11-12: "account worked — employee size ke hisab se
+     distribution, score ke hisab se distribution". The same companies the
+     Worked rung counts for the period on screen, looked up in the account
+     list by Kylas id. Size is the Final employee band (Apollo, else Claude);
+     score is the Priority slab the Score section cuts, from the whole book. */
+  function workedMixHTML(r) {
+    if (!r || !r.current || !Array.isArray(r.current.cos)) return "";
+    const cur = r.current;
+    const people = (r.currentByOwner || []).slice()
+      .sort((a, b) => b.sql - a.sql || b.calls - a.calls || String(a.owner).localeCompare(String(b.owner)));
+    const byId = new Map((CACHE.companies || []).map((c) => [String(c.id), c]));
+    if (!byId.size) return `<div class="vsec"><p class="vnote">The size and score split of worked accounts
+      needs the account list — open <b>Accounts</b> once and come back.</p></div>`;
+    const E = global.Enrich;
+    const slabs = scoreSlabs(CACHE.companies);
+    const empOf = (c) => { const v = c && c.enrich && c.enrich.emp; return v && v !== E.UNKNOWN ? String(v) : "Unknown"; };
+    const slabOf = (c) => { const s = c ? slabFor(slabs, c) : null; return s ? `${s.name} \u00b7 ${s.lo}\u2013${s.hi}` : "No score"; };
+    const tally = (ids, fn) => {
+      const m = {};
+      for (const id of ids || []) { const k = fn(byId.get(String(id))); m[k] = (m[k] || 0) + 1; }
+      return m;
+    };
+    const table = (title, fn, order) => {
+      const team = tally(cur.cos, fn);
+      const per = people.map((p) => tally(p.cos, fn));
+      const keys = Object.keys(team).sort(order);
+      const tot = cur.cos.length;
+      return `<div class="vhead sm"><h2>${esc(title)}</h2>
+          <span class="vsub">${esc(cur.label || "")} \u00b7 the ${tot} compan${tot === 1 ? "y" : "ies"} worked in this period</span></div>
+        <div class="card scroll"><table class="ladder">
+          <thead><tr><th class="rung">${title.includes("size") ? "Employees" : "Score slab"}</th><th class="teamcol">Team</th><th class="conv">Share</th>
+            ${people.map((p) => `<th><span class="bdh" title="${esc(p.owner)}">
+              <span class="av" style="background:hsl(${hueOf(p.owner)} 42% 44%)">${esc(initials(p.owner))}</span>
+              <span>${esc(firstName(p.owner))}</span></span></th>`).join("")}</tr></thead>
+          <tbody>${keys.map((k) => `<tr>
+            <td class="rung"><span class="rungname">${esc(k)}</span></td>
+            <td class="teamcol"><b class="tnum">${team[k]}</b></td>
+            <td class="conv"><b class="tnum">${tot ? Math.round(team[k] / tot * 100) : 0}%</b></td>
+            ${per.map((m) => { const v = m[k] || 0; return `<td><div class="cellv tnum${v ? "" : " zero"}">${v}</div></td>`; }).join("")}
+          </tr>`).join("")}</tbody></table></div>`;
+    };
+    const lastOf = (a, b, unk) => (a === unk) - (b === unk);
+    const empOrder = (a, b) => lastOf(a, b, "Unknown") || E.empFloor(a) - E.empFloor(b);
+    const slabRank = (k) => { const i = slabs.findIndex((s) => k.startsWith(s.name + " ")); return i < 0 ? 99 : i; };
+    return `<div class="vsec">${table("Worked accounts by employee size", empOf, empOrder)}</div>
+      <div class="vsec">${table("Worked accounts by score", slabOf, (a, b) => slabRank(a) - slabRank(b))}
+        <p class="vnote">Accounts the console cannot find in the account list (no Kylas id on the
+          company) are left out, so these can total a little under the Worked rung.</p></div>`;
+  }
+
   function ladderHTML(r) {
     if (!r || !r.current) return "";
     const cur = r.current, prev = r.previous;
@@ -1729,7 +1823,7 @@
                 return `<td${tip}><div class="cellv tnum${v ? "" : " zero"}">${v}</div>
                   <div class="lbar"><i class="r${Math.min(Math.max(i, 2), 5)}" style="width:${v / rowMax[i] * 100}%"></i></div></td>`;
               }).join("")}
-            </tr>`;}).join("")}
+            </tr>${i <= 1 ? stageRowsHTML(rg.key === "worked" ? "workedStages" : "pickedStages", cur, people) : ""}`;}).join("")}
           </tbody>
         </table></div>
         <p class="vnote"><b>Worked</b> is every company <b>called</b> in this period (or whose stage
@@ -2311,6 +2405,7 @@
            period across the team and each associate; the table is every period.
            Same numbers, same report, one request. */
         ladderHTML(REP.data)}
+      ${workedMixHTML(REP.data)}
       ${scoreSection(rollup(DATA, dbase, dbase.length > 0))}
       <div class="vsec">${/* THE PERSON PICKED IN "Who", not "me" (Ayush, 2026-11-03: Sejal picked,
            the ladder still showed Ayush). This report feeds the ladder above too,

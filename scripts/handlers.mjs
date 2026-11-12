@@ -1365,7 +1365,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        the month's numbers were silently the first 4,000 calls. Found when the
        D1 copy, which reads whole tables, disagreed with this path. */
     const ALL = { pageSize: 100, maxPages: 2000 };
-    const [callRows, rolledRows, transRows, contactRows, diallerRows, team] = await Promise.all([
+    const [callRows, rolledRows, transRows, contactRows, diallerRows, team, companyRows] = await Promise.all([
       /* Contact: a call is work on its company (report.mjs, Worked). */
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set", "Contact"], ...ALL }),
       /* Days past the retention window live in Call Rollup, one row per day per
@@ -1402,6 +1402,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          the ladder was just fixed for. It happens in the route, once, so every
          total on the page is of the same population. */
       readTeam(airtable).catch(() => []),
+      /* Company record -> Kylas id, so the ladder's worked companies can be cut
+         by employee size and score on the console, which keys accounts by
+         their Kylas id. Tolerated: without it the cut is just unavailable. */
+      listTolerant(airtable, "Companies", { fields: ["Kylas Company ID"], ...ALL }).catch(() => []),
     ]);
 
     const contactCompany = new Map(contactRows.map((r) => [r.id, (r.fields.Company || [])[0] || r.id]));
@@ -1471,7 +1475,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (r.fields["Is Right POC"]) signals.push({ at, owner, company: co, metric: "right" });
       if (r.fields["Is Discovery"]) signals.push({ at, owner, company: co, metric: "discovery" });
     }
-    return { calls, transitions, signals, dialler, diallerState, team };
+    const kidOf = Object.fromEntries((companyRows || [])
+      .filter((r) => r.fields?.["Kylas Company ID"]).map((r) => [r.id, String(r.fields["Kylas Company ID"])]));
+    return { calls, transitions, signals, dialler, diallerState, team, kidOf };
   });
 
   /* Picklists, read once. The console cannot know what an account's custom
@@ -2860,7 +2866,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          re-paid a crawl of the whole call log for numbers already in hand.
          ?fresh=1 is the Refresh button; a save drops the cache, so the next
          dashboard open sees the call just logged. */
-      const { calls, transitions, signals, dialler, diallerState, team } =
+      const { calls, transitions, signals, dialler, diallerState, team, kidOf = {} } =
         await reportData({ fresh: !!url.searchParams.get("fresh") });
       const counts = counter(team);
       /* Filled below, once calls/transitions/signals all exist — an earlier
@@ -2898,6 +2904,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          only becomes a Stage Transition when the sync sees it. Without this the
          screen cannot distinguish "nobody worked those accounts" from "the sync
          has not run since". Both look like a small number. */
+      /* Worked companies as Kylas ids — see kidOf. A company with no Kylas id
+         (or a contact with no company) is dropped from the cut, not guessed. */
+      const toKids = (o) => (o && o.cos ? { ...o, cos: [...new Set(o.cos.map((c) => kidOf[c]).filter(Boolean))] } : o);
+      out.current = toKids(out.current);
+      out.currentByOwner = (out.currentByOwner || []).map(toKids);
+      out.periods = out.periods.map((p) => (p.cos ? toKids(p) : p));
       const sync = await syncState();
       return { ...out, period, team, excluded, dialler: diallerState,
                sync: sync ? { at: sync.at || "", contacts: sync.contacts ?? null,

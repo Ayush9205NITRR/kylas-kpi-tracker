@@ -1540,3 +1540,11 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
   background:none;font:inherit;font-size:var(--t-meta);color:var(--text2);padding:8px 6px;text-align:left;cursor:pointer}
 .scRow:hover{background:var(--panel2)}.scRow b{color:var(--text);font-weight:var(--w-med);font-size:var(--t-label)}
 .scFoot{display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid var(--line)}
+/* Worked / Picked split by stage: indented, lighter, no bars — detail under a
+   rung, not a rung of its own. */
+table.ladder tr.subtog td{padding-top:2px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+table.ladder tr.subtog .linkbtn{background:transparent;border:0;padding:0;font:inherit;font-size:var(--t-meta);
+  color:var(--blue);cursor:pointer}
+table.ladder tr.substage td{padding-top:5px;padding-bottom:5px;color:var(--text2);background:var(--panel2)}
+table.ladder tr.substage .rungname.sub{padding-left:30px;font-size:var(--t-meta)}
+table.ladder tr.substage .cellv{font-size:var(--t-meta)}
