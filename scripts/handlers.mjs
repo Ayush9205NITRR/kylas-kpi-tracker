@@ -1248,7 +1248,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
       const creator = [me.firstName, me.lastName].filter(Boolean).join(" ");
       const owner = people.find((p) => p.id === f.ownerId)?.name || creator;
-      const row = { id, name: made?.name || name, owner, ownerId: f.ownerId };
+      const row = { id, name: made?.name || name, owner, ownerId: f.ownerId, source: srcOpt?.label || f.source };
       await rememberCreated(row);
       if (cache) await cache.put(`company-claim:${companyKey(name)}`, JSON.stringify(row), { ttlSeconds: 7 * 86400 }).catch(() => {});
       companyNames.set(id, row.name);
@@ -2461,6 +2461,15 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                  lastRunSecondsAgo: lastRun ? Math.round((Date.now() - lastRun) / 1000) : null,
                  crawlError,
                  kpiSource: "none", kpiError: "", kpiMatched: 0 };
+      }
+      /* COMPANIES MADE FROM THE CONSOLE since the crawl: laid over it so a new
+         account is in the list the moment it is created, not after 02:00. */
+      {
+        const have = new Set(crawl.companies.map((c) => String(c.id)));
+        const fresh = (await createdList()).filter((c) => c?.id && !have.has(String(c.id)));
+        if (fresh.length) crawl = { ...crawl, companies: [...fresh.map((c) => ({ id: String(c.id), name: c.name,
+          owner: c.owner || "", ownerId: String(c.ownerId || ""), stage: "", source: c.source || null, offsiteRaw: {}, booleanPost: "",
+          createdAt: new Date().toISOString() })), ...crawl.companies] };
       }
       for (const co of crawl.companies) {
         if (co.ownerId && co.owner) owners.set(String(co.ownerId), co.owner);

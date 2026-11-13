@@ -1577,3 +1577,4 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .newco .ncmore summary{cursor:pointer;margin-bottom:10px}
 .newco .ncfoot{display:flex;justify-content:flex-end;gap:8px}
 @media (max-width:720px){.newco .ncgrid{grid-template-columns:1fr}}
+.cobox-list.up{top:auto;bottom:calc(100% + 4px)}

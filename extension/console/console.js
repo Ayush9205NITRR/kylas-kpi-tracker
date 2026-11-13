@@ -1181,6 +1181,9 @@ function companyField(a){
   };
   const paint=(msg)=>{
     list.hidden=false;inp.setAttribute("aria-expanded","true");
+    /* Open upward when the box sits low on the card: the footer bar would
+       otherwise cover the results. */
+    const r=inp.getBoundingClientRect();list.classList.toggle("up",window.innerHeight-r.bottom<320&&r.top>320);
     if(msg){list.innerHTML=`<p class="cobox-msg">${msg}</p>`;return;}
     const exact=rows.some(r=>r.exact);
     list.innerHTML=rows.map((r,i)=>`<button type="button" class="cobox-opt${i===at?" on":""}" data-i="${i}" role="option">
