@@ -70,6 +70,7 @@ const withMeta = (c) => ({
   } },
 });
 
+const CREATED_COMPANIES = [];
 const COMPANIES = {
   1776620: {
     id: 1776620, name: "seats", ownerId: 74725,
@@ -425,6 +426,17 @@ createServer(async (req, res) => {
                             totalElements: out.length, page: cpage, size: csize });
   }
 
+  /* A NEW company. POST /__companies lists what was created, for tests. */
+  if (p === "/v1/companies" && req.method === "POST") {
+    const b = JSON.parse(await text(req) || "{}");
+    if (!String(b.name || "").trim()) return json(res, 400, { message: "name is required" });
+    const id = 900000 + Object.keys(COMPANIES).length;
+    COMPANIES[id] = { id, name: String(b.name).trim(), ownerId: Number(b.ownerId) || 74725, customFieldValues: {},
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    CREATED_COMPANIES.push(id);
+    return json(res, 200, COMPANIES[id]);
+  }
+  if (p === "/__companies" && req.method === "GET") return json(res, 200, CREATED_COMPANIES.map((id) => COMPANIES[id]));
   if (p === "/v1/search/company" && req.method === "POST") {
     const body = JSON.parse(await text(req));
     const rules = body?.jsonRule?.rules || [];
@@ -454,6 +466,8 @@ createServer(async (req, res) => {
     for (const r of rules) {
       if (r.field === "ownerId") out = out.filter((c) => c.ownerId === Number(r.value));
       if (r.field === "id") out = out.filter((c) => Number(c.id) === Number(r.value));
+      if (r.field === "multi_field" && String(r.value || "").trim())
+        out = out.filter((c) => String(c.name || "").toLowerCase().includes(String(r.value).trim().toLowerCase()));
     }
 
     /* An updatedAt UPPER BOUND, which is how a client walks past the result

@@ -377,6 +377,9 @@
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
+    /* The card's company picker: never the whole list, one search per pause. */
+    searchCompanies: (q) => req(`/company-search?q=${encodeURIComponent(q)}`, { timeout: 15000 }),
+    createCompany: (name) => req("/company-create", { method: "POST", body: { name }, timeout: 30000 }),
     /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a
        403 for anybody else. status: Open | Resolved | all. */
     dupeFlags: (status = "Open") => req(`/dupe-flags?status=${encodeURIComponent(status)}`, { timeout: 20000 }),

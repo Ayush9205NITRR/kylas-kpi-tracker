@@ -1548,3 +1548,18 @@ table.ladder tr.subtog .linkbtn{background:transparent;border:0;padding:0;font:i
 table.ladder tr.substage td{padding-top:5px;padding-bottom:5px;color:var(--text2);background:var(--panel2)}
 table.ladder tr.substage .rungname.sub{padding-left:30px;font-size:var(--t-meta)}
 table.ladder tr.substage .cellv{font-size:var(--t-meta)}
+
+/* ── the card's company search (console.js companyField) ── */
+.cobox{position:relative}
+.cobox .in{padding-right:34px}
+.cobox-x{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;
+  color:var(--text3);font-size:var(--t-label);cursor:pointer;padding:4px 6px;border-radius:6px}
+.cobox-x:hover{color:var(--text);background:var(--panel3)}
+.cobox-list{position:absolute;z-index:40;left:0;right:0;top:calc(100% + 4px);max-height:280px;overflow:auto;
+  background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px}
+.cobox-opt{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;background:transparent;
+  padding:8px 10px;border-radius:8px;font:inherit;font-size:var(--t-body);color:var(--text);cursor:pointer}
+.cobox-opt .o{color:var(--text3);font-size:var(--t-meta);white-space:nowrap}
+.cobox-opt:hover,.cobox-opt.on{background:var(--blueSoft)}
+.cobox-new{color:var(--blue);font-weight:var(--w-strong);border-top:1px solid var(--line);border-radius:0 0 8px 8px}
+.cobox-msg{margin:0;padding:8px 10px;color:var(--text2);font-size:var(--t-meta)}

@@ -1151,29 +1151,81 @@ function knownCompanies(){
   if(scope&&scope.name) m.set(String(scope.id),scope.name);
   return m;
 }
-/* A contact belongs to a company in Kylas, and typing a name here never made
-   that link — it only produced a second spelling of an existing account. So it
-   is chosen, and inside a company scope it is fixed. */
+/* A contact belongs to ONE company in Kylas. It is picked, never typed free —
+   a typed name only made a second spelling of an existing account.
+
+   A SEARCH, NOT A LIST (Ayush, 2026-11-13). Eighteen thousand accounts do not
+   go in a dropdown: the box shows the company, ✕ clears it, and the name typed
+   is searched on the server across every owner (/company-search). The last row
+   creates a new company — refused when one by that name already exists, so the
+   picker cannot mint "Acme" beside "ACME Pvt Ltd". Works inside a company scope
+   too: moving a contact to the right account is the point. */
+const CO={seq:0,timer:0};
 function companyField(a){
   const f=el("div","f");
   f.innerHTML=`<label for="f-co">Where do they work?</label>`;
-  if(scope&&String(a.companyId)===String(scope.id)){
-    const w=el("div","fixed");
-    w.innerHTML=`<b id="f-co" data-value="${esc(a.companyId)}">${esc(a.company||scope.name)}</b>
-      <em>kylas ${esc(String(a.companyId))}</em>`;
-    f.appendChild(w);
-    return f;
-  }
-  const m=knownCompanies(), ids=[...m.keys()];
-  const sel=el("select","in");sel.id="f-co";
-  sel.innerHTML=[`<option value="">Choose a company</option>`,
-    ...ids.map(id=>`<option value="${esc(id)}"${String(a.companyId)===id?" selected":""}>${esc(m.get(id))}</option>`)].join("");
-  sel.onchange=e=>{
-    a.companyId=e.target.value;
-    a.company=m.get(e.target.value)||"";
+  const box=el("div","cobox");
+  const inp=el("input","in");inp.id="f-co";inp.type="text";inp.autocomplete="off";inp.spellcheck=false;
+  inp.placeholder="Search a company…";inp.value=a.company||"";inp.dataset.value=a.companyId||"";
+  inp.setAttribute("role","combobox");inp.setAttribute("aria-expanded","false");
+  const clr=el("button","cobox-x","✕");clr.type="button";clr.title="Clear and search for another company";
+  clr.hidden=!inp.value;
+  const list=el("div","cobox-list");list.hidden=true;list.setAttribute("role","listbox");
+  box.append(inp,clr,list);f.appendChild(box);
+  let rows=[],at=-1,q="";
+  const close=()=>{list.hidden=true;inp.setAttribute("aria-expanded","false");at=-1;};
+  const restore=()=>{inp.value=a.company||"";clr.hidden=!inp.value;};
+  const pick=(c)=>{
+    a.companyId=String(c.id);a.company=c.name;inp.value=c.name;inp.dataset.value=c.id;clr.hidden=false;close();
     renderCallbar();renderQueue();validate();
   };
-  f.appendChild(sel);
+  const paint=(msg)=>{
+    list.hidden=false;inp.setAttribute("aria-expanded","true");
+    if(msg){list.innerHTML=`<p class="cobox-msg">${msg}</p>`;return;}
+    const exact=rows.some(r=>r.exact);
+    list.innerHTML=rows.map((r,i)=>`<button type="button" class="cobox-opt${i===at?" on":""}" data-i="${i}" role="option">
+        <span class="n">${esc(r.name)}</span><span class="o">${esc(r.owner||"")}</span></button>`).join("")
+      +(exact?`<p class="cobox-msg">“${esc(q)}” already exists — pick it above.</p>`
+        :`<button type="button" class="cobox-opt cobox-new${at===rows.length?" on":""}" data-new="1" role="option">+ Create company “${esc(q)}”</button>`)
+      +(rows.length||exact?"":`<p class="cobox-msg">No company by that name yet.</p>`);
+  };
+  const search=()=>{
+    q=inp.value.trim();clearTimeout(CO.timer);
+    if(q.replace(/[^a-z0-9]/gi,"").length<2){rows=[];paint("Type two letters of the company's name.");return;}
+    const my=++CO.seq;
+    CO.timer=setTimeout(async()=>{
+      paint("Searching…");
+      try{const r=await API.searchCompanies(q);if(my!==CO.seq)return;rows=r.companies||[];at=-1;paint();}
+      catch(e){if(my===CO.seq)paint(esc(e.message||"Search failed"));}
+    },200);
+  };
+  const create=async()=>{
+    const name=q;if(!name)return;
+    paint(`Creating “${esc(name)}”…`);
+    try{
+      const r=await API.createCompany(name);
+      if(r.ok&&r.company){pick(r.company);toast?.(`Created ${r.company.name}`);return;}
+      rows=[...(r.exists||[]).map(c=>({...c,exact:true})),...(r.close||[])];paint();
+    }catch(e){paint(esc(e.message||"Could not create the company"));}
+  };
+  inp.oninput=()=>{clr.hidden=!inp.value;search();};
+  inp.onfocus=()=>{inp.select();};
+  inp.onkeydown=(e)=>{
+    const n=rows.length+(rows.some(r=>r.exact)?0:1);
+    if(e.key==="ArrowDown"){e.preventDefault();at=Math.min(n-1,at+1);paint();}
+    else if(e.key==="ArrowUp"){e.preventDefault();at=Math.max(0,at-1);paint();}
+    else if(e.key==="Enter"&&!list.hidden&&at>=0){e.preventDefault();e.stopPropagation();
+      if(at<rows.length)pick(rows[at]);else create();}
+    else if(e.key==="Escape"&&!list.hidden){e.preventDefault();e.stopPropagation();close();restore();}
+  };
+  /* mousedown, not click: a click would blur the box first and close the list
+     under the pointer. */
+  list.onmousedown=(e)=>{
+    const b=e.target.closest("button");if(!b)return;e.preventDefault();
+    if(b.dataset.new)create();else pick(rows[Number(b.dataset.i)]);
+  };
+  inp.onblur=()=>{setTimeout(()=>{if(document.activeElement!==inp){close();restore();}},120);};
+  clr.onclick=()=>{inp.value="";clr.hidden=true;inp.focus();search();};
   return f;
 }
 
@@ -1407,7 +1459,8 @@ const RESEARCH_SECTIONS=[
   {t:"Funding",f:[
     {l:"Total funding",k:["Total Funding"],money:1},
     {l:"Latest round",k:["Latest Funding Type"]},
-    {l:"Latest round amount",k:["Latest Funding Amount"],money:1}]},
+    {l:"Latest round amount",k:["Latest Funding Amount"],money:1},
+    {l:"Last raised",k:["Last Raised"]}]},
   {t:"Revenue",f:[
     {l:"Annual revenue",k:["Annual Revenue"],money:1},
     {l:"Revenue per employee",k:["at_rev_per_employee"],money:1}]},

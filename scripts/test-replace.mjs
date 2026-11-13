@@ -97,7 +97,7 @@ const made = toKylasContact({ ...CARD, kid: "",
   phones: [{ type: "MOBILE", cc: "+91", value: "9800004321", primary: true }] }, { remarks: "x" });
 is("it is built from the card alone", made.phoneNumbers.length, 1);
 ok("and nothing invents an email", Array.isArray(made.emails) && made.emails.length === 0);
-is("the name is the card's", `${made.firstName} ${made.lastName}`, "Preeti Pagote");
+is("the name is the card's, whole, in lastName (the POC Name box)", [made.firstName, made.lastName], [undefined, "Preeti Pagote"]);
 
 console.log("\n6. the remarks block still merges rather than replaces");
 /* Carried over only when the save has nothing to say about it. When it does,

@@ -139,8 +139,38 @@ function checkEmail(raw) {
 function splitName(raw) {
   const parts = String(raw == null ? "" : raw).trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: "", lastName: parts[0] };
-  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+  /* THE WHOLE NAME IN lastName (Ayush, 2026-11-13). This account's Kylas form
+     has ONE name box, "POC Name", and it shows lastName only — so a split
+     "Pooja" / "Bhatt" read as "Bhatt" on every contact. firstName stays empty. */
+  return { firstName: "", lastName: parts.join(" ") };
+}
+
+/* ── company names ─────────────────────────────────────────────────
+   One key per company so "Acme Pvt. Ltd", "ACME" and "The Acme Co" are the
+   same account. Used by the duplicate check before a company is created. */
+const CO_NOISE = new Set(["pvt", "private", "ltd", "limited", "llp", "inc", "co", "corp",
+  "corporation", "company", "the", "plc", "llc", "gmbh"]);
+function companyKey(raw) {
+  const words = String(raw == null ? "" : raw).toLowerCase().replace(/&/g, " and ")
+    .replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+  while (words.length > 1 && CO_NOISE.has(words[words.length - 1])) words.pop();
+  while (words.length > 1 && words[0] === "the") words.shift();
+  return words.join("");
+}
+/* Ranked matches of a typed name in a list of {name}: exact key, then prefix,
+   then contains. */
+function rankCompanies(q, list, limit) {
+  const k = companyKey(q);
+  if (!k) return [];
+  const out = [];
+  for (const c of list || []) {
+    const ck = companyKey(c && c.name);
+    if (!ck) continue;
+    const r = ck === k ? 0 : ck.startsWith(k) ? 1 : ck.includes(k) ? 2 : k.length >= 4 && k.includes(ck) && ck.length >= 4 ? 3 : -1;
+    if (r >= 0) out.push({ r, c });
+  }
+  out.sort((a, b) => a.r - b.r || String(a.c.name).length - String(b.c.name).length);
+  return out.slice(0, limit || 15).map((x) => ({ ...x.c, exact: x.r === 0 }));
 }
 
 /* ok = Kylas will accept it. warn = it is a poor name and somebody should fix
@@ -351,4 +381,4 @@ function checkContact(c, opts) {
   return { ok: !problems.some((p) => p.blocking), problems: problems, contact: out };
 }
 
-export { DIAL_CODES, ISO_OF, FIELDS, splitPhone, e164, prettyPhone, checkPhone, checkEmail, checkName, checkUrl, splitName, checkField, checkContact, isDate, isTime };
+export { DIAL_CODES, ISO_OF, FIELDS, splitPhone, e164, prettyPhone, checkPhone, checkEmail, checkName, checkUrl, splitName, checkField, checkContact, isDate, isTime, companyKey, rankCompanies };

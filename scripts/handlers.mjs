@@ -32,14 +32,14 @@ import { lastCallsByCompany as lastCallsOf, withLastCall } from "./last-call.mjs
 import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
-import { checkContact } from "./fields.mjs";
+import { checkContact, companyKey, rankCompanies } from "./fields.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
          readRcaDue, readRcaLog, writeRcaAnswer,
          readTeam, writeTeam, counter, nameKey,
          readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
-         ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS } from "./airtable.mjs";
+         ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS, ENRICH_FINAL, finalOf } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { stageModeSplit } from "./mode-split.mjs";
@@ -835,10 +835,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const kid = String(f[ENRICH_KEY] ?? "").trim();
       if (!kid) continue;
       const e = {
-        rev: money(f["Annual Revenue"]), rpe: money(f.at_rev_per_employee),
-        emp: empBand(f["No. of Employees (kylas)"]),
-        fund: money(f["Total Funding"]), amt: money(f["Latest Funding Amount"]),
-        type: flat(f["Latest Funding Type"]) || "", pri: num(f.at_priority),
+        rev: money(finalOf(f, "Annual Revenue")), rpe: money(f.at_rev_per_employee),
+        emp: empBand(finalOf(f, "No. of Employees (kylas)")),
+        fund: money(finalOf(f, "Total Funding")), amt: money(finalOf(f, "Latest Funding Amount")),
+        type: flat(finalOf(f, "Latest Funding Type")) || "", pri: num(f.at_priority),
         aps: flat(f["Account Pipeline Stage"]) || "",
         li: flat(f["linkedin - Appollo"]) || "",
         bp: ENRICH_BOOLEAN_COLUMNS.map((c) => flat(f[c])).find(Boolean) || "",
@@ -947,7 +947,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   const RESEARCH_LIST_FIELDS = ["Kylas Company Id", "linkedin - Appollo",
     ...ENRICH_BOOLEAN_COLUMNS,
     "Total Funding", "Latest Funding Amount", "Latest Funding Type", "Source - Concatenate",
-    "Account Pipeline Stage", "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee"];
+    "Account Pipeline Stage", "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee",
+    ...Object.values(ENRICH_FINAL)];
   const flat = (v) => Array.isArray(v) ? [...new Set(v.map(flat).filter((x) => x !== "" && x != null))].join(", ")
     : v && typeof v === "object" ? (v.name ?? v.url ?? "") : (v ?? "");
   const researchRows = new Map();
@@ -964,6 +965,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (!r) return { found: false };
         const fields = {};
         for (const [k, v] of Object.entries(r.fields || {})) { const x = flat(v); if (x !== "") fields[k] = x; }
+        /* MERGED VALUES UNDER THE NAMES EVERY CONSOLE ALREADY READS: a Final
+           column (Apollo, else Claude) wins over the Apollo-only one, so a
+           company Apollo never saw still shows its size and funding. */
+        for (const [apollo, fin] of Object.entries(ENRICH_FINAL)) {
+          if (fields[fin] !== undefined && fields[fin] !== "") fields[apollo] = fields[fin];
+          delete fields[fin];
+        }
         /* THE FOURTH HOME, FOLDED INTO THE FIRST FOR OLDER CONSOLES. Extensions up
            to 1.70 look for the Boolean post in three columns and know nothing of
            "Boolean (linked)" — which is where 107 rows keep it. Rather than make
@@ -1137,6 +1145,41 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       ids.add(String((await keyOwner().catch(() => null))?.id || ""));
       return kylas.users([...ids].filter(Boolean));
     }))();
+  /* Companies created from the console, until the crawl has them. Kept in
+     the shared cache so every isolate sees them, for a week. */
+  let createdMem = [];
+  async function createdList() {
+    if (cache) { try { const v = JSON.parse((await cache.get("companies-created")) || "[]"); if (Array.isArray(v)) createdMem = v; } catch { /* keep memory */ } }
+    return createdMem;
+  }
+  async function rememberCreated(row) {
+    const list = [row, ...(await createdList()).filter((c) => c.id !== row.id)].slice(0, 500);
+    createdMem = list;
+    if (cache) await cache.put("companies-created", JSON.stringify(list), { ttlSeconds: 7 * 86400 }).catch(() => {});
+  }
+  async function companyMatches(q, limit, { live = false } = {}) {
+    const crawl = await kylasCompanies.peek().catch(() => null);
+    const pool = new Map();
+    for (const c of await createdList()) pool.set(String(c.id), c);
+    for (const c of crawl?.companies || []) if (!pool.has(String(c.id)))
+      pool.set(String(c.id), { id: String(c.id), name: c.name, owner: c.owner || "", ownerId: c.ownerId || "" });
+    let hits = rankCompanies(q, [...pool.values()], limit);
+    /* Kylas' own search when the crawl is cold, thin, or this is a create. */
+    if (live || !crawl || hits.length < Math.min(5, limit)) {
+      /* Kylas' free text matches the words it is given, so "Acme Retail Ltd"
+         misses "Acme Retail". Ask for the name without its legal tail too. */
+      const core = String(q).replace(/[^A-Za-z0-9& ]+/g, " ")
+        .replace(/(\s+(pvt|private|ltd|limited|llp|inc|co|corp|corporation|company|plc|llc|gmbh))+\s*$/i, "").trim();
+      const asks = [...new Set([q, core].filter((x) => x && x.length >= 2))];
+      const more = (await Promise.all(asks.map((x) => kylas.companiesMatching(x, 20).catch(() => [])))).flat();
+      for (const co of more) if (co?.id && !pool.has(String(co.id)))
+        pool.set(String(co.id), { id: String(co.id), name: co.name || "",
+          owner: lookupName(co, "ownerId", co.ownerId) || (await ownerName(co.ownerId)) || "", ownerId: String(co.ownerId ?? "") });
+      hits = rankCompanies(q, [...pool.values()], limit);
+    }
+    return hits;
+  }
+
   async function whoami() {
     const email = String(callerOf()?.email || "").trim().toLowerCase();
     if (!email) return keyOwner();
@@ -3175,6 +3218,42 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        contact is being typed, so the answer is on screen before Save. Read-only.
        Any signed-in user: it reveals who holds a number, which is what the
        associate adding that number needs to know. */
+    /* ── COMPANIES BY NAME: search for the card's picker, create one ──────
+       18,000 accounts: the console never holds the list, it asks here per
+       keystroke. The cached crawl (every owner) answers; Kylas' own search
+       fills in anything newer; and companies made from the console this
+       week are laid over both, since the crawl learns of them only later. */
+    "/company-search": async (url) => {
+      const q = String(url.searchParams.get("q") || "").trim();
+      if (companyKey(q).length < 2) return { q, companies: [] };
+      return { q, companies: await companyMatches(q, 15) };
+    },
+    "/company-create": async (_url, body) => {
+      const name = String(body?.name || "").trim().replace(/\s+/g, " ");
+      if (companyKey(name).length < 2) throw Object.assign(new Error("Type the company's name"), { status: 400 });
+      if (name.length > 255) throw Object.assign(new Error("That name is too long"), { status: 400 });
+      /* RE-CHECKED HERE, not trusted from the card: two people can type the
+         same new company in the same minute. A match is an answer, not an
+         error — the card offers the existing account instead. */
+      const hits = await companyMatches(name, 8, { live: true });
+      const same = hits.filter((c) => c.exact);
+      if (same.length) return { ok: false, exists: same, close: hits.filter((c) => !c.exact) };
+      const me = await whoami();
+      if (!me?.id) throw Object.assign(new Error("Your login is not a Kylas user, so the company would have no owner"), { status: 403 });
+      const made = await kylas.createCompany({ name, ownerId: Number(me.id) });
+      const id = String(made?.id ?? "");
+      if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
+      const owner = [me.firstName, me.lastName].filter(Boolean).join(" ");
+      const row = { id, name: made?.name || name, owner, ownerId: String(me.id) };
+      await rememberCreated(row);
+      companyNames.set(id, row.name);
+      if (airtable) await airtable.upsertMany("Companies", "Kylas Company ID",
+        [{ "Kylas Company ID": id, Name: row.name, Owner: owner, "Kylas Owner ID": String(me.id) }])
+        .catch((e) => log(`! company ${id} created in Kylas; the Airtable row waits for the sync — ${String(e.message).slice(0, 120)}`));
+      log(`company created: ${row.name} (${id}) for ${owner}`);
+      return { ok: true, company: row };
+    },
+
     "/check-contact": async (_url, body) => {
       const raw = body?.contact;
       if (!raw) throw Object.assign(new Error("contact is required"), { status: 400 });

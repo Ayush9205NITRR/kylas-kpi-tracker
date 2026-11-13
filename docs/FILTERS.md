@@ -49,7 +49,7 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | Company | Text | `name` | |
 | ~~Pipeline stage~~ (column removed 2026-10-22 — the UI shows Account stage only) | Single select | Kylas' `Pipeline Stage - BD`, or the POCs' best rung | the checklist includes **No stage** — thousands of allotted accounts have never been given one, and leaving it out makes them unreachable |
 | Owner | Single select | `owner` | |
-| Source of Data | Single select | `source` | |
+| Source of Data | Single select | `source` | starts at **contains** (hand-typed values, many spellings) |
 | Offsite | Multiple select | `offsite` | the one genuinely multi-valued column: a company can name two quarters, so the checklist means *has any of*, not *is* |
 | KPI status | Single select | the derived rung | |
 | Last call | **Date** | `lastCalledAt` | the cell shows a band; the filter holds the date. "Before 1 April" and "cold" are different questions |

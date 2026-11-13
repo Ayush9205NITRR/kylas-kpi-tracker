@@ -731,6 +731,16 @@ export function createClient(key, {
     contact: (id) => call("GET", `/v1/contacts/${id}`),
 
     createContact: (body) => call("POST", "/v1/contacts", body),
+    /* A NEW company, { name, ownerId }. POST creates; it never replaces, so it
+       carries none of updateCompany's risk. The duplicate check happens before
+       this is called (handlers /company-create). */
+    createCompany: (body) => call("POST", "/v1/companies", body),
+    /* Free-text company search, for a name newer than the cached crawl. */
+    async companiesMatching(text, size = 20) {
+      const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,
+        { fields: COMPANY_LEAN, jsonRule: freeText(String(text)) });
+      return rows(r);
+    },
     updateContact: (id, body) => call("PUT", `/v1/contacts/${id}`, body),
     /* Sent the WHOLE company, read just before — see writeCompanyOffsite() in
        handlers.mjs for why a partial body is not risked here. */
@@ -997,7 +1007,9 @@ export function toKylasContact(c, { remarks, extra, base } = {}) {
   const { firstName, lastName } = splitName(c.pocName);
   const had = base || {};
   const body = {
-    firstName: firstName || undefined,
+    /* null, not omitted: a name typed on the card is all in lastName, and an
+       old firstName must be CLEARED or POC Name reads "Pooja Pooja Bhatt". */
+    firstName: firstName || (lastName ? null : undefined),
     lastName: lastName || "Unknown",
     designation: c.designation || undefined,
     linkedin: c.linkedin || undefined,
@@ -1023,7 +1035,9 @@ export function toKylasContact(c, { remarks, extra, base } = {}) {
   if (!body.phoneNumbers.length && had.phoneNumbers?.length) body.phoneNumbers = had.phoneNumbers;
   if (!body.designation && had.designation) body.designation = had.designation;
   if (!body.linkedin && had.linkedin) body.linkedin = had.linkedin;
-  if (!firstName && had.firstName) body.firstName = had.firstName;
+  /* A name was typed: it is all in lastName now, and firstName is cleared on
+     purpose (the PUT replaces). Carry the old halves only when none was typed. */
+  if (lastName === "Unknown" && had.firstName) body.firstName = had.firstName;
   if (lastName === "Unknown" && had.lastName) body.lastName = had.lastName;
 
   if (c.companyId) body.company = Number(c.companyId);

@@ -59,9 +59,9 @@ eq("plus tag",          checkEmail("nandini+bd@jsw.in").ok, true);
 eq("blank",             checkEmail("").ok, false);
 
 console.log("names");
-eq("two words",  splitName("Nandini Shenoy"), { firstName: "Nandini", lastName: "Shenoy" });
+eq("two words",  splitName("Nandini Shenoy"), { firstName: "", lastName: "Nandini Shenoy" });
 eq("one word",   splitName("Shenoy"), { firstName: "", lastName: "Shenoy" });
-eq("three",      splitName("Ram Prasad Iyer"), { firstName: "Ram Prasad", lastName: "Iyer" });
+eq("three",      splitName("Ram Prasad Iyer"), { firstName: "", lastName: "Ram Prasad Iyer" });
 /* NOT blocking. Kylas accepts both, so neither may cost the associate a save —
    they are advice, carried as `warn`. */
 eq("a phone in the name box is allowed", checkName("8319585041").ok, true);
@@ -102,7 +102,7 @@ const good = checkContact({ pocName: "Nandini Shenoy", designation: "Hr Business
                             phones: [{ value: "+91 72598 98838" }],
                             emails: [{ value: "Nandini.Shenoy@jsw.in" }] });
 eq("passes", good.ok, true);
-eq("split name", [good.contact.firstName, good.contact.lastName], ["Nandini", "Shenoy"]);
+eq("split name", [good.contact.firstName, good.contact.lastName], ["", "Nandini Shenoy"]);
 eq("phone normalised", good.contact.phones[0].value, "7259898838");
 eq("email lowered", good.contact.emails[0].value, "nandini.shenoy@jsw.in");
 eq("primary forced", good.contact.phones[0].primary, true);

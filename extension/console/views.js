@@ -647,16 +647,27 @@
     const side = [...(wrap?.querySelectorAll(".rtable") || [])].map((n) => n.scrollLeft);
     const act = document.activeElement;
     const id = act && act.id && wrap && wrap.contains(act) ? act.id : "";
-    let sel = null;
-    try { if (id) sel = [act.selectionStart, act.selectionEnd]; } catch { /* not a text box */ }
     await paint();
     if (scroller) scroller.scrollTop = top;
     wrap?.querySelectorAll(".rtable").forEach((n, i) => { if (side[i] != null) n.scrollLeft = side[i]; });
     if (!id) return;
     const back = document.getElementById(id);
-    if (!back || document.activeElement === back) return;
+    if (!back || back === act) return;
+    /* LETTERS TYPED DURING THE PAINT (Ayush, 2026-11-13: "likhte likhte do
+       letter piche ho jaate hai"). The paint is async; keys pressed while it
+       ran went into the OLD box, which was then thrown away, and the caret was
+       put back where it was BEFORE the paint. So the new box showed the value
+       from when the redraw began, and the caret sat two letters behind. Read
+       the old box AFTER the paint — its value and caret are what was actually
+       typed — and hand both to the new one. */
+    let sel = null, late = null;
+    try { sel = [act.selectionStart, act.selectionEnd]; } catch { /* not a text box */ }
+    if (typeof act.value === "string" && "value" in back && act.value !== back.value) late = act.value;
+    if (late != null) back.value = late;
     back.focus({ preventScroll: true });
     try { if (sel && sel[0] != null) back.setSelectionRange(sel[0], sel[1]); } catch { /* not a text box */ }
+    /* ...and tell the view, so the list catches up with the late letters. */
+    if (late != null) back.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   /* ALLOTTED, NOT YET IN THE COPY. The list is read from the Airtable copy,
@@ -2698,7 +2709,7 @@
                 fresh: new Set(), owner: "", sort: "next", limit: 100, offsite: "",
                 srcOpen: false, srcFind: "", srcScroll: 0,
                 /* the condition, as in Airtable's text filter */
-                srcOp: "any", srcText: "",
+                srcOp: "contains", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
                 /* the focus list and the call-back, as chip rows on top of
                    every other filter */
@@ -2797,7 +2808,7 @@
     if (ACC.q) q.set("q", ACC.q);
     if (ACC.q && ACC.qOp && ACC.qOp !== "contains") q.set("qop", ACC.qOp);
     if (ACC.priMin !== "") q.set("pri", ACC.priMin);
-    if (ACC.srcOp !== "any" && ACC.srcText) { q.set("srcop", ACC.srcOp); q.set("srctext", ACC.srcText); }
+    if (ACC.srcOp !== "contains" || ACC.srcText) { q.set("srcop", ACC.srcOp); if (ACC.srcText) q.set("srctext", ACC.srcText); }
     if (ACC.sort !== "next") q.set("sort", ACC.sort);
     if (FB.tree.items.length) q.set("fb", JSON.stringify(FB.tree));
     q.set("cols", [...ACC.cols].join("~"));
@@ -2817,7 +2828,7 @@
     ACC.q = q.get("q") || "";
     ACC.qOp = Q_OPS_KEYS.includes(q.get("qop")) ? q.get("qop") : "contains";
     ACC.priMin = q.get("pri") || "";
-    ACC.srcOp = q.get("srcop") || "any";
+    ACC.srcOp = q.get("srcop") || "contains";
     ACC.srcText = q.get("srctext") || "";
     if (SORT_KEYS.includes(q.get("sort"))) ACC.sort = q.get("sort");
     /* A tree out of a link is text somebody could have edited. Anything that
@@ -4880,7 +4891,7 @@
       ACC.focusSet.clear(); ACC.coldSet.clear();
       for (const st of moreSets()) st.clear();
       ACC.priMin = ""; ACC.q = ""; FB.tree = { join: "and", items: [] };
-      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
+      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "contains"; ACC.srcText = "";
       ACC.nextSet = new Set(["overdue", "today"]);
       ACC.sort = "next"; ACC.limit = 100;
       saveAccPrefs(); redraw();
@@ -5036,6 +5047,10 @@
          not a question. */
       const ops = Object.keys(FB_OPS[fbField(c.f).type]);
       if (!ops.includes(c.op)) c.op = ops[0];
+      /* SOURCE OF DATA STARTS AT "contains" (Ayush, 2026-11-13): its values are
+         typed by hand — "Ayush - Research", "Ayush Research", "Ayush-research" —
+         so one word finds every spelling, where a checklist needs each ticked. */
+      if (c.f === "source" && ops.includes("contains")) c.op = "contains";
       c.v = [];
       ACC.limit = 100; redraw();
     }));
@@ -5189,7 +5204,7 @@
     }));
     on("srcClear", "click", () => {
       ACC.sources.clear(); ACC.srcText = "";
-      if (ACC.srcOp === "empty" || ACC.srcOp === "notempty") ACC.srcOp = "any";
+      if (ACC.srcOp === "empty" || ACC.srcOp === "notempty") ACC.srcOp = "contains";
       ACC.limit = 100; redraw();
     });
     on("srcOp", "change", (e) => { ACC.srcOp = e.target.value; ACC.srcScroll = 0; ACC.limit = 100; redraw(); });
@@ -5332,7 +5347,7 @@
       ACC.focusSet.clear(); ACC.coldSet.clear(); ACC.nextSet.clear();
       for (const s of moreSets()) s.clear();
       ACC.priMin = ""; FB.tree = { join: "and", items: [] }; ACC.q = "";
-      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "any"; ACC.srcText = "";
+      ACC.srcOpen = false; ACC.srcFind = ""; ACC.srcOp = "contains"; ACC.srcText = "";
       ACC.limit = 100; redraw();
     });
 

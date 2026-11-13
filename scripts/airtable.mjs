@@ -1240,9 +1240,29 @@ export const ENRICH_TABLE = "Company List";
 export const ENRICH_KEY = "Kylas Company Id";
 export const ENRICH_BOOLEAN_COLUMNS =
   ["Boolean Post link - kylas", "Boolean - New", "Boolean Post Link (Demand Team)", "Boolean (linked)"];
+/* Apollo-only column -> the Final column that prefers Apollo and falls back to
+   Claude (Company List, 2026-11). */
+export const ENRICH_FINAL = {
+  "No. of Employees (kylas)": "Employees (Final)",
+  "Annual Revenue": "Revenue (Final)",
+  "Total Funding": "Total Funding (Final)",
+  "Latest Funding Amount": "Funding Amount (Final)",
+  "Latest Funding Type": "Funding Type (Final)",
+  "Last Raised": "Last Raised (Final)",
+};
+/* The Final value when that column has one, else the Apollo column's. */
+export const finalOf = (f, apollo) => {
+  const k = ENRICH_FINAL[apollo];
+  const v = k ? f?.[k] : undefined;
+  const has = Array.isArray(v) ? v.some((x) => x !== "" && x != null) : v !== "" && v != null;
+  return has ? v : f?.[apollo];
+};
 export const ENRICH_FIELDS = [
   ENRICH_KEY, "Annual Revenue", "No. of Employees (kylas)", "at_rev_per_employee",
   "Total Funding", "Latest Funding Amount", "Latest Funding Type", "at_priority",
+  /* THE MERGED COLUMNS (Apollo, else Claude's web research). Read first; the
+     Apollo-only columns above stay as the fallback for a base without them. */
+  ...Object.values(ENRICH_FINAL),
   "linkedin - Appollo", "Offsite Timeline",
   /* The demand team's own view of where an account stands — "LinkedIn Outreach
      Initiated", "Not Interested", "Invalid Contact". It is NOT the Kylas
