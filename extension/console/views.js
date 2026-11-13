@@ -4283,7 +4283,6 @@
               aria-label="Search accounts" autocomplete="off" spellcheck="false">
             ${qValues().length > 1 && ACC.q ? `<span class="srchn" title="${esc(qValues().join(", "))}">${qValues().length} values</span>` : ""}
           </div>
-          <button type="button" class="gbtn" id="accNewCo" title="Create a company in Kylas, with the details its score needs">+ New company</button>
           ${ownerPicker(all)}
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
@@ -4955,15 +4954,14 @@
          paint and then puts the caret and the scroll back. */
       qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 150);
     });
-    on("accNewCo", "click", () => {
-      if (!global.NewCompany) return;
-      global.NewCompany.open({ onDone: (co) => {
-        /* Into the list at once, then the next read brings its enrichment. */
-        ACC.q = co.name; ACC.limit = 100;
-        ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, () => redraw(), true);
-        redraw();
-      } });
-    });
+    /* After the header's "+ New company": an open Accounts view shows the new
+       company at once (searched), the next read brings its enrichment. */
+    global.afterCompanyCreated = (co) => {
+      if (!document.getElementById("accQ")) return;
+      ACC.q = co.name; ACC.limit = 100;
+      ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, () => redraw(), true);
+      redraw();
+    };
     on("accQOp", "change", (e) => {
       ACC.qOp = Q_OPS_KEYS.includes(e.target.value) ? e.target.value : "contains";
       ACC.limit = 100; saveAccPrefs();

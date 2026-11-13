@@ -2157,6 +2157,13 @@ function newContact(){
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
 }
 on("newBtn","click",newContact);
+/* "+ New company", beside "+ New contact" in the header (Ayush, 2026-11-13:
+   that is where it is looked for). The same form the card's company search
+   opens; an open Accounts view shows the new company straight away. */
+on("newCoBtn","click",()=>{
+  if(!window.NewCompany){toast("Reload the console to create companies.");return;}
+  NewCompany.open({onDone:(co)=>{window.afterCompanyCreated?.(co);}});
+});
 on("qNewBtn","click",newContact);
 document.getElementById("resetBtn").addEventListener("click",()=>{render();toast("Reset");});
 document.getElementById("saveBtn").addEventListener("click",saveNext);
