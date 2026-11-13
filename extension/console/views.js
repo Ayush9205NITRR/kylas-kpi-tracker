@@ -3067,12 +3067,15 @@
   };
   function sourceMatches(src) {
     const v = String(src || "");
-    const t = ACC.srcText.trim().toLowerCase();
+    /* As the filter builder: commas mean any of, and _ - spacing do not count. */
+    const norm = (x) => String(x ?? "").toLowerCase().replace(/[_\-–—/|.]+/g, " ").replace(/\s+/g, " ").trim();
+    const ts = ACC.srcText.split(",").map(norm).filter(Boolean);
+    const has = () => ts.some((t) => norm(v).includes(t));
     switch (ACC.srcOp) {
       case "any": return !ACC.sources.size || ACC.sources.has(v || "—");
       case "none": return !ACC.sources.size || !ACC.sources.has(v || "—");
-      case "contains": return !t || v.toLowerCase().includes(t);
-      case "notcontains": return !t || !v.toLowerCase().includes(t);
+      case "contains": return !ts.length || has();
+      case "notcontains": return !ts.length || !has();
       case "empty": return !v.trim();
       case "notempty": return !!v.trim();
       default: return true;
@@ -3288,11 +3291,16 @@
       case "anyof": return list.some((x) => c.v.includes(String(x)));
       case "noneof": return !list.some((x) => c.v.includes(String(x)));
       case "contains": case "ncontains": {
-        const q = String(c.v[0] ?? "").trim().toLowerCase();
-        const shown = (x) => `${String(x ?? "")} ${f.labelOf ? String(f.labelOf(x) ?? "") : ""}`.toLowerCase();
+        /* Several words, comma-separated, match ANY of them: "gptw, apollo". */
+        /* Underscores, hyphens and spacing do not count: "cold calling" finds
+           COLD_CALLING, "ayush research" finds "Ayush-research". */
+        const norm = (t) => String(t ?? "").toLowerCase().replace(/[_\-–—/|.]+/g, " ").replace(/\s+/g, " ").trim();
+        const qs = String(c.v[0] ?? "").split(",").map(norm).filter(Boolean);
+        if (!qs.length) return true;
+        const shown = (x) => norm(`${String(x ?? "")} ${f.labelOf ? String(f.labelOf(x) ?? "") : ""}`);
         const hit = (f.type === "enum" || f.type === "multi")
-          ? list.some((x) => x != null && x !== "" && shown(x).includes(q))
-          : String(raw ?? "").toLowerCase().includes(q);
+          ? list.some((x) => x != null && x !== "" && qs.some((q) => shown(x).includes(q)))
+          : qs.some((q) => norm(raw).includes(q));
         return c.op === "contains" ? hit : !hit;
       }
       case "is": return f.type === "num"
@@ -3356,7 +3364,8 @@
          number with the word after it, and everything else a text box that
          says what it wants. "10M" and "1.2b" are read by the same parser the
          columns use, so the placeholder can promise them. */
-      const ph = f.type === "num" ? "e.g. 10M" : "value";
+      const ph = f.type === "num" ? "e.g. 10M"
+        : (c.op === "contains" || c.op === "ncontains") ? "type a word · several with commas, e.g. gptw, apollo" : "value";
       value = kind === "date" ? box(0, "", "date")
         : kind === "days" ? `${box(0, "", "number")}<span class="fb-and">days</span>`
         : need === 2 ? `${box(0, "from")}<span class="fb-and">and</span>${box(1, "to")}`
@@ -5123,8 +5132,17 @@
         const path = box.dataset.fbv, i = box.dataset.i;
         await redraw();
         const again = document.querySelector(`[data-fbv="${path}"][data-i="${i}"]`);
-        if (again) { again.focus({ preventScroll: true });
-          try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* ignore */ } }
+        if (again) {
+          /* LETTERS TYPED DURING THE REDRAW went into the old box, which the
+             redraw threw away (the same bug the Accounts search had). Take the
+             old box's value and caret as they are NOW, and catch the list up. */
+          const late = box.value !== again.value ? box.value : null;
+          if (late != null) again.value = late;
+          again.focus({ preventScroll: true });
+          try { const a = box.selectionStart ?? again.value.length, b = box.selectionEnd ?? a;
+                again.setSelectionRange(a, b); } catch { /* ignore */ }
+          if (late != null) again.dispatchEvent(new Event("input", { bubbles: true }));
+        }
       }, 400);
     }));
 
