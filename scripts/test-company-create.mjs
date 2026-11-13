@@ -90,8 +90,8 @@ try {
   const w = await (await fetch("http://127.0.0.1:9900/__companies", { headers: { "api-key": "x" } })).json();
   const blue = w.find((c) => c.name === "Bluefin Labs Pvt Ltd");
   ok("Kylas got Source of Data as its option id", blue?.customFieldValues?.cfSourceOfData === 9201, JSON.stringify(blue?.customFieldValues));
-  ok("Kylas got the LinkedIn page", blue?.customFieldValues?.cfLinkedinPage === "https://www.linkedin.com/company/bluefin-labs");
-  ok("Kylas got the city, normalised", blue?.city === "Bengaluru", String(blue?.city));
+  ok("Kylas got ONLY name, owner and Source of Data", blue && Object.keys(blue.customFieldValues || {}).join() === "cfSourceOfData"
+     && !("city" in blue) && !("linkedin" in blue) && !("numberOfEmployees" in blue), JSON.stringify(blue).slice(0, 200));
   const cl = await (await fetch("http://127.0.0.1:9901/v0/appRESEARCH/Company%20List", { headers: { Authorization: "Bearer pat_mock" } })).json();
   const r = (cl.records || []).find((x) => x.fields?.["Kylas Company Id"] === String(blue?.id))?.fields || {};
   ok("Company List: employees = band midpoint (350)", r["Employees (Manual)"] === 350, JSON.stringify(r).slice(0, 200));
@@ -100,6 +100,29 @@ try {
   ok("Company List: who and when", !!r["Manual By"] && /^\d{4}-\d{2}-\d{2}$/.test(r["Manual At"] || ""));
   const form = await get("/company-form");
   ok("/company-form lists sources, bands, industries, cities", form.sources?.length === 3 && form.bands?.length === 8 && Object.keys(form.industries || {}).length >= 15 && form.cities?.includes("Bengaluru"));
+
+  console.log("\n7. move a contact to another company, immediately");
+  const K = async (path) => { for (let i = 0; i < 8; i++) { const r = await fetch(`http://127.0.0.1:9900${path}`, { headers: { "api-key": "x" } });
+    if (r.status !== 429) return r.json(); await sleep(1200); } throw new Error("mock kept rate limiting"); };
+  const cBefore = await K("/v1/contacts/112936");
+  /* The name is the one other thing a write changes on purpose: the whole
+     name goes into lastName (POC Name), firstName empty. */
+  const strip = (c) => { const { company, updatedAt, updatedBy, metaData, firstName, lastName, ...rest } = c || {}; return JSON.stringify(rest); };
+  const mv = await post("/contact-move", { kid: "112936", companyId: "903", companyName: "Shorehouse Retail" });
+  const cAfter = await K("/v1/contacts/112936");
+  const coOf = (c) => String(c?.company?.id ?? c?.company ?? "");
+  ok("the move answers ok, from -> to", mv.status === 200 && mv.j.ok && mv.j.from === "1776620" && mv.j.to === "903", JSON.stringify(mv.j));
+  ok("Kylas: the contact now belongs to the new company", coOf(cAfter) === "903", coOf(cAfter));
+  ok("Kylas: nothing else on the contact changed", strip(cBefore) === strip(cAfter), `${strip(cBefore).slice(0, 120)} vs ${strip(cAfter).slice(0, 120)}`);
+  const ct = await (await fetch("http://127.0.0.1:9901/v0/appMOCK/Contacts", { headers: { Authorization: "Bearer pat_mock" } })).json();
+  const cos = await (await fetch("http://127.0.0.1:9901/v0/appMOCK/Companies", { headers: { Authorization: "Bearer pat_mock" } })).json();
+  const row = (ct.records || []).find((x) => x.fields?.["Kylas Contact ID"] === "112936");
+  const shore = (cos.records || []).find((x) => x.fields?.["Kylas Company ID"] === "903");
+  ok("Airtable: the contact is linked to the new company", !!row && !!shore && (row.fields.Company || []).includes(shore.id), JSON.stringify(row?.fields?.Company));
+  const undo = await post("/contact-move", { kid: "112936", companyId: "1776620" });
+  ok("undo moves it back", undo.j.ok && coOf(await K("/v1/contacts/112936")) === "1776620");
+  const same = await post("/contact-move", { kid: "112936", companyId: "1776620" });
+  ok("moving to the company it is already in changes nothing", same.j.unchanged === true);
 } finally {
   for (const p of procs) { try { p.kill("SIGKILL"); } catch {} }
 }

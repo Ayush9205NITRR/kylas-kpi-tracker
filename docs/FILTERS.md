@@ -64,7 +64,6 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | Funding stage | Single select | `enrich.type` | the latest round's type |
 | Industry | Single select | `enrich.ind` | docs/industries.json group; the BD's pick, else Apollo's industry mapped |
 | City | Single select | `enrich.city` | one spelling per city (Bangalore → Bengaluru) |
-| Demand team stage | Single select | `enrich.aps` | Company List's `Account Pipeline Stage`, a reference the demand team maintains by hand. Off by default |
 | LinkedIn | Link | `enrich.li` | |
 | Boolean post | Link | `enrich.bp` | whichever of the four Boolean columns is filled |
 | Created at | **Date** | `createdAt` | Kylas' own audit field on the company. Off by default |
@@ -125,6 +124,8 @@ of their own because a band and a date answer different questions.
 | Focus list | Single select | the ★ on the company name — focus, not picked, deprioritized |
 | Last call, banded | Single select | the freshness dot — ≤ 7 days, 8–30, 31–90, 90+, never |
 | Days since last call | Number | the same date, as a count |
+| Sub-industry | Single select | the industry's sub-group (docs/industries.json) |
+| Going cold (open, no call in 5d+) | Single select | the Highlight chip — an open account with no call in five days |
 
 ---
 

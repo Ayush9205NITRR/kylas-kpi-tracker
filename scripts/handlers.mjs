@@ -34,7 +34,7 @@ import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact, companyKey, rankCompanies } from "./fields.mjs";
 import { EMP_BANDS, CITIES, CITY_LIST, industries, industryOf, normCity, checkCompanyForm } from "./company-form.mjs";
-import { createAirtable, syncContact, readCompanyKpis,
+import { createAirtable, syncContact, readCompanyKpis, dropReadCaches,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
          readRcaDue, readRcaLog, writeRcaAnswer,
@@ -772,11 +772,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         .map((f) => ({ name: f.name, label: f.displayName || "" })),
       /* The New-company form's fields, each found by LABEL (the key Kylas gave
          a custom field need not say what it is). First match wins. */
-      ...Object.fromEntries([["source", /source\s*of\s*data/i], ["linkedin", /linked\s*in/i],
-        ["industry", /^industry\b|\bindustry$/i], ["city", /^city$|\bcity\b/i]].map(([k, re]) => {
-        const f = fields.find((x) => re.test(`${x.displayName || ""}`) || re.test(`${x.name || ""}`));
-        return [k, f ? { name: f.name, label: f.displayName || "", custom: !f.standard, options: findOptions(f) || [] } : null];
-      })) };
+      /* Source of Data: the key the Field Map names, the label as a fallback. */
+      source: (() => {
+        const f = fields.find((x) => x.name === "cfSourceOfData") || fields.find((x) => /source\s*of\s*data/i.test(`${x.displayName || ""}`));
+        return f ? { name: f.name, label: f.displayName || "", options: findOptions(f) || [] } : null;
+      })() };
   });
   /* ONE COMPANY CAN NAME MORE THAN ONE QUARTER. Kylas' own field is a single
      select today, so it cannot hold two — but the value still arrives as a
@@ -1230,19 +1230,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       }
       const me = me0;
       if (!me?.id) throw Object.assign(new Error("Your login is not a Kylas user, so the company would have no owner"), { status: 403 });
-      /* Kylas fields that exist on this account, by label; the rest are said. */
-      const cfv = {}, std = {}, skipped = [];
-      const put = (key, val) => { const d = defs?.[key]; if (!d) { skipped.push(key); return; }
-        (d.custom ? cfv : std)[d.name] = val; };
-      const srcOpt = (defs?.source?.options || []).find((o) => o.code === f.source || o.label === f.source || String(o.id) === f.source);
-      put("source", srcOpt?.id ?? f.source);
-      put("linkedin", f.linkedin);
-      if (f.industry) { const opt = (defs?.industry?.options || []).find((o) => String(o.label).toLowerCase() === f.industry.toLowerCase());
-        if (defs?.industry?.options?.length && !opt) skipped.push("industry"); else put("industry", opt?.id ?? f.industry); }
-      if (f.city) put("city", f.city);
+      /* WHAT GOES TO KYLAS: name, owner and Source of Data — nothing else
+         (Ayush, 2026-11-13). LinkedIn, size, industry, city, revenue and
+         funding live in Company List only. Source of Data is the company
+         field cfSourceOfData (the base's Kylas Field Map), set by option id. */
+      const skipped = [];
+      const srcDef = defs?.source;
+      const srcOpt = (srcDef?.options || []).find((o) => o.code === f.source || o.label === f.source || String(o.id) === f.source);
+      if (srcDef?.options?.length && !srcOpt)
+        throw Object.assign(new Error(`“${f.source}” is not a Source of Data option in Kylas — pick one from the list`), { status: 400 });
+      const cfv = srcDef ? { [srcDef.name || "cfSourceOfData"]: srcOpt?.id ?? f.source } : { cfSourceOfData: f.source };
       let made;
-      try { made = await kylas.createCompany({ name, ownerId: Number(f.ownerId), ...std,
-        ...(Object.keys(cfv).length ? { customFieldValues: cfv } : {}) }); }
+      try { made = await kylas.createCompany({ name, ownerId: Number(f.ownerId), customFieldValues: cfv }); }
       catch (e) { if (cache) await cache.delete(`company-claim:${companyKey(name)}`).catch(() => {}); throw e; }
       const id = String(made?.id ?? "");
       if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
@@ -3354,9 +3353,48 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         bands: EMP_BANDS, industries: industries().groups, cities: CITIES, cityList: CITY_LIST,
         fundingTypes: ["Seed", "Angel", "Pre-Seed", "Series A", "Series B", "Series C", "Series D", "Series E",
           "Venture (Round not Specified)", "Private Equity", "Debt Financing", "Merger / Acquisition", "IPO", "Grant", "Other"],
-        kylasFields: Object.fromEntries(["source", "linkedin", "industry", "city"].map((k) => [k, !!defs?.[k]])),
+        kylasFields: ["name", "owner", "source"],
       };
     },
+    /* MOVE A CONTACT TO ANOTHER COMPANY, NOW (Ayush, 2026-11-13: "want all
+       operations to move immediately"). Not on the next Save & next, not at
+       02:00: Kylas, the Airtable copy and the account-stage index all change
+       before this answers.
+         Kylas: the record is read and PUT back whole with only `company`
+         changed (the PUT replaces — toKylasContact carries every other field
+         from the record just read, as the save does), then read back.
+         Airtable: the new company's row is upserted and the contact re-linked.
+       POST { kid, companyId, companyName? } -> { ok, from, to } */
+    "/contact-move": async (_url, body) => {
+      const kid = String(body?.kid || "").trim(), to = String(body?.companyId || "").trim();
+      if (!kid || !to) throw Object.assign(new Error("kid and companyId are required"), { status: 400 });
+      const base = await kylas.contact(kid);
+      if (!base?.id) throw Object.assign(new Error("Kylas has no contact with that id"), { status: 404 });
+      const from = String(idOf(base.company) ?? base.companyId ?? "");
+      if (from === to) return { ok: true, from, to, unchanged: true };
+      const toName = String(body?.companyName || companyNames.get(to) || (await companyName(to).catch(() => "")) || "");
+      const card = { ...toConsoleContact(base), kid, companyId: to, company: toName };
+      await kylas.updateContact(kid, toKylasContact(card, { base }));
+      const back = await kylas.contact(kid);
+      const now = String(idOf(back?.company) ?? back?.companyId ?? "");
+      if (now !== to) throw Object.assign(new Error(`Kylas accepted the move but the contact still reads company ${now || "none"}`), { status: 502 });
+      historyCache.delete(kid);
+      let airtableMoved = false;
+      if (airtable) {
+        try {
+          const co = await airtable.upsert("Companies", "Kylas Company ID", { "Kylas Company ID": to, ...(toName ? { Name: toName } : {}) });
+          if (co?.id) { await airtable.upsert("Contacts", "Kylas Contact ID", { "Kylas Contact ID": kid, Company: [co.id] }); airtableMoved = true; }
+          dropReadCaches();
+        } catch (e) { log(`! contact ${kid} moved in Kylas; the Airtable link waits for the sync — ${String(e.message).slice(0, 140)}`); }
+      }
+      try {
+        const ix = (await csLoad({ fresh: true })) || null;
+        if (ix && noteSaved(ix, { id: kid, companyId: to, stage: stageCode(base?.customFieldValues?.cfPipelineStageBd) || "" })) await csSave();
+      } catch { /* the delta crawl repairs the index */ }
+      log(`contact ${kid} moved ${from || "(none)"} -> ${to}`);
+      return { ok: true, from, to, toName, airtableMoved };
+    },
+
     /* ONE CREATE AT A TIME. The check and Kylas' create are two calls, so
        twenty people pressing Create on the same new name in the same second
        all passed the check and made twenty companies (stress-company S3).

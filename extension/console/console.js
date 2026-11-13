@@ -1175,9 +1175,29 @@ function companyField(a){
   let rows=[],at=-1,q="";
   const close=()=>{list.hidden=true;inp.setAttribute("aria-expanded","false");at=-1;};
   const restore=()=>{inp.value=a.company||"";clr.hidden=!inp.value;};
-  const pick=(c)=>{
-    a.companyId=String(c.id);a.company=c.name;inp.value=c.name;inp.dataset.value=c.id;clr.hidden=false;close();
-    renderCallbar();renderQueue();validate();
+  const set=(id,name)=>{a.companyId=String(id||"");a.company=name||"";inp.value=a.company;inp.dataset.value=a.companyId;clr.hidden=!inp.value;};
+  /* A SAVED contact moves at once — Kylas and Airtable before the toast
+     (Ayush: "want all operations to move immediately"). A new card has no
+     Kylas id yet, so its company simply goes with its first save. */
+  const pick=async(c)=>{
+    const was={id:a.companyId,name:a.company};close();
+    set(c.id,c.name);renderCallbar();renderQueue();validate();
+    if(!a.kid||String(was.id)===String(c.id)||!window.API?.moveContact)return;
+    const move=async(to,toName,back)=>{
+      inp.disabled=true;const hold=inp.value;inp.value="Moving…";
+      try{
+        await API.moveContact(a.kid,to,toName);
+        inp.disabled=false;set(to,toName);renderCallbar();renderQueue();validate();
+        if(!back)toast(`Moved to ${toName}`,()=>move(was.id,was.name,true));
+        else toast(`Moved back to ${toName}`);
+      }catch(e){
+        inp.disabled=false;
+        const r=back?{id:c.id,name:c.name}:was;set(r.id,r.name);renderCallbar();renderQueue();validate();
+        toast(`Could not move: ${e.message||"error"} — still at ${r.name||"no company"}`);
+        void hold;
+      }
+    };
+    await move(String(c.id),c.name,false);
   };
   const paint=(msg)=>{
     list.hidden=false;inp.setAttribute("aria-expanded","true");

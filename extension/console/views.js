@@ -3224,6 +3224,9 @@
     { k: "fresh", label: "Last call, banded", type: "enum", get: (c) => freshOf(c),
       valueList: () => FRESH.map((z) => z.k), labelOf: (v) => FRESH.find((z) => z.k === v)?.label || v },
     { k: "days", label: "Days since last call", type: "num", get: (c) => daysSince(c.lastCalledAt) },
+    { k: "subind", label: "Sub-industry", type: "enum", get: (c) => c.enrich?.sub || "" },
+    { k: "goingcold", label: "Going cold (open, no call in 5d+)", type: "enum", get: (c) => (openStale(c) ? "yes" : "no"),
+      valueList: () => ["yes", "no"], labelOf: (v) => (v === "yes" ? "Going cold" : "Not going cold") },
   ];
 
   /* Every field the builder can ask about: one per filterable column, in the

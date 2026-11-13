@@ -381,6 +381,9 @@
     searchCompanies: (q) => req(`/company-search?q=${encodeURIComponent(q)}`, { timeout: 15000 }),
     /* The New-company form: its lists, then the whole form in one POST. */
     companyForm: () => req("/company-form", { timeout: 20000 }),
+    /* Move a saved contact to another company — Kylas and Airtable, now. */
+    moveContact: (kid, companyId, companyName) => req("/contact-move", { method: "POST",
+      body: { kid, companyId, companyName }, timeout: 30000 }),
     createCompany: (form) => req("/company-create", { method: "POST",
       body: typeof form === "string" ? { name: form } : form, timeout: 30000 }),
     /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a

@@ -78,7 +78,7 @@ for (const e of entries) {
 }
 /* And the other way: a row on the page for a column that no longer exists. */
 const labels = new Set(entries.map((e) => e.label));
-const EXTRA = new Set(["Focus list", "Last call, banded", "Days since last call",
+const EXTRA = new Set(["Focus list", "Last call, banded", "Days since last call", "Sub-industry", "Going cold (open, no call in 5d+)",
                        "column", "field", "type"]);
 for (const l of doc.split("\n").filter((x) => /^\| [A-Z]/.test(x)).map((x) => x.split("|")[1].trim()))
   ok(`the page's "${l}" is a real column`, labels.has(l) || EXTRA.has(l),
