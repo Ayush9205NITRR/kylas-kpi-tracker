@@ -1180,6 +1180,44 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     return hits;
   }
 
+  let createQueue = Promise.resolve();
+  async function createCompanyOnce(body) {
+      const name = String(body?.name || "").trim().replace(/\s+/g, " ");
+      if (companyKey(name).length < 2) throw Object.assign(new Error("Type the company's name"), { status: 400 });
+      if (name.length > 255) throw Object.assign(new Error("That name is too long"), { status: 400 });
+      /* RE-CHECKED HERE, not trusted from the card: two people can type the
+         same new company in the same minute. A match is an answer, not an
+         error — the card offers the existing account instead. */
+      const hits = await companyMatches(name, 8, { live: true });
+      const same = hits.filter((c) => c.exact);
+      if (same.length) return { ok: false, exists: same, close: hits.filter((c) => !c.exact) };
+      const claimKey = `company-claim:${companyKey(name)}`;
+      if (cache) {
+        const held = await cache.get(claimKey).catch(() => null);
+        let c = null; try { c = held ? JSON.parse(held) : null; } catch { /* stale */ }
+        if (c?.id) return { ok: false, exists: [{ ...c, exact: true }], close: [] };
+        if (c?.pending) throw Object.assign(new Error(`Someone is creating “${c.name}” right now — search again in a moment`), { status: 409 });
+        await cache.put(claimKey, JSON.stringify({ name, pending: true }), { ttlSeconds: 120 }).catch(() => {});
+      }
+      const me = await whoami();
+      if (!me?.id) throw Object.assign(new Error("Your login is not a Kylas user, so the company would have no owner"), { status: 403 });
+      let made;
+      try { made = await kylas.createCompany({ name, ownerId: Number(me.id) }); }
+      catch (e) { if (cache) await cache.delete(`company-claim:${companyKey(name)}`).catch(() => {}); throw e; }
+      const id = String(made?.id ?? "");
+      if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
+      const owner = [me.firstName, me.lastName].filter(Boolean).join(" ");
+      const row = { id, name: made?.name || name, owner, ownerId: String(me.id) };
+      await rememberCreated(row);
+      if (cache) await cache.put(`company-claim:${companyKey(name)}`, JSON.stringify(row), { ttlSeconds: 7 * 86400 }).catch(() => {});
+      companyNames.set(id, row.name);
+      if (airtable) await airtable.upsertMany("Companies", "Kylas Company ID",
+        [{ "Kylas Company ID": id, Name: row.name, Owner: owner, "Kylas Owner ID": String(me.id) }])
+        .catch((e) => log(`! company ${id} created in Kylas; the Airtable row waits for the sync — ${String(e.message).slice(0, 120)}`));
+      log(`company created: ${row.name} (${id}) for ${owner}`);
+      return { ok: true, company: row };
+  }
+
   async function whoami() {
     const email = String(callerOf()?.email || "").trim().toLowerCase();
     if (!email) return keyOwner();
@@ -3228,30 +3266,16 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (companyKey(q).length < 2) return { q, companies: [] };
       return { q, companies: await companyMatches(q, 15) };
     },
-    "/company-create": async (_url, body) => {
-      const name = String(body?.name || "").trim().replace(/\s+/g, " ");
-      if (companyKey(name).length < 2) throw Object.assign(new Error("Type the company's name"), { status: 400 });
-      if (name.length > 255) throw Object.assign(new Error("That name is too long"), { status: 400 });
-      /* RE-CHECKED HERE, not trusted from the card: two people can type the
-         same new company in the same minute. A match is an answer, not an
-         error — the card offers the existing account instead. */
-      const hits = await companyMatches(name, 8, { live: true });
-      const same = hits.filter((c) => c.exact);
-      if (same.length) return { ok: false, exists: same, close: hits.filter((c) => !c.exact) };
-      const me = await whoami();
-      if (!me?.id) throw Object.assign(new Error("Your login is not a Kylas user, so the company would have no owner"), { status: 403 });
-      const made = await kylas.createCompany({ name, ownerId: Number(me.id) });
-      const id = String(made?.id ?? "");
-      if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
-      const owner = [me.firstName, me.lastName].filter(Boolean).join(" ");
-      const row = { id, name: made?.name || name, owner, ownerId: String(me.id) };
-      await rememberCreated(row);
-      companyNames.set(id, row.name);
-      if (airtable) await airtable.upsertMany("Companies", "Kylas Company ID",
-        [{ "Kylas Company ID": id, Name: row.name, Owner: owner, "Kylas Owner ID": String(me.id) }])
-        .catch((e) => log(`! company ${id} created in Kylas; the Airtable row waits for the sync — ${String(e.message).slice(0, 120)}`));
-      log(`company created: ${row.name} (${id}) for ${owner}`);
-      return { ok: true, company: row };
+    /* ONE CREATE AT A TIME. The check and Kylas' create are two calls, so
+       twenty people pressing Create on the same new name in the same second
+       all passed the check and made twenty companies (stress-company S3).
+       Creates are rare; queuing them costs nothing. Within a process the
+       queue settles it; across Worker isolates a claim in the shared cache,
+       keyed by the normalised name, refuses the second one. */
+    "/company-create": (_url, body) => {
+      const run = createQueue.then(() => createCompanyOnce(body));
+      createQueue = run.catch(() => {});
+      return run;
     },
 
     "/check-contact": async (_url, body) => {
