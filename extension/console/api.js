@@ -379,7 +379,10 @@
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
     /* The card's company picker: never the whole list, one search per pause. */
     searchCompanies: (q) => req(`/company-search?q=${encodeURIComponent(q)}`, { timeout: 15000 }),
-    createCompany: (name) => req("/company-create", { method: "POST", body: { name }, timeout: 30000 }),
+    /* The New-company form: its lists, then the whole form in one POST. */
+    companyForm: () => req("/company-form", { timeout: 20000 }),
+    createCompany: (form) => req("/company-create", { method: "POST",
+      body: typeof form === "string" ? { name: form } : form, timeout: 30000 }),
     /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a
        403 for anybody else. status: Open | Resolved | all. */
     dupeFlags: (status = "Open") => req(`/dupe-flags?status=${encodeURIComponent(status)}`, { timeout: 20000 }),

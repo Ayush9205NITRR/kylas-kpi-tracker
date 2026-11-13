@@ -1199,14 +1199,13 @@ function companyField(a){
       catch(e){if(my===CO.seq)paint(esc(e.message||"Search failed"));}
     },200);
   };
-  const create=async()=>{
-    const name=q;if(!name)return;
-    paint(`Creating “${esc(name)}”…`);
-    try{
-      const r=await API.createCompany(name);
-      if(r.ok&&r.company){pick(r.company);toast?.(`Created ${r.company.name}`);return;}
-      rows=[...(r.exists||[]).map(c=>({...c,exact:true})),...(r.close||[])];paint();
-    }catch(e){paint(esc(e.message||"Could not create the company"));}
+  /* "+ Create" opens the full New-company form (owner, source, LinkedIn,
+     size …) with the typed name filled in; the new company is picked here
+     when the form is done. */
+  const create=()=>{
+    close();
+    if(!window.NewCompany){paint("Reload the console to create companies.");return;}
+    NewCompany.open({name:q,onDone:(co)=>pick(co)});
   };
   inp.oninput=()=>{clr.hidden=!inp.value;search();};
   inp.onfocus=()=>{inp.select();};

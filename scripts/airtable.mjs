@@ -1263,6 +1263,7 @@ export const ENRICH_FIELDS = [
   /* THE MERGED COLUMNS (Apollo, else Claude's web research). Read first; the
      Apollo-only columns above stay as the fallback for a base without them. */
   ...Object.values(ENRICH_FINAL),
+  "Industry", "City", "Industry Group", "Sub-industry", "HQ City",
   "linkedin - Appollo", "Offsite Timeline",
   /* The demand team's own view of where an account stands — "LinkedIn Outreach
      Initiated", "Not Interested", "Invalid Contact". It is NOT the Kylas

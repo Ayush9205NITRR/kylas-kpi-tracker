@@ -1563,3 +1563,17 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .cobox-opt:hover,.cobox-opt.on{background:var(--blueSoft)}
 .cobox-new{color:var(--blue);font-weight:var(--w-strong);border-top:1px solid var(--line);border-radius:0 0 8px 8px}
 .cobox-msg{margin:0;padding:8px 10px;color:var(--text2);font-size:var(--t-meta)}
+
+/* ── the New-company form (newco.js) ── */
+.newco .ncgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:12px}
+.newco .f{display:flex;flex-direction:column;gap:6px;font-size:var(--t-label);color:var(--text2)}
+.newco .f.wide{grid-column:1 / -1}
+.newco .rq{color:var(--rose);font-weight:var(--w-strong)}
+.newco .ncmsg{font-size:var(--t-meta);color:var(--text3);min-height:1em}
+.newco .ncmsg.ok{color:var(--text2)}
+.newco .ncmsg.warn{color:var(--text2)}
+.newco .ncmsg.bad,.newco #ncErr{color:var(--rose)}
+.newco .ncmore{margin:4px 0 12px;font-size:var(--t-label);color:var(--text2)}
+.newco .ncmore summary{cursor:pointer;margin-bottom:10px}
+.newco .ncfoot{display:flex;justify-content:flex-end;gap:8px}
+@media (max-width:720px){.newco .ncgrid{grid-template-columns:1fr}}

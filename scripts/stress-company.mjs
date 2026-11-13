@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const ENV = { KYLAS_BASE: "http://127.0.0.1:9900", KYLAS_KEY: "x",
-  AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock", AIRTABLE_BASE: "appMOCK", PORT: "8787" };
+  AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock", AIRTABLE_BASE: "appMOCK", RESEARCH_BASE: "appRESEARCH", PORT: "8787" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const ok = (what, cond, detail = "") => { cond ? pass++ : fail++; console.log(`  ${cond ? "PASS" : "FAIL"}  ${what}${detail ? ` — ${detail}` : ""}`); };
@@ -26,7 +26,7 @@ const start = (file, env = {}) => procs.push(spawn("node", [file], { cwd: REPO, 
 const wait = async (url, h = {}) => { for (let i = 0; i < 100; i++) { try { await fetch(url, { headers: h }); return; } catch { await sleep(300); } } throw new Error(`${url} never came up`); };
 const B = "http://127.0.0.1:8787";
 const search = async (q) => { const t = Date.now(); const r = await fetch(`${B}/company-search?q=${encodeURIComponent(q)}`); return { ms: Date.now() - t, status: r.status, j: await r.json().catch(() => ({})) }; };
-const create = async (name) => { const r = await fetch(`${B}/company-create`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); return { status: r.status, j: await r.json().catch(() => ({})) }; };
+const create = async (name) => { const r = await fetch(`${B}/company-create`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: "74725", source: "COLD_CALLING", linkedin: "https://www.linkedin.com/company/x-" + encodeURIComponent(String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")).slice(0, 60), empBand: "51-200", name }) }); return { status: r.status, j: await r.json().catch(() => ({})) }; };
 const made = async () => (await fetch("http://127.0.0.1:9900/__companies", { headers: { "api-key": "x" } })).json();
 const pool = async (items, n, fn) => { const out = []; let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } })); return out; };
 

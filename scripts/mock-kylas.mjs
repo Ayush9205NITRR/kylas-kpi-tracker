@@ -431,7 +431,7 @@ createServer(async (req, res) => {
     const b = JSON.parse(await text(req) || "{}");
     if (!String(b.name || "").trim()) return json(res, 400, { message: "name is required" });
     const id = 900000 + Object.keys(COMPANIES).length;
-    COMPANIES[id] = { id, name: String(b.name).trim(), ownerId: Number(b.ownerId) || 74725, customFieldValues: {},
+    COMPANIES[id] = { ...b, id, name: String(b.name).trim(), ownerId: Number(b.ownerId) || 74725, customFieldValues: b.customFieldValues || {},
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     CREATED_COMPANIES.push(id);
     return json(res, 200, COMPANIES[id]);
@@ -556,6 +556,14 @@ createServer(async (req, res) => {
         ] } },
       { name: "cfBatch", displayName: "Batch", type: "TEXT_FIELD" },
       { name: "cfBooleanPostLink", displayName: "Boolean Post link", type: "URL" },
+      { name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
+        picklist: { picklistValues: [
+          { id: 9201, name: "COLD_CALLING", displayName: "Cold Calling" },
+          { id: 9202, name: "APOLLO", displayName: "Apollo" },
+          { id: 9203, name: "LINKEDIN", displayName: "LinkedIn" },
+        ] } },
+      { name: "cfLinkedinPage", displayName: "LinkedIn", type: "URL" },
+      { name: "city", displayName: "City", type: "TEXT_FIELD", standard: true },
     ] });
   }
 

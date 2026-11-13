@@ -2721,7 +2721,7 @@
                    source employee bucket, a funding-stage name), plus a floor
                    for the priority score. The bands themselves are computed
                    from the raw number every time — see enrich.js. */
-                rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(),
+                rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(), ind: new Set(), sub: new Set(), city: new Set(),
                 offsiteSet: new Set(), priMin: "", moreOpen: false,
                 /* the demand team's own pipeline stage, out of Company List */
                 apsSet: new Set(), cbySet: new Set(), ubySet: new Set(),
@@ -2798,7 +2798,7 @@
      anything in it the console does not recognise is ignored rather than
      being an error, because a link outlives the filter it was made with. */
   const LINK_SETS = { stage: "stages", src: "sources", kpi: "kpis", fresh: "fresh", next: "nextSet",
-                      focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage",
+                      focus: "focusSet", rev: "rev", emp: "emp", round: "round", fstage: "fstage", ind: "ind", sub: "sub", city: "city",
                       off: "offsiteSet", cby: "cbySet", uby: "ubySet", cold: "coldSet" };
   function filtersToQuery() {
     const q = new URLSearchParams();
@@ -2948,6 +2948,9 @@
     if (skip !== "emp" && ACC.emp.size && !ACC.emp.has(VALUE_OF.emp(co))) return false;
     if (skip !== "round" && ACC.round.size && !ACC.round.has(VALUE_OF.round(co))) return false;
     if (skip !== "fstage" && ACC.fstage.size && !ACC.fstage.has(VALUE_OF.fstage(co))) return false;
+    if (skip !== "ind" && ACC.ind.size && !ACC.ind.has(VALUE_OF.ind(co))) return false;
+    if (skip !== "sub" && ACC.sub.size && !ACC.sub.has(VALUE_OF.sub(co))) return false;
+    if (skip !== "city" && ACC.city.size && !ACC.city.has(VALUE_OF.city(co))) return false;
     if (skip !== "cby" && ACC.cbySet.size && !ACC.cbySet.has(VALUE_OF.cby(co))) return false;
     if (skip !== "uby" && ACC.ubySet.size && !ACC.ubySet.has(VALUE_OF.uby(co))) return false;
     /* "at least N". A company with no score is not "0" — it is unscored, so it
@@ -2995,6 +2998,10 @@
     round: (c) => global.Enrich.bandOf(global.Enrich.ROUND_BANDS, c.enrich?.amt ?? null),
     emp: (c) => c.enrich?.emp || global.Enrich.UNKNOWN,
     fstage: (c) => c.enrich?.type || global.Enrich.UNKNOWN,
+    /* Industry (docs/industries.json groups), its sub-industry, and the city. */
+    ind: (c) => c.enrich?.ind || global.Enrich.UNKNOWN,
+    sub: (c) => c.enrich?.sub || global.Enrich.UNKNOWN,
+    city: (c) => c.enrich?.city || global.Enrich.UNKNOWN,
     aps: (c) => c.enrich?.aps || global.Enrich.UNKNOWN,
     /* A company can name more than one quarter, so this one answers with a
        list and the chips mean "contains any" — see MULTI below. */
@@ -3666,6 +3673,12 @@
         ${bandRow("Latest round", "round", E.ROUND_BANDS, ACC.round)}
         ${chipRow(all, "Funding stage", "fstage", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.fstage,
           null, { limit: 8, expanded: ACC.fstageMore, moreNoun: "stages", moreOne: "stage" })}
+        ${chipRow(all, "Industry", "ind", null, (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.ind,
+          null, { limit: 8, expanded: ACC.indMore, moreNoun: "industries", moreOne: "industry" })}
+        ${ACC.ind.size ? chipRow(all.filter((c) => ACC.ind.has(VALUE_OF.ind(c))), "Sub-industry", "sub", null,
+          (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.sub, null, { limit: 10 }) : ""}
+        ${chipRow(all, "City", "city", null, (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.city,
+          null, { limit: 10, expanded: ACC.cityMore, moreNoun: "cities", moreOne: "city" })}
         ${chipRow(all, "Offsite timeline", "offsite", null,
           (v) => (v === E.UNKNOWN ? "Not known yet" : offLabel(v)), ACC.offsiteSet)}
         <div class="frow"><span class="lbl">Priority</span>
@@ -3676,7 +3689,7 @@
       </div>` : ""}
     </div>`;
   }
-  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.offsiteSet, ACC.cbySet, ACC.ubySet];
+  const moreSets = () => [ACC.rev, ACC.emp, ACC.round, ACC.fstage, ACC.ind, ACC.sub, ACC.city, ACC.offsiteSet, ACC.cbySet, ACC.ubySet];
   const moreCount = () => moreSets().reduce((n, s) => n + s.size, 0) + (ACC.priMin === "" ? 0 : 1);
   const moreActive = () => moreCount() > 0;
 
@@ -3806,6 +3819,12 @@
     { k: "fstage", label: "Funding stage", w: "1fr",
       ff: { type: "enum", get: (c) => en(c).type || "" },
       cell: (c) => dash(esc(en(c).type || "")) },
+    { k: "industry", label: "Industry", w: "1fr",
+      ff: { type: "enum", get: (c) => en(c).ind || "" },
+      cell: (c) => dash(esc([en(c).ind, en(c).sub].filter(Boolean).join(" › "))) },
+    { k: "city", label: "City", w: ".8fr",
+      ff: { type: "enum", get: (c) => en(c).city || "" },
+      cell: (c) => dash(esc(en(c).city || "")) },
     /* ACCOUNT PIPELINE STAGE — CALCULATED, and the highest one wins.
        An account with three contacts has three pipeline stages, and the
        account sits at the furthest of them by the 26-rung order in
@@ -4252,6 +4271,7 @@
               aria-label="Search accounts" autocomplete="off" spellcheck="false">
             ${qValues().length > 1 && ACC.q ? `<span class="srchn" title="${esc(qValues().join(", "))}">${qValues().length} values</span>` : ""}
           </div>
+          <button type="button" class="gbtn" id="accNewCo" title="Create a company in Kylas, with the details its score needs">+ New company</button>
           ${ownerPicker(all)}
           <select id="accSort" aria-label="Sort">
             ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}"${ACC.sort === k ? " selected" : ""}>${esc(v)}</option>`).join("")}
@@ -4851,7 +4871,7 @@
        reaching the rest is the same gesture as picking one. */
     /* One flag per row that can be capped — named after the row, so adding a
        capped row is one entry here and not a second branch. */
-    const MORE_FLAG = { fstage: "fstageMore", aps: "apsMore" };
+    const MORE_FLAG = { fstage: "fstageMore", aps: "apsMore", ind: "indMore", city: "cityMore" };
     host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
       const flag = MORE_FLAG[b.dataset.more];
       if (flag) ACC[flag] = !ACC[flag];
@@ -4864,6 +4884,7 @@
                    next: () => ACC.nextSet, stage: () => ACC.stages, fresh: () => ACC.fresh,
                    rev: () => ACC.rev, emp: () => ACC.emp, round: () => ACC.round,
                    fstage: () => ACC.fstage, offsite: () => ACC.offsiteSet,
+                   ind: () => ACC.ind, sub: () => ACC.sub, city: () => ACC.city,
                    cby: () => ACC.cbySet, uby: () => ACC.ubySet, cold: () => ACC.coldSet };
     host.querySelectorAll(".chip[data-f]").forEach((b) => b.addEventListener("click", () => {
       const { f, v } = b.dataset;
@@ -4921,6 +4942,15 @@
          "search pane se bahar nikal ja rahe hoon"). keepPlace waits for the
          paint and then puts the caret and the scroll back. */
       qTimer = setTimeout(() => { keepPlace(redraw).catch(() => {}); }, 150);
+    });
+    on("accNewCo", "click", () => {
+      if (!global.NewCompany) return;
+      global.NewCompany.open({ onDone: (co) => {
+        /* Into the list at once, then the next read brings its enrichment. */
+        ACC.q = co.name; ACC.limit = 100;
+        ensureCompanies(FILTERS.owner === "all" ? "all" : FILTERS.owner, () => redraw(), true);
+        redraw();
+      } });
     });
     on("accQOp", "change", (e) => {
       ACC.qOp = Q_OPS_KEYS.includes(e.target.value) ? e.target.value : "contains";

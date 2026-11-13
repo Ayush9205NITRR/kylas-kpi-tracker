@@ -17,7 +17,7 @@ import { companyKey, rankCompanies } from "./fields.mjs";
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const ENV = { KYLAS_BASE: "http://127.0.0.1:9900", KYLAS_KEY: "x",
-  AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock", AIRTABLE_BASE: "appMOCK", PORT: "8787" };
+  AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock", AIRTABLE_BASE: "appMOCK", RESEARCH_BASE: "appRESEARCH", PORT: "8787" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const ok = (what, cond, detail = "") => { cond ? pass++ : fail++; console.log(`  ${cond ? "PASS" : "FAIL"}  ${what}${cond || !detail ? "" : ` — ${detail}`}`); };
@@ -38,6 +38,7 @@ try {
   start("scripts/mock-airtable.mjs", { PORT: "9901" }); await wait("http://127.0.0.1:9901/v0/appMOCK/Companies");
   start("scripts/proxy.mjs"); await wait("http://127.0.0.1:8787/health");
   const get = async (p) => (await fetch(`http://127.0.0.1:8787${p}`)).json();
+  const FORM = { ownerId: "74725", source: "COLD_CALLING", linkedin: "https://www.linkedin.com/company/bluefin-labs", empBand: "201-500" };
   const post = async (p, body) => { const x = await fetch(`http://127.0.0.1:8787${p}`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { status: x.status, j: await x.json() }; };
 
@@ -51,7 +52,7 @@ try {
   ok("one letter asks for nothing", Array.isArray(s3.companies) && s3.companies.length === 0);
 
   console.log("\n3. create");
-  const c1 = await post("/company-create", { name: "Bluefin Labs Pvt Ltd" });
+  const c1 = await post("/company-create", { ...FORM, name: "Bluefin Labs Pvt Ltd", revenue: "25,000,000", fundingType: "Series A", totalFunding: 12000000, industry: "IT & Software", subIndustry: "SaaS & Software", city: "bangalore" });
   ok("created", c1.status === 200 && c1.j.ok && c1.j.company?.id, JSON.stringify(c1));
   const made = await (await fetch("http://127.0.0.1:9900/__companies", { headers: { "api-key": "x" } })).json();
   ok("in Kylas, once", made.length === 1 && made[0].name === "Bluefin Labs Pvt Ltd", JSON.stringify(made));
@@ -63,13 +64,42 @@ try {
 
   console.log("\n4. never twice");
   for (const spelling of ["Bluefin Labs", "BLUEFIN LABS PRIVATE LIMITED", "bluefin-labs", "Shorehouse Retail Ltd"]) {
-    const c = await post("/company-create", { name: spelling });
+    const c = await post("/company-create", { ...FORM, name: spelling });
     ok(`"${spelling}" refused with the existing account`, c.status === 200 && c.j.ok === false && (c.j.exists || []).length >= 1, JSON.stringify(c.j).slice(0, 160));
   }
   const after = await (await fetch("http://127.0.0.1:9900/__companies", { headers: { "api-key": "x" } })).json();
   ok("...and Kylas still holds exactly one new company", after.length === 1, String(after.length));
-  const c5 = await post("/company-create", { name: "x" });
+  const c5 = await post("/company-create", { ...FORM, name: "x" });
   ok("a one-letter name is refused", c5.status === 400);
+
+  console.log("\n5. the form's required fields");
+  for (const [k, label] of [["source", "Source of Data"], ["linkedin", "LinkedIn"], ["empBand", "employee size"]]) {
+    const c = await post("/company-create", { ...FORM, name: `Missing ${k} Co`, [k]: "" });
+    ok(`no ${label} -> 400`, c.status === 400, JSON.stringify(c.j).slice(0, 100));
+  }
+  const bad = await post("/company-create", { ...FORM, name: "Bad Link Co", linkedin: "https://example.com/acme" });
+  ok("a LinkedIn URL that is not a company page -> 400", bad.status === 400, JSON.stringify(bad.j).slice(0, 100));
+  const badSrc = await post("/company-create", { ...FORM, name: "Bad Source Co", source: "NOT_A_SOURCE" });
+  ok("an unknown Source of Data -> 400", badSrc.status === 400);
+  const badOwner = await post("/company-create", { ...FORM, name: "Bad Owner Co", ownerId: "99999" });
+  ok("an owner who is not an active user -> 400", badOwner.status === 400);
+  const noType = await post("/company-create", { ...FORM, name: "Funding No Type Co", totalFunding: 5 });
+  ok("funding numbers without a funding type -> 400", noType.status === 400);
+
+  console.log("\n6. what the full create wrote");
+  const w = await (await fetch("http://127.0.0.1:9900/__companies", { headers: { "api-key": "x" } })).json();
+  const blue = w.find((c) => c.name === "Bluefin Labs Pvt Ltd");
+  ok("Kylas got Source of Data as its option id", blue?.customFieldValues?.cfSourceOfData === 9201, JSON.stringify(blue?.customFieldValues));
+  ok("Kylas got the LinkedIn page", blue?.customFieldValues?.cfLinkedinPage === "https://www.linkedin.com/company/bluefin-labs");
+  ok("Kylas got the city, normalised", blue?.city === "Bengaluru", String(blue?.city));
+  const cl = await (await fetch("http://127.0.0.1:9901/v0/appRESEARCH/Company%20List", { headers: { Authorization: "Bearer pat_mock" } })).json();
+  const r = (cl.records || []).find((x) => x.fields?.["Kylas Company Id"] === String(blue?.id))?.fields || {};
+  ok("Company List: employees = band midpoint (350)", r["Employees (Manual)"] === 350, JSON.stringify(r).slice(0, 200));
+  ok("Company List: revenue, funding type and total as entered", r["Revenue (Manual)"] === 25000000 && r["Funding Type (Manual)"] === "Series A" && r["Total Funding (Manual)"] === 12000000);
+  ok("Company List: industry, sub-industry, city", r["Industry Group"] === "IT & Software" && r["Sub-industry"] === "SaaS & Software" && r["HQ City"] === "Bengaluru");
+  ok("Company List: who and when", !!r["Manual By"] && /^\d{4}-\d{2}-\d{2}$/.test(r["Manual At"] || ""));
+  const form = await get("/company-form");
+  ok("/company-form lists sources, bands, industries, cities", form.sources?.length === 3 && form.bands?.length === 8 && Object.keys(form.industries || {}).length >= 15 && form.cities?.includes("Bengaluru"));
 } finally {
   for (const p of procs) { try { p.kill("SIGKILL"); } catch {} }
 }

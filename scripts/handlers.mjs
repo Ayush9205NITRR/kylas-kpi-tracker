@@ -33,6 +33,7 @@ import { emptyIndex, applyContacts, noteSaved, byCompany as stagesByCompany,
          higher as higherStage } from "./contact-stages.mjs";
 import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact, companyKey, rankCompanies } from "./fields.mjs";
+import { EMP_BANDS, CITIES, CITY_LIST, industries, industryOf, normCity, checkCompanyForm } from "./company-form.mjs";
 import { createAirtable, syncContact, readCompanyKpis,
          readContact, readCompany, readQueue,
          readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
@@ -768,7 +769,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       /* "Boolean Post link" on the Kylas company (Ayush, 2026-11-04: pick it from
          Kylas, not Airtable). Found by LABEL, like Offsite. */
       boolean: fields.filter((f) => /boolean/i.test(`${f.name} ${f.displayName}`))
-        .map((f) => ({ name: f.name, label: f.displayName || "" })) };
+        .map((f) => ({ name: f.name, label: f.displayName || "" })),
+      /* The New-company form's fields, each found by LABEL (the key Kylas gave
+         a custom field need not say what it is). First match wins. */
+      ...Object.fromEntries([["source", /source\s*of\s*data/i], ["linkedin", /linked\s*in/i],
+        ["industry", /^industry\b|\bindustry$/i], ["city", /^city$|\bcity\b/i]].map(([k, re]) => {
+        const f = fields.find((x) => re.test(`${x.displayName || ""}`) || re.test(`${x.name || ""}`));
+        return [k, f ? { name: f.name, label: f.displayName || "", custom: !f.standard, options: findOptions(f) || [] } : null];
+      })) };
   });
   /* ONE COMPANY CAN NAME MORE THAN ONE QUARTER. Kylas' own field is a single
      select today, so it cannot hold two — but the value still arrives as a
@@ -836,9 +844,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       if (!kid) continue;
       const e = {
         rev: money(finalOf(f, "Annual Revenue")), rpe: money(f.at_rev_per_employee),
-        emp: empBand(finalOf(f, "No. of Employees (kylas)")),
+        emp: empBand(f["No. of Employees (kylas)"]),   /* the BAND (a formula over Employees (Final)), not the count */
         fund: money(finalOf(f, "Total Funding")), amt: money(finalOf(f, "Latest Funding Amount")),
         type: flat(finalOf(f, "Latest Funding Type")) || "", pri: num(f.at_priority),
+        /* Industry: the BD's pick, else Apollo's industry mapped through
+           docs/industries.json. City: the BD's, else Apollo's, one spelling. */
+        ind: flat(f["Industry Group"]) || (industryOf(flat(f.Industry)) || [])[0] || "",
+        sub: flat(f["Sub-industry"]) || (industryOf(flat(f.Industry)) || [])[1] || "",
+        city: normCity(flat(f["HQ City"]) || flat(f.City)),
         aps: flat(f["Account Pipeline Stage"]) || "",
         li: flat(f["linkedin - Appollo"]) || "",
         bp: ENRICH_BOOLEAN_COLUMNS.map((c) => flat(f[c])).find(Boolean) || "",
@@ -1181,10 +1194,26 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   }
 
   let createQueue = Promise.resolve();
+  async function formPeople() {
+    const apiUser = String((await keyOwner().catch(() => null))?.id || "");
+    const { users } = await kylasUsers().catch(() => ({ users: [] }));
+    return users.filter((u) => u.id && u.active !== false && String(u.id) !== apiUser && !/super\s*admin/i.test(u.name || ""))
+      .map((u) => ({ id: String(u.id), name: u.name || u.email || String(u.id) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
   async function createCompanyOnce(body) {
-      const name = String(body?.name || "").trim().replace(/\s+/g, " ");
-      if (companyKey(name).length < 2) throw Object.assign(new Error("Type the company's name"), { status: 400 });
-      if (name.length > 255) throw Object.assign(new Error("That name is too long"), { status: 400 });
+      const defs = await companyFieldsShared().catch(() => null);
+      const me0 = await whoami();
+      const people = await formPeople();
+      /* The creator is always allowed as owner, even when they are not in the
+         BD list (an admin, or the key's own user on a test stack). */
+      if (me0?.id && !people.some((p) => p.id === String(me0.id)))
+        people.push({ id: String(me0.id), name: [me0.firstName, me0.lastName].filter(Boolean).join(" ") });
+      const form = checkCompanyForm({ ownerId: me0?.id, ...body },
+        { sources: defs?.source?.options || [], people });
+      if (!form.ok) throw Object.assign(new Error(Object.values(form.errors)[0]), { status: 400, fields: form.errors });
+      const f = form.clean;
+      const name = f.name;
       /* RE-CHECKED HERE, not trusted from the card: two people can type the
          same new company in the same minute. A match is an answer, not an
          error — the card offers the existing account instead. */
@@ -1199,23 +1228,61 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (c?.pending) throw Object.assign(new Error(`Someone is creating “${c.name}” right now — search again in a moment`), { status: 409 });
         await cache.put(claimKey, JSON.stringify({ name, pending: true }), { ttlSeconds: 120 }).catch(() => {});
       }
-      const me = await whoami();
+      const me = me0;
       if (!me?.id) throw Object.assign(new Error("Your login is not a Kylas user, so the company would have no owner"), { status: 403 });
+      /* Kylas fields that exist on this account, by label; the rest are said. */
+      const cfv = {}, std = {}, skipped = [];
+      const put = (key, val) => { const d = defs?.[key]; if (!d) { skipped.push(key); return; }
+        (d.custom ? cfv : std)[d.name] = val; };
+      const srcOpt = (defs?.source?.options || []).find((o) => o.code === f.source || o.label === f.source || String(o.id) === f.source);
+      put("source", srcOpt?.id ?? f.source);
+      put("linkedin", f.linkedin);
+      if (f.industry) { const opt = (defs?.industry?.options || []).find((o) => String(o.label).toLowerCase() === f.industry.toLowerCase());
+        if (defs?.industry?.options?.length && !opt) skipped.push("industry"); else put("industry", opt?.id ?? f.industry); }
+      if (f.city) put("city", f.city);
       let made;
-      try { made = await kylas.createCompany({ name, ownerId: Number(me.id) }); }
+      try { made = await kylas.createCompany({ name, ownerId: Number(f.ownerId), ...std,
+        ...(Object.keys(cfv).length ? { customFieldValues: cfv } : {}) }); }
       catch (e) { if (cache) await cache.delete(`company-claim:${companyKey(name)}`).catch(() => {}); throw e; }
       const id = String(made?.id ?? "");
       if (!id) throw Object.assign(new Error("Kylas did not return the new company's id"), { status: 502 });
-      const owner = [me.firstName, me.lastName].filter(Boolean).join(" ");
-      const row = { id, name: made?.name || name, owner, ownerId: String(me.id) };
+      const creator = [me.firstName, me.lastName].filter(Boolean).join(" ");
+      const owner = people.find((p) => p.id === f.ownerId)?.name || creator;
+      const row = { id, name: made?.name || name, owner, ownerId: f.ownerId };
       await rememberCreated(row);
       if (cache) await cache.put(`company-claim:${companyKey(name)}`, JSON.stringify(row), { ttlSeconds: 7 * 86400 }).catch(() => {});
       companyNames.set(id, row.name);
       if (airtable) await airtable.upsertMany("Companies", "Kylas Company ID",
-        [{ "Kylas Company ID": id, Name: row.name, Owner: owner, "Kylas Owner ID": String(me.id) }])
+        [{ "Kylas Company ID": id, Name: row.name, Owner: owner, "Kylas Owner ID": f.ownerId,
+           ...(srcOpt?.label ? { "Source of Data": srcOpt.label } : {}) }])
         .catch((e) => log(`! company ${id} created in Kylas; the Airtable row waits for the sync — ${String(e.message).slice(0, 120)}`));
-      log(`company created: ${row.name} (${id}) for ${owner}`);
-      return { ok: true, company: row };
+      /* THE SCORE'S INPUTS, in Company List. The Manual columns win over
+         Apollo and Claude in every Final formula, so the score is computed
+         from what the BD entered the moment the row exists. */
+      let score = null, researchSaved = false;
+      if (researchAt) {
+        const today = new Date().toISOString().slice(0, 10);
+        const rowR = { "Kylas Company Id": id, Name: row.name, "Company Name - Kylas": row.name,
+          "Owner - Kylas": owner, "Source of Data": srcOpt?.label || f.source,
+          "LinkedIn (Manual)": f.linkedin, "Employees (Manual)": f.employees,
+          ...(f.revenue != null ? { "Revenue (Manual)": f.revenue } : {}),
+          ...(f.fundingType ? { "Funding Type (Manual)": f.fundingType } : {}),
+          ...(f.fundingAmount != null ? { "Funding Amount (Manual)": f.fundingAmount } : {}),
+          ...(f.totalFunding != null ? { "Total Funding (Manual)": f.totalFunding } : {}),
+          ...(f.lastRaised ? { "Last Raised (Manual)": f.lastRaised } : {}),
+          ...(f.industry ? { "Industry Group": f.industry, "Sub-industry": f.subIndustry } : {}),
+          ...(f.city ? { "HQ City": f.city } : {}),
+          "Manual By": creator, "Manual At": today };
+        try {
+          await researchAt.upsertMany(RESEARCH_TABLE, "Kylas Company Id", [rowR]);
+          researchSaved = true;
+          const back = await listTolerant(researchAt, RESEARCH_TABLE, { fields: ["at_priority"],
+            formula: `{Kylas Company Id} = '${id}'`, pageSize: 1, maxPages: 1 }).catch(() => []);
+          score = num(back?.[0]?.fields?.at_priority);
+        } catch (e) { log(`! company ${id}: Company List row not written — ${String(e.message).slice(0, 160)}`); }
+      }
+      log(`company created: ${row.name} (${id}) for ${owner} by ${creator}${skipped.length ? ` · Kylas has no ${skipped.join("/")} field` : ""}`);
+      return { ok: true, company: row, score, researchSaved, skipped };
   }
 
   async function whoami() {
@@ -3265,6 +3332,21 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const q = String(url.searchParams.get("q") || "").trim();
       if (companyKey(q).length < 2) return { q, companies: [] };
       return { q, companies: await companyMatches(q, 15) };
+    },
+    /* WHAT THE NEW-COMPANY FORM NEEDS, in one read: owners, the Source of
+       Data options from Kylas, employee bands, industries and cities. */
+    "/company-form": async () => {
+      const me = await whoami().catch(() => null);
+      const defs = await companyFieldsShared().catch(() => null);
+      return {
+        me: me?.id ? { id: String(me.id), name: [me.firstName, me.lastName].filter(Boolean).join(" ") } : null,
+        people: await formPeople(),
+        sources: (defs?.source?.options || []).map((o) => ({ id: o.id, code: o.code, label: o.label })),
+        bands: EMP_BANDS, industries: industries().groups, cities: CITIES, cityList: CITY_LIST,
+        fundingTypes: ["Seed", "Angel", "Pre-Seed", "Series A", "Series B", "Series C", "Series D", "Series E",
+          "Venture (Round not Specified)", "Private Equity", "Debt Financing", "Merger / Acquisition", "IPO", "Grant", "Other"],
+        kylasFields: Object.fromEntries(["source", "linkedin", "industry", "city"].map((k) => [k, !!defs?.[k]])),
+      };
     },
     /* ONE CREATE AT A TIME. The check and Kylas' create are two calls, so
        twenty people pressing Create on the same new name in the same second

@@ -1,0 +1,686 @@
+{
+ "_about": "Industry taxonomy for the console (Ayush, 2026-11-13). groups: top-level -> sub-industries. map: a source value (Apollo/LinkedIn industry or a Kylas label), lowercased -> [group, sub]. Edit here; server and console read this file.",
+ "groups": {
+  "IT & Software": [
+   "SaaS & Software",
+   "IT Services",
+   "Hardware & Semiconductors"
+  ],
+  "BFSI": [
+   "Banking & Capital Markets",
+   "Financial Services & Fintech",
+   "Insurance",
+   "VC & PE"
+  ],
+  "Manufacturing & Industrial": [
+   "Auto & Mobility",
+   "Machinery & Engineering",
+   "Chemicals & Materials",
+   "Textiles & Apparel"
+  ],
+  "Pharma & Healthcare": [
+   "Pharma & Biotech",
+   "Hospitals & Care",
+   "Medical Devices",
+   "Wellness & Fitness"
+  ],
+  "Consumer & Retail": [
+   "FMCG & Food",
+   "Retail & E-commerce"
+  ],
+  "Education": [
+   "Schools & Higher Ed",
+   "EdTech & Training"
+  ],
+  "Real Estate & Construction": [
+   "Real Estate",
+   "Construction & Infra"
+  ],
+  "Energy & Utilities": [
+   "Oil, Gas & Power",
+   "Renewables & Environment"
+  ],
+  "Logistics & Transport": [
+   "Logistics & Supply Chain",
+   "Transport & Aviation"
+  ],
+  "Media, Marketing & Entertainment": [
+   "Marketing & Advertising",
+   "Media & Publishing",
+   "Entertainment & Sports"
+  ],
+  "Hospitality & Travel": [
+   "Hotels & Restaurants",
+   "Travel & Events"
+  ],
+  "Professional Services": [
+   "Consulting",
+   "Legal",
+   "HR & Staffing",
+   "Business Services"
+  ],
+  "Telecom": [
+   "Telecom"
+  ],
+  "Agriculture": [
+   "Agriculture"
+  ],
+  "Government & Non-profit": [
+   "Government",
+   "Non-profit"
+  ],
+  "Other": [
+   "Other"
+  ]
+ },
+ "map": {
+  "accounting": [
+   "BFSI",
+   "Financial Services & Fintech"
+  ],
+  "advertising & marketing": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "airlines/aviation": [
+   "Logistics & Transport",
+   "Transport & Aviation"
+  ],
+  "alternative dispute resolution": [
+   "Professional Services",
+   "Legal"
+  ],
+  "alternative medicine": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "animation": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "apparel & fashion": [
+   "Manufacturing & Industrial",
+   "Textiles & Apparel"
+  ],
+  "architecture & planning": [
+   "Real Estate & Construction",
+   "Construction & Infra"
+  ],
+  "arts & crafts": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "automotive": [
+   "Manufacturing & Industrial",
+   "Auto & Mobility"
+  ],
+  "aviation & aerospace": [
+   "Manufacturing & Industrial",
+   "Auto & Mobility"
+  ],
+  "banking": [
+   "BFSI",
+   "Banking & Capital Markets"
+  ],
+  "biotechnology": [
+   "Pharma & Healthcare",
+   "Pharma & Biotech"
+  ],
+  "biotechnology & pharmaceuticals": [
+   "Pharma & Healthcare",
+   "Pharma & Biotech"
+  ],
+  "broadcast media": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "building materials": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "business supplies & equipment": [
+   "Professional Services",
+   "Business Services"
+  ],
+  "capital markets": [
+   "BFSI",
+   "Banking & Capital Markets"
+  ],
+  "chemicals": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "civic & social organization": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "civil engineering": [
+   "Real Estate & Construction",
+   "Construction & Infra"
+  ],
+  "commercial real estate": [
+   "Real Estate & Construction",
+   "Real Estate"
+  ],
+  "computer & network security": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "computer games": [
+   "IT & Software",
+   "SaaS & Software"
+  ],
+  "computer hardware": [
+   "IT & Software",
+   "Hardware & Semiconductors"
+  ],
+  "computer networking": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "computer software": [
+   "IT & Software",
+   "SaaS & Software"
+  ],
+  "construction": [
+   "Real Estate & Construction",
+   "Construction & Infra"
+  ],
+  "construction, infrastructure & real estate": [
+   "Real Estate & Construction",
+   "Construction & Infra"
+  ],
+  "consumer electronics": [
+   "IT & Software",
+   "Hardware & Semiconductors"
+  ],
+  "consumer goods": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "consumer services": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "cosmetics": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "dairy": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "defense & space": [
+   "Manufacturing & Industrial",
+   "Auto & Mobility"
+  ],
+  "design": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "e-learning": [
+   "Education",
+   "EdTech & Training"
+  ],
+  "education & training": [
+   "Education",
+   "EdTech & Training"
+  ],
+  "education management": [
+   "Education",
+   "Schools & Higher Ed"
+  ],
+  "electrical/electronic manufacturing": [
+   "Manufacturing & Industrial",
+   "Machinery & Engineering"
+  ],
+  "enterprise tech / horizontal saas": [
+   "IT & Software",
+   "SaaS & Software"
+  ],
+  "entertainment": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "environmental services": [
+   "Energy & Utilities",
+   "Renewables & Environment"
+  ],
+  "events services": [
+   "Hospitality & Travel",
+   "Travel & Events"
+  ],
+  "executive office": [
+   "Professional Services",
+   "Business Services"
+  ],
+  "facilities services": [
+   "Professional Services",
+   "Business Services"
+  ],
+  "farming": [
+   "Agriculture",
+   "Agriculture"
+  ],
+  "financial services": [
+   "BFSI",
+   "Financial Services & Fintech"
+  ],
+  "financial services & insurance": [
+   "BFSI",
+   "Financial Services & Fintech"
+  ],
+  "food & beverages": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "food production": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "fund-raising": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "furniture": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "gambling & casinos": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "glass, ceramics & concrete": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "government administration": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "government relations": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "graphic design": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "health care": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "health, wellness & fitness": [
+   "Pharma & Healthcare",
+   "Wellness & Fitness"
+  ],
+  "higher education": [
+   "Education",
+   "Schools & Higher Ed"
+  ],
+  "hospital & health care": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "hospitality": [
+   "Hospitality & Travel",
+   "Hotels & Restaurants"
+  ],
+  "human resources": [
+   "Professional Services",
+   "HR & Staffing"
+  ],
+  "import & export": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "individual & family services": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "industrial automation": [
+   "Manufacturing & Industrial",
+   "Machinery & Engineering"
+  ],
+  "information services": [
+   "IT & Software",
+   "SaaS & Software"
+  ],
+  "information technology": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "information technology & services": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "insurance": [
+   "BFSI",
+   "Insurance"
+  ],
+  "international affairs": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "international trade & development": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "internet": [
+   "IT & Software",
+   "SaaS & Software"
+  ],
+  "investment banking": [
+   "BFSI",
+   "Banking & Capital Markets"
+  ],
+  "investment management": [
+   "BFSI",
+   "Financial Services & Fintech"
+  ],
+  "it services": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "it services and it consulting": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "law enforcement": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "law practice": [
+   "Professional Services",
+   "Legal"
+  ],
+  "legal services": [
+   "Professional Services",
+   "Legal"
+  ],
+  "leisure, travel & tourism": [
+   "Hospitality & Travel",
+   "Travel & Events"
+  ],
+  "libraries": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "logistics & supply chain": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "luxury goods & jewelry": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "machinery": [
+   "Manufacturing & Industrial",
+   "Machinery & Engineering"
+  ],
+  "management consulting": [
+   "Professional Services",
+   "Consulting"
+  ],
+  "manufacturing & production": [
+   "Manufacturing & Industrial",
+   "Machinery & Engineering"
+  ],
+  "maritime": [
+   "Logistics & Transport",
+   "Transport & Aviation"
+  ],
+  "market research": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "marketing & advertising": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "mechanical or industrial engineering": [
+   "Manufacturing & Industrial",
+   "Machinery & Engineering"
+  ],
+  "media production": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "medical devices": [
+   "Pharma & Healthcare",
+   "Medical Devices"
+  ],
+  "medical practice": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "mental health care": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "military": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "mining & metals": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "motion pictures & film": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "museums & institutions": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "nanotechnology": [
+   "IT & Software",
+   "Hardware & Semiconductors"
+  ],
+  "newspapers": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "non-profit and charity organisations": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "nonprofit organization management": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "oil & energy": [
+   "Energy & Utilities",
+   "Oil, Gas & Power"
+  ],
+  "online media": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "other": [
+   "Other",
+   "Other"
+  ],
+  "outsourcing/offshoring": [
+   "IT & Software",
+   "IT Services"
+  ],
+  "package/freight delivery": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "packaging & containers": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "paper & forest products": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "performing arts": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "pharmaceuticals": [
+   "Pharma & Healthcare",
+   "Pharma & Biotech"
+  ],
+  "photography": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "plastics": [
+   "Manufacturing & Industrial",
+   "Chemicals & Materials"
+  ],
+  "primary/secondary education": [
+   "Education",
+   "Schools & Higher Ed"
+  ],
+  "printing": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "professional services": [
+   "Professional Services",
+   "Business Services"
+  ],
+  "professional training & coaching": [
+   "Education",
+   "EdTech & Training"
+  ],
+  "public policy": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "public relations & communications": [
+   "Media, Marketing & Entertainment",
+   "Marketing & Advertising"
+  ],
+  "public safety": [
+   "Government & Non-profit",
+   "Government"
+  ],
+  "publishing": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "railroad manufacture": [
+   "Manufacturing & Industrial",
+   "Auto & Mobility"
+  ],
+  "real estate": [
+   "Real Estate & Construction",
+   "Real Estate"
+  ],
+  "recreational facilities & services": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "religious institutions": [
+   "Government & Non-profit",
+   "Non-profit"
+  ],
+  "renewables & environment": [
+   "Energy & Utilities",
+   "Renewables & Environment"
+  ],
+  "research": [
+   "Professional Services",
+   "Consulting"
+  ],
+  "restaurants": [
+   "Hospitality & Travel",
+   "Hotels & Restaurants"
+  ],
+  "retail": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "security & investigations": [
+   "Professional Services",
+   "Business Services"
+  ],
+  "semiconductors": [
+   "IT & Software",
+   "Hardware & Semiconductors"
+  ],
+  "shipbuilding": [
+   "Manufacturing & Industrial",
+   "Auto & Mobility"
+  ],
+  "sporting goods": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "sports": [
+   "Media, Marketing & Entertainment",
+   "Entertainment & Sports"
+  ],
+  "staffing & recruiting": [
+   "Professional Services",
+   "HR & Staffing"
+  ],
+  "telecommunications": [
+   "Telecom",
+   "Telecom"
+  ],
+  "textiles": [
+   "Manufacturing & Industrial",
+   "Textiles & Apparel"
+  ],
+  "think tanks": [
+   "Professional Services",
+   "Consulting"
+  ],
+  "trading": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "translation & localization": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ],
+  "transportation": [
+   "Logistics & Transport",
+   "Transport & Aviation"
+  ],
+  "transportation/trucking/railroad": [
+   "Logistics & Transport",
+   "Transport & Aviation"
+  ],
+  "utilities": [
+   "Energy & Utilities",
+   "Oil, Gas & Power"
+  ],
+  "venture capital & private equity": [
+   "BFSI",
+   "VC & PE"
+  ],
+  "veterinary": [
+   "Pharma & Healthcare",
+   "Hospitals & Care"
+  ],
+  "warehousing": [
+   "Logistics & Transport",
+   "Logistics & Supply Chain"
+  ],
+  "wholesale": [
+   "Consumer & Retail",
+   "Retail & E-commerce"
+  ],
+  "wine & spirits": [
+   "Consumer & Retail",
+   "FMCG & Food"
+  ],
+  "wireless": [
+   "IT & Software",
+   "Hardware & Semiconductors"
+  ],
+  "writing & editing": [
+   "Media, Marketing & Entertainment",
+   "Media & Publishing"
+  ]
+ }
+}

@@ -62,6 +62,8 @@ sheet (it arrives comma-separated). "is" and "begins with" match *any* value;
 | Total funding | Number | `enrich.fund` | dollars |
 | Latest round | Number | `enrich.amt` | dollars. Apollo writes `0` for "no round", which is read as *unknown*, never as zero |
 | Funding stage | Single select | `enrich.type` | the latest round's type |
+| Industry | Single select | `enrich.ind` | docs/industries.json group; the BD's pick, else Apollo's industry mapped |
+| City | Single select | `enrich.city` | one spelling per city (Bangalore → Bengaluru) |
 | Demand team stage | Single select | `enrich.aps` | Company List's `Account Pipeline Stage`, a reference the demand team maintains by hand. Off by default |
 | LinkedIn | Link | `enrich.li` | |
 | Boolean post | Link | `enrich.bp` | whichever of the four Boolean columns is filled |
