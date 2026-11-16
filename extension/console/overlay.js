@@ -127,6 +127,10 @@
      the one case that needs a name is the one case that had none. The account
      opened as "Company 500009" while the row the associate clicked said
      "working-co-01". */
+  /* ONE CONTACT, BY ITS KYLAS ID, from anywhere — the duplicate pill uses it
+     to land on a person who sits under another account entirely, which is the
+     one case the pill could not do anything about before (Ayush, 2026-11-16). */
+  window.openContactFromView = (kid) => { showView(null); openContact(String(kid)); };
   window.openCompanyFromView = (id, label) => {
     showView(null);
     const co = DATA.find((a) => String(a.companyId) === String(id));
@@ -203,12 +207,15 @@
       }
       /* A toast fades; this has to stay on screen, or an empty roster reads as
          "this company has no contacts" when it means "we never asked". */
-      scope.offline = true;
+      /* scope can be gone by now: openContact() sets it (to null, for a
+         contact with no company) and the duplicate pill's "Move it here"
+         opens a contact while this fetch is still in the air. */
+      if (scope) scope.offline = true;
       render();
       if (!had) toast("Could not reach Kylas — start the proxy to load contacts");
       return;
     }
-    scope.offline = false;
+    if (scope) scope.offline = false;   /* may be gone: see above */
 
     /* Kylas owns the contact fields; the overlay keeps its own. Merging by id
        rather than replacing is what stops a refetch wiping notes typed a moment
@@ -232,7 +239,7 @@
     }
 
     if (res.company?.name) {
-      scope.name = res.company.name;
+      if (scope) scope.name = res.company.name;
       /* And on every record at this company. showCompany() has to name the
          scope before the fetch returns, and with no label from the page that
          name is "Company <id>" — which it then stamps onto the placeholder
@@ -243,7 +250,7 @@
         if (String(a.companyId) === String(id) &&
             (!a.company || /^Company \d+$/.test(a.company))) a.company = res.company.name;
     }
-    scope.kylas = res.company || null;
+    if (scope) scope.kylas = res.company || null;
 
     /* A placeholder made because nothing was held is pointless once real
        contacts have arrived. */

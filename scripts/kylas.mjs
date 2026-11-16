@@ -1244,6 +1244,12 @@ export function toConsoleCompany(co) {
     id: String(id),
     name,
     stage: stageCode(cf.cfPipelineStageBd),
+    /* WHO THE ACCOUNT BELONGS TO. /company already asked this mapper for
+       `ownerId` when it built its owners list, and got undefined every time
+       because nothing here set it. The card shows it now, so it has to be
+       real: the id for comparing and sending, the name for reading. */
+    ownerId: String(idOf(co?.ownerId) ?? idOf(co?.owner) ?? ""),
+    owner: pick(nameOf(co?.ownerId), nameOf(co?.owner), lookupName(co, "ownerId", idOf(co?.ownerId)), "") || "",
     lastCalledAt: pick(cf.cfLastCalledAtDate, null),
     accountHealth: pick(cf.cfAccountHealthBd, null),
     source: stageCode(cf.cfSourceOfData),

@@ -29,6 +29,7 @@
       <button class="gbtn" id="newBtn" type="button">+ New contact</button>
       <button class="gbtn" id="newCoBtn" type="button" title="Create a company in Kylas, with the details its score needs">+ New company</button>
       <span class="link" id="linkState" title="Checking the proxy…">·</span>
+      <button class="gbtn" id="todayBtn" type="button" title="The calls you have made today">Today</button>
       <button class="gbtn" id="dashBtn" type="button" title="The funnel ladder, talk time and RCA — yours or the team's">Dashboard</button>
       <button class="gbtn" id="jobBtn" type="button" hidden title="Re-assignment running on the server">Re-assigning</button>
       <button class="gbtn" id="rcaBtn" type="button" hidden title="Stalled contacts that need a reason — and the reasons already given">Reasons</button>
@@ -43,10 +44,12 @@
 
   <div class="mid" id="mid">
     <aside class="queue">
-      <div class="qmode" id="qmode"></div>
+      <!-- THE RAIL IS THE CONTACT LIST, and nothing else (Ayush, 2026-11-16:
+           "contact pane ke left ka UI not required"). The Company/Today tab
+           switch and the ★ Focus / overdue summary that used to sit here are
+           gone; Today is reached from the header instead, so the mode is not
+           stranded. -->
       <div class="qscope" id="qscope" hidden></div>
-      <!-- Your focus accounts that are not SQL yet: the list you are held to. -->
-      <div class="qfocus" id="qfocus" hidden></div>
       <!-- The search box is gone. It promised "name, company, phone" and could
            not deliver any of the three: visible() narrows to the open company
            BEFORE the query runs, so searching a contact at another company, or

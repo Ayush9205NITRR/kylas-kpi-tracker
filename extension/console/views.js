@@ -4875,7 +4875,11 @@
         /* The LinkedIn and boolean-post chips are links inside a row that is
            itself a button. Without this, opening one also opened the company
            behind it. */
-        if (e.target.closest("[data-stop]")) return;
+        /* A tick is a tick. The checkbox lives INSIDE the first cell, so
+           without this the row opens the account under the person's finger —
+           which is what happened whenever a repaint dropped the input's own
+           listener (see the delegated handler below). */
+        if (e.target.closest("[data-stop], .cpick")) return;
         global.openCompanyFromView?.(r.dataset.id, r.querySelector(".co")?.textContent || "");
       }));
     /* A row that hides its long tail says so, and says it as a chip, so
@@ -5327,16 +5331,26 @@
       ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.todaySet = ""; ACC.limit = 100;
       if (ACC.openNeed) toTable(); else redraw(); }));
     /* ── ticking accounts, and handing them over ───────────────────────── */
-    /* Delegated, because the rows are re-rendered on every keystroke in the
-       search box and per-row listeners would be rebound hundreds of times. */
-    host.querySelectorAll(".cpick").forEach((b) => {
-      b.addEventListener("click", (e) => e.stopPropagation());   /* not a row-open */
-      b.addEventListener("change", () => {
+    /* DELEGATED — and it has to be. The comment here used to say "delegated"
+       while the code bound every input by hand, which held only because the
+       accounts view re-wires on each redraw. The board and the legacy table
+       repaint through paint(), which rebinds rows and NOT the inputs, so after
+       any repaint a tick had no listener and the click reached the row: the
+       account opened instead of being selected (Ayush, 2026-11-16). One
+       listener on the host survives every repaint, because the host does. */
+    if (!host.dataset.cpickWired) {
+      host.dataset.cpickWired = "1";
+      host.addEventListener("click", (e) => {
+        if (e.target.closest(".cpick")) e.stopPropagation();     /* not a row-open */
+      }, true);
+      host.addEventListener("change", (e) => {
+        const b = e.target.closest(".cpick");
+        if (!b) return;
         const id = String(b.dataset.pick);
         if (b.checked) ACC.picked.add(id); else ACC.picked.delete(id);
         ACC.busy = ""; redraw();
       });
-    });
+    }
     on("accPickAll", "click", () => {
       /* THE ROWS IN FRONT OF THEM, never the whole account. */
       const ids = EXPLORER_ROWS.map((r) => String(r.id));
@@ -5384,7 +5398,7 @@
       redraw();
     });
     /* ── ALLOT ──────────────────────────────────────────────────────── */
-    if (API.isAdmin && !CACHE.allotPeople && !CACHE.allotPeopleAsked) {
+    if (!CACHE.allotPeople && !CACHE.allotPeopleAsked) {
       CACHE.allotPeopleAsked = true;
       API.allotPeople().then((r) => { CACHE.allotPeople = r.people || []; redraw(); })
         .catch(() => { CACHE.allotPeopleAsked = false; });
@@ -5465,8 +5479,15 @@
     /* A row is a way into the company, not a dead end. So is a card — the board
        would be a picture rather than a tool if its cards did not open. */
     const bindRows = () => {
-      host.querySelectorAll(".vr[data-id], .vcard[data-id]").forEach((r) =>
-        r.addEventListener("click", () => global.openCompanyFromView?.(r.dataset.id)));
+      /* NOT the accounts table: it binds its own rows, and an unscoped
+         selector bound them a second time, so one click opened twice. */
+      host.querySelectorAll(".vr[data-id], .vcard[data-id]").forEach((r) => {
+        if (r.closest(".acctable")) return;
+        r.addEventListener("click", (e) => {
+          if (e.target.closest("[data-stop], .cpick")) return;
+          global.openCompanyFromView?.(r.dataset.id);
+        });
+      });
       host.querySelectorAll(".vmorec[data-lane]").forEach((b) =>
         b.addEventListener("click", () => { openLanes.add(b.dataset.lane); paint(); }));
     };
@@ -5582,17 +5603,25 @@
        done     moved / not moved with the reason, Retry, Download CSV, Close
      The job itself is AllotJobs (server-side, read back, resumable). */
   const rdInitials = (n) => String(n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
-  const coName = (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.name || `#${id}`;
-  function openReassign(redraw) {
+  /* Names for accounts the companies cache has not loaded — the call card can
+     open this for one account long before the Accounts view has ever run. */
+  const NAME_HINT = new Map();
+  const coName = (id) => NAME_HINT.get(String(id))
+    || (CACHE.companies || []).find((c) => String(c.id) === String(id))?.name || `#${id}`;
+  /* `only` is a row list supplied by the caller instead of the ticked rows —
+     the call card hands it exactly one account (Views.reassignOne). Everything
+     below is the flow that already existed; one account is just a short list. */
+  let REDRAW_RD = null;
+  function openReassign(redraw, only) {
     document.querySelector(".rdScrim")?.remove();
-    const rows = pickedIn(EXPLORER_ROWS);
+    const rows = only || pickedIn(EXPLORER_ROWS);
     if (!rows.length) return;
     if (!ACC.allot.length) ACC.allot.push({ id: "", pct: 100 });
     ACC.allotMode ||= "company";
     const el = document.createElement("div");
     el.className = "rdScrim";
     let phase = "choose", started = 0, unsub = null;
-    const close = () => { el.remove(); if (unsub) unsub(); };
+    const close = () => { el.remove(); REDRAW_RD = null; if (unsub) unsub(); };
     const evenly = () => {
       const n = ACC.allot.length, base = Math.floor(100 / n);
       ACC.allot.forEach((r, i) => { r.pct = base + (i < 100 - base * n ? 1 : 0); });
@@ -5723,6 +5752,7 @@
         el.querySelector(".rdNote").textContent = `Could not start: ${String(e.message || e).slice(0, 160)}. Nothing was changed.`;
       }
     }
+    REDRAW_RD = () => { if (el.isConnected) paint(); };
     const onJob = () => { if (phase === "run" && el.isConnected) paint(); };
     AllotJobs.onChange(onJob);
     unsub = () => AllotJobs.off?.(onJob);
@@ -5820,7 +5850,30 @@
   })();
   global.AllotJobs = AllotJobs;
 
-  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded,
+  /* ONE ACCOUNT, FROM THE CALL CARD. The same modal, the same server job, the
+     same read-back — the card has no business owning a second copy of any of
+     that. onDone fires when the job finishes, so the card can re-read who owns
+     the account rather than guessing it moved. */
+  function reassignOne(id, name, onDone) {
+    if (!id) return;
+    NAME_HINT.set(String(id), name || `#${id}`);
+    /* The people list is fetched by the accounts view when it wires itself up.
+       Opened from the call card that view may never have run, and the picker
+       then sits on "Loading people…" for ever. Ask for it here too; the modal
+       repaints when it lands. */
+    if (!CACHE.allotPeople && !CACHE.allotPeopleAsked) {
+      CACHE.allotPeopleAsked = true;
+      API.allotPeople().then((r) => { CACHE.allotPeople = r.people || []; REDRAW_RD?.(); })
+        .catch(() => { CACHE.allotPeopleAsked = false; });
+    }
+    const known = (CACHE.companies || []).find((c) => String(c.id) === String(id));
+    openReassign(() => {}, [{ id: String(id), name: name || known?.name || `#${id}`, acctN: known?.acctN }]);
+    if (!onDone) return;
+    const f = () => { const j = AllotJobs.job; if (j?.finished) { AllotJobs.off?.(f); onDone(j); } };
+    AllotJobs.onChange(f);
+  }
+
+  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded, reassignOne,
                   /* The account's open-account state, for the call card (console.js). */
                   companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },
                   openFor: (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.open || null,

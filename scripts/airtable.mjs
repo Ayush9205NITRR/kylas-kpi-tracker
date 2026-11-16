@@ -808,11 +808,14 @@ async function companyIndex(at, fresh) {
   if (!at.mirrored && !fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
     return { byRec: IDX.byRec, byKid: IDX.byKid };
   const rows = await at.listAll("Companies",
-    { fields: ["Kylas Company ID", "Name", "Owner"], pageSize: 100, maxPages: 200 });
+    { fields: ["Kylas Company ID", "Name", "Owner", "Kylas Owner ID"], pageSize: 100, maxPages: 200 });
   const byRec = new Map(), byKid = new Map();
   for (const r of rows) {
     const co = { id: String(r.fields?.["Kylas Company ID"] || ""),
-                 name: r.fields?.Name || "", owner: r.fields?.Owner || "", recordId: r.id };
+                 name: r.fields?.Name || "", owner: r.fields?.Owner || "",
+                 /* The id, not just the name: the card's "change the account
+                    owner" link needs something to compare and to send. */
+                 ownerId: String(r.fields?.["Kylas Owner ID"] || ""), recordId: r.id };
     byRec.set(r.id, co);
     if (co.id) byKid.set(co.id, co);
   }
@@ -927,7 +930,7 @@ export async function readCompany(at, companyKid) {
     : (await allContacts(at)).filter((r) => (r.fields?.Company || [])[0] === co.recordId);
   const events = await eventsFor(at, rows.map((r) => r.id));
   return {
-    company: { id: co.id, name: co.name, owner: co.owner },
+    company: { id: co.id, name: co.name, owner: co.owner, ownerId: co.ownerId || "" },
     contacts: rows.map((r) => toConsoleContactFromAirtable(r,
       { company: co, events: events.get(r.id) || [] })),
   };

@@ -34,7 +34,8 @@ const procs = [];
 const start = (file, env = {}) => procs.push(spawn("node", [file], { cwd: REPO, env: { ...process.env, ...ENV, ...env }, stdio: "ignore" }));
 const wait = async (url) => { for (let i = 0; i < 60; i++) { try { await fetch(url); return; } catch { await sleep(300); } } throw new Error(`${url} never came up`); };
 try {
-  start("scripts/mock-kylas.mjs", { PORT: "9900" }); await wait("http://127.0.0.1:9900/__writes");
+  /* MOCK_USER_LIST=1: /allot-people needs a user list, and §9 asks it for one. */
+  start("scripts/mock-kylas.mjs", { PORT: "9900", MOCK_USER_LIST: "1" }); await wait("http://127.0.0.1:9900/__writes");
   start("scripts/mock-airtable.mjs", { PORT: "9901" }); await wait("http://127.0.0.1:9901/v0/appMOCK/Companies");
   start("scripts/proxy.mjs"); await wait("http://127.0.0.1:8787/health");
   const get = async (p) => (await fetch(`http://127.0.0.1:8787${p}`)).json();
@@ -123,6 +124,47 @@ try {
   ok("undo moves it back", undo.j.ok && coOf(await K("/v1/contacts/112936")) === "1776620");
   const same = await post("/contact-move", { kid: "112936", companyId: "1776620" });
   ok("moving to the company it is already in changes nothing", same.j.unchanged === true);
+
+  console.log("\n8. re-assign a contact to another BD, immediately");
+  /* The owner is the ONE field this is allowed to change. Everything else —
+     the name included, which /contact-move is allowed to normalise — must come
+     back byte for byte, because the PUT replaces the record. */
+  const oBefore = await K("/v1/contacts/112936");
+  const ownerOf = (c) => String(c?.ownerId?.id ?? c?.ownerId ?? "");
+  const stripO = (c) => { const { updatedAt, updatedBy, metaData, ownerId, ...rest } = c || {}; return JSON.stringify(rest); };
+  const noKid = await post("/contact-owner", { ownerId: "74726" });
+  ok("no kid -> 400", noKid.status === 400);
+  const noOwner = await post("/contact-owner", { kid: "112936" });
+  ok("no ownerId -> 400", noOwner.status === 400);
+  const ghost = await post("/contact-owner", { kid: "99999999", ownerId: "74726" });
+  ok("a contact Kylas has never seen -> 404, and says to save it first",
+     ghost.status === 404 && /save it once/i.test(JSON.stringify(ghost.j)), JSON.stringify(ghost.j).slice(0, 140));
+  const stranger = await post("/contact-owner", { kid: "112936", ownerId: "99999" });
+  ok("an owner who is not a Kylas user -> 400", stranger.status === 400, JSON.stringify(stranger.j).slice(0, 120));
+  const ro = await post("/contact-owner", { kid: "112936", ownerId: "74726" });
+  const oAfter = await K("/v1/contacts/112936");
+  ok("the re-assign answers ok, from -> to", ro.status === 200 && ro.j.ok && ro.j.to === "74726", JSON.stringify(ro.j));
+  ok("Kylas: the contact now belongs to the new owner", ownerOf(oAfter) === "74726", ownerOf(oAfter));
+  ok("Kylas: NOTHING else on the contact changed", stripO(oBefore) === stripO(oAfter),
+     `${stripO(oBefore).slice(0, 120)} vs ${stripO(oAfter).slice(0, 120)}`);
+  const ctO = await (await fetch("http://127.0.0.1:9901/v0/appMOCK/Contacts", { headers: { Authorization: "Bearer pat_mock" } })).json();
+  const rowO = (ctO.records || []).find((x) => x.fields?.["Kylas Contact ID"] === "112936");
+  ok("Airtable: the copy carries the new owner", !!rowO?.fields?.Owner && rowO.fields["Kylas Owner ID"] === "74726",
+     JSON.stringify(rowO?.fields?.Owner));
+  const back74725 = await post("/contact-owner", { kid: "112936", ownerId: "74725" });
+  ok("undo gives it back", back74725.j.ok && ownerOf(await K("/v1/contacts/112936")) === "74725");
+  const sameOwner = await post("/contact-owner", { kid: "112936", ownerId: "74725" });
+  ok("re-assigning to the owner it already has changes nothing", sameOwner.j.unchanged === true);
+
+  console.log("\n9. handing accounts over is no longer admin-only");
+  /* 1.84.2 opened /reassign, /allot and /allot-people to every BD (Ayush,
+     2026-11-16), with the actor logged instead. The target checks stayed. */
+  const people = await get("/allot-people");
+  ok("/allot-people answers for a non-admin", Array.isArray(people.people) && people.people.length > 0,
+     JSON.stringify(people).slice(0, 140));
+  const dry = await post("/reassign", { companies: ["1776620"], ownerId: "74726" });
+  ok("/reassign dry run answers for a non-admin, and writes nothing",
+     dry.status === 200 && dry.j.dryRun === true, `${dry.status} ${JSON.stringify(dry.j).slice(0, 140)}`);
 } finally {
   for (const p of procs) { try { p.kill("SIGKILL"); } catch {} }
 }

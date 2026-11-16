@@ -47,16 +47,6 @@ body.framed .ovOnly{display:inline-block}
 .link.oldui{background:var(--blueSoft);border-color:var(--blueLine);color:var(--blue);
   font-weight:var(--w-strong)}
 
-/* ── company / session switch ────────────────────────────────────────── */
-.qmode{display:flex;gap:4px;padding:8px 8px 0}
-.qm{
-  flex:1;border:1px solid var(--line2);background:transparent;border-radius:6px;
-  padding:5px 6px;font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);cursor:pointer;
-}
-.qm i{font-style:normal;font-family:var(--m,ui-monospace);font-size:var(--t-meta);opacity:.8}
-.qm[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
-.qm[disabled]{opacity:.4;cursor:default}
-
 /* Neutral, not slate. Slate carries "past" (CLAUDE.md), so tinting the company
    band with it spent the one non-blue hue on a heading — and read as a second
    accent. Structure separates this band, not colour. */
@@ -120,6 +110,10 @@ body.framed .ovOnly{display:inline-block}
 .dupe button:hover{background:var(--amber);color:var(--panel)}
 /* The server's answer is a sentence, not a name: let it wrap. */
 .dupe.long span{overflow:visible;text-overflow:clip;white-space:normal}
+/* With Open · Move it here · Give it to me the pill can hold four buttons, so
+   it wraps rather than squeezing the sentence out of existence. */
+.dupe.long{flex-wrap:wrap}
+.dupe .dsub{flex:0 0 100%;font-weight:var(--w-strong);opacity:.85}
 
 /* ── dial a number straight from its row ─────────────────────────────── */
 .dialbtn{
@@ -1305,29 +1299,6 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
    record id (developer information) gives way first. */
 @media(max-width:1440px){.hseg button{padding:7px 11px}}
 
-/* ── the focus pane, top of the queue ──────────────────────────────── */
-.qfocus{border-bottom:1px solid var(--line);padding:10px 14px 12px;background:var(--panel2)}
-.qfocus .qfh{display:flex;align-items:baseline;gap:8px;font-size:var(--t-label);color:var(--text2)}
-.qfocus .qfh b{font-family:var(--display);font-size:var(--t-body);color:var(--blue)}
-.qfocus .qfh em{font-style:normal;font-weight:var(--w-strong);color:var(--amber)}
-.qfocus .qfgo{margin-top:8px;width:100%;text-align:left;background:var(--amberSoft);border:1px solid var(--amberLine);
-  border-radius:var(--r);padding:8px 10px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--amber);cursor:pointer}
-.qfocus .qfl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
-.qfocus .qfi{width:100%;display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;cursor:pointer;
-  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line2);border-radius:var(--r);padding:8px 10px;font:inherit}
-.qfocus .qfi:hover{border-color:var(--blueLine)}
-.qfocus .qfi .n{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qfocus .qfi .st{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text3);white-space:nowrap}
-.qfocus .qfi .sub{grid-column:1 / -1;font-size:var(--t-meta);color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qfocus .qfi.overdue,.qfocus .qfi.no-date{border-left-color:var(--amber)}
-.qfocus .qfi.overdue .st,.qfocus .qfi.no-date .st{color:var(--amber)}
-.qfocus .qfi.today{border-left-color:var(--blue)}
-.qfocus .qfi.today .st{color:var(--blue)}
-.qfocus .qfi.done{opacity:.7}
-.qfocus .qft{margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:var(--t-meta);color:var(--text3)}
-.qfocus .qft div{display:flex;flex-wrap:wrap;gap:2px 10px}
-.qfocus .qft b{color:var(--text2);font-weight:var(--w-strong)}
-.qfocus .qft em{font-style:normal;font-weight:var(--w-strong);color:var(--text)}
 
 /* the Next call column */
 /* The call-back state, wherever it is shown — the table's cell and the
@@ -1446,6 +1417,13 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .ajBar i{display:block;height:100%;background:var(--blue);border-radius:99px;transition:width .3s}
 .ajBad{color:var(--amber)}
 .qscope .cmv{margin-left:auto;font-size:var(--t-meta);border:1px solid var(--line2);background:var(--panel);border-radius:6px;padding:2px 8px;color:var(--text2);cursor:pointer}
+/* WHO THE ACCOUNT BELONGS TO — its own line under the name, because it is a
+   different fact from the contact's owner and must not read as the same one. */
+.qscope .cown{flex:0 0 100%;font-size:var(--t-meta);color:var(--text3)}
+.qscope .cown b{font-weight:var(--w-strong);color:var(--text2)}
+.qscope .clink{background:transparent;border:0;padding:0 0 0 6px;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-strong);color:var(--blue);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.qscope .clink:hover{text-decoration-thickness:2px}
 .mvList{display:flex;flex-direction:column;gap:6px;margin:8px 0 10px;max-height:260px;overflow:auto}
 
 /* RE-ASSIGN (views.js bulkBar + openReassign, 2026-10-29). A selection is a

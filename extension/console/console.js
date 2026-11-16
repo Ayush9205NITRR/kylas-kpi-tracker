@@ -54,6 +54,14 @@ function adoptOwners(list){
   addOwners(names);
 }
 const ownerIdFor=(name)=>OWNER_ID[name]||"";
+/* The other way round. The Airtable copy of a company carries the owner's
+   Kylas id even when its Owner text cell is empty, and "Account owner #74725"
+   is not an answer to "who owns this account". */
+const ownerNameFor=(id)=>{
+  const k=String(id||"");if(!k)return "";
+  for(const n in OWNER_ID)if(String(OWNER_ID[n])===k)return n;
+  return "";
+};
 function adoptPicklists(picklists){
   if(!picklists)return;
   const take=(...names)=>{
@@ -632,7 +640,7 @@ function renderQueue(){
   try{paintQueue();}finally{if(Q)Q.scrollTop=qTop;}
 }
 function paintQueue(){
-  renderMode();renderScope();renderFocusPane();renderFilters();
+  renderScope();renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
   if(!rows.length){L.appendChild(el("li","qempty","Nothing here right now."));return;}
@@ -841,100 +849,10 @@ function companyStage(list){
 }
 
 
-function renderMode(){
-  const w=document.getElementById("qmode");
-  if(!w)return;
-  w.innerHTML="";
-  const due=DATA.filter(a=>!a.done&&a.nextCallDate&&a.nextCallDate<=today()).length;
-  [["company","Company",scope?companyRoster(scope.id).length:0],
-   ["session","Today",DATA.filter(calledToday).length]].forEach(([k,lab,n])=>{
-    const b=el("button","qm",`${lab}${n?` <i>${n}</i>`:""}`);
-    b.type="button";
-    b.setAttribute("aria-pressed",mode===k?"true":"false");
-    b.disabled=(k==="company"&&!scope);
-    b.title=k==="company"
-      ?(scope?"Only the contacts at this company":"Open the console on a Kylas company page to use this")
-      :"The calls you have made today"+(due?` · ${due} due now`:"");
-    b.onclick=()=>{mode=k;const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();};
-    w.appendChild(b);
-  });
-}
-/* ── THE FOCUS PANE: WHAT YOU OWE YOUR FOCUS ACCOUNTS ────────────────────
-   Once an account is picked (★ Focus) it stays in front of you until it is
-   exhausted — it reaches SQL — or you drop it with a reason (Deprioritize).
-   There is no third way off. Each one says what it is owed: overdue first,
-   then due today, then those with no call-back set at all (which is its own
-   kind of overdue — nothing is scheduled to happen). Under Today it is the
-   full list; under Company it is one line pointing there, so it is never
-   out of sight. */
-const FOCUS_ORDER={overdue:0,today:1,"no-date":2,closed:3,later:4,done:5};
-function myFocus(){
-  if(typeof Focus==="undefined")return [];
-  const u=API.state?.user||{},me=String(u.name||"").toLowerCase(),em=String(u.email||"").toLowerCase();
-  return Object.entries(Focus.map)
-    .filter(([,f])=>f.status==="focus")
-    .filter(([,f])=>API.isAdmin||String(f.ownerName||"").toLowerCase()===me||String(f.setByEmail||"").toLowerCase()===em
-      ||String(f.setByEmail||"").toLowerCase()===me)
-    .map(([id,f])=>({id,f,s:f.standing||{state:"no-date"}}))
-    .sort((x,y)=>(FOCUS_ORDER[x.s.state]??9)-(FOCUS_ORDER[y.s.state]??9)
-      ||(x.s.nextCall||"").localeCompare(y.s.nextCall||"")||(y.s.daysOpen||0)-(x.s.daysOpen||0));
-}
-function focusStateText(s){
-  return s.state==="overdue"?`Overdue ${-s.dueIn}d`
-    :s.state==="today"?"Due today"
-    :s.state==="no-date"?"No call-back set"
-    :s.state==="closed"?"All POCs closed"
-    :s.state==="done"?`SQL ✓${s.tatDays!=null?` in ${s.tatDays}d`:""}`
-    :`In ${s.dueIn}d`;
-}
-function renderFocusPane(){
-  const w=document.getElementById("qfocus");if(!w)return;
-  if(typeof Focus==="undefined"){w.hidden=true;return;}
-  Focus.load();
-  const all=myFocus(),open=all.filter(x=>x.s.state!=="done");
-  if(!all.length){w.hidden=true;w.innerHTML="";return;}
-  w.hidden=false;w.innerHTML="";
-  const n=k=>open.filter(x=>x.s.state===k).length;
-  const owed=n("overdue")+n("today")+n("no-date");
-  const head=el("div","qfh",`<b>★ Focus</b><span>${open.length} open${owed?` · <em>${owed} need a call</em>`:""}</span>`);
-  w.appendChild(head);
-  if(mode!=="session"){
-    /* Company tab: never out of sight, one line. */
-    if(owed){
-      const go=el("button","qfgo",`${n("overdue")?`${n("overdue")} overdue · `:""}${n("today")?`${n("today")} due today · `:""}${n("no-date")?`${n("no-date")} with no call-back`:""}`.replace(/ · $/,"")+" — see Today →");
-      go.type="button";go.onclick=()=>{mode="session";render();};
-      w.appendChild(go);
-    }
-    return;
-  }
-  const ul=el("ul","qfl");
-  const shown=[...open,...all.filter(x=>x.s.state==="done").slice(0,3)];
-  shown.forEach(({id,f,s})=>{
-    const li=el("li"),b=el("button","qfi "+s.state);b.type="button";
-    b.innerHTML=`<span class="n">${esc(f.companyName||"#"+id)}</span>
-      <span class="st">${esc(focusStateText(s))}</span>
-      <span class="sub">${esc([label(s.stage)||"not called yet",s.daysOpen!=null?`day ${s.daysOpen}`:"",
-        s.lastCallAt?`last call ${since(s.lastCallAt)}`:"",API.isAdmin&&f.ownerName?String(f.ownerName).split(" ")[0]:""].filter(Boolean).join(" · "))}</span>`;
-    b.title=s.state==="closed"?"Every POC here is at a dead end: add a new POC or deprioritize with a reason"
-      :s.state==="no-date"?"Nothing is scheduled: open it and set a day to call back":"Open this company";
-    b.onclick=()=>window.openCompanyFromView?.(id,f.companyName||"");
-    li.appendChild(b);ul.appendChild(li);
-  });
-  w.appendChild(ul);
-  /* TAT, for the person looking (or the team, for an admin). */
-  const T=Focus.tat||{},rows=Object.entries(T).filter(([o])=>API.isAdmin||o.toLowerCase()===String(API.state?.user?.name||"").toLowerCase());
-  if(rows.length){
-    const t=el("div","qft");
-    t.innerHTML=rows.map(([o,v])=>`<div><b>${esc(API.isAdmin?o.split(" ")[0]:"Your pace")}</b>
-      ${v.medianPickToSql!=null?`<span>pick → SQL <em>${v.medianPickToSql}d</em></span>`:""}
-      ${v.medianDaysOpen!=null?`<span>open for <em>${v.medianDaysOpen}d</em></span>`:""}
-      ${v.followups?.onTimePct!=null?`<span>call-backs on time <em>${v.followups.onTimePct}%</em></span>`:""}
-      ${v.followups?.medianDelayDays?`<span>late by <em>${v.followups.medianDelayDays}d</em></span>`:""}</div>`).join("");
-    t.title="Median days from ★ Focus to SQL; median days the open ones have been open; share of promised call-backs made on or before the day; median lateness of the rest.";
-    w.appendChild(t);
-  }
-}
-
+/* The ★ Focus summary and the overdue box that lived in the rail are gone
+   (Ayush, 2026-11-16). Focus itself is untouched — it is still set from the
+   Accounts view, still drives the ladder, and the call bar still shows it.
+   What went is the duplicate of it that sat beside every contact card. */
 async function moveContactsSheet(sc){
   const s=el("div","scrim");
   s.innerHTML=`<div class="sheet"><div class="h"><h3>Move contacts — ${esc(sc.name)}</h3><button class="gbtn" id="mvx" type="button">Close</button></div>
@@ -964,6 +882,19 @@ async function moveContactsSheet(sc){
   };
 }
 
+/* THE ACCOUNT'S OWNER. /company carries it (kylas.mjs toConsoleCompany, and
+   the Airtable branch's company row), so the card already holds it the moment
+   the account is open. The Accounts-view cache is only a fallback: it is empty
+   until that view has run at least once, which on a cold open it has not. */
+function accountOwner(){
+  const k=scope?.kylas||null;
+  if(k&&(k.owner||k.ownerId)){
+    const id=String(k.ownerId||"");
+    return {id,name:String(k.owner||"")||ownerNameFor(id)};
+  }
+  const c=scope?window.Views?.companyOwner?.(scope.id):null;
+  return c?{id:String(c.id||""),name:String(c.name||"")||ownerNameFor(c.id)}:{id:"",name:""};
+}
 function renderScope(){
   const w=document.getElementById("qscope");
   if(!w)return;
@@ -975,10 +906,10 @@ function renderScope(){
   w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
     +`<span class="cc">${n} contact${n===1?"":"s"}</span>`
     +(scope.offline?`<span class="cwarn" title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`:"");
-  /* RE-ASSIGN THIS COMPANY'S CONTACTS (admin) — the company stays where it
+  /* RE-ASSIGN THIS COMPANY'S CONTACTS — the company stays where it
      is. "To the account's owner" is the common case: contacts that sit on
      somebody else. Runs as a background job (views.js AllotJobs). */
-  if(window.API?.isAdmin&&window.AllotJobs){
+  if(window.AllotJobs){
     const mv=el("button","cmv","Move contacts…");mv.type="button";
     mv.title="Re-assign this company's contacts (the company stays with its owner)";
     mv.onclick=()=>moveContactsSheet(scope);
@@ -987,6 +918,25 @@ function renderScope(){
   const x=el("button","cx","×");x.type="button";x.title="Leave this company and show today's calls";
   x.onclick=()=>{scope=null;mode="session";render();};
   w.appendChild(x);
+  /* WHO THE ACCOUNT BELONGS TO. It was fetched with the company and thrown
+     away; the BD had to open Kylas to find out (Ayush, 2026-11-16). The
+     contact's own owner is on the card below — this is the account's. */
+  const acc=accountOwner();
+  if(acc.name||acc.id){
+    const o=el("span","cown",`Account owner <b>${esc(acc.name||("#"+acc.id))}</b>`);
+    o.title="Who this account belongs to in Kylas — not the same thing as who owns this contact";
+    w.appendChild(o);
+    if(window.Views?.reassignOne&&acc.id){
+      const ch=el("button","clink","Change");ch.type="button";
+      ch.title="Hand this account, and every contact on it, to another BD";
+      ch.onclick=()=>window.Views.reassignOne(scope.id,scope.name,()=>{
+        /* Re-read it rather than assume: the job reports per account, and a
+           failure must not leave the card claiming it moved. */
+        window.openCompanyFromView?.(scope.id,scope.name);
+      });
+      o.appendChild(ch);   /* inside the line, not after it: .cown is full-width */
+    }
+  }
 }
 
 /* A REPAINT KEEPS THE PLACE; MOVING TO ANOTHER RECORD RESETS IT.
@@ -1015,8 +965,18 @@ function putPlace(p){
 }
 function render(){
   const p=placeOf();
-  renderCallbar();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
+  renderCallbar();renderModeBtn();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
   putPlace(p);
+}
+/* TODAY / COMPANY, in the header. The rail's two tabs are gone, so one header
+   button carries the mode. It always offers the OTHER side of the pair, so
+   neither view can be stranded: Today when you are on a company, and back to
+   the company when you are on Today and there is one to go back to. */
+function renderModeBtn(){
+  const b=document.getElementById("todayBtn");if(!b)return;
+  const back=mode==="session"&&scope;
+  b.textContent=back?"Company":"Today";
+  b.title=back?`Only the contacts at ${scope.name}`:"The calls you have made today";
 }
 /* Research has its own pane to the right of the events when the screen is
    wide enough (or as the third tab when it is narrow); in between it sits at
@@ -1309,6 +1269,29 @@ function askServerDupe(a){
     catch(e){/* offline or an older proxy: the local pill below still works */}
   },600);
 }
+/* The half-typed new card is thrown away once the BD decides to work on the
+   record that already exists — leaving it behind is how a second record gets
+   created a minute later. Only ever the unsaved one. */
+function dropNewCard(){
+  if(!isNew||DATA[cur]?.kid)return;
+  DATA.splice(cur,1);cur=Math.max(0,Math.min(cur,DATA.length-1));isNew=false;
+  DV.sig="";DV.v=null;
+}
+/* One write, then land on the real contact. The button says what is happening
+   and goes back to saying what it does if the write fails, because a dead
+   button with no reason is how people end up in Kylas anyway. */
+async function adopt(btn,m,run,said){
+  const was=btn.textContent;btn.disabled=true;btn.textContent="Working…";
+  try{
+    await run();
+    toast(said);
+    dropNewCard();
+    window.openContactFromView?.(m.kid);
+  }catch(e){
+    btn.disabled=false;btn.textContent=was;
+    toast(`Could not do that: ${String(e.message||e).slice(0,120)}`);
+  }
+}
 function renderDupe(){
   document.querySelectorAll(".dupe").forEach(n=>n.remove());
   const host=document.getElementById("f-ph")?.closest(".f");
@@ -1328,6 +1311,37 @@ function renderDupe(){
       const go=el("button",null,"Open");go.type="button";
       go.onclick=()=>{cur=at;isNew=false;stopTimer();secs=0;tmode="idle";render();resetScroll();};
       w.appendChild(go);
+    }
+    /* THE PERSON IS ALREADY IN KYLAS, UNDER SOMEBODY ELSE'S ACCOUNT. Until
+       1.84.2 the pill could only say so: Open worked when the contact happened
+       to be in this list, and otherwise it told the BD to go and look in
+       Accounts — which in practice meant leaving for Kylas (Ayush,
+       2026-11-16: "there is no option of finding it and then re-alloting it").
+       The two things they actually want to do are one call each, and both
+       routes are already proven: /contact-move and /contact-owner. */
+    const m=v.existing||(v.matches||[]).find(x=>x.samePerson)||null;
+    if(m&&m.kid&&!a.dupeOverride){
+      const where=[m.company||(m.companyId?`company ${m.companyId}`:""),m.owner||""].filter(Boolean).join(" · ");
+      if(where)w.appendChild(el("span","dsub",where));
+      if(at<0){
+        const op=el("button",null,"Open");op.type="button";
+        op.title="Go to that contact where it already is";
+        op.onclick=()=>{dropNewCard();window.openContactFromView?.(m.kid);};
+        w.appendChild(op);
+      }
+      if(scope&&String(m.companyId||"")!==String(scope.id)){
+        const mv=el("button",null,"Move it here");mv.type="button";
+        mv.title=`Re-link that contact to ${scope.name}, keeping its history`;
+        mv.onclick=()=>adopt(mv,m,()=>API.moveContact(m.kid,scope.id,scope.name),`Moved to ${scope.name}`);
+        w.appendChild(mv);
+      }
+      const mineId=typeof ownerIdFor==="function"?String(ownerIdFor(ME)||""):"";
+      if(ME&&mineId&&String(m.ownerId||"")!==mineId){
+        const gm=el("button",null,"Give it to me");gm.type="button";
+        gm.title="Make that contact yours in Kylas";
+        gm.onclick=()=>adopt(gm,m,()=>API.setContactOwner(m.kid,mineId,ME),`Now with ${ME}`);
+        w.appendChild(gm);
+      }
     }
     if(exact){
       const ov=el("button",null,a.dupeOverride?"Undo":"Create anyway");ov.type="button";
@@ -1672,7 +1686,7 @@ async function setFocusFor(a,id,{status,reason="",note=""}){
   }catch(e){toast("Not saved — "+(e.message||e));}
 }
 /* The header only, so an answer arriving mid-call never moves the caret. */
-if(typeof Focus!=="undefined")Focus.onChange(()=>{if(DATA[cur])renderCallbar();renderFocusPane();});
+if(typeof Focus!=="undefined")Focus.onChange(()=>{if(DATA[cur])renderCallbar();});
 function dayAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);
   return isNaN(d)?"":d<=0?"today":d===1?"yesterday":d+" days ago";
@@ -2187,6 +2201,10 @@ function newContact(){
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
 }
 on("newBtn","click",newContact);
+on("todayBtn","click",()=>{
+  mode=(mode==="session"&&scope)?"company":"session";
+  const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();
+});
 /* "+ New company", beside "+ New contact" in the header (Ayush, 2026-11-13:
    that is where it is looked for). The same form the card's company search
    opens; an open Accounts view shows the new company straight away. */

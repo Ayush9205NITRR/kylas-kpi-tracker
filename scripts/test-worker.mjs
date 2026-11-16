@@ -931,12 +931,17 @@ console.log('\n11. a copy that is short of the account is not the account');
       { Origin: ORIGIN, 'content-type': 'application/json' },
       body: JSON.stringify({ companies: ['903'], ownerId: '99999' }) }),
     assocEnv, { waitUntil() {} });
-  check('an associate cannot re-assign anybody\'s accounts', asAssociate.status === 403,
-        `status ${asAssociate.status}`);
-  /* ...not even the dry run, which would otherwise report how many contacts
-     sit on everybody else's accounts. */
-  check('...and the reply says why, not just no',
-        /admin/i.test((await asAssociate.json()).error || ''), '');
+  /* 1.84.2 OPENED THIS TO EVERY BD (Ayush, 2026-11-16). It was admins only,
+     and the reason was good — an associate who can run it can move the team's
+     pipeline onto themselves. He was told that and asked for it anyway, so
+     what this now asserts is the new rule, not the old one: an associate gets
+     through, and the TARGET checks that never depended on the caller's role
+     still hold (see "never to the API user" below and §15). */
+  check('an associate can re-assign accounts now, not only an admin',
+        asAssociate.status === 200, `status ${asAssociate.status}`);
+  const aj = await asAssociate.json();
+  check('...and it is still only a dry run until apply is asked for',
+        aj.dryRun === true, JSON.stringify(aj).slice(0, 140));
 
   /* 99999 owns nothing in the mock, so this is a real move rather than the
      no-op that 74726 would be — a dry run that counts 0 proves nothing. */
@@ -1323,7 +1328,11 @@ console.log('\n11. a copy that is short of the account is not the account');
   const api = await post(1703, '/allot-jobs', { items: [{ companyId: 903, to: 74725 }] });
   check('never to the API user', api.status === 400, `${api.status} ${api.body.error}`);
   const assoc = await post(1704, '/allot-jobs', { items: [{ companyId: 903, to: 74726 }] }, { ADMIN_EMAILS: 'somebody.else@enout.in' });
-  check('an associate cannot start one', assoc.status === 403, `${assoc.status}`);
+  check('an associate can start one now (1.84.2)', assoc.status === 200, `${assoc.status} ${assoc.body.error || ''}`);
+  /* The gate that went was the caller's role. The gate on the TARGET did not:
+     an associate is refused the API user exactly as an admin is. */
+  const assocApi = await post(1707, '/allot-jobs', { items: [{ companyId: 903, to: 74725 }] }, { ADMIN_EMAILS: 'somebody.else@enout.in' });
+  check('...but still never to the API user', assocApi.status === 400, `${assocApi.status} ${assocApi.body.error}`);
 }
 
 /* ── 16 · TWO ISOLATES, ONE INDEX ────────────────────────────────────

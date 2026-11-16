@@ -2751,19 +2751,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        the console shows before anybody agrees to it. scripts/reassign.mjs
        holds the rules and the reasons; they are not repeated here. */
     "/reassign": async (_url, body) => {
-      /* ADMINS ONLY, and the dry run too.
-         Handing accounts between people is a management action, not a
-         dialling one: an associate who could run this could move the team's
-         pipeline onto themselves, and the dry run alone would tell them how
-         many contacts sit on everybody else's accounts. roleOf() already
-         decides this everywhere else; it decides it here. */
+      /* OPEN TO EVERY BD since 1.84.2 (Ayush, 2026-11-16), where it was
+         admins only. The reason it was closed still stands and is not
+         pretended away: an associate who can run this can move the team's
+         pipeline onto themselves, and the dry run alone says how many
+         contacts sit on everybody else's accounts. What replaces the gate is
+         a trail — every move records who asked for it, so the action is
+         attributable even though it is no longer restricted. The target
+         checks (never the API user, never a deactivated user) are unchanged;
+         they were never the part that depended on the caller's role. */
       const who = await whoami();
-      if (roleOf(who) !== "admin")
-        throw Object.assign(new Error("Re-assigning accounts is an admin action."), { status: 403 });
+      const actor = `${who?.name || who?.email || "unknown"}#${who?.id || "?"}`;
       const { plan, apply } = await import("./reassign.mjs");
       const companies = Array.isArray(body?.companies) ? body.companies : [];
       const ownerId = body?.ownerId;
       if (!body?.apply) return { dryRun: true, ...(await plan({ kylas, companies, ownerId, log })) };
+      log(`REASSIGN by ${actor}: ${companies.length} account(s) -> owner ${ownerId}`);
       /* THREE AT A TIME by default; REASSIGN_CONCURRENCY=1 is the old behaviour. */
       const out = await apply({ kylas, companies, ownerId, log, concurrency: Number(env.REASSIGN_CONCURRENCY || 3) });
       /* The copy now disagrees with Kylas about who owns these, and the pane
@@ -2784,9 +2787,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        account"). A leaveActive the request carries — 1.69/1.70 sent true by
        default, to keep contacts another active BD held — is ignored. */
     "/allot": async (_url, body) => {
+      /* Open to every BD, logged by actor — see /reassign above. */
       const who = await whoami();
-      if (roleOf(who) !== "admin")
-        throw Object.assign(new Error("Allotting accounts is an admin action."), { status: 403 });
+      const n = Array.isArray(body?.assignments) ? body.assignments.length : 0;
+      log(`ALLOT by ${who?.name || who?.email || "unknown"}#${who?.id || "?"}: ${n} assignment(s)`);
       const { allot } = await import("./reassign.mjs");
       const apiUser = String((await keyOwner().catch(() => null))?.id || "");
       const { users } = await kylasUsers().catch(() => ({ users: [] }));
@@ -2810,10 +2814,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        GET  /allot-jobs[?id=]  one job's progress, or the recent ones
        POST /allot-jobs/step   { id } runs a few items now (the console calls it while open)
        POST /allot-jobs/cancel { id } · /allot-jobs/retry { id }
-       Admin only. Targets must be active Kylas users, never the API user. */
+       Open to every BD since 1.84.2, logged by actor (see /reassign).
+       Targets must be active Kylas users, never the API user. */
     "/allot-jobs": async (url, body) => {
       const who = await whoami();
-      if (roleOf(who) !== "admin") throw Object.assign(new Error("Re-assigning is an admin action."), { status: 403 });
       if (!allotJobs) throw Object.assign(new Error("Background re-assignment needs the server's database (D1)."), { status: 503 });
       if (!body || !Array.isArray(body.items)) {
         const id = url.searchParams.get("id");
@@ -2827,14 +2831,14 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         if (t === apiUser) throw Object.assign(new Error("Never to the API user (Enout Super Admin)."), { status: 400 });
         if (active.get(t) === false) throw Object.assign(new Error(`User ${t} is deactivated in Kylas.`), { status: 400 });
       }
+      log(`ALLOT-JOB by ${who?.name || who?.email || "unknown"}#${who?.id || "?"}: ${body.items.length} item(s) -> ${targets.join(", ")}`);
       const kind = body.kind === "contacts" ? "contacts" : "company";
       const job = await allotJobs.create({ kind, by: userName(who), items: body.items });
       if (mirror) await mirror.markStale().catch(() => {});
       return { job: await allotJobs.status(job.id) };
     },
     "/allot-jobs/step": async (_url, body) => {
-      const who = await whoami();
-      if (roleOf(who) !== "admin") throw Object.assign(new Error("Re-assigning is an admin action."), { status: 403 });
+      /* Whoever started the job drives it; the gate moved to /allot-jobs. */
       if (!allotJobs) throw Object.assign(new Error("no database"), { status: 503 });
       const ran = await allotJobs.drain(performAllot, { jobId: body?.id || null,
         max: Number(env.ALLOT_STEP_MAX || 4), budgetMs: Number(env.ALLOT_STEP_MS || 20000) });
@@ -2842,11 +2846,9 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { ran, job: body?.id ? await allotJobs.status(body.id) : null };
     },
     "/allot-jobs/cancel": async (_url, body) => {
-      if (roleOf(await whoami()) !== "admin") throw Object.assign(new Error("admin only"), { status: 403 });
       return allotJobs.cancel(String(body?.id || ""));
     },
     "/allot-jobs/retry": async (_url, body) => {
-      if (roleOf(await whoami()) !== "admin") throw Object.assign(new Error("admin only"), { status: 403 });
       return allotJobs.retry(String(body?.id || ""));
     },
 
@@ -2867,9 +2869,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        user. The console's owner list has everyone who ever owned an account —
        deactivated people included, and Kylas refuses to hand a record to them. */
     "/allot-people": async () => {
-      const who = await whoami();
-      if (roleOf(who) !== "admin")
-        throw Object.assign(new Error("Allotting accounts is an admin action."), { status: 403 });
+      /* Every BD can hand an account over now, so every BD needs the list of
+         people it can be handed to. It is names and ids, nothing private. */
       const apiUser = String((await keyOwner().catch(() => null))?.id || "");
       const { users } = await kylasUsers().catch(() => ({ users: [] }));
       const people = users.filter((u) => u.id && u.active !== false && String(u.id) !== apiUser && !/super\s*admin/i.test(u.name || ""))
@@ -3406,10 +3407,23 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/contact-owner": async (_url, body) => {
       const kid = String(body?.kid || "").trim(), to = String(body?.ownerId || "").trim();
       if (!kid || !to) throw Object.assign(new Error("kid and ownerId are required"), { status: 400 });
+      /* THE TARGET HAS TO BE A REAL USER, and proving that is not ownerName()'s
+         job: it answers with the id itself when the lookup fails, on purpose,
+         so that a read never dies over a name. Used as a check it waved
+         through "owner 99999" and the PUT then set it (caught by
+         test-company-create §8). A name the CLIENT sent proves nothing either.
+         So: the console's own list, or Kylas itself, and nothing else. */
       const people = await formPeople();
       const known = people.find((p) => p.id === to);
-      const toName = known?.name || String(body?.ownerName || "").trim() || (await ownerName(to).catch(() => "")) || "";
-      if (!toName) throw Object.assign(new Error("That owner is not a Kylas user this console knows"), { status: 400 });
+      let toName = known?.name || "";
+      if (!toName) {
+        const u = await kylas.user(to).catch(() => null);
+        toName = [u?.firstName, u?.lastName].filter(Boolean).join(" ").trim() || String(u?.name || "").trim();
+        if (!u?.id || !toName)
+          throw Object.assign(new Error("That owner is not a Kylas user this console knows"), { status: 400 });
+        if (u.active === false)
+          throw Object.assign(new Error(`${toName} is deactivated in Kylas.`), { status: 400 });
+      }
       /* A contact the console holds but Kylas does not (saved only locally, or
          deleted there) reads as a raw 404 from the client — say it plainly. */
       const base = await kylas.contact(kid).catch((e) => {
