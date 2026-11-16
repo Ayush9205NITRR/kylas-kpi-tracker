@@ -324,6 +324,9 @@ label{display:block;font-size:var(--t-meta);color:var(--text2);margin-bottom:5px
    place this colour is allowed. Shown only when the owner picked has no Kylas
    id, because then the save would silently keep the previous owner. */
 .fwarn{margin:6px 0 0;font-size:var(--t-meta);color:var(--rose);line-height:1.45}
+/* The quiet twin of .fwarn: what just happened to this field, not a problem.
+   Used by the Owner box while a re-assign is in flight and after it lands. */
+.fnote{margin:6px 0 0;font-size:var(--t-meta);color:var(--text2);line-height:1.45}
 .req{color:var(--rose)}
 .in,select.in,textarea.in{width:100%;border:1px solid var(--line2);background:var(--panel);
   border-radius:6px;padding:7px 10px;font-size:var(--t-body);min-height:34px;font-weight:var(--w-body)}

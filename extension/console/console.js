@@ -1160,6 +1160,27 @@ function knownCompanies(){
    creates a new company — refused when one by that name already exists, so the
    picker cannot mint "Acme" beside "ACME Pvt Ltd". Works inside a company scope
    too: moving a contact to the right account is the point. */
+/* Re-assigning one contact, applied at once and undoable. Kylas first, then
+   the Airtable copy; a failure puts the dropdown back where it was. */
+async function reassignNow(a,was,to,back){
+  const sel=document.getElementById("f-ow"), note=document.getElementById("f-ow-now");
+  const say=(t)=>{if(note){note.textContent=t;note.hidden=!t;}};
+  if(sel)sel.disabled=true;say(`Re-assigning to ${to.name}…`);
+  try{
+    await API.setContactOwner(a.kid,to.id,to.name);
+    a.owner=to.name;a.ownerId=to.id;
+    if(sel){sel.disabled=false;sel.value=to.name;}
+    say(`Now with ${to.name} — in Kylas too.`);
+    renderQueue();validate();
+    if(back)toast(`Back with ${to.name}`);
+    else toast(`Re-assigned to ${to.name}`,()=>reassignNow(a,to,{name:was.name,id:was.id},true));
+  }catch(e){
+    a.owner=was.name;a.ownerId=was.id;
+    if(sel){sel.disabled=false;sel.value=was.name||"";}
+    say("");renderQueue();validate();
+    toast(`Could not re-assign: ${e.message||"error"} — still with ${was.name||"nobody"}`);
+  }
+}
 const CO={seq:0,timer:0};
 function companyField(a){
   const f=el("div","f");
@@ -1385,15 +1406,24 @@ function renderBasic(){
      updateCompany exists in the client and no code path calls it — so this
      moves the one contact and nothing else.
      The id travels with the name, or the save would carry the old one. */
+  /* A SAVED contact is re-assigned ON THE SPOT (Ayush, 2026-11-16: "I am
+     required to leave the console"). It used to land only on Save & next, and
+     a save needs every required field — so a plain re-assign meant opening
+     Kylas. A new card has no Kylas id yet, so its owner simply goes with its
+     first save, as before. */
   grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,(v)=>{
+    const was={name:a.owner,id:a.ownerId};
     a.owner=v;
     a.ownerId=ownerIdFor(v);
-    /* Picked a name this console has no id for: say it here rather than let
-       the save quietly keep the previous owner. */
     const warn=document.getElementById("f-ow-warn");
     if(warn)warn.hidden=!(v&&!a.ownerId);
     touch("record");
+    if(!a.kid||!v||!a.ownerId||String(was.id)===String(a.ownerId)||!window.API?.setContactOwner)return;
+    reassignNow(a,was,{name:v,id:a.ownerId});
   })));
+  {
+    const w=el("p","fnote");w.id="f-ow-now";w.hidden=true;grid.lastChild.appendChild(w);
+  }
   {
     const w=el("p","fwarn","This owner is not in the list Kylas sent, so the contact cannot be re-assigned to them. Refresh, or pick another.");
     /* Hidden until somebody PICKS an owner we cannot resolve. On first paint

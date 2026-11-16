@@ -384,6 +384,9 @@
     /* Move a saved contact to another company — Kylas and Airtable, now. */
     moveContact: (kid, companyId, companyName) => req("/contact-move", { method: "POST",
       body: { kid, companyId, companyName }, timeout: 30000 }),
+    /* Re-assign a saved contact to another BD — Kylas and Airtable, now. */
+    setContactOwner: (kid, ownerId, ownerName) => req("/contact-owner", { method: "POST",
+      body: { kid, ownerId, ownerName }, timeout: 30000 }),
     createCompany: (form) => req("/company-create", { method: "POST",
       body: typeof form === "string" ? { name: form } : form, timeout: 30000 }),
     /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a

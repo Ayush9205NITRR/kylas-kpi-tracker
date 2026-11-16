@@ -3395,6 +3395,49 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { ok: true, from, to, toName, airtableMoved };
     },
 
+    /* RE-ASSIGN ONE CONTACT, NOW. The Owner dropdown on the card only landed
+       on Save & next, and a save needs every required field — so moving a
+       contact to another BD meant opening Kylas (Ayush, 2026-11-16). This
+       writes it on the spot: Kylas, then the Airtable copy.
+         Only the contact moves. A COMPANY's owner is a different endpoint and
+       dragging its contacts along is the accident this console exists to
+       avoid (see setCompanyOwner's note in kylas.mjs).
+       POST { kid, ownerId, ownerName? } -> { ok, from, to } */
+    "/contact-owner": async (_url, body) => {
+      const kid = String(body?.kid || "").trim(), to = String(body?.ownerId || "").trim();
+      if (!kid || !to) throw Object.assign(new Error("kid and ownerId are required"), { status: 400 });
+      const people = await formPeople();
+      const known = people.find((p) => p.id === to);
+      const toName = known?.name || String(body?.ownerName || "").trim() || (await ownerName(to).catch(() => "")) || "";
+      if (!toName) throw Object.assign(new Error("That owner is not a Kylas user this console knows"), { status: 400 });
+      /* A contact the console holds but Kylas does not (saved only locally, or
+         deleted there) reads as a raw 404 from the client — say it plainly. */
+      const base = await kylas.contact(kid).catch((e) => {
+        if (/\b404\b|no such contact/i.test(String(e.message))) return null;
+        throw e;
+      });
+      if (!base?.id) throw Object.assign(new Error("Kylas does not have this contact yet — save it once, then re-assign"), { status: 404 });
+      const from = String(idOf(base.ownerId) ?? "");
+      if (from === to) return { ok: true, from, to, toName, unchanged: true };
+      const fromName = (await ownerName(from).catch(() => "")) || "";
+      const card = { ...toConsoleContact(base), kid, ownerId: to, owner: toName };
+      await kylas.updateContact(kid, toKylasContact(card, { base }));
+      const back = await kylas.contact(kid);
+      const now = String(idOf(back?.ownerId) ?? "");
+      if (now !== to) throw Object.assign(new Error(`Kylas accepted the change but the contact still reads owner ${now || "none"}`), { status: 502 });
+      historyCache.delete(kid);
+      let airtableMoved = false;
+      if (airtable) {
+        try {
+          await airtable.upsert("Contacts", "Kylas Contact ID",
+            { "Kylas Contact ID": kid, Owner: toName, "Kylas Owner ID": to });
+          airtableMoved = true; dropReadCaches();
+        } catch (e) { log(`! contact ${kid} re-assigned in Kylas; the Airtable copy waits for the sync — ${String(e.message).slice(0, 140)}`); }
+      }
+      log(`contact ${kid} owner ${fromName || from || "(none)"} -> ${toName}`);
+      return { ok: true, from, fromName, to, toName, airtableMoved };
+    },
+
     /* ONE CREATE AT A TIME. The check and Kylas' create are two calls, so
        twenty people pressing Create on the same new name in the same second
        all passed the check and made twenty companies (stress-company S3).
