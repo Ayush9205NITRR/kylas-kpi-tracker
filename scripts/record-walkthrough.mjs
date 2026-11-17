@@ -105,7 +105,10 @@ const MOCK = { KYLAS_BASE: "http://127.0.0.1:9900", KYLAS_KEY: "x",
   AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock",
   AIRTABLE_BASE: "appMOCK", RESEARCH_BASE: "appRESEARCH" };
 
-start("scripts/mock-kylas.mjs", { ...MOCK, PORT: "9900", MOCK_USER_LIST: "1", MOCK_MANY: "40" });
+/* MOCK_SOURCE_TEXT=1: Source of Data as free text, which is how Ayush's own
+   account holds it — so step 5 films the box he will actually see. */
+start("scripts/mock-kylas.mjs", { ...MOCK, PORT: "9900", MOCK_USER_LIST: "1", MOCK_MANY: "40",
+  MOCK_MANY_SOURCES: "1", MOCK_SOURCE_TEXT: "1" });
 start("scripts/mock-airtable.mjs", { ...MOCK, PORT: "9901" });
 await wait("http://127.0.0.1:9901/v0/appMOCK/Companies");
 start("scripts/proxy.mjs", { ...MOCK, PORT: "8788" });            /* the mock proxy */
@@ -305,15 +308,23 @@ async function learnNames() {
   const f = F(); if (!f) return [];
   const names = await f.evaluate(() => {
     const out = [];
-    const push = (v) => { const s = String(v || "").trim(); if (s.length > 2) out.push(s); };
+    const NOT_A_NAME = /^(choose|select|none|all|me|other|unknown|n\/?a|—|-)$/i;
+    const push = (v) => { const s = String(v || "").trim(); if (s.length > 2 && !NOT_A_NAME.test(s)) out.push(s); };
     try { for (const o of OWNERS) push(typeof o === "string" ? o : o?.name); } catch { /* not loaded yet */ }
     try { for (const a of DATA) { push(a?.pocName); push(a?.owner); } } catch { /* not loaded yet */ }
     try { push(API.state?.user?.name); } catch { /* no user */ }
     /* and whatever is on screen: the queue rows, the owner picker, the card */
+    /* NOT THE PLACEHOLDERS. A select's first option is "Choose", and learning
+       that as a person's name made the mask rewrite every "Choose" on screen
+       into an invented one — Employee size read "Rohit Demo" in the cut before
+       this. Skip options with no value, and the handful of words a dropdown
+       uses to mean "nothing picked". */
+    const STOP = new Set(["choose", "select", "select…", "none", "all", "me", "—", "-", "n/a", "na", "other"]);
     const fake = window.__maskFakes || new Set();
     for (const el of document.querySelectorAll("#qlist .qi .n, #qlist b, #f-ow option, .vr .c7, #f-poc")) {
+      if (el.tagName === "OPTION" && !el.value) continue;
       const v = String(el.value || el.textContent || "").trim();
-      if (!fake.has(v)) push(v);
+      if (!fake.has(v) && !STOP.has(v.toLowerCase())) push(v);
     }
     window.__maskNames = [...new Set([...(window.__maskNames || []), ...out])];
     window.__maskNow?.();
@@ -429,8 +440,13 @@ try {
   await f().locator(".rdPanel #rdX").click(); await sleep(1200);
 
   await must("#qNewBtn", "the + New contact button").click(); await sleep(1000);
-  await must("#f-poc", "the name box").fill("Leela Demo");
-  await must("#f-ph", "the phone box").fill("9000000003");
+  /* A person the mock really holds, under ANOTHER account (company 903) than
+     the card is on — that is the whole case. Typing someone who does not
+     exist found no duplicate and the pill never came, which is what stopped
+     the last three rehearsals. The mask rewrites what is on screen, not the
+     record behind it, so the lookup still goes out on the real number. */
+  await must("#f-poc", "the name box").fill("Devanshi Kalro");
+  await must("#f-ph", "the phone box").fill("9920477103");
   await f().locator("#f-poc").click();
   await sleep(1500);
   await appears(".dupe", "the duplicate pill", 20000);   /* debounce + a server round trip */
@@ -441,7 +457,27 @@ try {
   await give.click(); await sleep(5200);
   await step("Taken — in Kylas too, with their history intact. Nothing was typed twice.", 3400);
 
-  await step("1.84.2 · pushed, not deployed. Comment and it goes live.", 3000);
+  /* 5 · the Source of Data box (1.84.3). Not one of the four he asked to see,
+     but it is the thing that blocked him, so it is worth 10 seconds. The mock
+     serves the field as free text only when MOCK_SOURCE_TEXT=1 — otherwise
+     this is the dropdown, which is equally worth seeing. */
+  await f().locator("#ncCancel, #ncClose").click().catch(() => {});
+  await f().evaluate(() => window.NewCompany?.open?.("")).catch(() => {});
+  await sleep(2500);
+  if (await f().locator("#ncSource").count()) {
+    const tag = await f().locator("#ncSource").evaluate((el) => el.tagName).catch(() => "");
+    await step(`5 · New company. Source of Data is ${tag === "INPUT" ? "typed, with what the account already uses offered" : "the list Kylas holds"}.`, 2600);
+    if (tag === "INPUT") {
+      await f().locator("#ncSource").click();
+      await f().locator("#ncSource").type("Rou", { delay: 140 });
+      await sleep(1400);
+      await step("It was an empty dropdown, so no company could be created at all.", 3200);
+    }
+    await f().locator("#ncCancel").click().catch(() => {});
+    await sleep(800);
+  }
+
+  await step("1.84.3 · pushed, not deployed. Comment and it goes live.", 3000);
   if (errs.length) say(`\n! page errors during the run: ${errs.slice(0, 3).join(" | ")}`);
 } catch (e) {
   failed = e;
