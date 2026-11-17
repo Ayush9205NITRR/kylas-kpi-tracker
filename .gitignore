@@ -17,6 +17,10 @@ apps/bd-ladder/dist
 .dev.vars.*
 .wrangler/
 screenshots/
+# Recordings made by scripts/record-walkthrough.mjs. They are build output, not
+# source — and on a live run they are frames of the real account, masked but
+# still not something a public repo should carry.
+walkthrough/
 
 db/*.sqlite
 db/*.sqlite-journal
