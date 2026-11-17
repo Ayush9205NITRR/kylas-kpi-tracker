@@ -86,7 +86,13 @@
           <select class="in" id="ncOwner">${(m.people || []).map((p) => opt(p.id, p.name, String(p.id) === String(m.me?.id))).join("")}
             ${m.me && !(m.people || []).some((p) => String(p.id) === String(m.me.id)) ? opt(m.me.id, m.me.name + " (me)", true) : ""}</select></label>
         <label class="f"><span>Source of Data ${req}</span>
-          <select class="in" id="ncSource"><option value="">Choose</option>${(m.sources || []).map((o) => opt(o.code, o.label)).join("")}</select></label>
+          ${(m.sources || []).length
+            ? `<select class="in" id="ncSource"><option value="">Choose</option>${(m.sources || []).map((o) => opt(o.code, o.label)).join("")}</select>`
+            /* No list in Kylas: the field is free text there, so a dropdown
+               here could only ever be empty. Type it, with what the account
+               already uses offered as you type. */
+            : `<span class="cobox"><input class="in" id="ncSource" autocomplete="off"
+                 placeholder="${(m.sourceSeen || []).length ? "Type: GPTW, Apollo, Round-Robin…" : "How this account was found"}"></span>`}</label>
         <label class="f wide"><span>LinkedIn page ${req}</span>
           <input class="in" id="ncLi" placeholder="linkedin.com/company/…" autocomplete="off"></label>
         <label class="f"><span>Employee size ${req}</span>
@@ -111,6 +117,13 @@
     let ind = null, city = null, nameState = "empty", seq = 0, timer = 0;
     typeahead($("ncInd"), indList, { onPick: (x) => { ind = x; check(); } });
     typeahead($("ncCity"), cityList, { allowNew: true, onPick: (x) => { city = x; check(); } });
+    /* The same picker as City when Source of Data is free text: anything may
+       be typed, and the spellings already in use are one keystroke away, so
+       "GPTW + Re-allotment" stays one value instead of becoming three. */
+    if (!(m.sources || []).length)
+      typeahead($("ncSource"), (m.sourceSeen || []).map((x) => ({ label: x.label, value: x.label,
+        n: x.used ? `${x.used} account${x.used === 1 ? "" : "s"}` : "" })),
+        { allowNew: true, onPick: () => check() });
 
     const liOk = (v) => /^(https?:\/\/)?([a-z]{2,3}\.)?linkedin\.com\/(company|school|showcase)\/[^\s/?#]+/i.test(v.trim());
     function check() {

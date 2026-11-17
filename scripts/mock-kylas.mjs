@@ -18,6 +18,12 @@ const PORT = Number(process.env.PORT || 9900);
 const stages = JSON.parse(readFileSync(new URL("../docs/stages.json", import.meta.url), "utf8")).stages;
 const id = (code) => stages.find((s) => s.code === code).id;
 
+const SOURCE_VALUES = [
+  { id: 9201, name: "COLD_CALLING", displayName: "Cold Calling" },
+  { id: 9202, name: "APOLLO", displayName: "Apollo" },
+  { id: 9203, name: "LINKEDIN", displayName: "LinkedIn" },
+];
+
 const USERS = {
   74725: { id: 74725, firstName: "Enout", lastName: "Super Admin",
            email: "crmadmin@enout.in", active: true },
@@ -544,6 +550,17 @@ createServer(async (req, res) => {
   /* Company fields, for the Offsite Timeline picklist that lives on the
      company. Two offsite-looking fields, as an account that replaced one is
      likely to have: the "(BD - New)" one is the live one. */
+  /* One field on its own. Kylas serves the picklist values here even when the
+     fields list leaves them out (docs/kylas-picklists.md pulled the real lists
+     this way), so the console asks here before calling a field free text. */
+  if (/^\/v1\/fields\/\d+$/.test(p)) {
+    const fid = Number(p.split("/").pop());
+    if (fid === 7001 && process.env.MOCK_SOURCE_TEXT !== "1")
+      return json(res, 200, { id: 7001, name: "cfSourceOfData", displayName: "Source of Data",
+                              type: "PICK_LIST", picklist: { picklistValues: SOURCE_VALUES } });
+    return json(res, 404, { message: "Not Found" });
+  }
+
   if (p === "/v1/entities/company/fields") {
     return json(res, 200, { content: [
       { name: "cfOffsiteTimeline", displayName: "Offsite Timeline (old)", type: "TEXT_FIELD" },
@@ -556,12 +573,20 @@ createServer(async (req, res) => {
         ] } },
       { name: "cfBatch", displayName: "Batch", type: "TEXT_FIELD" },
       { name: "cfBooleanPostLink", displayName: "Boolean Post link", type: "URL" },
-      { name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
-        picklist: { picklistValues: [
-          { id: 9201, name: "COLD_CALLING", displayName: "Cold Calling" },
-          { id: 9202, name: "APOLLO", displayName: "Apollo" },
-          { id: 9203, name: "LINKEDIN", displayName: "LinkedIn" },
-        ] } },
+      /* SOURCE OF DATA, IN ITS THREE REAL SHAPES. Ayush's account holds this
+         one as FREE TEXT on the company — which is how "GPTW + Re-allotment"
+         exists and why the Accounts filter needed "contains" — and the form
+         rendered an empty dropdown nobody could pick from (2026-11-17). The
+         mock only ever served the inline picklist, so every test passed.
+           MOCK_SOURCE_TEXT=1        free text, his account
+           MOCK_SOURCE_VIA_FIELD=1   a picklist whose values are not inline,
+                                     served only by GET /v1/fields/{id} */
+      process.env.MOCK_SOURCE_TEXT === "1"
+        ? { id: 7001, name: "cfSourceOfData", displayName: "Source of Data", type: "TEXT_FIELD" }
+        : process.env.MOCK_SOURCE_VIA_FIELD === "1"
+        ? { id: 7001, name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST" }
+        : { id: 7001, name: "cfSourceOfData", displayName: "Source of Data", type: "PICK_LIST",
+            picklist: { picklistValues: SOURCE_VALUES } },
       { name: "cfLinkedinPage", displayName: "LinkedIn", type: "URL" },
       { name: "city", displayName: "City", type: "TEXT_FIELD", standard: true },
     ] });

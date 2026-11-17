@@ -156,6 +156,62 @@ try {
   const sameOwner = await post("/contact-owner", { kid: "112936", ownerId: "74725" });
   ok("re-assigning to the owner it already has changes nothing", sameOwner.j.unchanged === true);
 
+  console.log("\n8b. Source of Data when Kylas has no list for it");
+  /* Ayush, 2026-11-17: "While creating companies source of data dropdown is
+     not coming". On his account the COMPANY field is free text, so there were
+     no options, the form rendered an empty dropdown, and no company could be
+     created at all. Three shapes, all of which must leave the form usable. */
+  {
+    const one = async (env, what) => {
+      const procs2 = [];
+      const st = (file, e = {}) => procs2.push(spawn("node", [file], { cwd: REPO, env: { ...process.env, ...ENV, ...e }, stdio: "ignore" }));
+      try {
+        st("scripts/mock-kylas.mjs", { PORT: "9902", ...env });
+        await wait("http://127.0.0.1:9902/__writes");
+        st("scripts/proxy.mjs", { KYLAS_BASE: "http://127.0.0.1:9902", KYLAS_KEY: "x",
+          AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock",
+          AIRTABLE_BASE: "appMOCK", RESEARCH_BASE: "appRESEARCH", PORT: "8789" });
+        await wait("http://127.0.0.1:8789/health");
+        const r = await (await fetch("http://127.0.0.1:8789/company-form")).json();
+        console.log(`  (${what}: ${r.sources?.length || 0} option(s), free=${r.sourceFree}, seen=${(r.sourceSeen || []).length})`);
+        return r;
+      } finally { for (const x of procs2) { try { x.kill("SIGKILL"); } catch {} } }
+    };
+    const inline = await one({}, "inline picklist");
+    ok("a picklist inline still gives the options", inline.sources?.length === 3 && inline.sourceFree === false);
+    const viaField = await one({ MOCK_SOURCE_VIA_FIELD: "1" }, "picklist, values only on /v1/fields/{id}");
+    ok("options not inline are fetched from the field itself", viaField.sources?.length === 3 && viaField.sourceFree === false,
+       JSON.stringify(viaField.sources || []).slice(0, 120));
+    const free = await one({ MOCK_SOURCE_TEXT: "1" }, "free text (Ayush's account)");
+    ok("free text says so instead of offering an empty list", free.sourceFree === true && (free.sources || []).length === 0,
+       JSON.stringify({ free: free.sourceFree, n: free.sources?.length }));
+    ok("...and suggests what the account already uses", Array.isArray(free.sourceSeen) && free.sourceSeen.length > 0
+       && free.sourceSeen.every((x) => x.label), JSON.stringify((free.sourceSeen || []).slice(0, 4)));
+  }
+  /* And a free-text source must still create: the write path sends the text. */
+  {
+    const procs3 = [];
+    try {
+      procs3.push(spawn("node", ["scripts/mock-kylas.mjs"], { cwd: REPO, stdio: "ignore",
+        env: { ...process.env, ...ENV, PORT: "9903", MOCK_SOURCE_TEXT: "1" } }));
+      await wait("http://127.0.0.1:9903/__writes");
+      procs3.push(spawn("node", ["scripts/proxy.mjs"], { cwd: REPO, stdio: "ignore",
+        env: { ...process.env, KYLAS_BASE: "http://127.0.0.1:9903", KYLAS_KEY: "x",
+               AIRTABLE_BASE_URL: "http://127.0.0.1:9901", AIRTABLE_PAT: "pat_mock",
+               AIRTABLE_BASE: "appMOCK", RESEARCH_BASE: "appRESEARCH", PORT: "8790" } }));
+      await wait("http://127.0.0.1:8790/health");
+      const r = await fetch("http://127.0.0.1:8790/company-create", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...FORM, name: "Freetext Source Co", source: "GPTW + Re-allotment" }) });
+      const j = await r.json();
+      ok("a typed Source of Data creates the company", r.status === 200 && j.ok === true, JSON.stringify(j).slice(0, 160));
+      const made = await (await fetch("http://127.0.0.1:9903/__companies", { headers: { "api-key": "x" } })).json();
+      const co = made.find((c) => c.name === "Freetext Source Co");
+      ok("...and Kylas got the text, not an option id",
+         co?.customFieldValues?.cfSourceOfData === "GPTW + Re-allotment", JSON.stringify(co?.customFieldValues));
+    } finally { for (const x of procs3) { try { x.kill("SIGKILL"); } catch {} } }
+  }
+
   console.log("\n9. handing accounts over is no longer admin-only");
   /* 1.84.2 opened /reassign, /allot and /allot-people to every BD (Ayush,
      2026-11-16), with the actor logged instead. The target checks stayed. */

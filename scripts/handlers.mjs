@@ -772,10 +772,25 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         .map((f) => ({ name: f.name, label: f.displayName || "" })),
       /* The New-company form's fields, each found by LABEL (the key Kylas gave
          a custom field need not say what it is). First match wins. */
-      /* Source of Data: the key the Field Map names, the label as a fallback. */
-      source: (() => {
+      /* Source of Data: the key the Field Map names, the label as a fallback.
+         OPTIONS MAY NOT BE INLINE. The fields list carries them for contact
+         fields, which is why the card's "Came from" has always worked, but on
+         this account the COMPANY field came back with none and the New-company
+         form rendered a dropdown with nothing in it — nothing to pick, so a
+         company could not be created at all (Ayush, 2026-11-17). So: ask for
+         the field on its own as well (docs/kylas-picklists.md pulled the real
+         lists that way), and if there are still no options the field is free
+         text — say so, rather than offering an empty list. */
+      source: await (async () => {
         const f = fields.find((x) => x.name === "cfSourceOfData") || fields.find((x) => /source\s*of\s*data/i.test(`${x.displayName || ""}`));
-        return f ? { name: f.name, label: f.displayName || "", options: findOptions(f) || [] } : null;
+        if (!f) return null;
+        let options = findOptions(f) || [];
+        if (!options.length && f.id) {
+          const one = await kylas.raw("GET", `/v1/fields/${f.id}`).catch(() => null);
+          options = findOptions(one) || [];
+        }
+        log(`company Source of Data: ${f.name} (${f.type || "type?"}) — ${options.length} option(s)`);
+        return { name: f.name, label: f.displayName || "", type: f.type || "", options };
       })() };
   });
   /* ONE COMPANY CAN NAME MORE THAN ONE QUARTER. Kylas' own field is a single
@@ -3351,6 +3366,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         me: me?.id ? { id: String(me.id), name: [me.firstName, me.lastName].filter(Boolean).join(" ") } : null,
         people: await formPeople(),
         sources: (defs?.source?.options || []).map((o) => ({ id: o.id, code: o.code, label: o.label })),
+        /* FREE TEXT, NOT A LIST. When Kylas holds Source of Data on the company
+           as text — which is what makes values like "GPTW + Re-allotment"
+           possible, and why the Accounts filter needed "contains" — there is
+           nothing to put in a dropdown. The form must let the BD type, and
+           suggest what the account already uses rather than inventing a 41st
+           spelling of the same thing. */
+        sourceFree: !(defs?.source?.options || []).length,
+        sourceType: defs?.source?.type || "",
+        sourceSeen: await (async () => {
+          if ((defs?.source?.options || []).length) return [];
+          /* The crawl when it is warm — it holds the whole account, so the
+             counts are real. Cold (a fresh worker), one page from Kylas
+             rather than no suggestions at all: peek() never starts a crawl,
+             and starting one to fill a dropdown would be a bad trade. */
+          const crawl = await kylasCompanies.peek().catch(() => null);
+          let list = crawl?.companies || [];
+          if (!list.length) {
+            const raw = await kylas.companies(200).catch(() => null);
+            list = (Array.isArray(raw) ? raw : raw?.content || raw?.companies || []).map(toConsoleCompany);
+          }
+          const n = new Map();
+          for (const c of list) {
+            const v = String(c?.source ?? "").trim();
+            if (v) n.set(v, (n.get(v) || 0) + 1);
+          }
+          return [...n.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60)
+            .map(([label, used]) => ({ label, used }));
+        })(),
         bands: EMP_BANDS, industries: industries().groups, cities: CITIES, cityList: CITY_LIST,
         fundingTypes: ["Seed", "Angel", "Pre-Seed", "Series A", "Series B", "Series C", "Series D", "Series E",
           "Venture (Round not Specified)", "Private Equity", "Debt Financing", "Merger / Acquisition", "IPO", "Grant", "Other"],
