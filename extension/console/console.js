@@ -54,6 +54,21 @@ function adoptOwners(list){
   addOwners(names);
 }
 const ownerIdFor=(name)=>OWNER_ID[name]||"";
+/* The whole active user list from the server, adopted and remembered. Called
+   on boot and whenever the card is about to need it. */
+let OWNERS_ASKED=0;
+async function refreshOwners(force){
+  if(!force&&Date.now()-OWNERS_ASKED<5*60*1000)return;
+  OWNERS_ASKED=Date.now();
+  try{
+    const r=await API.allotPeople();
+    const list=(r?.people||[]).filter(p=>p?.name);
+    if(!list.length)return;
+    adoptOwners(list);
+    await Store.setSetting("owners",list);
+    if(DATA[cur])renderBasic();
+  }catch(e){ /* older server, or offline: the stored list still stands */ }
+}
 /* The other way round. The Airtable copy of a company carries the owner's
    Kylas id even when its Owner text cell is empty, and "Account owner #74725"
    is not an answer to "who owns this account". */
@@ -1425,6 +1440,11 @@ function renderBasic(){
      a save needs every required field — so a plain re-assign meant opening
      Kylas. A new card has no Kylas id yet, so its owner simply goes with its
      first save, as before. */
+  /* SELF-HEALING. If the owner this contact already has cannot be resolved to
+     a Kylas id, the list we hold is short — ask for the full one rather than
+     waiting for the BD to discover it by picking a name and being told it
+     cannot be used. */
+  if(a.owner&&!ownerIdFor(a.owner))refreshOwners(true);
   grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,(v)=>{
     const was={name:a.owner,id:a.ownerId};
     a.owner=v;
@@ -1570,9 +1590,28 @@ function rVal(F,f){
   if(f.money)v=money(v);
   return v;
 }
-const rHTML=(f,v)=>f.link&&/^https?:|^www\./i.test(v)
-  ?`<a href="${esc(/^www\./i.test(v)?"https://"+v:v)}" target="_blank" rel="noopener">${esc(v.replace(/^https?:\/\/(www\.)?/i,"").slice(0,48))} ↗</a>`
-  :esc(v);
+/* ANY HOST, NOT ONLY ONE THAT ARRIVED WITH A SCHEME. A value stored as
+   "linkedin.com/company/x" failed this test and rendered as plain text, and
+   when it did pass it went into href= unchanged — a relative URL inside the
+   extension frame, which navigates to chrome-extension://…/console/linkedin.com/…
+   and dies. Normalise to https:// and let the URL parser decide what is a
+   link at all (Ayush, 2026-11-19: research links that did nothing). */
+function webUrl(v){
+  const t=String(v||"").trim();
+  if(!t||/\s/.test(t))return null;
+  const u=/^https?:\/\//i.test(t)?t:"https://"+t.replace(/^\/+/,"");
+  try{
+    const p=new URL(u);
+    if(!p.hostname.includes("."))return null;
+    return p.protocol==="http:"||p.protocol==="https:"?p.href:null;
+  }catch{return null;}
+}
+const rHTML=(f,v)=>{
+  const u=f.link?webUrl(v):null;
+  return u
+    ?`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(String(v).replace(/^https?:\/\/(www\.)?/i,"").slice(0,48))} ↗</a>`
+    :esc(v);
+};
 const RES_ALL=RESEARCH_SECTIONS.flatMap(s=>s.f);
 function researchCard(a){
   const id=accountOf(a).id;
@@ -2457,6 +2496,13 @@ async function syncToKylas(a,call){
 async function boot(){
   ME=(await Store.getSetting("me"))||"";
   adoptOwners((await Store.getSetting("owners"))||[]);
+  /* EVERY ACTIVE BD, ON BOOT, not only the ones a record happened to carry.
+     The stored list is whatever the last fetch left behind, so a console
+     opened cold — or opened straight onto one contact — had a short Owner
+     dropdown and showed the real owner as "not in the list Kylas sent".
+     Refreshed in the background: nothing waits on it, and a server that
+     cannot answer leaves the stored list exactly as it was. */
+  refreshOwners();
   const saved=await Store.loadContacts();
   if(saved&&saved.length)DATA=saved;
   const log=await Store.loadLog();

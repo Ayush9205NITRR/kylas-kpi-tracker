@@ -107,6 +107,44 @@ list", so two instances adding different accounts both land.
    crawl landed, and stayed empty for good. It reads the list at paint time
    and repaints when it arrives.
 
+### 1.85.1 — two bugs Ayush hit on the live account (2026-11-19)
+
+**Links in Views → Contacts did nothing.** The phone was `<a href="tel:…">`
+and the email `<a href="mailto:…">`; Chrome refuses both inside the
+`chrome-extension://` iframe ("This content is blocked"). They are buttons
+now: the number goes through `window.requestDial` — the same path the call
+card has always used, which clicks Kylas' own dialler on the host page and
+falls back to copying — and the address copies with a toast. `console.js`
+had already made exactly this choice for the call bar; the views table was
+written without knowing that. **Never put a `tel:` or `mailto:` href in this
+extension.**
+
+While auditing the rest: a stored URL with no scheme (`linkedin.com/company/x`)
+went into `href=` unchanged, which inside the frame is a *relative* URL —
+it opened `chrome-extension://…/console/linkedin.com/…` and died. Both the
+Account Research links and the accounts-table chips normalise through a
+`webUrl()` helper now, and carry `target="_blank" rel="noopener noreferrer"`.
+
+**The Owner dropdown was missing most of the team.** Opening a contact
+*directly* — which is what Views → Contacts does — went through `/contact`,
+and `/contact` was the one record route that did not send `owners`. So the
+card had only the two or three names it was born with: the contact's real
+owner showed under the red *"This owner is not in the list Kylas sent"*, and
+there was nobody else to re-assign to. Fixed on both sides:
+
+- `/contact` now returns the full active list (`ownerList()`) and the
+  picklists, exactly as `/company` does; `/view-contacts` returns them too.
+- `overlay.js` adopts them on contact open, not only on company open.
+- `console.js` refreshes the whole active list on boot (`refreshOwners()`),
+  and re-asks if the card is ever painted with an owner it cannot resolve to
+  an id — so a short list heals itself instead of waiting to be discovered.
+
+**And the table disagreed with the card.** The Airtable copy can hold a Kylas
+owner id with no name against it; the Contacts table read `—` for a person
+whose card read `Sejal Agrawal`. `/view-contacts` resolves the name from the
+id now, so both screens read the same thing. The stress suite seeds exactly
+that row — an owner id with a blank name — and fails without the fix.
+
 **Not done:** no per-view sort saved beyond the optional filter snapshot, no
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).

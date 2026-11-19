@@ -61,7 +61,9 @@ const fails = async (path, body) => {
 };
 
 try {
-  start("scripts/mock-kylas.mjs", { PORT: "9910", MOCK_USER_LIST: "1", MOCK_MANY: "60" });
+  start("scripts/mock-kylas.mjs", { PORT: "9910", MOCK_USER_LIST: "1", MOCK_MANY: "60",
+    /* A real team, so "the whole owner list" is more than two names. */
+    MOCK_BD_TEAM: "1" });
   await wait("http://127.0.0.1:9910/__writes");
   start("scripts/mock-airtable.mjs", { PORT: "9911" });
   await wait("http://127.0.0.1:9911/v0/appMOCK/Companies");
@@ -235,6 +237,72 @@ try {
   ok("a view that does not exist is a 404", (await fails("/view-contacts?id=nope"))?.status === 404);
   as(BDS[4]);
   ok("somebody else's personal view is 403 here too", (await fails(`/view-contacts?id=${mine.id}`))?.status === 403);
+
+  /* ── 8b · THE OWNER LIST, everywhere a card can be opened from ───────
+     Ayush, 2026-11-19: he opened a contact out of a view's Contacts table and
+     the card showed the real owner under "This owner is not in the list Kylas
+     sent" — with no other BD in the dropdown to pick instead. /contact simply
+     did not send the owners, and the Contacts table read "—" for the same
+     person whose card said a name. */
+  console.log("\n8b · the owner list");
+  as(ADMIN);
+  const people = (await call("/allot-people")).people || [];
+  ok("/allot-people lists the active BDs", people.length >= 5, `${people.length}`);
+  ok("...never the API user or a Super Admin",
+     !people.some((p) => /super\s*admin/i.test(p.name || "")), JSON.stringify(people.map((p) => p.name)));
+  ok("...and never a deactivated one", !people.some((p) => /\bOld\b/.test(p.name || "")),
+     JSON.stringify(people.map((p) => p.name)));
+
+  const co = await call("/company?id=1776620");
+  ok("/company sends the whole list, not the record's own owners",
+     (co.owners || []).length >= people.length, `${(co.owners || []).length} vs ${people.length}`);
+
+  const one = await call("/contact?id=112936");
+  ok("/contact sends an owners list at all", Array.isArray(one.owners), JSON.stringify(Object.keys(one)));
+  ok("...the whole active list, same as /company",
+     (one.owners || []).length >= people.length, `${(one.owners || []).length} vs ${people.length}`);
+  ok("...every one with an id AND a name — a name alone cannot re-assign",
+     (one.owners || []).every((o) => o.id && o.name), JSON.stringify((one.owners || []).slice(0, 3)));
+  ok("...including the contact's own owner",
+     (one.owners || []).some((o) => String(o.id) === String(one.contact.ownerId)),
+     `${one.contact.owner} #${one.contact.ownerId}`);
+  ok("/contact also sends the picklists the card needs", !!one.picklists);
+
+  /* THE EXACT ROW THAT CAUSED IT: the copy holds a Kylas owner id with no
+     name against it. Before the fix the table read "—" here while the card
+     read the name — the same record, two answers. */
+  const AT = "http://127.0.0.1:9911/v0/appMOCK";
+  const atPost = (table, fields) => fetch(`${AT}/${encodeURIComponent(table)}`, {
+    method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer pat_mock" },
+    body: JSON.stringify({ records: [{ fields }] }) }).then((r) => r.json());
+  await atPost("Companies", { "Kylas Company ID": "4242", Name: "Nameless Owner Co" });
+  await atPost("Contacts", { "Kylas Contact ID": "994242", Name: "Rakshita Demo",
+    "Company Kylas ID": "4242", "Kylas Owner ID": "80001" /* and NO Owner name */ });
+  const blankView = (await call("/views", { name: "Blank owner", visibility: "team",
+    companies: ["4242"] })).view;
+  const blank = await call(`/view-contacts?id=${blankView.id}`);
+  const rak = (blank.contacts || []).find((c) => String(c.kid) === "994242");
+  ok("a copy row with an owner id but no name still shows the owner",
+     !!rak && String(rak.owner || "").trim().length > 0,
+     rak ? `owner="${rak.owner}" id=${rak.ownerId}` : "the row never came back");
+  ok("...and it is the right person", rak?.owner === "Sejal One", `got “${rak?.owner}”`);
+
+  const vcOwn = await call(`/view-contacts?id=${real?.id || ""}`);
+  ok("/view-contacts sends the owner list too", (vcOwn.owners || []).length >= people.length,
+     `${(vcOwn.owners || []).length}`);
+  /* THE TABLE AND THE CARD MUST SAY THE SAME THING. A row the copy holds with
+     an owner id and no name used to read "—" beside a card showing a name. */
+  const named = vcOwn.contacts.filter((c) => c.ownerId);
+  ok("every contact with an owner id has the name to go with it",
+     named.length > 0 && named.every((c) => String(c.owner || "").trim()),
+     JSON.stringify(named.filter((c) => !c.owner).map((c) => `${c.pocName}#${c.ownerId}`).slice(0, 4)));
+  for (const c of named.slice(0, 5)) {
+    const card = await call(`/contact?id=${c.kid}`);
+    if (!card?.contact) continue;
+    ok(`“${c.pocName}”: table owner matches the card`,
+       String(c.owner || "") === String(card.contact.owner || ""),
+       `table “${c.owner}” vs card “${card.contact.owner}”`);
+  }
 
   /* ── and the whole lot survived a reload from the store ─────────────── */
   console.log("\n8 · it is really on the server");

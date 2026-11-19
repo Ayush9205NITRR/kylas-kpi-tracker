@@ -136,7 +136,11 @@ try {
   ok('...with the columns a BD needs',
      ['Contact', 'Company', 'Designation', 'Phone', 'Email', 'Stage', 'Owner', 'Last call', 'Next call']
        .every((h) => cols.includes(h)), cols.join('|'));
-  ok('the phone is a tel: link', await f().locator('.ctable .crow a[href^="tel:"]').count() > 0);
+  /* NOT a tel: link — Chrome blocks those inside the extension frame. §12
+     proves the button reaches requestDial; here it just has to exist. */
+  ok('the phone is a dial button, not a blocked tel: link',
+     await f().locator('.ctable .crow [data-dial]').count() > 0
+     && await f().locator('.ctable a[href^="tel:"]').count() === 0);
   await page.screenshot({ path: `${SHOTS}/views-3-contacts.png` });
 
   console.log('\n7 · search, filter and group inside Contacts');
@@ -177,7 +181,117 @@ try {
   ok('delete removes exactly one of them',
      (await tabs()).filter((t) => t.includes('Chrome built view')).length === 1, (await tabs()).join(' | '));
 
-  console.log('\n11 · the console log');
+  /* ══ 11 · FRESH OPEN → VIEW → CONTACTS → CALL CARD ═══════════════════
+     The flow Ayush was actually on when both bugs showed: a console opened
+     cold, straight into a view's Contacts, straight onto a card. No company
+     opened first, no dashboard — which is exactly why the card had no owner
+     list to work with. */
+  console.log('\n11 · fresh open, straight to a contact');
+  {
+    const c2 = await ctx.newPage();
+    const e2 = [];
+    c2.on('pageerror', (e) => e2.push('pageerror: ' + e.message));
+    c2.on('console', (m) => { if (m.type() === 'error') e2.push('console: ' + m.text().slice(0, 200)); });
+    const G = () => c2.frames().find((f) => f.url().startsWith('chrome-extension'));
+    await c2.goto(`${HOST}/sales/companies/list/`); await W(3500);
+    await G().evaluate(async (b) => { await API.setBase(b); }, BASE);
+    await c2.reload(); await W(6500);
+    await G().evaluate(() => window.showConsoleView('companies'));
+    let r3 = G().locator('.acctable .vr[data-id]');
+    for (let i = 0; i < 40 && await r3.count() === 0; i++) { await W(1000); r3 = G().locator('.acctable .vr[data-id]'); }
+    await W(1200);
+    await G().locator('.vws .vwtab', { hasText: 'Seeded by another BD' }).first().click(); await W(2000);
+    await G().locator('#halfCon').click(); await W(8000);
+
+    const tableOwner = (await G().locator('.ctable .crow').first().locator('span').nth(6).textContent() || '').trim();
+    ok('the Contacts table names an owner, not “—”', !!tableOwner && tableOwner !== '—', `“${tableOwner}”`);
+
+    await G().locator('.ctable .crow [data-open]').first().click(); await W(7000);
+    const cardOwner = await G().locator('#f-ow').inputValue().catch(() => '');
+    ok('the card opened with an owner', !!cardOwner, `“${cardOwner}”`);
+    ok('the table and the card agree on the owner', tableOwner === cardOwner,
+       `table “${tableOwner}” vs card “${cardOwner}”`);
+
+    /* THE WHOLE LIST, on a console that has opened nothing else. */
+    const offered = (await G().locator('#f-ow option').allTextContents()).filter((t) => t.trim());
+    const active = ((await (await fetch(`${BASE}/allot-people`)).json()).people || []).map((p) => p.name);
+    ok(`the Owner dropdown offers every active BD (${offered.length} ≥ ${active.length})`,
+       offered.length >= active.length, offered.join(' | '));
+    const missing = active.filter((n) => !offered.includes(n));
+    ok('...with nobody from the active list missing', missing.length === 0, missing.join(', '));
+    ok('...and the current owner is one of them', offered.includes(cardOwner), `“${cardOwner}”`);
+
+    /* The red "not in the list Kylas sent" must not appear for any of them. */
+    const warnShown = async () => G().evaluate(() => {
+      const w = document.getElementById('f-ow-warn');
+      return !!w && !w.hidden;
+    });
+    ok('no "not in the list" warning on open', (await warnShown()) === false);
+    let anyWarn = false;
+    for (const name of active.slice(0, 4)) {
+      await G().locator('#f-ow').selectOption({ label: name }); await W(1600);
+      if (await warnShown()) { anyWarn = true; console.log(`      (warned on “${name}”)`); }
+    }
+    ok('picking any active BD never warns', anyWarn === false);
+    await c2.screenshot({ path: `${SHOTS}/views-4-owner.png` });
+    ok('no console errors on the fresh-open path', e2.length === 0, e2.slice(0, 3).join(' || '));
+    await c2.close();
+  }
+
+  /* ══ 12 · EVERY LINK IN THE CONTACTS TABLE ══════════════════════════ */
+  console.log('\n12 · the links actually do something');
+  await f().evaluate(() => window.showConsoleView('companies')); await W(2500);
+  await f().locator('.vws .vwtab', { hasText: 'Seeded by another BD' }).first().click(); await W(2000);
+  await f().locator('#halfCon').click(); await W(8000);
+
+  ok('no bare tel: link is rendered at all', await f().locator('.ctable a[href^="tel:"]').count() === 0);
+  ok('no mailto: link either', await f().locator('.ctable a[href^="mailto:"]').count() === 0);
+  ok('the phone is a button that dials', await f().locator('.ctable [data-dial]').count() > 0);
+  ok('the email is a button that copies', await f().locator('.ctable [data-mail]').count() > 0);
+
+  /* requestDial is what the card uses; prove the click reaches it rather
+     than navigating the frame. */
+  await f().evaluate(() => { window.__dialled = []; const real = window.requestDial;
+    window.requestDial = (n) => { window.__dialled.push(n); return real?.(n); }; });
+  const urlBefore = page.url();
+  await f().locator('.ctable [data-dial]').first().click(); await W(1200);
+  const dialled = await f().evaluate(() => window.__dialled || []);
+  ok('clicking a phone calls requestDial', dialled.length === 1, JSON.stringify(dialled));
+  ok('...with the number it shows', /^\+?\d[\d\s]*$/.test(dialled[0] || ''), dialled[0]);
+  ok('...and navigates nothing', page.url() === urlBefore);
+  ok('...and does not open the row behind it',
+     await f().evaluate(() => !!document.querySelector('.ctable')) === true);
+
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+  await f().locator('.ctable [data-mail]').first().click(); await W(1200);
+  ok('clicking an email stays on the page', page.url() === urlBefore);
+  const toasted = await f().evaluate(() => document.querySelector('.toast')?.textContent || '');
+  ok('...and says it copied', /copied/i.test(toasted), `“${toasted}”`);
+
+  const coBtn = f().locator('.ctable [data-openco]').first();
+  ok('the company is clickable too', await coBtn.count() === 1);
+  await coBtn.click(); await W(6000);
+  ok('clicking a company opens that account',
+     await f().evaluate(() => !document.getElementById('viewport')?.hidden
+       || !!document.getElementById('qscope')?.textContent) === true);
+
+  console.log('\n13 · external links open, and open safely');
+  {
+    const bad = await f().evaluate(() => [...document.querySelectorAll('a[target="_blank"]')]
+      .map((a) => ({ href: a.getAttribute('href'), rel: a.getAttribute('rel') || '' }))
+      .filter((x) => !/^https?:\/\//i.test(x.href || '') || !/noopener/.test(x.rel)));
+    ok('every new-tab link is absolute https and carries noopener',
+       bad.length === 0, JSON.stringify(bad.slice(0, 3)));
+    /* The normaliser itself: a stored value with no scheme must still open. */
+    const norm = await f().evaluate(() => typeof webUrl === 'function'
+      ? [webUrl('linkedin.com/company/x'), webUrl('www.example.com'), webUrl('not a url'), webUrl('')]
+      : null);
+    ok('a bare "linkedin.com/…" normalises to https',
+       norm && norm[0] === 'https://linkedin.com/company/x', JSON.stringify(norm));
+    ok('...and junk is not made into a link', norm && norm[2] === null && norm[3] === null, JSON.stringify(norm));
+  }
+
+  console.log('\n14 · the console log');
   ok('no page or console errors anywhere in that', errs.length === 0, errs.slice(0, 4).join(' || '));
 } catch (e) {
   fail++;

@@ -334,6 +334,18 @@
 
     if (wanted !== String(id)) return;      /* moved on; this answer is stale */
 
+    /* THE OWNER LIST, EXACTLY AS A COMPANY OPEN DOES IT. Opening a contact
+       direct — from the Contacts half of a named view, or from a Kylas
+       contact page — used to skip this entirely, so the card had only the
+       names it was born with: the real owner read as "not in the list Kylas
+       sent" and no other BD was in the dropdown to re-assign to. */
+    adoptPicklists(res.picklists);
+    if (res.owners?.length) {
+      adoptOwners(res.owners);
+      Store.setSetting("owners", res.owners.filter((o) => o?.name));
+      if (!ME && API.state.user?.name) { ME = API.state.user.name; addOwners([ME]); }
+    }
+
     const fetched = res?.contact;
     if (!fetched?.kid) {
       setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);

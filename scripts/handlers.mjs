@@ -3597,8 +3597,18 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           for (const g of got) contacts.push(...g);
         }
       }
+      /* THE TABLE AND THE CARD MUST AGREE. The Airtable copy can hold a Kylas
+         owner id with no name against it, and the table then read "—" for a
+         contact whose card said "Sejal Agrawal" — the same record, two
+         answers (Ayush, 2026-11-19). Resolve the name from the id here, once
+         per distinct owner, so both screens read from the same place. */
+      const owners = await ownerList(contacts.map((c) => ({ id: c.ownerId, name: c.owner })));
+      const byId = new Map(owners.map((o) => [String(o.id), o.name]));
+      for (const c of contacts)
+        if (!String(c.owner || "").trim() && c.ownerId) c.owner = byId.get(String(c.ownerId)) || c.owner || "";
       log(`view-contacts ${id || "(ad hoc)"} — ${contacts.length} contact(s) across ${ids.length} account(s)`);
-      return { view: view ? viewForClient(view, me) : null, contacts,
+      return { view: view ? viewForClient(view, me) : null, contacts, owners,
+               picklists: (await meta()).picklists,
                companies: ids.length, asked, truncated: asked > ids.length };
     },
 
@@ -3931,13 +3941,29 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/contact": async (url) => {
       const id = url.searchParams.get("id");
       if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+      /* THE OWNER LIST COMES WITH THE CONTACT, exactly as it does with a
+         company. Without it, a console that opened straight onto a contact —
+         which is what the Contacts half of a named view does — had only the
+         two or three names it was born with, so the card showed the real
+         owner over the red "this owner is not in the list Kylas sent, so the
+         contact cannot be re-assigned" and the dropdown was missing every
+         other BD (Ayush, 2026-11-19: "owner mein poore owner list nahi ho
+         rahe hai"). ownerList() is every ACTIVE Kylas user plus whoever this
+         instance has met, so an inactive current owner still shows. */
       const held = await fromAirtable("contact " + id, () => readContact(airtable, id));
-      if (held) { log(`contact ${id} from Airtable`); return { contact: held, source: "airtable" }; }
+      if (held) {
+        log(`contact ${id} from Airtable`);
+        return { contact: held, source: "airtable",
+                 owners: await ownerList([{ id: held.ownerId, name: held.owner }]),
+                 picklists: (await meta()).picklists };
+      }
       const c = await kylas.contact(id);
       log(`contact ${id} from Kylas`);
-      return { contact: toConsoleContact(c, { ownerName: await ownerName(c?.ownerId),
-                 writeMap: await writeMap().catch(() => null), tzMin: TZ_MIN }),
-               raw: c, source: "kylas" };
+      const mapped = toConsoleContact(c, { ownerName: await ownerName(c?.ownerId),
+        writeMap: await writeMap().catch(() => null), tzMin: TZ_MIN });
+      return { contact: mapped, raw: c, source: "kylas",
+               owners: await ownerList([{ id: mapped.ownerId, name: mapped.owner }]),
+               picklists: (await meta()).picklists };
     },
   };
   /* Where the copies stand — how old, how many rows — for a person checking

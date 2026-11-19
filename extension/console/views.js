@@ -3757,9 +3757,23 @@
   const dash = (s) => (s === "" || s === null || s === undefined ? "—" : s);
   /* A link as a small chip. New tab, and noopener — these are third-party
      URLs out of a shared table. */
-  const linkChip = (url, text) => (url
-    ? `<a class="lnk" href="${esc(url)}" target="_blank" rel="noopener noreferrer"
-         title="${esc(url)}" data-stop="1">${esc(text)}</a>` : "—");
+  /* NORMALISED FIRST. A stored "linkedin.com/company/x" has no scheme, so it
+     went into href= as a RELATIVE url and opened
+     chrome-extension://…/console/linkedin.com/… — a link that looked right
+     and went nowhere (Ayush, 2026-11-19). */
+  const webUrl = (v) => {
+    const t = String(v || "").trim();
+    if (!t || /\s/.test(t)) return null;
+    try {
+      const p = new URL(/^https?:\/\//i.test(t) ? t : "https://" + t.replace(/^\/+/, ""));
+      return p.hostname.includes(".") && /^https?:$/.test(p.protocol) ? p.href : null;
+    } catch { return null; }
+  };
+  const linkChip = (url, text) => {
+    const u = webUrl(url);
+    return u ? `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener noreferrer"
+         title="${esc(u)}" data-stop="1">${esc(text)}</a>` : "—";
+  };
 
   /* EVERY COLUMN DECLARES ITS TYPE, AND THE FILTER MENU IS BUILT FROM THAT.
      This is the Airtable gesture, and the reason it is one table rather than
@@ -4488,11 +4502,23 @@
       return `${head}<div class="vr crow" data-kid="${esc(c.kid || "")}">
         <span><button type="button" class="clink2" data-open="${esc(c.kid || "")}"
           ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button></span>
-        <span title="${esc(c.company || "")}">${esc(c.company || "—")}</span>
+        <span>${c.companyId ? `<button type="button" class="clink2" data-stop="1"
+          data-openco="${esc(c.companyId)}" title="Open ${esc(c.company || "this account")}">${esc(c.company || "—")}</button>`
+          : esc(c.company || "—")}</span>
         <span>${esc(c.designation || "—")}</span>
-        <span>${tel?.value ? `<a class="clink2" href="tel:${esc((tel.cc || "") + tel.value)}"
-          data-stop="1" title="Call ${esc(c.pocName || "")}">${esc((tel.cc ? tel.cc + " " : "") + tel.value)}</a>` : "—"}</span>
-        <span>${mail?.value ? `<a class="clink2" href="mailto:${esc(mail.value)}" data-stop="1">${esc(mail.value)}</a>` : "—"}</span>
+        ${/* NOT tel: AND NOT mailto:. Both are handed to whatever the OS
+             registered, and inside the extension's own iframe Chrome refuses
+             them outright — "This content is blocked" — so the number looked
+             like a link and did nothing (Ayush, 2026-11-19). The card has
+             always gone through requestDial, which clicks Kylas' own dialler
+             on the host page and falls back to copying; the email copies,
+             the same choice console.js made for the call bar. Buttons, not
+             anchors, so there is no navigation to block in the first place. */ ""}
+        <span>${tel?.value ? `<button type="button" class="clink2" data-stop="1"
+          data-dial="${esc((tel.cc || "") + tel.value)}"
+          title="Dial ${esc(c.pocName || "")} through Kylas">${esc((tel.cc ? tel.cc + " " : "") + tel.value)}</button>` : "—"}</span>
+        <span>${mail?.value ? `<button type="button" class="clink2" data-stop="1"
+          data-mail="${esc(mail.value)}" title="Copy this address">${esc(mail.value)}</button>` : "—"}</span>
         <span>${esc(label(c.stage) || "—")}</span>
         <span>${esc(c.owner || "—")}</span>
         <span class="num"><i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}</span>
@@ -5818,9 +5844,33 @@
       redraw();
     }));
     host.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation();
+      e.preventDefault(); e.stopPropagation();
       const kid = b.dataset.open;
       if (kid) global.openContactFromView?.(kid);
+    }));
+    /* THE NUMBER DIALS THROUGH KYLAS, the address copies. Neither navigates:
+       tel: and mailto: are both blocked inside the extension's iframe, and a
+       link that does nothing is worse than no link. */
+    host.querySelectorAll("[data-dial]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const num = b.dataset.dial;
+      if (!num) return;
+      if (typeof global.requestDial === "function") global.requestDial(num);
+      else if (typeof global.copyNumber === "function") global.copyNumber(num);
+    }));
+    host.querySelectorAll("[data-mail]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const addr = b.dataset.mail;
+      if (!addr) return;
+      navigator.clipboard?.writeText(addr)
+        .then(() => global.toast?.(`${addr} copied`))
+        .catch(() => global.toast?.(`Could not copy ${addr}`));
+    }));
+    /* A company in the contacts table opens that account. */
+    host.querySelectorAll("[data-openco]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = b.dataset.openco;
+      if (id) global.openCompanyFromView?.(id, b.textContent.trim());
     }));
 
     on("accPickAll", "click", () => {
