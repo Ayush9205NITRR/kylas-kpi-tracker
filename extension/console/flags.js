@@ -76,7 +76,7 @@
   const flagLine = (f) => `<li>
       <span class="flk">${esc(KIND[f.kind] || f.kind)}</span>
       <span class="flw">${esc(f.why)}${f.otherKid
-        ? ` <a class="fllink" href="${KYLAS}${encodeURIComponent(f.otherKid)}" target="_blank" rel="noopener">their record</a>` : ""}</span>
+        ? ` <a class="fllink" href="${KYLAS}${encodeURIComponent(f.otherKid)}" target="_blank" rel="noopener noreferrer">their record</a>` : ""}</span>
     </li>`;
 
   function card(g, resolved) {
@@ -86,7 +86,7 @@
     const head = `<div class="flhead">
         <b>${esc(g.contact || "(no name)")}</b>
         <em>${esc(g.owner ? `added under ${g.owner}` : "")}${g.createdAt ? ` · ${esc(ago(g.createdAt))}` : ""}${
-          g.kid ? ` · <a class="fllink" href="${KYLAS}${encodeURIComponent(g.kid)}" target="_blank" rel="noopener">Kylas ${esc(g.kid)}</a>` : ""}</em>
+          g.kid ? ` · <a class="fllink" href="${KYLAS}${encodeURIComponent(g.kid)}" target="_blank" rel="noopener noreferrer">Kylas ${esc(g.kid)}</a>` : ""}</em>
       </div>`;
     if (resolved) {
       const r = done[0] || {};
