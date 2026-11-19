@@ -67,6 +67,50 @@ answer to "did my deploy land".
 
 ---
 
+## 1b · Named views (1.85.0, pushed, NOT deployed)
+
+A view is a named set of accounts — "Mumbai FMCG", "GPTW batch 3" — saved on
+the server and shared with the team or kept personal. **Every BD can make
+one**; it is not an admin feature. It answers both halves of the job: the
+Accounts list narrowed to those accounts, and the people inside them.
+
+| | |
+|---|---|
+| Rules | `scripts/views.mjs` — pure, and the only place the permissions live |
+| Routes | `/views` (list, create, update, duplicate, pin), `/views/companies`, `/views/delete`, `/view-contacts` |
+| Storage | **one key per view**, `view:<id>`, in the same store as everything else (D1 on the Worker, `.save-journal.json` on a laptop). Pins are per person, `viewpins:<email>`. |
+| UI | the strip, the builder and the Contacts table are all in `extension/console/views.js`; styles at the end of `production.css` |
+| Tests | `scripts/test-views-stress.mjs` (50), `scripts/test-views-live.mjs` (34, real Chrome) |
+
+**Who may do what.** Read: a team view, anybody; a personal one, its owner and
+admins. Write: a team view takes any BD's edit — a shared list only one person
+can fix goes stale. Delete: its owner or an admin, team views included.
+
+**Why one key per view.** A single "all the views" document would make every
+save a read-modify-write of everybody else's work, and the save that landed
+second would win silently. Two BDs saving two views now touch two keys.
+The remaining race — two people editing the *same* view — is handled by a
+per-id promise chain in `handlers.mjs` plus re-reading inside it, and by
+expressing membership as add/remove sets rather than "here is the whole
+list", so two instances adding different accounts both land.
+
+**Three bugs this found, worth not reintroducing:**
+
+1. **Duplicate overwrote the original.** `writeView` spread the source view
+   over the new one *after* setting the new id, so the copy inherited the old
+   id and replaced it. The id is now set last. One view where there should
+   have been two, and the first one's name gone.
+2. **A view deleted mid-write came back.** Delete ran outside the per-view
+   lock, so an add that had already read the view wrote it back afterwards.
+   Delete is inside the lock now. Caught by the stress suite, not by hand.
+3. **The builder's picker was empty** if it was opened before the 18K account
+   crawl landed, and stayed empty for good. It reads the list at paint time
+   and repaints when it arrives.
+
+**Not done:** no per-view sort saved beyond the optional filter snapshot, no
+nested/folder views, and `/view-contacts` caps at 400 accounts per request
+(it says so when it truncates).
+
 ## 2 · Getting a working stack in 30 seconds
 
 Everything below runs with no keys and touches nothing real.

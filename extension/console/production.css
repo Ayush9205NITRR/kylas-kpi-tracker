@@ -1556,3 +1556,82 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .newco .ncfoot{display:flex;justify-content:flex-end;gap:8px}
 @media (max-width:720px){.newco .ncgrid{grid-template-columns:1fr}}
 .cobox-list.up{top:auto;bottom:calc(100% + 4px)}
+
+/* ══ NAMED VIEWS ═══════════════════════════════════════════════════════
+   Airtable's view tabs, in this console's palette. ONE ACCENT, the indigo
+   --blue: the active tab, the pin and the Team badge all use it, and nothing
+   here introduces a hue of its own (CLAUDE.md). The five type sizes are the
+   five that already exist; no new ones. Team vs Mine is told apart by fill
+   and weight, not by a second colour. */
+.vws{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px}
+.vwtab{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);
+  background:var(--panel);border-radius:999px;padding:5px 12px;font:inherit;font-size:var(--t-label);
+  color:var(--text2);cursor:pointer;max-width:320px}
+.vwtab:hover{border-color:var(--blueLine);color:var(--text)}
+.vwtab.on{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.vwtab .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:var(--w-med)}
+.vwtab.on .n{font-weight:var(--w-strong)}
+.vwtab .c{font-size:var(--t-meta);opacity:.75}
+.vwtab .vwpin{font-style:normal;font-size:var(--t-meta);opacity:.45;cursor:pointer;line-height:1}
+.vwtab .vwpin.on,.vwtab .vwpin:hover{opacity:1}
+.vwwho{font-size:var(--t-meta);font-weight:var(--w-strong);border-radius:5px;padding:1px 6px;
+  background:var(--blueSoft);color:var(--blue)}
+.vwtab.on .vwwho{background:rgba(255,255,255,.22);color:var(--onBlue)}
+.vwwho.mine{background:var(--panel3);color:var(--text3)}
+.vwtab.on .vwwho.mine{background:rgba(255,255,255,.18);color:var(--onBlue)}
+.vwfind{border:1px solid var(--line2);background:var(--panel);border-radius:999px;
+  padding:5px 12px;font:inherit;font-size:var(--t-label);color:var(--text);min-width:150px}
+.vwnew{border:1px dashed var(--blueLine);background:transparent;border-radius:999px;
+  padding:5px 12px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--blue);cursor:pointer}
+.vwnew:hover{background:var(--blueSoft)}
+.vwacts{display:inline-flex;gap:10px;align-items:center;margin-left:4px}
+.vwacts .danger{color:var(--rose)}
+.vwsnote{font-size:var(--t-meta);color:var(--text3)}
+.vwsnote.bad{color:var(--amber)}
+.vwhalf{display:flex;align-items:center;gap:12px;margin:0 0 10px;flex-wrap:wrap}
+.vwhnote{font-size:var(--t-meta);color:var(--text3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* the builder, and "add to view" — the allot modal's shape, so the console
+   has one kind of dialog rather than two */
+.vbScrim{position:fixed;inset:0;background:rgba(28,27,46,.42);display:grid;place-items:center;z-index:60;padding:24px}
+.vbPanel{width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line2);border-radius:14px;overflow:hidden;
+  box-shadow:0 24px 64px rgba(28,27,46,.28)}
+.vbPanel.sm{width:min(460px,96vw)}
+.vbHead{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:14px 16px;border-bottom:1px solid var(--line);font-family:var(--display);font-size:var(--t-sec)}
+.vbBody{padding:14px 16px;overflow:auto;display:grid;gap:12px}
+.vbFoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.vbF{display:grid;gap:5px;font-size:var(--t-label);color:var(--text2)}
+.vbF>span{font-weight:var(--w-med)}
+.vbF .req{color:var(--rose);font-style:normal}
+.vbF .in{width:100%;border:1px solid var(--line2);background:var(--panel);border-radius:8px;
+  padding:7px 10px;font:inherit;font-size:var(--t-label);color:var(--text)}
+.vbRow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.vbActs{display:flex;gap:12px;margin:2px 0}
+.vbList{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+.vbOpt{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:8px;
+  padding:6px 10px;font-size:var(--t-label);color:var(--text);cursor:pointer}
+.vbOpt:hover{background:var(--blueSoft)}
+.vbOpt .o{font-size:var(--t-meta);color:var(--text3)}
+.vbPick{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;width:100%;
+  padding:8px 10px;border:0;border-bottom:1px solid var(--line);background:transparent;
+  font:inherit;font-size:var(--t-label);color:var(--text);text-align:left;cursor:pointer}
+.vbPick:hover{background:var(--blueSoft)}
+.vbChips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.vbChip{display:inline-flex;align-items:center;gap:5px;font-size:var(--t-meta);
+  background:var(--blueSoft);color:var(--blue);border-radius:999px;padding:2px 8px}
+.vbChip button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;line-height:1}
+.vbChip.more{background:var(--panel3);color:var(--text3)}
+.vbChk{display:flex;align-items:center;gap:8px;font-size:var(--t-label);color:var(--text2)}
+.vbErr{margin:0;font-size:var(--t-label);color:var(--rose)}
+
+/* the contacts half: the accounts table's own grid, nine columns */
+.ctable{--acols:1.3fr 1.1fr .9fr .9fr 1.1fr .9fr .8fr .7fr .7fr;--amin:1120px}
+.ctable .crow{cursor:default}
+.clink2{background:transparent;border:0;padding:0;font:inherit;color:var(--blue);
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer;text-align:left}
+.clink2[disabled]{color:var(--text3);text-decoration:none;cursor:default}
+.cgrouph{grid-column:1/-1;font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text3);
+  background:var(--panel2);padding:5px 12px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:1}

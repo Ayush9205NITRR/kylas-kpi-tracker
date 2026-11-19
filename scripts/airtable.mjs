@@ -936,6 +936,51 @@ export async function readCompany(at, companyKid) {
   };
 }
 
+/* EVERY CONTACT AT ANY OF THESE COMPANIES, in a few requests rather than one
+   per company. A named view can hold hundreds of accounts, and asking
+   readCompany() for each would be hundreds of round trips on a rate-limited
+   API — the console would sit there for a minute to fill one table.
+   Chunked into OR() formulas; falls back to the one full scan readCompany
+   already falls back to when the base has no rollup field. */
+export async function readContactsForCompanies(at, kids = [], { chunk = 40 } = {}) {
+  const ids = [...new Set((kids || []).map((x) => String(x)).filter(Boolean))];
+  if (!ids.length) return [];
+  const { byKid } = await companyIndex(at);
+  const out = [];
+  const seen = new Set();
+  const take = async (rows) => {
+    const events = await eventsFor(at, rows.map((r) => r.id));
+    for (const r of rows) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      const co = byKid.get(String((r.fields?.["Company Kylas ID"] || [])[0]
+        ?? r.fields?.["Company Kylas ID"] ?? ""))
+        || [...byKid.values()].find((c) => c.recordId === (r.fields?.Company || [])[0]);
+      out.push(toConsoleContactFromAirtable(r, { company: co, events: events.get(r.id) || [] }));
+    }
+  };
+  if (!noCompanyRollup) {
+    try {
+      for (let i = 0; i < ids.length; i += chunk) {
+        const part = ids.slice(i, i + chunk);
+        const rows = await listTolerant(at, "Contacts", {
+          formula: `OR(${part.map((k) => `{Company Kylas ID} = '${esc(k)}'`).join(",")})`,
+          fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 40 });
+        await take(rows);
+      }
+      return out;
+    } catch (e) {
+      if (!/INVALID_FILTER_BY_FORMULA|UNKNOWN_FIELD_NAME|422/i.test(e.message)) throw e;
+      noCompanyRollup = true;
+      at.log?.(`  Contacts has no "Company Kylas ID" rollup — scanning instead. Run repair-base.`);
+    }
+  }
+  const want = new Set();
+  for (const k of ids) { const co = byKid.get(String(k)); if (co?.recordId) want.add(co.recordId); }
+  await take((await allContacts(at)).filter((r) => want.has((r.fields?.Company || [])[0])));
+  return out;
+}
+
 /* The dialling queue: every contact, optionally narrowed to one owner. */
 export async function readQueue(at, owner) {
   /* The contact scan and the company index do not depend on each other, and

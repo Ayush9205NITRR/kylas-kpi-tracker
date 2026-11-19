@@ -2708,6 +2708,15 @@
                    which is what the list used to open on. */
                 fresh: new Set(), owner: "", sort: "next", limit: 100, offsite: "",
                 srcOpen: false, srcFind: "", srcScroll: 0,
+                /* ── NAMED VIEWS ──────────────────────────────────────────
+                   viewId is the saved set of accounts in front of you ("" is
+                   all of them); half says whether you are looking at those
+                   accounts or at the people inside them. Both survive a
+                   redraw, neither survives a reload — the view does, because
+                   it is on the server, and that is the point of it. */
+                viewId: "", half: "accounts", vFind: "",
+                cFind: "", cStage: new Set(), cOwner: new Set(), cFresh: new Set(),
+                cSort: "next", cGroup: false, cLimit: 200,
                 /* the condition, as in Airtable's text filter */
                 srcOp: "contains", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
@@ -2933,6 +2942,9 @@
     if (skip !== "today" && !todayMatch(co)) return false;
     /* A hand-picked set (a Score slabs cell, "Open all in Accounts"). */
     if (ACC.idSet && !ACC.idSet.ids.has(String(co.id))) return false;
+    /* THE ACTIVE NAMED VIEW. It narrows like a filter rather than replacing
+       the list, so every chip, search and sort keeps working inside it. */
+    if (skip !== "view") { const v = activeView(); if (v && !v.set.has(String(co.id))) return false; }
     if (skip !== "open" && ACC.openNeed && !(co.open && (ACC.openNeed === "all" || co.open.need === ACC.openNeed))) return false;
     /* THE ACCOUNT'S stage, not one contact's. A row here is an account, so the
        question "show me everything at Discovery" is a question about how far
@@ -3552,6 +3564,10 @@
         <b class="tnum">${n} selected</b>${contacts ? `<span class="abar-sub">· ${contacts} contacts</span>` : ""}
         <span class="abar-sep"></span>
         <button class="ab" id="accFocusMany" type="button"${ACC.adding ? " disabled" : ""}>★ Add to Focus</button>
+        ${/* EVERY BD, not just an admin: naming the list you just ticked is
+             the whole point of views, and it is not a management action. */ ""}
+        <button class="ab" id="accSaveView" type="button">+ Save as view</button>
+        <button class="ab" id="accAddView" type="button">+ Add to view</button>
         ${API.isAdmin ? `<button class="ab p" id="accReassign" type="button">Re-assign →</button>` : ""}
         <button class="ab" id="accPickAll" type="button">${allShown ? "Select none" : `Select all ${shown}`}</button>
         <button class="ab x" id="accPickClear" type="button">Clear</button>
@@ -4157,6 +4173,383 @@
       </div></div>`;
   }
 
+  /* ══ NAMED VIEWS ══════════════════════════════════════════════════════
+     A view is a named set of accounts: "Mumbai FMCG", "GPTW batch 3". The
+     Accounts list is 18,000 rows, and the filters that get a BD to the forty
+     they are working this week are not worth rebuilding every morning.
+
+     It narrows the list rather than replacing it, so every chip, the search
+     and the sort keep working inside a view — and the same view answers the
+     Contacts half, because the question "who do I call at these accounts" is
+     the same question one level down.
+
+     Server: scripts/views.mjs (who may do what) and the /views routes. */
+  const VIEWS = { list: [], me: null, loaded: false, asked: false, busy: "", err: "" };
+  const viewById = (id) => VIEWS.list.find((v) => v.id === String(id)) || null;
+  /* The active view with its companies as a Set — built once per lookup
+     rather than per row, because accMatch() runs over every account. */
+  let VSET = { id: "", set: new Set() };
+  function activeView() {
+    const v = viewById(ACC.viewId);
+    if (!v) return null;
+    if (VSET.id !== v.id || VSET.rev !== v.rev) VSET = { id: v.id, rev: v.rev, set: new Set((v.companies || []).map(String)) };
+    return { view: v, set: VSET.set };
+  }
+  async function loadViews(force) {
+    if (VIEWS.asked && !force) return VIEWS.list;
+    VIEWS.asked = true;
+    try {
+      const r = await API.views();
+      VIEWS.list = r.views || []; VIEWS.me = r.me || null; VIEWS.loaded = true; VIEWS.err = "";
+    } catch (e) {
+      VIEWS.err = String(e.message || e).slice(0, 160);
+      /* An older proxy has no /views. Say it once, in the strip, and leave
+         everything else working — views are an addition, not a dependency. */
+    }
+    return VIEWS.list;
+  }
+  /* Every write goes through here: it keeps the strip honest about what is
+     happening, reloads the list, and never leaves a half-done message up. */
+  async function viewDo(what, fn, redraw) {
+    VIEWS.busy = what; redraw();
+    try { const out = await fn(); await loadViews(true); VIEWS.busy = ""; redraw(); return out; }
+    catch (e) { VIEWS.busy = ""; VIEWS.err = String(e.message || e).slice(0, 200); redraw(); throw e; }
+  }
+
+  /* ── the strip ────────────────────────────────────────────────────────
+     Airtable's idea: the views are tabs, always in sight, one click each.
+     Pinned first, then most recently touched (sortViews on the server). */
+  function viewsStrip(all) {
+    if (VIEWS.err && !VIEWS.list.length)
+      return `<div class="vws"><span class="vwsnote">Saved views need the updated server — ${esc(VIEWS.err)}</span></div>`;
+    const q = (ACC.vFind || "").trim().toLowerCase();
+    const list = q ? VIEWS.list.filter((v) => v.name.toLowerCase().includes(q)
+      || (v.owner || "").toLowerCase().includes(q)) : VIEWS.list;
+    const active = ACC.viewId;
+    const tab = (v) => `<button type="button" class="vwtab${active === v.id ? " on" : ""}" data-view="${esc(v.id)}"
+        title="${esc(v.description || v.name)}${v.owner ? ` · ${esc(v.owner)}` : ""}">
+        <i class="vwpin${v.pinned ? " on" : ""}" data-pin="${esc(v.id)}" role="button" tabindex="0"
+           title="${v.pinned ? "Unpin" : "Pin to the front"}" aria-label="${v.pinned ? "Unpin" : "Pin"} ${esc(v.name)}">${v.pinned ? "★" : "☆"}</i>
+        <span class="n">${esc(v.name)}</span>
+        <span class="c tnum">${v.count}</span>
+        <span class="vwwho ${v.visibility === "team" ? "team" : "mine"}">${v.visibility === "team" ? "Team" : "Mine"}</span>
+      </button>`;
+    return `<div class="vws">
+      <button type="button" class="vwtab${active ? "" : " on"}" data-view="" title="Every account allotted to you">
+        <span class="n">All accounts</span><span class="c tnum">${all.length}</span></button>
+      ${list.map(tab).join("")}
+      ${VIEWS.list.length > 6 ? `<input class="vwfind" id="vwFind" type="search" value="${esc(ACC.vFind || "")}"
+        placeholder="Find a view…" aria-label="Find a view" autocomplete="off">` : ""}
+      <button type="button" class="vwnew" id="vwNew">+ New view</button>
+      ${ACC.viewId ? `<span class="vwacts">
+        <button type="button" class="linkbtn" id="vwEdit">Edit</button>
+        <button type="button" class="linkbtn" id="vwDup">Duplicate</button>
+        ${viewById(ACC.viewId)?.can?.delete ? `<button type="button" class="linkbtn danger" id="vwDel">Delete</button>` : ""}
+      </span>` : ""}
+      ${VIEWS.busy ? `<span class="vwsnote">${esc(VIEWS.busy)}…</span>` : ""}
+      ${VIEWS.err && VIEWS.list.length ? `<span class="vwsnote bad">${esc(VIEWS.err)}</span>` : ""}
+    </div>`;
+  }
+
+  /* ── the builder ──────────────────────────────────────────────────────
+     Name, who can see it, what it opens on, and which accounts are in it.
+     The picker searches the list already in the browser, so it answers on
+     every keystroke over 18,000 rows without asking the server anything. */
+  function openViewBuilder(allAtOpen, { edit = null, seed = [], redraw }) {
+    /* The companies list arrives asynchronously, and a builder opened a second
+       too early used to show an empty picker for the rest of its life. Read it
+       at paint time instead of freezing whatever was there at open. */
+    const live = () => (CACHE.companies?.length ? CACHE.companies : (allAtOpen || []));
+    document.querySelector(".vbScrim")?.remove();
+    const v = edit ? viewById(edit) : null;
+    const st = {
+      name: v?.name || "", description: v?.description || "",
+      visibility: v?.visibility || "team", scope: v?.scope || "both",
+      picked: new Set((v?.companies || seed).map(String)),
+      q: "", keepFilters: false, err: "", saving: false,
+    };
+    const el = document.createElement("div");
+    el.className = "vbScrim";
+    const close = () => el.remove();
+    const nameOf = (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.name || `#${id}`;
+
+    const paint = () => {
+      const q = st.q.trim().toLowerCase();
+      const pool = live();
+      const hits = (q ? pool.filter((c) => String(c.name || "").toLowerCase().includes(q)) : pool).slice(0, 200);
+      const chips = [...st.picked].slice(0, 40);
+      el.innerHTML = `<div class="vbPanel" role="dialog" aria-label="${edit ? "Edit view" : "New view"}">
+        <div class="vbHead"><b>${edit ? "Edit view" : "New view"}</b>
+          <button class="rdX" id="vbX" type="button" aria-label="Close">×</button></div>
+        <div class="vbBody">
+          <label class="vbF"><span>Name <i class="req">*</i></span>
+            <input id="vbName" class="in" value="${esc(st.name)}" placeholder="Mumbai FMCG" autocomplete="off" maxlength="80"></label>
+          <label class="vbF"><span>Description</span>
+            <input id="vbDesc" class="in" value="${esc(st.description)}" placeholder="What this list is for" autocomplete="off" maxlength="500"></label>
+          <div class="vbRow">
+            <div class="vbF"><span>Who can see it</span>
+              <div class="vtoggle" role="group" aria-label="Visibility">
+                <button type="button" data-vis="team"${st.visibility === "team" ? ' class="on"' : ""}>Shared (Team)</button>
+                <button type="button" data-vis="personal"${st.visibility === "personal" ? ' class="on"' : ""}>Personal (Only me)</button>
+              </div></div>
+            <div class="vbF"><span>Opens on</span>
+              <div class="vtoggle" role="group" aria-label="Default scope">
+                <button type="button" data-scope="both"${st.scope === "both" ? ' class="on"' : ""}>Both</button>
+                <button type="button" data-scope="accounts"${st.scope === "accounts" ? ' class="on"' : ""}>Accounts</button>
+                <button type="button" data-scope="contacts"${st.scope === "contacts" ? ' class="on"' : ""}>Contacts</button>
+              </div></div>
+          </div>
+          <div class="vbF"><span>Accounts <i class="tnum">${st.picked.size}</i> selected</span>
+            <input id="vbQ" class="in" value="${esc(st.q)}" placeholder="Search accounts to add…" autocomplete="off">
+            <div class="vbActs">
+              <button type="button" class="linkbtn" id="vbAll">Select all ${hits.length} shown</button>
+              <button type="button" class="linkbtn" id="vbNone">Clear</button>
+            </div>
+            <div class="vbList">${!pool.length ? `<p class="cobox-msg">Loading accounts…</p>`
+              : hits.length ? hits.map((c) => `<label class="vbOpt">
+                <input type="checkbox" data-co="${esc(c.id)}"${st.picked.has(String(c.id)) ? " checked" : ""}>
+                <span class="n">${esc(c.name || ("#" + c.id))}</span>
+                <span class="o">${esc(c.owner || "")}</span></label>`).join("")
+              : `<p class="cobox-msg">Nothing matches “${esc(st.q)}”.</p>`}</div>
+            ${chips.length ? `<div class="vbChips">${chips.map((id) =>
+              `<span class="vbChip">${esc(nameOf(id))}<button type="button" data-drop="${esc(id)}" aria-label="Remove">×</button></span>`).join("")}
+              ${st.picked.size > chips.length ? `<span class="vbChip more">+${st.picked.size - chips.length} more</span>` : ""}</div>` : ""}
+          </div>
+          <label class="vbChk"><input type="checkbox" id="vbKeep"${st.keepFilters ? " checked" : ""}>
+            Also save the filters and sort that are on now</label>
+          ${st.err ? `<p class="vbErr">${esc(st.err)}</p>` : ""}
+        </div>
+        <div class="vbFoot">
+          <button class="gbtn" id="vbCancel" type="button">Cancel</button>
+          <button class="pbtn" id="vbSave" type="button"${st.saving ? " disabled" : ""}>${
+            st.saving ? "Saving…" : edit ? "Save changes" : "Create view"}</button>
+        </div>`;
+      const $ = (id) => el.querySelector("#" + id);
+      $("vbX").onclick = close; $("vbCancel").onclick = close;
+      $("vbName").oninput = (e) => { st.name = e.target.value; };
+      $("vbDesc").oninput = (e) => { st.description = e.target.value; };
+      $("vbKeep").onchange = (e) => { st.keepFilters = e.target.checked; };
+      let t = 0;
+      $("vbQ").oninput = (e) => { st.q = e.target.value; clearTimeout(t); t = setTimeout(() => {
+        const at = el.querySelector("#vbQ")?.selectionStart; paint();
+        const n = el.querySelector("#vbQ"); if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch { /* not text */ } }
+      }, 160); };
+      el.querySelectorAll("[data-vis]").forEach((b) => b.onclick = () => { st.visibility = b.dataset.vis; paint(); });
+      el.querySelectorAll("[data-scope]").forEach((b) => b.onclick = () => { st.scope = b.dataset.scope; paint(); });
+      el.querySelectorAll("[data-co]").forEach((b) => b.onchange = () => {
+        b.checked ? st.picked.add(String(b.dataset.co)) : st.picked.delete(String(b.dataset.co));
+        const n = el.querySelector(".vbF .tnum"); if (n) n.textContent = st.picked.size;
+      });
+      el.querySelectorAll("[data-drop]").forEach((b) => b.onclick = () => { st.picked.delete(String(b.dataset.drop)); paint(); });
+      $("vbAll").onclick = () => { for (const c of hits) st.picked.add(String(c.id)); paint(); };
+      $("vbNone").onclick = () => { st.picked.clear(); paint(); };
+      $("vbSave").onclick = async () => {
+        if (!st.name.trim()) { st.err = "A view needs a name."; paint(); el.querySelector("#vbName")?.focus(); return; }
+        st.saving = true; st.err = ""; paint();
+        try {
+          const body = { name: st.name, description: st.description, visibility: st.visibility,
+                         scope: st.scope, companies: [...st.picked] };
+          if (edit) body.id = edit;
+          if (st.keepFilters) body.filters = snapshotFilters();
+          const r = await viewDo(edit ? "Saving" : "Creating", () => API.saveView(body), redraw);
+          ACC.viewId = r?.view?.id || ACC.viewId;
+          if (r?.view?.scope === "contacts") ACC.half = "contacts";
+          close(); redraw();
+        } catch (e) { st.saving = false; st.err = String(e.message || e).slice(0, 200); paint(); }
+      };
+    };
+    paint();
+    /* The accounts arrive from a crawl, so a builder opened in the first
+       seconds would otherwise show an empty picker for good. */
+    if (!live().length) {
+      const t = setInterval(() => {
+        if (!el.isConnected) return clearInterval(t);
+        if (live().length) { clearInterval(t); const at = el.querySelector("#vbName")?.value; if (at != null) st.name = at; paint(); }
+      }, 600);
+    }
+    el.addEventListener("click", (e) => { if (e.target === el) close(); });
+    document.body.appendChild(el);
+    setTimeout(() => el.querySelector("#vbName")?.focus(), 30);
+  }
+
+  /* What "save the filters that are on now" means. Sets do not survive JSON,
+     so they go as arrays and come back as Sets. */
+  function snapshotFilters() {
+    return { q: ACC.q, qOp: ACC.qOp, sort: ACC.sort, view: ACC.view,
+             stages: [...ACC.stages], owners: [...ACC.owners], kpis: [...ACC.kpis],
+             fresh: [...ACC.fresh], focusSet: [...ACC.focusSet], nextSet: [...ACC.nextSet],
+             coldSet: [...ACC.coldSet], sources: [...ACC.sources] };
+  }
+  function applyFilters(f) {
+    if (!f) return;
+    ACC.q = f.q || ""; ACC.qOp = f.qOp || "contains"; ACC.sort = f.sort || ACC.sort;
+    if (f.view) ACC.view = f.view;
+    for (const [k, v] of Object.entries({ stages: f.stages, owners: f.owners, kpis: f.kpis,
+      fresh: f.fresh, focusSet: f.focusSet, nextSet: f.nextSet, coldSet: f.coldSet, sources: f.sources }))
+      if (Array.isArray(v)) ACC[k] = new Set(v);
+  }
+
+  /* ── pick a view to add the ticked accounts to ────────────────────────── */
+  function openAddToView(ids, redraw) {
+    document.querySelector(".vbScrim")?.remove();
+    const el = document.createElement("div");
+    el.className = "vbScrim";
+    const close = () => el.remove();
+    const mine = VIEWS.list.filter((v) => v.can?.write);
+    el.innerHTML = `<div class="vbPanel sm" role="dialog" aria-label="Add to a view">
+      <div class="vbHead"><b>Add ${ids.length} account${ids.length === 1 ? "" : "s"} to…</b>
+        <button class="rdX" id="vbX" type="button" aria-label="Close">×</button></div>
+      <div class="vbBody">
+        ${mine.length ? `<div class="vbList">${mine.map((v) => `<button type="button" class="vbPick" data-add="${esc(v.id)}">
+          <span class="n">${esc(v.name)}</span><span class="c tnum">${v.count}</span>
+          <span class="vwwho ${v.visibility === "team" ? "team" : "mine"}">${v.visibility === "team" ? "Team" : "Mine"}</span></button>`).join("")}</div>`
+        : `<p class="cobox-msg">No view you can add to yet — make one.</p>`}
+      </div>
+      <div class="vbFoot"><button class="gbtn" id="vbCancel" type="button">Cancel</button>
+        <button class="pbtn" id="vbNew2" type="button">+ New view with these</button></div>`;
+    el.querySelector("#vbX").onclick = close;
+    el.querySelector("#vbCancel").onclick = close;
+    el.querySelector("#vbNew2").onclick = () => { close(); openViewBuilder(CACHE.companies || [], { seed: ids, redraw }); };
+    el.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
+      close();
+      await viewDo("Adding", () => API.viewCompanies(b.dataset.add, ids, []), redraw).catch(() => {});
+      ACC.busy = `${ids.length} added to “${viewById(b.dataset.add)?.name || "the view"}”.`;
+      redraw();
+    });
+    el.addEventListener("click", (e) => { if (e.target === el) close(); });
+    document.body.appendChild(el);
+  }
+
+  /* ══ THE CONTACTS HALF OF A VIEW ══════════════════════════════════════
+     Same named view, one level down: the people at those accounts. The BD
+     lives on the call card, so every row here is a way into one — the name
+     opens the card, the number dials.
+
+     Fetched once per view and kept, because a view's accounts do not change
+     while you are reading them, and a BD switching Accounts ⇄ Contacts twice
+     should not pay for it twice. */
+  const CON = { id: "", rows: [], loading: false, err: "", at: 0 };
+  async function loadViewContacts(id, redraw, force) {
+    if (!id) { CON.id = ""; CON.rows = []; return; }
+    if (CON.id === id && !force && Date.now() - CON.at < 5 * 60 * 1000) return;
+    CON.id = id; CON.loading = true; CON.err = ""; redraw();
+    try {
+      const r = await API.viewContacts(id);
+      CON.rows = r.contacts || []; CON.at = Date.now(); CON.truncated = !!r.truncated;
+    } catch (e) { CON.err = String(e.message || e).slice(0, 200); CON.rows = []; }
+    CON.loading = false; redraw();
+  }
+  const conFresh = (c) => {
+    const d = c.lastCalledAt ? Math.floor((Date.now() - new Date(c.lastCalledAt).getTime()) / 86400000) : null;
+    return d == null ? "never" : d <= 7 ? "fresh" : d <= 30 ? "warm" : d <= 90 ? "cool" : "cold";
+  };
+  function conRows() {
+    const q = (ACC.cFind || "").trim().toLowerCase();
+    let rows = CON.rows.filter((c) => {
+      if (ACC.cStage.size && !ACC.cStage.has(String(c.stage || ""))) return false;
+      if (ACC.cOwner.size && !ACC.cOwner.has(String(c.owner || ""))) return false;
+      if (ACC.cFresh.size && !ACC.cFresh.has(conFresh(c))) return false;
+      if (!q) return true;
+      return [c.pocName, c.company, c.designation, c.owner,
+              ...(c.phones || []).map((p) => p.value), ...(c.emails || []).map((e) => e.value)]
+        .some((v) => String(v || "").toLowerCase().includes(q));
+    });
+    const by = {
+      next: (a, b) => (a.nextCallDate ? 0 : 1) - (b.nextCallDate ? 0 : 1)
+        || String(a.nextCallDate || "").localeCompare(String(b.nextCallDate || "")),
+      recent: (a, b) => String(b.lastCalledAt || "").localeCompare(String(a.lastCalledAt || "")),
+      stale: (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || "")),
+      az: (a, b) => String(a.pocName || "").localeCompare(String(b.pocName || "")),
+      company: (a, b) => String(a.company || "").localeCompare(String(b.company || ""))
+        || String(a.pocName || "").localeCompare(String(b.pocName || "")),
+    }[ACC.cSort] || ((a, b) => 0);
+    rows = [...rows].sort(by);
+    if (ACC.cGroup) rows.sort((a, b) => String(a.company || "").localeCompare(String(b.company || "")));
+    return rows;
+  }
+  function contactsHTML(all) {
+    const v = viewById(ACC.viewId);
+    if (!v) return `<div class="card explorer"><div class="exhead"><h2>Contacts</h2>
+      <p>Pick a view first — Contacts shows the people at a view's accounts.</p></div></div>`;
+    if (CON.loading) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
+      <p>Loading the people at ${v.count} account${v.count === 1 ? "" : "s"}…</p></div></div>`;
+    if (CON.err) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
+      <p class="vwarn">${esc(CON.err)}</p><button class="gbtn sm" id="conRetry" type="button">Try again</button></div></div>`;
+    const rows = conRows();
+    const stages = [...new Set(CON.rows.map((c) => c.stage).filter(Boolean))];
+    const owners = [...new Set(CON.rows.map((c) => c.owner).filter(Boolean))].sort();
+    const shown = rows.slice(0, ACC.cLimit);
+    let lastCo = "";
+    const row = (c) => {
+      const head = ACC.cGroup && c.company !== lastCo ? (lastCo = c.company,
+        `<div class="cgrouph">${esc(c.company || "No company")}</div>`) : "";
+      const tel = (c.phones || [])[0];
+      const mail = (c.emails || [])[0];
+      return `${head}<div class="vr crow" data-kid="${esc(c.kid || "")}">
+        <span><button type="button" class="clink2" data-open="${esc(c.kid || "")}"
+          ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button></span>
+        <span title="${esc(c.company || "")}">${esc(c.company || "—")}</span>
+        <span>${esc(c.designation || "—")}</span>
+        <span>${tel?.value ? `<a class="clink2" href="tel:${esc((tel.cc || "") + tel.value)}"
+          data-stop="1" title="Call ${esc(c.pocName || "")}">${esc((tel.cc ? tel.cc + " " : "") + tel.value)}</a>` : "—"}</span>
+        <span>${mail?.value ? `<a class="clink2" href="mailto:${esc(mail.value)}" data-stop="1">${esc(mail.value)}</a>` : "—"}</span>
+        <span>${esc(label(c.stage) || "—")}</span>
+        <span>${esc(c.owner || "—")}</span>
+        <span class="num"><i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}</span>
+        <span class="num">${esc(c.nextCallDate || "—")}</span>
+      </div>`;
+    };
+    const chip = (set, k, lab) => `<button type="button" class="chip${set.has(k) ? " on" : ""}" data-cchip="${esc(k)}"
+      data-cset="${set === ACC.cStage ? "cStage" : set === ACC.cOwner ? "cOwner" : "cFresh"}">${esc(lab)}</button>`;
+    return `<div class="card explorer">
+      <div class="exhead">
+        <h2>${esc(v.name)} · Contacts</h2>
+        <span class="exn tnum">${rows.length} ${rows.length === 1 ? "person" : "people"}${
+          rows.length < CON.rows.length ? `<em class="exof"> of ${CON.rows.length}</em>` : ""}</span>
+        <button class="gbtn sm" id="conRefresh" type="button">Refresh</button>
+        <p>Across ${v.count} account${v.count === 1 ? "" : "s"}${CON.truncated ? " (the first 400)" : ""}. The name opens the call card; the number dials.</p>
+      </div>
+      <div class="extools">
+        <div class="srch"><input id="conQ" type="search" value="${esc(ACC.cFind)}"
+          placeholder="Search people, companies, numbers…" aria-label="Search contacts" autocomplete="off"></div>
+        <select id="conSort" aria-label="Sort">
+          ${Object.entries({ next: "Call-backs first", recent: "Last call, newest", stale: "Last call, oldest",
+            az: "A–Z", company: "By company" }).map(([k, lab]) =>
+            `<option value="${k}"${ACC.cSort === k ? " selected" : ""}>${esc(lab)}</option>`).join("")}
+        </select>
+        <button type="button" class="gbtn sm${ACC.cGroup ? " on" : ""}" id="conGroup"
+          aria-pressed="${ACC.cGroup}">Group by company</button>
+      </div>
+      ${stages.length > 1 ? `<div class="chiprow"><span class="cl">Stage</span>${stages.map((k) => chip(ACC.cStage, k, label(k) || k)).join("")}</div>` : ""}
+      ${owners.length > 1 ? `<div class="chiprow"><span class="cl">Owner</span>${owners.map((k) => chip(ACC.cOwner, k, k)).join("")}</div>` : ""}
+      <div class="chiprow"><span class="cl">Last call</span>${FRESH.map((z) => chip(ACC.cFresh, z.k, z.label)).join("")}</div>
+      <div class="accscroll"><div class="acctable ctable">
+        <div class="vr vh"><span>Contact</span><span>Company</span><span>Designation</span><span>Phone</span>
+          <span>Email</span><span>Stage</span><span>Owner</span><span class="num">Last call</span><span class="num">Next call</span></div>
+        ${shown.length ? shown.map(row).join("") : `<div class="vempty">Nobody matches those filters.</div>`}
+      </div></div>
+      ${rows.length > ACC.cLimit ? `<button class="gbtn" id="conMore" type="button">Show ${
+        Math.min(200, rows.length - ACC.cLimit)} more of ${rows.length - ACC.cLimit}</button>` : ""}
+    </div>`;
+  }
+
+  /* ACCOUNTS ⇄ CONTACTS. One switch, right where the view tabs are, because
+     a named view answers both questions and making people leave the view to
+     change which one they are asking would defeat it. Only offered inside a
+     view: "every contact at every account" is the dialling queue, which is a
+     different screen. */
+  function modeSwitch() {
+    if (!ACC.viewId) return "";
+    const v = viewById(ACC.viewId);
+    return `<div class="vwhalf">
+      <div class="vtoggle" role="group" aria-label="Accounts or contacts">
+        <button type="button" id="halfAcc"${ACC.half === "accounts" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Accounts</button>
+        <button type="button" id="halfCon"${ACC.half === "contacts" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Contacts</button>
+      </div>
+      <span class="vwhnote">${esc(v?.description || (v ? `${v.count} account${v.count === 1 ? "" : "s"} in “${v.name}”` : ""))}</span>
+    </div>`;
+  }
+
   function explorerHTML(all) {
     const cols = colsOn();
     /* Rebuilt each paint so a value list offers what the data holds now. */
@@ -4255,9 +4648,17 @@
       ${dueHere ? `<button class="gbtn sm" id="accToday" type="button">Show them</button>` : ""}
     </div>`;
 
+    /* THE CONTACTS HALF IS THE SAME VIEW, one level down. Everything above
+       this point still ran, because the strip has to be painted either way
+       and the counts in it come from the same list. */
+    if (ACC.half === "contacts" && ACC.viewId)
+      return `${viewsStrip(all)}${modeSwitch()}${contactsHTML(all)}`;
+
     return `
       ${todayCard(all)}
       ${strip}
+      ${viewsStrip(all)}
+      ${modeSwitch()}
       <div class="card explorer">
         <div class="exhead">
           <h2>${esc(ACC.stages.size === 1 ? stageName([...ACC.stages][0]) : "All accounts")}</h2>
@@ -4792,6 +5193,9 @@
           : `Columns are where the name came from, busiest first.`}
         Whatever is not the column is still a filter above, so this narrows rather than needing a
         different board.</p>`
+        : /* These notes explain the ACCOUNTS table. In the contacts half of a
+             view they would sit under a table they do not describe. */
+          (ACC.half === "contacts" && ACC.viewId) ? ""
         : `<p class="vnote">Named POCs answer the question a manager actually asks — not how many right
         POCs, but which person. Stage is the highest any POC at that company has reached. A company
         with no POCs yet is one allotted to you that nobody has opened.
@@ -5351,6 +5755,74 @@
         ACC.busy = ""; redraw();
       });
     }
+    /* ── named views ───────────────────────────────────────────────── */
+    /* The strip is repainted on every redraw, so these are bound each time,
+       exactly like every other control in here. */
+    host.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", (e) => {
+      if (e.target.closest("[data-pin]")) return;          /* the star is its own button */
+      const id = b.dataset.view || "";
+      ACC.viewId = id;
+      const v = viewById(id);
+      ACC.half = v && v.scope === "contacts" ? "contacts" : "accounts";
+      if (v?.filters) applyFilters(v.filters);
+      ACC.limit = 100; ACC.busy = "";
+      redraw();
+      if (ACC.half === "contacts") loadViewContacts(id, redraw);
+    }));
+    host.querySelectorAll("[data-pin]").forEach((n) => {
+      const go = async (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const id = n.dataset.pin, now = !!viewById(id)?.pinned;
+        await viewDo(now ? "Unpinning" : "Pinning", () => API.pinView(id, !now), redraw).catch(() => {});
+      };
+      n.addEventListener("click", go);
+      n.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") go(e); });
+    });
+    on("vwFind", "input", (e) => { ACC.vFind = e.target.value; redraw();
+      const n = host.querySelector("#vwFind"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } });
+    on("vwNew", "click", () => openViewBuilder(CACHE.companies || [], { redraw }));
+    on("vwEdit", "click", () => openViewBuilder(CACHE.companies || [], { edit: ACC.viewId, redraw }));
+    on("vwDup", "click", async () => {
+      const r = await viewDo("Duplicating", () => API.duplicateView(ACC.viewId), redraw).catch(() => null);
+      if (r?.view?.id) { ACC.viewId = r.view.id; redraw(); }
+    });
+    on("vwDel", "click", async () => {
+      const v = viewById(ACC.viewId);
+      if (!v || !confirm(`Delete the view “${v.name}”?\n\nThe accounts stay where they are — only the saved list goes.`)) return;
+      await viewDo("Deleting", () => API.deleteView(v.id), redraw).catch(() => {});
+      ACC.viewId = ""; ACC.half = "accounts"; redraw();
+    });
+    on("halfAcc", "click", () => { ACC.half = "accounts"; redraw(); });
+    on("halfCon", "click", () => { ACC.half = "contacts"; redraw(); loadViewContacts(ACC.viewId, redraw); });
+    on("accSaveView", "click", () => {
+      const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
+      openViewBuilder(CACHE.companies || [], { seed: ids, redraw });
+    });
+    on("accAddView", "click", async () => {
+      const ids = pickedIn(EXPLORER_ROWS).map((r) => String(r.id));
+      if (!ids.length) return;
+      await loadViews();
+      openAddToView(ids, redraw);
+    });
+    /* ── the contacts half ─────────────────────────────────────────── */
+    on("conQ", "input", (e) => { ACC.cFind = e.target.value; redraw();
+      const n = host.querySelector("#conQ"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } });
+    on("conSort", "change", (e) => { ACC.cSort = e.target.value; redraw(); });
+    on("conGroup", "click", () => { ACC.cGroup = !ACC.cGroup; redraw(); });
+    on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
+    on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
+    on("conRetry", "click", () => loadViewContacts(ACC.viewId, redraw, true));
+    host.querySelectorAll("[data-cchip]").forEach((b) => b.addEventListener("click", () => {
+      const set = ACC[b.dataset.cset], k = b.dataset.cchip;
+      set.has(k) ? set.delete(k) : set.add(k);
+      redraw();
+    }));
+    host.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const kid = b.dataset.open;
+      if (kid) global.openContactFromView?.(kid);
+    }));
+
     on("accPickAll", "click", () => {
       /* THE ROWS IN FRONT OF THEM, never the whole account. */
       const ids = EXPLORER_ROWS.map((r) => String(r.id));
@@ -5397,6 +5869,10 @@
       }
       redraw();
     });
+    /* The saved views, once, on the first paint of the Accounts screen. The
+       strip renders empty until they land and then repaints — nothing else
+       waits on it, so a slow or missing /views never holds up the list. */
+    if (!VIEWS.asked) loadViews().then(() => redraw());
     /* ── ALLOT ──────────────────────────────────────────────────────── */
     if (!CACHE.allotPeople && !CACHE.allotPeopleAsked) {
       CACHE.allotPeopleAsked = true;

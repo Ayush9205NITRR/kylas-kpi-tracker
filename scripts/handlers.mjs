@@ -35,13 +35,16 @@ import { STAGE_ID, STAGE_LABEL, STAGE_RUNG, MILESTONE } from "./stages.mjs";
 import { checkContact, companyKey, rankCompanies } from "./fields.mjs";
 import { EMP_BANDS, CITIES, CITY_LIST, industries, industryOf, normCity, checkCompanyForm } from "./company-form.mjs";
 import { createAirtable, syncContact, readCompanyKpis, dropReadCaches,
-         readContact, readCompany, readQueue,
+         readContact, readCompany, readContactsForCompanies, readQueue,
          readCompanies, readSyncState, listTolerant, upsertTolerant, upsertManyTolerant,
          readRcaDue, readRcaLog, writeRcaAnswer,
          readTeam, writeTeam, counter, nameKey,
          readFocus, readResearch, writeFocus, writeFocusMany, writeResearch,
          ENRICH_TABLE, ENRICH_KEY, ENRICH_FIELDS, ENRICH_BOOLEAN_COLUMNS, ENRICH_FINAL, finalOf } from "./airtable.mjs";
 import { num, money, empBand } from "./enrich.mjs";
+import { checkView, canRead, canWrite, canDelete, viewForClient, mergeCompanies,
+         sortViews, copyName, newViewId, viewKey, pinsKey, isViewKey,
+         cleanCompanies, cleanText, VIEW_LIMITS } from "./views.mjs";
 import { RCA_GATES, RCA_GATE } from "./rca.mjs";
 import { stageModeSplit } from "./mode-split.mjs";
 import { mayAnswerRca } from "./rca-owner.mjs";
@@ -1309,6 +1312,99 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       return { id: u.id, firstName, lastName: rest.join(" "), email, matched: true };
     }
     return { id: "", firstName: callerOf()?.name || email, lastName: "", email, matched: false };
+  }
+
+  /* ── NAMED VIEWS: identity, storage, and one writer at a time ──────────
+     scripts/views.mjs has the rules; this has the store. */
+  /* WHO IS ASKING, for a permission decision. The email is the identity —
+     Google signs the BD in and whoami() resolves it against Kylas' user list,
+     so `ayush@enout.in` is the same person whichever machine he is on. A
+     stack with no login configured answers as the key's owner, who is admin
+     by roleOf()'s own rule, which keeps a laptop usable. */
+  async function viewer() {
+    const me = await whoami().catch(() => null);
+    return { email: String(me?.email || "").trim().toLowerCase(),
+             name: userName(me) || me?.email || "",
+             id: String(me?.id || ""), admin: roleOf(me) === "admin" };
+  }
+
+  async function readView(id) {
+    const raw = await store.get(viewKey(id)).catch(() => null);
+    if (!raw) return null;
+    try { const v = JSON.parse(raw); return v && v.id ? v : null; } catch { return null; }
+  }
+
+  async function readPins(email) {
+    if (!email) return [];
+    try { const v = JSON.parse(await store.get(pinsKey(email)) || "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  }
+
+  /* Every view the store holds, narrowed to the ones this person may see.
+     keys() is "best effort" on the KV store, which is why the views live
+     under one prefix and nothing else does. */
+  async function allViews(me) {
+    const keys = (await store.keys().catch(() => [])).filter(isViewKey);
+    const pins = new Set(await readPins(me.email));
+    const out = [];
+    for (let i = 0; i < keys.length; i += 25) {
+      const part = await Promise.all(keys.slice(i, i + 25).map(async (k) => {
+        const raw = await store.get(k).catch(() => null);
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch { return null; }
+      }));
+      for (const v of part) if (v?.id && canRead(v, me)) out.push(viewForClient(v, me, { pinned: pins.has(v.id) }));
+    }
+    return sortViews(out);
+  }
+
+  /* ONE WRITER AT A TIME, PER VIEW. Two BDs ticking accounts into the same
+     view in the same second would otherwise both read the old list, both add
+     their own, and the second write would drop the first one's accounts. The
+     chain is per id, so saving different views never waits. */
+  const viewLocks = new Map();
+  function withView(id, fn) {
+    const prev = viewLocks.get(id) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    /* Keep the chain alive but never let a rejection poison the next writer. */
+    viewLocks.set(id, next.then(() => {}, () => {}));
+    next.finally(() => { if (viewLocks.get(id) === next) viewLocks.delete(id); }).catch(() => {});
+    return next;
+  }
+
+  async function writeView(id, fields, me) {
+    const now = new Date().toISOString();
+    if (!id) {
+      /* THE ID IS SET LAST, ON PURPOSE. Duplicate passes the view it is
+         copying as `fields`, so an id spread in after this one silently made
+         the "copy" overwrite the original — one view in the store where there
+         should have been two, and the first one's name gone. Nothing a caller
+         spreads may decide identity or ownership. */
+      const v = { ...fields, id: newViewId(), ownerEmail: me.email, ownerName: me.name,
+                  createdAt: now, updatedAt: now, updatedBy: me.name || me.email, rev: 1 };
+      await store.put(viewKey(v.id), JSON.stringify(v));
+      log(`view ${v.id} “${v.name}” created by ${me.email || "unknown"} (${v.visibility}, ${(v.companies || []).length} accounts)`);
+      return viewForClient(v, me, { pinned: false });
+    }
+    return editView(id, me, (cur) => ({ ...cur, ...fields }));
+  }
+
+  /* Read, change, write — inside the lock, and re-reading rather than trusting
+     whatever the caller last saw. */
+  async function editView(id, me, change) {
+    return withView(id, async () => {
+      const cur = await readView(id);
+      if (!cur) throw Object.assign(new Error("That view no longer exists"), { status: 404 });
+      if (!canWrite(cur, me))
+        throw Object.assign(new Error(cur.visibility === "personal"
+          ? "That is someone else's personal view" : "You cannot change that view"), { status: 403 });
+      const next = { ...change(cur), id: cur.id, ownerEmail: cur.ownerEmail, ownerName: cur.ownerName,
+                     createdAt: cur.createdAt, updatedAt: new Date().toISOString(),
+                     updatedBy: me.name || me.email, rev: (cur.rev || 1) + 1 };
+      await store.put(viewKey(id), JSON.stringify(next));
+      const pins = new Set(await readPins(me.email));
+      return viewForClient(next, me, { pinned: pins.has(id) });
+    });
   }
 
   /* ── ANSWER NOW, REFRESH BEHIND IT ───────────────────────────────────────
@@ -3352,6 +3448,160 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        keystroke. The cached crawl (every owner) answers; Kylas' own search
        fills in anything newer; and companies made from the console this
        week are laid over both, since the crawl learns of them only later. */
+    /* ── NAMED VIEWS ─────────────────────────────────────────────────────
+       A view is a named set of accounts, saved by a BD and used by the
+       Accounts list and the Contacts list alike. scripts/views.mjs holds the
+       rules and the reasons; this is the storage and the plumbing.
+
+       ONE KEY PER VIEW (`view:<id>`), so two BDs saving at the same moment
+       write two different keys. A single "all views" document would have made
+       every save a read-modify-write of everybody's work, and the one that
+       landed second would silently win.
+
+       The remaining race is two people changing the SAME view at once. The
+       store has no compare-and-set, so: a per-id promise chain serialises
+       writes inside this instance, and every write re-reads the view first,
+       so an add merges onto whatever landed before it rather than onto a copy
+       read seconds ago. Across instances that chain does not reach, which is
+       why adds are expressed as add/remove sets (mergeCompanies) and never as
+       "here is the whole list" — two instances adding different accounts to
+       one view both end up in it.
+
+         GET  /views                      the ones you may see
+         POST /views                      create, update, duplicate, pin
+         POST /views/companies            { id, add:[], remove:[] }
+         POST /views/delete               { id }
+         GET  /view-contacts?id=…         every contact at the view's accounts */
+    "/views": async (url, body) => {
+      const me = await viewer();
+      /* Both runtimes hand a GET an empty object, not null, so "did they send
+         anything" is the test — a POST with no fields says nothing anyway. */
+      if (!body || !Object.keys(body).length) {
+        const list = await allViews(me);
+        return { views: list, me: { email: me.email, admin: me.admin, name: me.name }, limits: VIEW_LIMITS };
+      }
+      const id = String(body.id || "").slice(0, VIEW_LIMITS.id);
+
+      /* PIN is per person, in its own key, so starring a shared view is not a
+         write to something the whole team is also writing. */
+      if (body.action === "pin" || body.action === "unpin") {
+        if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+        const pins = new Set(await readPins(me.email));
+        body.action === "pin" ? pins.add(id) : pins.delete(id);
+        await store.put(pinsKey(me.email), JSON.stringify([...pins].slice(0, 200)));
+        return { ok: true, pinned: [...pins] };
+      }
+
+      const existing = id ? await readView(id) : null;
+      if (id && !existing) throw Object.assign(new Error("That view no longer exists"), { status: 404 });
+      if (existing && !canWrite(existing, me))
+        throw Object.assign(new Error(existing.visibility === "personal"
+          ? "That is someone else's personal view"
+          : "You cannot change that view"), { status: 403 });
+
+      if (body.action === "duplicate") {
+        if (!existing) throw Object.assign(new Error("id is required to duplicate"), { status: 400 });
+        if (!canRead(existing, me)) throw Object.assign(new Error("That is someone else's personal view"), { status: 403 });
+        const taken = (await allViews(me)).map((v) => v.name);
+        return { ok: true, view: await writeView(null, {
+          ...existing, name: copyName(existing.name, taken),
+          /* A copy belongs to whoever made it, and starts where they can see
+             it: a personal copy of a team view is a private working list. */
+          visibility: body.visibility === "team" ? "team" : "personal",
+        }, me) };
+      }
+
+      const form = checkView(body, { existing });
+      if (!form.ok) throw Object.assign(new Error(Object.values(form.errors)[0]), { status: 400, fields: form.errors });
+      if (!existing) {
+        const mine = (await allViews(me)).filter((v) => v.mine).length;
+        if (mine >= VIEW_LIMITS.perOwner)
+          throw Object.assign(new Error(`You already have ${VIEW_LIMITS.perOwner} views — delete one first`), { status: 400 });
+      }
+      return { ok: true, view: await writeView(id || null, form.clean, me) };
+    },
+
+    "/views/companies": async (_url, body) => {
+      const me = await viewer();
+      const id = String(body?.id || "").slice(0, VIEW_LIMITS.id);
+      if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+      const add = cleanCompanies(body?.add), remove = cleanCompanies(body?.remove);
+      if (!add.length && !remove.length) throw Object.assign(new Error("add or remove is required"), { status: 400 });
+      return { ok: true, view: await editView(id, me, (v) => ({
+        ...v, companies: mergeCompanies(v.companies, { add, remove }) })) };
+    },
+
+    "/views/delete": async (_url, body) => {
+      const me = await viewer();
+      const id = String(body?.id || "").slice(0, VIEW_LIMITS.id);
+      if (!id) throw Object.assign(new Error("id is required"), { status: 400 });
+      /* IN THE SAME LOCK AS THE WRITES. Deleting outside it let an add that
+         had already read the view write it back afterwards — the view
+         reappeared, holding whatever that one writer had, and the delete
+         looked like it had silently failed (test-views-stress §4). */
+      return withView(id, async () => {
+        const v = await readView(id);
+        if (!v) return { ok: true, gone: true };
+        if (!canDelete(v, me))
+          throw Object.assign(new Error(v.visibility === "team"
+            ? `“${v.name}” belongs to ${v.ownerName || v.ownerEmail || "someone else"} — they or an admin can delete it`
+            : "That is someone else's personal view"), { status: 403 });
+        await store.delete(viewKey(id));
+        log(`view ${id} “${v.name}” deleted by ${me.email || "unknown"}`);
+        return { ok: true, deleted: id };
+      });
+    },
+
+    /* EVERY CONTACT AT THE VIEW'S ACCOUNTS. The Airtable copy answers in a few
+       requests (readContactsForCompanies); where it holds nothing for an
+       account — one nobody has worked yet — Kylas is asked for that account
+       alone, a few at a time, so a brand-new view is not empty. */
+    "/view-contacts": async (url) => {
+      const me = await viewer();
+      const id = String(url.searchParams.get("id") || "");
+      let ids = [];
+      let view = null;
+      if (id) {
+        view = await readView(id);
+        if (!view) throw Object.assign(new Error("That view no longer exists"), { status: 404 });
+        if (!canRead(view, me)) throw Object.assign(new Error("That is someone else's personal view"), { status: 403 });
+        ids = view.companies || [];
+      } else {
+        ids = cleanCompanies(String(url.searchParams.get("companies") || "").split(","));
+      }
+      const cap = Math.min(Number(url.searchParams.get("cap")) || 400, 1000);
+      const asked = ids.length;
+      ids = ids.slice(0, cap);
+      if (!ids.length) return { view: view ? viewForClient(view, me) : null, contacts: [], companies: 0, asked };
+
+      let contacts = [];
+      if (airtable) {
+        try { contacts = await readContactsForCompanies(airtable, ids); }
+        catch (e) { log(`! view-contacts: Airtable — ${String(e.message).slice(0, 140)}`); }
+      }
+      const have = new Set(contacts.map((c) => String(c.companyId || "")));
+      const missing = ids.filter((x) => !have.has(String(x)));
+      if (missing.length) {
+        /* Three at a time: a new view of fifty unworked accounts should not
+           open fifty Kylas connections at once. */
+        const todo = missing.slice(0, 60);
+        for (let i = 0; i < todo.length; i += 3) {
+          const part = todo.slice(i, i + 3);
+          const got = await Promise.all(part.map(async (cid) => {
+            try {
+              const raw = await kylas.contactsForCompany(cid);
+              const list = Array.isArray(raw) ? raw : raw?.contacts || [];
+              return await mapContacts(list, { id: cid, name: companyNames.get(String(cid)) || "" });
+            } catch { return []; }
+          }));
+          for (const g of got) contacts.push(...g);
+        }
+      }
+      log(`view-contacts ${id || "(ad hoc)"} — ${contacts.length} contact(s) across ${ids.length} account(s)`);
+      return { view: view ? viewForClient(view, me) : null, contacts,
+               companies: ids.length, asked, truncated: asked > ids.length };
+    },
+
     "/company-search": async (url) => {
       const q = String(url.searchParams.get("q") || "").trim();
       if (companyKey(q).length < 2) return { q, companies: [] };

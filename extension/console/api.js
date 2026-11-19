@@ -387,6 +387,22 @@
     /* Re-assign a saved contact to another BD — Kylas and Airtable, now. */
     setContactOwner: (kid, ownerId, ownerName) => req("/contact-owner", { method: "POST",
       body: { kid, ownerId, ownerName }, timeout: 30000 }),
+    /* ── NAMED VIEWS ────────────────────────────────────────────────────
+       A view is a named set of accounts, saved by a BD and shared with the
+       team or kept private. Every BD may make one; scripts/views.mjs holds
+       who may change what. */
+    views: () => req("/views", { timeout: 20000 }),
+    saveView: (view) => req("/views", { method: "POST", body: view, timeout: 20000 }),
+    duplicateView: (id) => req("/views", { method: "POST", body: { id, action: "duplicate" }, timeout: 20000 }),
+    pinView: (id, on) => req("/views", { method: "POST", body: { id, action: on ? "pin" : "unpin" }, timeout: 15000 }),
+    /* Add and remove together, never "here is the whole list": two BDs
+       ticking accounts into one view at the same moment both land. */
+    viewCompanies: (id, add, remove) => req("/views/companies", { method: "POST",
+      body: { id, add: add || [], remove: remove || [] }, timeout: 20000 }),
+    deleteView: (id) => req("/views/delete", { method: "POST", body: { id }, timeout: 20000 }),
+    /* Every contact at the view's accounts, for the Contacts half of a view. */
+    viewContacts: (id, cap) => req(`/view-contacts?id=${encodeURIComponent(id)}${cap ? `&cap=${cap}` : ""}`,
+      { timeout: 60000 }),
     createCompany: (form) => req("/company-create", { method: "POST",
       body: typeof form === "string" ? { name: form } : form, timeout: 30000 }),
     /* The admin's queue of possible duplicates (Duplicate Flags). Admin only: a
