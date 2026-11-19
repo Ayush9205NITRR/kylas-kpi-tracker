@@ -291,6 +291,76 @@ try {
     ok('...and junk is not made into a link', norm && norm[2] === null && norm[3] === null, JSON.stringify(norm));
   }
 
+  /* ══ 15 · THE FOUR THINGS AYUSH HIT ON 1.85.1 ════════════════════════ */
+  console.log('\n15 · the company band, and a re-assign reaching the list');
+  await f().evaluate(() => window.openCompanyFromView('1776620',
+    'Gamechangesolar Renewables Private Limited')); await W(6000);
+  const band = await f().evaluate(() => {
+    const n = document.getElementById('qscope'); if (!n) return null;
+    const top = n.querySelector('.qstop'), own = n.querySelector('.cown');
+    const b = own?.querySelector('b'), x = n.querySelector('.cx');
+    const r = (e) => e?.getBoundingClientRect();
+    return { children: [...n.children].map((c) => c.className),
+             xWithTheName: Math.abs((r(x)?.top ?? 0) - (r(n.querySelector('.cn'))?.top ?? 99)) < 8,
+             ownerBelow: (r(own)?.top ?? 0) > (r(n.querySelector('.cn'))?.top ?? 0),
+             label: own?.querySelector('em')?.textContent || '',
+             name: b?.textContent || '', size: b ? getComputedStyle(b).fontSize : '',
+             colour: b ? getComputedStyle(b).color : '' };
+  });
+  ok('the band is two rows, not one that wraps',
+     band && band.children.join() === 'qstop,cown', JSON.stringify(band?.children));
+  ok('the × stays on the row with the company name', band?.xWithTheName === true);
+  ok('the owner has a line of its own, under it', band?.ownerBelow === true);
+  ok('...labelled, and named', /account owner/i.test(band?.label || '') && !!band?.name,
+     `“${band?.label}” / “${band?.name}”`);
+  ok('...at label size, in the text colour — not meta grey',
+     band?.size === '13px' && band?.colour === 'rgb(28, 27, 46)', `${band?.size} ${band?.colour}`);
+
+  /* THE OWNER LIST FILLS ITSELF even when the server sends none with the
+     contact — which is what a console talking to an older deploy gets. */
+  const active = ((await (await fetch(`${BASE}/allot-people`)).json()).people || []).map((p) => p.name);
+  const refilled = await f().evaluate(async () => {
+    OWNERS = ['']; for (const k of Object.keys(OWNER_ID)) delete OWNER_ID[k];
+    await refreshOwners(true);
+    return { names: OWNERS.filter(Boolean), ids: OWNERS.filter(Boolean).filter((n) => !!OWNER_ID[n]).length };
+  });
+  ok('an emptied owner list refills itself from the server',
+     active.every((n) => refilled.names.includes(n)),
+     `missing ${active.filter((n) => !refilled.names.includes(n)).join(', ')}`);
+  ok('...with an id against every name, so re-assigning works',
+     refilled.ids === refilled.names.length, `${refilled.ids}/${refilled.names.length}`);
+  /* An owner the server does not list (a deactivated user) must be asked
+     about ONCE, not on every repaint. */
+  const asks = await f().evaluate(async () => {
+    let n = 0; const real = window.API.allotPeople;
+    window.API.allotPeople = (...a) => { n++; return real.apply(window.API, a); };
+    const a = rec(); const keep = a.owner;
+    a.owner = 'Ghost Of Nobody';
+    for (let i = 0; i < 4; i++) { renderBasic(); await new Promise((r) => setTimeout(r, 250)); }
+    a.owner = keep; window.API.allotPeople = real; renderBasic();
+    return n;
+  });
+  ok('an owner the server cannot name is asked about once, not every paint',
+     asks <= 1, `${asks} requests over 4 repaints`);
+
+  /* A re-assign on the card must reach the Contacts table behind it. */
+  await f().locator('.vws .vwtab', { hasText: 'Seeded by another BD' }).first().click().catch(() => {});
+  await W(1500);
+  await f().locator('#halfCon').click().catch(() => {}); await W(7000);
+  if (await f().locator('.ctable .crow').count()) {
+    const was = (await f().locator('.ctable .crow').first().locator('span').nth(6).textContent() || '').trim();
+    await f().locator('.ctable .crow [data-open]').first().click(); await W(6500);
+    const people = ((await (await fetch(`${BASE}/allot-people`)).json()).people || []).map((p) => p.name);
+    const to = people.find((n) => n !== was);
+    await f().locator('#f-ow').selectOption({ label: to }); await W(5000);
+    ok('the card accepted the re-assign', (await f().locator('#f-ow').inputValue()) === to, `${was} → ${to}`);
+    await f().evaluate(() => window.showConsoleView('companies')); await W(2500);
+    await f().locator('.vws .vwtab', { hasText: 'Seeded by another BD' }).first().click(); await W(1500);
+    await f().locator('#halfCon').click(); await W(3000);
+    const now = (await f().locator('.ctable .crow').first().locator('span').nth(6).textContent() || '').trim();
+    ok('...and the Contacts table behind it shows the new owner', now === to, `table “${now}” vs “${to}”`);
+  }
+
   console.log('\n14 · the console log');
   ok('no page or console errors anywhere in that', errs.length === 0, errs.slice(0, 4).join(' || '));
 } catch (e) {

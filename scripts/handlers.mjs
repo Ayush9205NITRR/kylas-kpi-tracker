@@ -3953,17 +3953,22 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const held = await fromAirtable("contact " + id, () => readContact(airtable, id));
       if (held) {
         log(`contact ${id} from Airtable`);
+        /* MOCK_OLD_CONTACT=1 replays the server Ayush actually had deployed
+           (1.85.0), which sent no owners with a contact — so the console's
+           own fallback can be tested rather than assumed. */
         return { contact: held, source: "airtable",
-                 owners: await ownerList([{ id: held.ownerId, name: held.owner }]),
-                 picklists: (await meta()).picklists };
+                 ...(env.MOCK_OLD_CONTACT === "1" ? {} : {
+                   owners: await ownerList([{ id: held.ownerId, name: held.owner }]),
+                   picklists: (await meta()).picklists }) };
       }
       const c = await kylas.contact(id);
       log(`contact ${id} from Kylas`);
       const mapped = toConsoleContact(c, { ownerName: await ownerName(c?.ownerId),
         writeMap: await writeMap().catch(() => null), tzMin: TZ_MIN });
       return { contact: mapped, raw: c, source: "kylas",
-               owners: await ownerList([{ id: mapped.ownerId, name: mapped.owner }]),
-               picklists: (await meta()).picklists };
+               ...(env.MOCK_OLD_CONTACT === "1" ? {} : {
+                 owners: await ownerList([{ id: mapped.ownerId, name: mapped.owner }]),
+                 picklists: (await meta()).picklists }) };
     },
   };
   /* Where the copies stand — how old, how many rows — for a person checking

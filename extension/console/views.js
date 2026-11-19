@@ -4975,6 +4975,7 @@
   }
 
   async function companies(host) {
+    LAST_HOST = host;
     /* Same allotted list the dashboard uses, so the two cannot disagree about
        which companies exist. The owner filter here is the company's own owner
        in Kylas, which is what "allotted to me" means. Rendered from cache
@@ -6399,7 +6400,37 @@
     AllotJobs.onChange(f);
   }
 
+  /* A CONTACT'S OWNER CHANGED ON THE CARD. The Accounts list and the Contacts
+     table are both painted from caches that were filled before that happened,
+     so without this the BD re-assigns somebody, goes back, and the old name
+     is still sitting there (Ayush, 2026-11-19: "owner assign karne ke baad
+     bhi main page mein reflect nahi ho raha"). Patch what we hold rather than
+     refetch: the server has already confirmed the change, and a refetch of
+     18,000 accounts to move one name is not a trade worth making. */
+  function noteOwnerChange(kid, ownerId, ownerName) {
+    const k = String(kid || "");
+    let touched = false;
+    for (const c of CON.rows || []) {
+      if (String(c.kid) !== k) continue;
+      c.owner = ownerName || c.owner; c.ownerId = String(ownerId || c.ownerId || "");
+      touched = true;
+    }
+    if (touched && ACC.half === "contacts" && document.querySelector(".ctable")) redrawExplorer();
+  }
+  /* The account's own owner, after the re-assign job moves it. */
+  function noteAccountOwner(companyId, ownerId, ownerName) {
+    const id = String(companyId || "");
+    for (const c of CACHE.companies || [])
+      if (String(c.id) === id) { c.owner = ownerName || c.owner; c.ownerId = String(ownerId || c.ownerId || ""); }
+    redrawExplorer();
+  }
+  /* The explorer repaints itself through companies(host); keep a handle to the
+     last host so a change made on the CARD can reach it. */
+  let LAST_HOST = null;
+  const redrawExplorer = () => { if (LAST_HOST && LAST_HOST.isConnected) companies(LAST_HOST).catch(() => {}); };
+
   global.Views = { rollup, dashboard, companies, FILTERS, savedLanded, reassignOne,
+                  noteOwnerChange, noteAccountOwner,
                   /* The account's open-account state, for the call card (console.js). */
                   companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },
                   openFor: (id) => (CACHE.companies || []).find((c) => String(c.id) === String(id))?.open || null,

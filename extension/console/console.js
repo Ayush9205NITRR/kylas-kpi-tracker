@@ -57,17 +57,28 @@ const ownerIdFor=(name)=>OWNER_ID[name]||"";
 /* The whole active user list from the server, adopted and remembered. Called
    on boot and whenever the card is about to need it. */
 let OWNERS_ASKED=0;
+/* Owner names we have already gone back to the server for. See renderBasic. */
+const OWNER_TRIED=new Set();
 async function refreshOwners(force){
   if(!force&&Date.now()-OWNERS_ASKED<5*60*1000)return;
   OWNERS_ASKED=Date.now();
   try{
     const r=await API.allotPeople();
     const list=(r?.people||[]).filter(p=>p?.name);
-    if(!list.length)return;
+    /* An empty answer is not an answer. Treat it as a failure so the next
+       paint asks again, rather than storing nothing over a good list. */
+    if(!list.length){OWNERS_ASKED=0;return;}
     adoptOwners(list);
     await Store.setSetting("owners",list);
     if(DATA[cur])renderBasic();
-  }catch(e){ /* older server, or offline: the stored list still stands */ }
+  }catch(e){
+    /* NOT REMEMBERED AS "ASKED". boot() runs before the sign-in has
+       necessarily landed, so the first try can 401 — and with the cooldown
+       set, nothing would try again for five minutes and the dropdown would
+       stay short for the whole session (Ayush, 2026-11-19: "contact overlay
+       mein owner load nahi ho rahe hai"). */
+    OWNERS_ASKED=0;
+  }
 }
 /* The other way round. The Airtable copy of a company carries the owner's
    Kylas id even when its Owner text cell is empty, and "Account owner #74725"
@@ -918,9 +929,18 @@ function renderScope(){
   const n=companyRoster(scope.id).length;
   /* The id, always. It is what every join is on, and "which company is this"
      must be answerable even when the name could not be resolved. */
-  w.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
-    +`<span class="cc">${n} contact${n===1?"":"s"}</span>`
-    +(scope.offline?`<span class="cwarn" title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`:"");
+  /* TWO ROWS, EXPLICITLY. This was one wrapping flex row, so a long company
+     name pushed the × onto a line of its own and the owner ended up wedged
+     underneath it — see Ayush's screenshot, 2026-11-19. The top row is the
+     account and its actions; the owner gets a line to itself, at the size
+     something you read on every call deserves. */
+  const top=el("div","qstop");
+  top.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
+    +`<span class="cc">${n} contact${n===1?"":"s"}</span>`;
+  w.innerHTML="";
+  w.appendChild(top);
+  if(scope.offline)w.appendChild(el("span","cwarn",
+    `<span title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`));
   /* RE-ASSIGN THIS COMPANY'S CONTACTS — the company stays where it
      is. "To the account's owner" is the common case: contacts that sit on
      somebody else. Runs as a background job (views.js AllotJobs). */
@@ -928,17 +948,17 @@ function renderScope(){
     const mv=el("button","cmv","Move contacts…");mv.type="button";
     mv.title="Re-assign this company's contacts (the company stays with its owner)";
     mv.onclick=()=>moveContactsSheet(scope);
-    w.appendChild(mv);
+    top.appendChild(mv);
   }
   const x=el("button","cx","×");x.type="button";x.title="Leave this company and show today's calls";
   x.onclick=()=>{scope=null;mode="session";render();};
-  w.appendChild(x);
+  top.appendChild(x);
   /* WHO THE ACCOUNT BELONGS TO. It was fetched with the company and thrown
      away; the BD had to open Kylas to find out (Ayush, 2026-11-16). The
      contact's own owner is on the card below — this is the account's. */
   const acc=accountOwner();
   if(acc.name||acc.id){
-    const o=el("span","cown",`Account owner <b>${esc(acc.name||("#"+acc.id))}</b>`);
+    const o=el("div","cown",`<em>Account owner</em><b>${esc(acc.name||("#"+acc.id))}</b>`);
     o.title="Who this account belongs to in Kylas — not the same thing as who owns this contact";
     w.appendChild(o);
     if(window.Views?.reassignOne&&acc.id){
@@ -1146,12 +1166,17 @@ async function reassignNow(a,was,to,back){
     a.owner=to.name;a.ownerId=to.id;
     if(sel){sel.disabled=false;sel.value=to.name;}
     say(`Now with ${to.name} — in Kylas too.`);
+    /* THE LISTS BEHIND THE CARD HOLD THEIR OWN COPY. Without telling them,
+       the BD re-assigns here, goes back to Accounts or to a view's Contacts,
+       and the old owner is still printed (Ayush, 2026-11-19). */
+    window.Views?.noteOwnerChange?.(a.kid,to.id,to.name);
     renderQueue();validate();
     if(back)toast(`Back with ${to.name}`);
     else toast(`Re-assigned to ${to.name}`,()=>reassignNow(a,to,{name:was.name,id:was.id},true));
   }catch(e){
     a.owner=was.name;a.ownerId=was.id;
     if(sel){sel.disabled=false;sel.value=was.name||"";}
+    window.Views?.noteOwnerChange?.(a.kid,was.id,was.name);
     say("");renderQueue();validate();
     toast(`Could not re-assign: ${e.message||"error"} — still with ${was.name||"nobody"}`);
   }
@@ -1444,7 +1469,18 @@ function renderBasic(){
      a Kylas id, the list we hold is short — ask for the full one rather than
      waiting for the BD to discover it by picking a name and being told it
      cannot be used. */
-  if(a.owner&&!ownerIdFor(a.owner))refreshOwners(true);
+  /* Either the owner on the card cannot be resolved to an id, or the list is
+     obviously too short to be the team — ask for the real one. This is what
+     makes the card right even against a server too old to send owners with
+     the contact.
+       ONCE PER NAME. A contact owned by somebody /allot-people does not list —
+     a deactivated user, which is exactly the case the owner list is allowed
+     to leave out — can never be resolved, and renderBasic runs on every
+     keystroke. Without the memo that is a request per paint, for ever. */
+  if((a.owner&&!ownerIdFor(a.owner)&&!OWNER_TRIED.has(a.owner))||OWNERS.filter(Boolean).length<3){
+    if(a.owner)OWNER_TRIED.add(a.owner);
+    refreshOwners(true);
+  }
   grid.appendChild(field("Owner","f-ow",true,select("f-ow",OWNERS,a.owner,(v)=>{
     const was={name:a.owner,id:a.ownerId};
     a.owner=v;
