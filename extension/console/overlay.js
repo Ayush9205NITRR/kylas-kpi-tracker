@@ -84,6 +84,9 @@
     if (!port) return;
     if (view === "companies" && which !== "companies") accountsTop = port.scrollTop || 0;
     view = which;
+    /* The company strip's actions act on the call card's company, which a
+       full-screen view is covering — see production.css. */
+    document.body.classList.toggle("viewing", !!which);
     paintBack();
     if (!which) { port.hidden = true; wrap.innerHTML = ""; return; }
     port.hidden = false;
@@ -91,9 +94,22 @@
        rejection here must show as a message rather than an empty panel and an
        unhandled rejection in the console. */
     wrap.innerHTML = `<p class="vnote">Loading…</p>`;
-    (which === "dashboard" ? Views.dashboard : which === "flags" ? Flags.view : Views.companies)(wrap)
+    (which === "dashboard" ? Views.dashboard
+      : which === "flags" ? Flags.view
+      : which === "today" ? Views.today
+      : Views.companies)(wrap)
       .then(() => { if (which === "companies" && view === "companies") port.scrollTop = accountsTop; })
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
+  }
+
+  /* A count chip: the word, and the number beside it. Under 1280px the CSS
+     hides the word and the number carries the meaning, which is how three of
+     these cost what one button used to. */
+  function setCount(btn, label, n) {
+    if (!btn) return;
+    const i = btn.querySelector("i"), b = btn.querySelector("b");
+    if (i) i.textContent = label; else btn.textContent = label;
+    if (b) { b.textContent = n ? String(n) : ""; b.hidden = !n; }
   }
 
   /* Views can move between themselves (the dashboard's Work today → the accounts table). */
@@ -109,14 +125,19 @@
      stack would send a person who arrived on a contact straight from Kylas
      nowhere useful; the ladder always has a next rung up. */
   const backBtn = document.getElementById("backBtn");
+  /* BACK IS A RUNG, NOT A SECOND DASHBOARD BUTTON. It used to read
+     "← Dashboard" on the Accounts and Flags views while the Dashboard button
+     sat three buttons away doing exactly the same thing (Ayush, 2026-11-20).
+     Now it only appears where there is somewhere to go back TO that is not
+     already one click away: from the call card, to the accounts list. */
   function paintBack() {
     if (!backBtn) return;
-    backBtn.hidden = view === "dashboard";
-    backBtn.textContent = view === "companies" || view === "flags" ? "← Dashboard" : "← Accounts";
-    backBtn.title = view === "companies" || view === "flags" ? "Back to the dashboard" : "Back to the accounts list";
+    backBtn.hidden = !!view;            /* any full-screen view has its own way out */
+    backBtn.textContent = "← Accounts";
+    backBtn.title = "Back to the accounts list";
   }
   if (backBtn) {
-    backBtn.onclick = () => showView(view === "companies" || view === "flags" ? "dashboard" : "companies");
+    backBtn.onclick = () => showView("companies");
     paintBack();
   }
 
@@ -143,7 +164,7 @@
   function showCompany(id, label) {
     const roster = DATA.filter((a) => String(a.companyId) === String(id));
     scope = { id, name: label || roster[0]?.company || ("Company " + id) };
-    mode = "company";
+    solo = false;
     if (roster.length) {
       cur = DATA.indexOf(roster.find((a) => !a.done) || roster[0]);
       isNew = false;
@@ -308,7 +329,7 @@
        shows it, and the Company tab is one click away — but the console
        opens on the contact you clicked. */
     scope = a.companyId ? { id: String(a.companyId), name: a.company } : null;
-    mode = "session";
+    solo = true;
     renderFilters();
     stopTimer(); secs = 0; render(); resetScroll();
     return true;
@@ -375,7 +396,7 @@
     scope = a.companyId
       ? { id: String(a.companyId), name: a.company || ("Company " + a.companyId) }
       : null;
-    mode = "session";
+    solo = true;
 
     persist();
     setLink("on", `Kylas · ${API.state.user?.name || "connected"}`);
@@ -708,7 +729,7 @@
   const flagsBtn = document.getElementById("flagsBtn");
   if (flagsBtn) {
     flagsBtn.onclick = () => showView("flags");
-    const paint = (n) => { flagsBtn.textContent = n ? `Flags ${n}` : "Flags"; flagsBtn.classList.toggle("warn", n > 0); };
+    const paint = (n) => { setCount(flagsBtn, "Flags", n); flagsBtn.classList.toggle("warn", n > 0); };
     window.Flags && Flags.onCount(paint);
     const sync = () => { const admin = !!(API.state && API.state.online && API.state.user && API.state.role === "admin"); flagsBtn.hidden = !admin; if (admin) Flags.refreshCount(); };
     if (window.API && API.onChange) API.onChange(sync);
@@ -726,7 +747,7 @@
     const bell = Views.rcaBell;
     let nudged = false;
     bell.onChange((n, mine) => {
-      rcaBtn.textContent = n ? `Reasons ${n}` : "Reasons";
+      setCount(rcaBtn, "Reasons", n);
       rcaBtn.classList.toggle("warn", n > 0);
       rcaBtn.title = mine ? `${mine} of your contacts need a reason — click to give them`
         : n ? `${n} stalled contact${n === 1 ? "" : "s"} waiting for a reason` : "Nothing is waiting for a reason";
@@ -754,7 +775,8 @@
       if (!j) { jobBtn.hidden = true; return; }
       jobBtn.hidden = false;
       const moved = j.done, all = j.total;
-      jobBtn.textContent = j.finished ? `${moved} moved ✓${j.failed ? ` · ${j.failed} failed` : ""}` : `Re-assigning ${moved}/${all}`;
+      setCount(jobBtn, j.finished ? `${moved} moved ✓${j.failed ? ` · ${j.failed} failed` : ""}` : "Re-assigning",
+               j.finished ? 0 : `${moved}/${all}`);
       jobBtn.classList.toggle("ok", !!j.finished && !j.failed);
       jobBtn.classList.toggle("warn", !!j.finished && !!j.failed);
     });

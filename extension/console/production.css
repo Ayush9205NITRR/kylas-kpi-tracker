@@ -47,26 +47,9 @@ body.framed .ovOnly{display:inline-block}
 .link.oldui{background:var(--blueSoft);border-color:var(--blueLine);color:var(--blue);
   font-weight:var(--w-strong)}
 
-/* Neutral, not slate. Slate carries "past" (CLAUDE.md), so tinting the company
-   band with it spent the one non-blue hue on a heading — and read as a second
-   accent. Structure separates this band, not colour. */
-.qscope{
-  display:grid;gap:4px;padding:7px 10px;
-  background:transparent;border-bottom:1px solid var(--line);
-}
-/* The account and its actions: ONE row that cannot wrap the × onto its own
-   line — the name gives way first, because it is the only part with an
-   ellipsis to give. */
-.qscope .qstop{display:flex;align-items:center;gap:8px;min-width:0}
-.qscope .cn{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qscope .cid,.qscope .cc{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);flex:none}
-.qscope .cc{color:var(--text2)}
-/* Amber marks flags and warnings only — this is the one place the queue says
-   "what you are looking at did not come from Kylas". */
-.qscope .cwarn{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--amber);
-  background:var(--amberSoft);border-radius:6px;padding:4px 8px}
-.qscope .cx{background:transparent;border:0;color:var(--text3);font-size:var(--t-sec);line-height:1;padding:0 4px;cursor:pointer}
-.qscope .cx:hover{color:var(--text)}
+/* The company band that used to sit at the top of the left rail is gone
+   (2026-11-20) — the header is the company strip now. Its rules went with it;
+   .acct .cown / .cmv / .cx below carry what it did. */
 
 /* A dashed blue slab for a button pressed a few times a day. A link. */
 .qnew{
@@ -1420,20 +1403,6 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .ajBar{height:8px;border-radius:99px;background:var(--panel3);overflow:hidden;margin:4px 0 10px}
 .ajBar i{display:block;height:100%;background:var(--blue);border-radius:99px;transition:width .3s}
 .ajBad{color:var(--amber)}
-.qscope .cmv{margin-left:auto;font-size:var(--t-meta);border:1px solid var(--line2);background:var(--panel);border-radius:6px;padding:2px 8px;color:var(--text2);cursor:pointer}
-/* WHO THE ACCOUNT BELONGS TO — its own line, and readable. It was --t-meta
-   grey tucked in beside the buttons, which is the size used for an id, not
-   for a name a BD checks on every call (Ayush, 2026-11-19: "owner should be
-   visible", "isko bada kar dete hain"). The label stays small; the NAME is
-   body size and takes the text colour. */
-.qscope .cown{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0}
-.qscope .cown em{font-style:normal;font-size:var(--t-meta);color:var(--text3);
-  text-transform:uppercase;letter-spacing:.04em;flex:none}
-.qscope .cown b{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);
-  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qscope .clink{background:transparent;border:0;padding:0;font:inherit;font-size:var(--t-label);
-  font-weight:var(--w-strong);color:var(--blue);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
-.qscope .clink:hover{text-decoration-thickness:2px}
 .mvList{display:flex;flex-direction:column;gap:6px;margin:8px 0 10px;max-height:260px;overflow:auto}
 
 /* RE-ASSIGN (views.js bulkBar + openReassign, 2026-10-29). A selection is a
@@ -1645,3 +1614,48 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .cgrouph{grid-column:1/-1;font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text3);
   background:var(--panel2);padding:5px 12px;border-bottom:1px solid var(--line);
   position:sticky;top:0;z-index:1}
+
+/* ══ THE COMPANY STRIP, IN THE HEADER ══════════════════════════════════
+   The left rail's band said the company's name, id and contact count — all
+   three of which the header was already saying, one band further down
+   (Ayush, 2026-11-20: "isko top mein"). The band is gone; what was only in
+   it, the owner and the two actions, is here. One accent, existing tokens. */
+.acct .cid{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);flex:none}
+.acct .cown{display:flex;align-items:baseline;gap:6px;min-width:0;flex:0 1 auto;white-space:nowrap}
+.acct .cown em{font-style:normal;font-size:var(--t-meta);color:var(--text3);
+  text-transform:uppercase;letter-spacing:.04em;flex:none}
+/* The NAME gives way by ellipsis, never by collapsing to one letter — which
+   is what happened when it was allowed to shrink inside .acct's overflow. */
+.acct .cown b{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2);
+  min-width:5ch;max-width:18ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct .cown em{flex:none}
+/* THE COMPANY'S ACTIONS BELONG TO THE CALL CARD. With a full-screen view open
+   the card is behind it, so "Move contacts…" and × are acting on something
+   nobody can see — and they were taking the width the owner name needed. */
+body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
+.acct .clink{background:transparent;border:0;padding:0;font:inherit;font-size:var(--t-label);
+  font-weight:var(--w-strong);color:var(--blue);text-decoration:underline;text-underline-offset:2px;
+  cursor:pointer;flex:none}
+.acct .cmv{flex:none;font-size:var(--t-meta);border:1px solid var(--line2);background:var(--panel);
+  border-radius:6px;padding:2px 8px;color:var(--text2);cursor:pointer}
+.acct .cmv:hover{border-color:var(--blueLine);color:var(--text)}
+.acct .cx{flex:none;background:transparent;border:0;color:var(--text3);font-size:var(--t-sec);
+  line-height:1;padding:0 2px;cursor:pointer}
+.acct .cx:hover{color:var(--text)}
+
+/* Counts, not sentences. Three chips cost what one button used to, and under
+   1280px the word goes and the number carries it (console.css). */
+.bar .cnts{display:flex;align-items:center;gap:6px;flex:none}
+.bar .cnt{display:inline-flex;align-items:center;gap:6px}
+.bar .cnt b{font-family:var(--m,ui-monospace);font-size:var(--t-meta);font-weight:var(--w-strong)}
+.bar .cnt i{font-style:normal}
+.bar .cnt b[hidden]{display:none}
+
+/* ══ TODAY ═════════════════════════════════════════════════════════════ */
+.tdtable{--acols:1.3fr 1.2fr 1fr 1fr .9fr .8fr;--amin:900px}
+/* The only marker here: how late it is. Amber is the flag colour this console
+   already uses, rose only for what is past due — no new hue (CLAUDE.md). */
+.tdw{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line2);
+  margin-right:6px;vertical-align:1px}
+.tdw.overdue{background:var(--rose)}
+.tdw.today{background:var(--amber)}

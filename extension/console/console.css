@@ -97,15 +97,30 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .app{height:100%;display:grid;grid-template-rows:auto auto 1fr auto;min-height:0}
 
 /* ── top bar ───────────────────────────────── */
-/* NO WRAP. With flex-wrap:wrap the buttons dropped onto a second row as soon
-   as a company name was long enough, and the bar's height did not follow —
-   "Close" ended up sitting on top of the callbar's top border. The bar is one
-   line now: the actions never shrink, and what is merely informative (pace,
-   KPI tiles) gives up its width first and is hidden outright when narrow. */
+/* TWO ROWS, EACH WITH ITS OWN HEIGHT — not a wrap.
+   The old rule was "never wrap", and the reason still stands: with
+   flex-wrap:wrap the buttons dropped onto a second line as soon as a company
+   name was long enough and the bar's height did not follow, so Close sat on
+   the callbar's border. But the company strip moved up here on 2026-11-20
+   (the rail's band is gone), and name + id + tiles + contacts + owner +
+   Change + Move + × simply does not fit beside nine buttons at 1500px: the
+   owner was crushed to the letter "O".
+   So the bar is a GRID of two explicit rows. Row one is identity, pace and
+   the actions, and it still never wraps. Row two is the company strip, and
+   it exists only when there is a company — `.bar` has no second row at all
+   otherwise, so nothing moves on a console with no account open. */
 .bar{background:var(--panel);border-bottom:1px solid var(--line);padding:0 22px;
-  padding-top:env(safe-area-inset-top,0px);display:flex;align-items:center;gap:14px;
-  flex-wrap:nowrap;min-height:48px;overflow:hidden}
-.bar .acts{display:flex;align-items:center;gap:10px;flex:none}
+  padding-top:env(safe-area-inset-top,0px);
+  display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;
+  column-gap:14px;min-height:48px;overflow:hidden}
+.bar .id{grid-row:1}
+.bar .pace{grid-row:1}
+.bar .sp{grid-row:1}
+.bar .acts{grid-row:1;display:flex;align-items:center;gap:10px;flex:none}
+/* The strip spans the whole width on its own line, under everything. */
+.bar .acct{grid-row:2;grid-column:1/-1}
+.bar:has(.acct:empty){min-height:48px}
+.bar .acct:empty{display:none}
 .bar .id{display:flex;align-items:center;gap:11px;flex:none}
 .bar .g{width:24px;height:24px;border-radius:6px;background:var(--blue);color:var(--onBlue);
   display:grid;place-items:center;font-weight:var(--w-strong);font-size:var(--t-meta)}
@@ -113,11 +128,13 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
 .bar .sp{flex:1}
 .pace{display:flex;align-items:center;gap:10px;font-size:var(--t-label);color:var(--text2);flex:none}
 .pace b{font-size:var(--t-body);color:var(--text);font-weight:var(--w-strong)}
-/* Shrinks before the buttons do, and its contents clip rather than push. */
-.acct{display:flex;align-items:center;gap:11px;flex:0 1 auto;min-width:0;overflow:hidden}
+/* Its own row now, so it has the width it needs; it still clips rather than
+   push, for the company name nobody could have predicted the length of. */
+.acct{display:flex;align-items:center;gap:11px;min-width:0;overflow:hidden;
+  padding-bottom:6px;margin-top:-2px}
 .bar h1{white-space:nowrap}
-.acct .scope{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2);flex:none;
-  border-left:2px solid var(--line2);padding-left:13px;margin-left:2px}
+.acct .scope{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text);flex:0 1 auto;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct .tiles{display:flex;gap:8px;flex-wrap:nowrap;overflow:hidden}
 .acct .of{font-size:var(--t-label);color:var(--text3);font-weight:var(--w-med);flex:none}
 .kpi{display:inline-flex;align-items:baseline;gap:6px;border:1px solid var(--line);border-radius:6px;
@@ -125,9 +142,20 @@ kbd{font-family:var(--f);font-size:var(--t-label);font-weight:var(--w-strong);bo
   color:var(--text3);white-space:nowrap}
 .kpi b{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
 .kpi.hit{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
-@media(max-width:1280px){.acct .of,.acct .scope{display:none}}
+/* THE ACTIONS MAY SHRINK, AND MUST NEVER CLIP. .acts had no min-width:0 and
+   no breakpoint of its own, so with Reasons, Flags and a running re-assign
+   showing, the right-hand end went under the bar's overflow:hidden with no
+   sign that anything was missing (Ayush, 2026-11-20). The order things give
+   way in, widest screen first: the account's tiles, then the pace meter, then
+   the count chips' words, then the account block entirely. Nothing is ever
+   removed from REACH — that was the rule the no-wrap note set, and it holds. */
+.bar .acts{min-width:0}
+@media(max-width:1280px){
+  .bar .cnt i{display:none}
+  .bar .cnt b{margin:0}
+}
 @media(max-width:1180px){.pace{display:none}}
-@media(max-width:980px){.acct{display:none}}
+@media(max-width:980px){.acct .cid,.acct .tiles{display:none}}
 .meter{width:96px;height:7px;border-radius:4px;background:var(--panel3);overflow:hidden}
 .meter i{display:block;height:100%;background:var(--blue);border-radius:4px;transition:width .3s}
 .gbtn{background:var(--panel);border:1px solid var(--line2);border-radius:6px;

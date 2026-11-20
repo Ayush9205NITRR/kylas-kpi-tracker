@@ -43,6 +43,41 @@ const seeded = await api('/views', { name: 'Seeded by another BD', visibility: '
                                      companies: ['903', '1776620'] });
 const personal = await api('/views', { name: 'Someone personal', visibility: 'personal', companies: ['903'] });
 
+/* TODAY'S FIXTURES, OWNED BY THIS SUITE. On a company no view holds, so they
+   cannot wander into the Contacts assertions above — the first time these
+   existed they were seeded by hand onto an account a view DID hold, and §11
+   then tried to re-assign a contact that lives only in the copy, which Kylas
+   rightly 404s. A test's data is the test's business. */
+const TD_CO = '7777';
+const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const atPost = (table, fields) => fetch(`http://127.0.0.1:9901/v0/appMOCK/${encodeURIComponent(table)}`, {
+  method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer pat_mock' },
+  body: JSON.stringify({ records: [{ fields }] }) }).then((r) => r.json()).catch(() => null);
+/* companyIndex() reads Owner and Kylas Owner ID off Companies, so a fixture
+   without them 422s the whole queue read — which is the Contacts table's
+   neighbour, not the Contacts table. */
+await atPost('Companies', { 'Kylas Company ID': TD_CO, Name: 'Today Fixtures Co',
+  Owner: 'Enout Super Admin', 'Kylas Owner ID': '74725' });
+/* EVERY FIELD THE READER ASKS FOR. readQueue requests CONTACT_READ_FIELDS by
+   name, and Airtable — the real one and this mock — answers UNKNOWN_FIELD_NAME
+   if a name in that list exists nowhere in the table. A half-populated fixture
+   therefore made /queue fall back to Kylas and Today came up empty, which read
+   as a product bug and was a fixture bug. */
+const tdContact = (kid, name, next, phone) => ({
+  'Kylas Contact ID': kid, Name: name, Salutation: '', Designation: 'Head of Ops',
+  LinkedIn: '', Owner: 'Enout Super Admin', 'Kylas Owner ID': '74725',
+  Phone: phone, Phones: '', Email: '', Emails: '', 'Source of Data': 'COLD_CALLING',
+  Remarks: '', 'Next Call Date': next, 'Next Call Time': '',
+  'Current Stage': 'FOLLOW_UP_1', 'KPI Rank': '', 'Kylas Updated At': '',
+  'Vendor Info': '', 'Mode of Meeting': '', 'Service Offering': false,
+  Flagged: false, 'Exit Reason': '',
+  /* "Company" is the LINK field CONTACT_READ_FIELDS asks for; without it
+     anywhere in the table the whole read 422s and Today comes up empty. */
+  Company: [], 'Company Kylas ID': TD_CO,
+});
+await atPost('Contacts', tdContact('880001', 'Due Today Person', day(0), '9000000021'));
+await atPost('Contacts', tdContact('880002', 'Overdue Person', day(-3), '9000000022'));
+
 const ctx = await chromium.launchPersistentContext((process.env.PROFILE_DIR || '/tmp/claude-0/pviews-') + Date.now(), {
   headless: false, viewport: { width: 1600, height: 950 },
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-proxy-server'],
@@ -272,8 +307,7 @@ try {
   ok('the company is clickable too', await coBtn.count() === 1);
   await coBtn.click(); await W(6000);
   ok('clicking a company opens that account',
-     await f().evaluate(() => !document.getElementById('viewport')?.hidden
-       || !!document.getElementById('qscope')?.textContent) === true);
+     await f().evaluate(() => !!document.getElementById('acct')?.textContent.trim()) === true);
 
   console.log('\n13 · external links open, and open safely');
   {
@@ -292,30 +326,9 @@ try {
   }
 
   /* ══ 15 · THE FOUR THINGS AYUSH HIT ON 1.85.1 ════════════════════════ */
-  console.log('\n15 · the company band, and a re-assign reaching the list');
-  await f().evaluate(() => window.openCompanyFromView('1776620',
-    'Gamechangesolar Renewables Private Limited')); await W(6000);
-  const band = await f().evaluate(() => {
-    const n = document.getElementById('qscope'); if (!n) return null;
-    const top = n.querySelector('.qstop'), own = n.querySelector('.cown');
-    const b = own?.querySelector('b'), x = n.querySelector('.cx');
-    const r = (e) => e?.getBoundingClientRect();
-    return { children: [...n.children].map((c) => c.className),
-             xWithTheName: Math.abs((r(x)?.top ?? 0) - (r(n.querySelector('.cn'))?.top ?? 99)) < 8,
-             ownerBelow: (r(own)?.top ?? 0) > (r(n.querySelector('.cn'))?.top ?? 0),
-             label: own?.querySelector('em')?.textContent || '',
-             name: b?.textContent || '', size: b ? getComputedStyle(b).fontSize : '',
-             colour: b ? getComputedStyle(b).color : '' };
-  });
-  ok('the band is two rows, not one that wraps',
-     band && band.children.join() === 'qstop,cown', JSON.stringify(band?.children));
-  ok('the × stays on the row with the company name', band?.xWithTheName === true);
-  ok('the owner has a line of its own, under it', band?.ownerBelow === true);
-  ok('...labelled, and named', /account owner/i.test(band?.label || '') && !!band?.name,
-     `“${band?.label}” / “${band?.name}”`);
-  ok('...at label size, in the text colour — not meta grey',
-     band?.size === '13px' && band?.colour === 'rgb(28, 27, 46)', `${band?.size} ${band?.colour}`);
-
+  console.log('\n15 · a re-assign reaching the list');
+  /* The company band this section used to measure is gone — the header strip
+     replaced it in 1.86, and §16 measures that instead. */
   /* THE OWNER LIST FILLS ITSELF even when the server sends none with the
      contact — which is what a console talking to an older deploy gets. */
   const active = ((await (await fetch(`${BASE}/allot-people`)).json()).people || []).map((p) => p.name);
@@ -359,6 +372,68 @@ try {
     await f().locator('#halfCon').click(); await W(3000);
     const now = (await f().locator('.ctable .crow').first().locator('span').nth(6).textContent() || '').trim();
     ok('...and the Contacts table behind it shows the new owner', now === to, `table “${now}” vs “${to}”`);
+  }
+
+  /* ══ 16 · THE TOP BAR, THE COMPANY STRIP, AND TODAY ══════════════════
+     1.86: the rail's company band moved into the header, the duplicate
+     Dashboard went, and Today stopped meaning two opposite things. */
+  console.log('\n16 · the top bar');
+  await f().evaluate(() => window.showConsoleView(null)); await W(800);
+  await f().evaluate(() => window.openCompanyFromView('1776620',
+    'Gamechangesolar Renewables Private Limited')); await W(6000);
+
+  ok('the rail band is gone', await f().locator('#qscope').count() === 0);
+  ok('the dead log counter is gone', await f().locator('#logCount').count() === 0);
+  const dash = await f().locator('.acts button', { hasText: /Dashboard/ }).count();
+  ok('there is exactly one Dashboard control', dash === 1, `${dash}`);
+
+  const strip = await f().evaluate(() => {
+    const n = document.getElementById('acct'); if (!n) return null;
+    const b = n.querySelector('.cown b');
+    return { name: n.querySelector('.scope')?.textContent || '',
+             owner: b?.textContent || '', ownerVisible: !!b && b.getBoundingClientRect().width > 40,
+             change: !!n.querySelector('.clink'), move: !!n.querySelector('.cmv'),
+             ownRow: n.getBoundingClientRect().top > document.querySelector('.acts').getBoundingClientRect().top };
+  });
+  ok('the company strip is in the header', !!strip?.name, JSON.stringify(strip));
+  ok('...with the owner readable, not crushed', strip?.ownerVisible === true, `“${strip?.owner}”`);
+  ok('...and a Change link beside it', strip?.change === true);
+  ok('...on a row of its own, under the buttons', strip?.ownRow === true);
+
+  /* Nothing in the bar may clip, at any width a BD uses. */
+  for (const w of [1500, 1280, 1100, 980]) {
+    await page.setViewportSize({ width: w, height: 900 }); await W(700);
+    const fits = await f().evaluate(() => {
+      const acts = document.querySelector('.acts'), bar = document.querySelector('.bar');
+      return acts.scrollWidth <= acts.clientWidth + 1 && bar.scrollWidth <= bar.clientWidth + 1;
+    });
+    ok(`nothing clips at ${w}px`, fits === true);
+  }
+  await page.setViewportSize({ width: 1600, height: 950 }); await W(600);
+
+  console.log('\n17 · Today means what you owe');
+  await f().locator('#todayBtn').click(); await W(7000);
+  const td = await f().evaluate(() => {
+    const rows = [...document.querySelectorAll('.tdtable .crow')];
+    return { n: rows.length,
+             tabs: [...document.querySelectorAll('#tdCall,#tdDone')].map((b) => b.textContent.trim()),
+             first: rows[0]?.querySelector('[data-open]')?.textContent?.trim() || '',
+             order: rows.map((r) => r.querySelector('.tdw')?.className || '') };
+  });
+  ok('Today lists the calls that are owed', td.n > 0, JSON.stringify(td));
+  ok('...with a To call and a Done today tab', td.tabs.length === 2 && /To call/.test(td.tabs[0])
+     && /Done today/.test(td.tabs[1]), td.tabs.join(' | '));
+  ok('...overdue before due-today', !td.order.length || td.order[0].includes('overdue')
+     || !td.order.some((c) => c.includes('overdue')), td.order.join(','));
+  ok('the phone dials rather than linking', await f().locator('.tdtable a[href^="tel:"]').count() === 0
+     && await f().locator('.tdtable [data-dial]').count() >= 0);
+  if (td.n) {
+    await f().locator('.tdtable [data-open]').first().click(); await W(6500);
+    const who = await f().locator('#f-poc').inputValue().catch(() => '');
+    ok('a row opens that contact’s call card', !!who && td.first.includes(who.split(' ')[0]),
+       `“${who}” vs “${td.first}”`);
+    ok('...with the company strip naming its account',
+       await f().evaluate(() => !!document.getElementById('acct')?.textContent.trim()) === true);
   }
 
   console.log('\n14 · the console log');

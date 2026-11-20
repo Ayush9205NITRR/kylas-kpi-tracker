@@ -149,6 +149,60 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 1c · The top bar, the company strip and Today (1.86.0)
+
+Ayush drew an arrow across the header and asked what Company and Today were
+for. Reading the code behind that turned up more than crowding.
+
+**The header is two explicit rows now, not one that wraps.** Row one is
+identity, the Calls meter with the link pill, and six actions. Row two is the
+company strip, and it exists only when a company is open. The old rule was
+"never wrap", for a good reason — with `flex-wrap:wrap` the buttons dropped
+onto a second line and the bar's height did not follow, so Close sat on the
+callbar's border. A **grid with two declared rows** is not that: the height
+follows, and nothing overlaps.
+
+**What went, and why:**
+
+| Gone | Reason |
+|---|---|
+| the second Dashboard button | `backBtn` read "← Dashboard" on the Accounts and Flags views while `dashBtn` sat three buttons away calling the same `showView("dashboard")`. Back is a rung now — call card → Accounts — and hidden wherever a view has its own way out |
+| `#logCount` | written to since the day it was added, never un-hidden. Dead UI |
+| the rail's `#qscope` band | it said the company's name, id and contact count, all three of which the header was already saying one band further down |
+| `mode` ("company" / "session") | two things called Today meant opposite things. See below |
+
+**`mode` became `solo`.** The old session mode did two jobs: "show the calls
+made today" and "show ONE contact, not their colleagues". The first moved to
+the Today screen; the second is what `solo` is, and it is named after what it
+does. Opening one person from their Kylas page or from a view's Contacts must
+not fill the rail with their four colleagues — that was decided once already
+and `solo` is what keeps it.
+
+**Today now means what you owe.** It is a screen beside Accounts and
+Dashboard, fed by `/queue` (every contact allotted to you), listing overdue
+and due-today soonest first, with **Done today** on a second tab. Done comes
+from this browser's own `DATA` — the Airtable copy a queue row is built from
+carries no `lastCallAt` — which is exactly the list the old header Today
+showed. The Accounts card keeps the name **Work today** and stays the ★Focus
+plan; the two stop competing because one is a screen and the other a card.
+
+**Count chips.** Reasons, Flags and Re-assigning are a count in a pill; under
+1280px the word goes and the number carries it. `.acts` gained `min-width:0`
+and the bar is asserted not to clip at 1500, 1280, 1100 and 980px — it used
+to clip silently, because `.bar` is `overflow:hidden` and nothing stopped it.
+
+**Left alone on purpose:** the callbar still names the company above the
+person. That was a deliberate call — "an associate 80 calls into a day needs
+to know which account they are on before they know who they are speaking to" —
+and the header strip does not replace it.
+
+**A fixture trap worth knowing.** `readQueue` reads Contacts *and*
+`companyIndex`, and Airtable answers `UNKNOWN_FIELD_NAME` if any requested
+field name exists nowhere in the table. A half-populated fixture therefore
+makes `/queue` fall back to Kylas and Today come up empty — which reads as a
+product bug and is not one. `test-views-live.mjs` seeds every field of both
+tables for this reason.
+
 ## 2 · Getting a working stack in 30 seconds
 
 Everything below runs with no keys and touches nothing real.

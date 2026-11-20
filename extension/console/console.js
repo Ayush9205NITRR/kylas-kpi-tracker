@@ -226,7 +226,7 @@ let DATA=[
 
 let cur=0, isNew=false, filter="todo", target=100, tried=false;
 let scope=null;      /* {id,name} when opened from a Kylas company page */
-let mode="company";  /* company: follow the Kylas page · session: one flat queue */
+
 let ME="";           /* the associate using the console; learned, then remembered */
 let timer=null, secs=0, ringing=false;
 let tmode="idle";     /* idle | dial | est */
@@ -602,16 +602,16 @@ function setOutcome(o){
 }
 
 /* ── queue ───────────────────────────────── */
+/* The rail shows ONE contact, not the company's roster: set when a single
+   person is opened, cleared when a company is. See visible(). */
+let solo=false;
 const FILTERS=[["todo","To call"],["flag","Flagged"],["all","All"]];
 function renderFilters(){
   const w=document.getElementById("qfil");w.innerHTML="";
-  /* These three narrow the COMPANY roster. In Today mode they have no effect at
-     all — visible() ignores them, because "what is left to do" means nothing
-     over a list of calls already made — so three buttons sat there looking
-     live and doing nothing. Hidden where they do nothing, and carrying their
-     count where they do, so "To call" and "Flagged" explain themselves instead
-     of needing to be tried. */
-  if(mode==="session"||!scope){w.hidden=true;return;}
+  /* These three narrow the COMPANY roster, so they are shown only when there
+     is one — and they carry their counts, so "To call" and "Flagged" explain
+     themselves instead of needing to be tried. */
+  if(!scope||solo){w.hidden=true;return;}
   w.hidden=false;
   const roster=DATA.filter(a=>String(a.companyId)===String(scope.id));
   const n={todo:roster.filter(a=>!a.done).length,
@@ -648,16 +648,22 @@ function bySession(x,y){
 const calledToday=a=>Day.isToday(a.lastCallAt);
 const byRecentCall=(x,y)=>String(y.a.lastCallAt||"").localeCompare(String(x.a.lastCallAt||""));
 
+/* THE RAIL IS THE COMPANY ROSTER, and only that. It used to carry a second
+   mode — "Today", a log of the calls already made — reached by a header
+   button that relabelled itself. Two things called Today meant opposite
+   things in one console: this one was work DONE, while the Accounts card of
+   the same name is work OWED (views.js todayPlan). Today is a screen of its
+   own now, and it means what has a deadline (Ayush, 2026-11-20). */
 function visible(){
-  const rows=DATA.map((a,i)=>({a,i}))
-    /* The record you are ON is always in the list. Today is a log of calls
-       made, and a contact opened from its Kylas page has not been called yet —
-       without this it would be missing from the very list it is selected in. */
-    .filter(({a,i})=>mode==="session"?(calledToday(a)||i===cur):(!scope||String(a.companyId)===String(scope.id)))
-    /* Done/flagged narrowing is about what is left to do, so it has no meaning
-       over a list of calls already made. */
-    .filter(({a})=>mode==="session"||filter==="all"||(filter==="flag"?a.flagged:!a.done));
-  return mode==="session"?rows.sort(byRecentCall):rows;
+  /* ONE CONTACT MEANS ONE CONTACT. Opening a person from their Kylas page, or
+     from a view's Contacts table, must not put their four colleagues on
+     screen with the one you asked for merely selected — that was decided
+     once already and `solo` is what keeps it, now that the old "session"
+     mode it used to ride on is gone. */
+  if(solo)return DATA.map((a,i)=>({a,i})).filter(({i})=>i===cur);
+  return DATA.map((a,i)=>({a,i}))
+    .filter(({a,i})=>!scope||String(a.companyId)===String(scope.id)||i===cur)
+    .filter(({a})=>filter==="all"||(filter==="flag"?a.flagged:!a.done));
 }
 function renderQueue(){
   /* Repainted on its own whenever a save job moves, every few seconds while
@@ -666,7 +672,7 @@ function renderQueue(){
   try{paintQueue();}finally{if(Q)Q.scrollTop=qTop;}
 }
 function paintQueue(){
-  renderScope();renderFilters();
+  renderFilters();
   const L=document.getElementById("qlist");L.innerHTML="";
   const rows=visible();
   if(!rows.length){L.appendChild(el("li","qempty","Nothing here right now."));return;}
@@ -679,9 +685,8 @@ function paintQueue(){
     const sync=a.syncing?'<i class="pend sync" title="Saving to Kylas…">…</i>'
       :a.syncError?`<i class="pend err" title="${esc(a.syncError)}">queued</i>`
       :a.pendingCreate?'<i class="pend" title="Not in Kylas yet">new</i>':"";
-    const due=mode==="session"&&a.nextCallDate&&a.nextCallDate<=today()
-      ?'<span class="due">due</span>'
-      :mode==="session"?`<span class="pri">#${priority(a)}</span>`:"";
+    /* A promise that has come due is worth saying on the row itself. */
+    const due=a.nextCallDate&&a.nextCallDate<=today()?'<span class="due">due</span>':"";
     /* WHO, AND WHERE THEY STAND. Ayush, 2026-09-19: "I can see all the POCs
        but I cannot clearly identify which POC I actually interacted with...
        showing Who -> Where they stand would make the information much clearer."
@@ -746,10 +751,43 @@ function renderAccount(){
   const counts=METRICS.map((m,i)=>peers.filter(x=>METRICS.slice(i).some(n=>n.test(x))).length);
   /* scope.name is the fetched company; a.company can still be a pre-fetch
      placeholder, so the scope wins when there is one. */
+  /* THE COMPANY STRIP. Everything the rail's band used to carry is here now,
+     beside the name the header was already showing: id, tiles, contact count,
+     who the account belongs to, and the two things you can do to it. The band
+     said half of this a second time, one band further down the screen
+     (Ayush, 2026-11-20). */
+  const id=scope?.id||a.companyId||"";
   W.innerHTML=`<span class="scope">${esc(scope?.name||a.company||"No company")}</span>
+    ${id?`<span class="cid">#${esc(id)}</span>`:""}
     <span class="tiles">${METRICS.map((m,i)=>
       `<span class="kpi${counts[i]?" hit":""}"><b>${counts[i]}</b>${esc(m.label)}</span>`).join("")}</span>
     <span class="of">${peers.length} contact${peers.length===1?"":"s"}</span>`;
+  if(!id)return;
+  const acc=accountOwner();
+  if(acc.name||acc.id){
+    const o=el("span","cown",`<em>Owner</em><b>${esc(acc.name||("#"+acc.id))}</b>`);
+    o.title="Who this account belongs to in Kylas — not the same thing as who owns this contact";
+    W.appendChild(o);
+    if(window.Views?.reassignOne&&acc.id){
+      const ch=el("button","clink","Change");ch.type="button";
+      ch.title="Hand this account, and every contact on it, to another BD";
+      ch.onclick=()=>window.Views.reassignOne(id,scope?.name||a.company||"",()=>{
+        window.openCompanyFromView?.(id,scope?.name||a.company||"");
+      });
+      o.appendChild(ch);
+    }
+  }
+  if(scope&&window.AllotJobs){
+    const mv=el("button","cmv","Move contacts…");mv.type="button";
+    mv.title="Re-assign this company's contacts (the company stays with its owner)";
+    mv.onclick=()=>moveContactsSheet(scope);
+    W.appendChild(mv);
+  }
+  if(scope){
+    const x=el("button","cx","×");x.type="button";x.title="Leave this company";
+    x.onclick=()=>{scope=null;solo=false;render();};
+    W.appendChild(x);
+  }
 }
 /* CALLS TODAY, THE SAME NUMBER THE PROGRESS TABLE SHOWS.
    Ayush, 2026-10-09: "The calling count is different in both the tab pane" —
@@ -921,59 +959,6 @@ function accountOwner(){
   const c=scope?window.Views?.companyOwner?.(scope.id):null;
   return c?{id:String(c.id||""),name:String(c.name||"")||ownerNameFor(c.id)}:{id:"",name:""};
 }
-function renderScope(){
-  const w=document.getElementById("qscope");
-  if(!w)return;
-  if(!scope||mode!=="company"){w.innerHTML="";w.hidden=true;return;}
-  w.hidden=false;
-  const n=companyRoster(scope.id).length;
-  /* The id, always. It is what every join is on, and "which company is this"
-     must be answerable even when the name could not be resolved. */
-  /* TWO ROWS, EXPLICITLY. This was one wrapping flex row, so a long company
-     name pushed the × onto a line of its own and the owner ended up wedged
-     underneath it — see Ayush's screenshot, 2026-11-19. The top row is the
-     account and its actions; the owner gets a line to itself, at the size
-     something you read on every call deserves. */
-  const top=el("div","qstop");
-  top.innerHTML=`<span class="cn">${esc(scope.name)}</span><span class="cid">#${esc(scope.id)}</span>`
-    +`<span class="cc">${n} contact${n===1?"":"s"}</span>`;
-  w.innerHTML="";
-  w.appendChild(top);
-  if(scope.offline)w.appendChild(el("span","cwarn",
-    `<span title="The proxy is not reachable, so this company's contacts were never fetched. Start it with: source .env.local &amp;&amp; node scripts/proxy.mjs">not loaded from Kylas</span>`));
-  /* RE-ASSIGN THIS COMPANY'S CONTACTS — the company stays where it
-     is. "To the account's owner" is the common case: contacts that sit on
-     somebody else. Runs as a background job (views.js AllotJobs). */
-  if(window.AllotJobs){
-    const mv=el("button","cmv","Move contacts…");mv.type="button";
-    mv.title="Re-assign this company's contacts (the company stays with its owner)";
-    mv.onclick=()=>moveContactsSheet(scope);
-    top.appendChild(mv);
-  }
-  const x=el("button","cx","×");x.type="button";x.title="Leave this company and show today's calls";
-  x.onclick=()=>{scope=null;mode="session";render();};
-  top.appendChild(x);
-  /* WHO THE ACCOUNT BELONGS TO. It was fetched with the company and thrown
-     away; the BD had to open Kylas to find out (Ayush, 2026-11-16). The
-     contact's own owner is on the card below — this is the account's. */
-  const acc=accountOwner();
-  if(acc.name||acc.id){
-    const o=el("div","cown",`<em>Account owner</em><b>${esc(acc.name||("#"+acc.id))}</b>`);
-    o.title="Who this account belongs to in Kylas — not the same thing as who owns this contact";
-    w.appendChild(o);
-    if(window.Views?.reassignOne&&acc.id){
-      const ch=el("button","clink","Change");ch.type="button";
-      ch.title="Hand this account, and every contact on it, to another BD";
-      ch.onclick=()=>window.Views.reassignOne(scope.id,scope.name,()=>{
-        /* Re-read it rather than assume: the job reports per account, and a
-           failure must not leave the card claiming it moved. */
-        window.openCompanyFromView?.(scope.id,scope.name);
-      });
-      o.appendChild(ch);   /* inside the line, not after it: .cown is full-width */
-    }
-  }
-}
-
 /* A REPAINT KEEPS THE PLACE; MOVING TO ANOTHER RECORD RESETS IT.
    render() rebuilds both panes from scratch, and it runs for reasons the
    associate did not cause — a company's contacts arriving from Kylas, a save
@@ -1000,18 +985,8 @@ function putPlace(p){
 }
 function render(){
   const p=placeOf();
-  renderCallbar();renderModeBtn();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
+  renderCallbar();renderQueue();renderPace();renderBasic();renderRight();renderResearchPane();validate();
   putPlace(p);
-}
-/* TODAY / COMPANY, in the header. The rail's two tabs are gone, so one header
-   button carries the mode. It always offers the OTHER side of the pair, so
-   neither view can be stranded: Today when you are on a company, and back to
-   the company when you are on Today and there is one to go back to. */
-function renderModeBtn(){
-  const b=document.getElementById("todayBtn");if(!b)return;
-  const back=mode==="session"&&scope;
-  b.textContent=back?"Company":"Today";
-  b.title=back?`Only the contacts at ${scope.name}`:"The calls you have made today";
 }
 /* Research has its own pane to the right of the events when the screen is
    wide enough (or as the third tab when it is narrow); in between it sits at
@@ -2184,7 +2159,7 @@ function saveNext(){
     kid:a.kid, pocName:a.pocName, company:a.company, owner:a.owner,
     outcome:outcome?outcome.t:null, stageSet:a.stage, duration, durationSource,
     createdHere:wasNew,
-  }).then(n=>{const c=document.getElementById("logCount");if(c)c.textContent=n;});
+  });   /* #logCount is gone — it was written to and never un-hidden. */
   persist();
   if(a.kid)Store.clearDraft(a.kid);
 
@@ -2271,15 +2246,16 @@ function newContact(){
   /* The id with the name (2026-10-30 stress test): a default owner with no
      id sent no ownerId, so every new contact landed on the API user. */
   if(ME){b.owner=ME;b.ownerId=ownerIdFor(ME);}
-  DATA=[b,...DATA];cur=0;isNew=true;filter="all";renderFilters();render();
+  /* A new contact belongs to the company's list, not to a solo card. */
+  DATA=[b,...DATA];cur=0;isNew=true;solo=false;filter="all";renderFilters();render();
   resetScroll();setTab("basic");
   setTimeout(()=>document.getElementById("f-poc")?.focus(),50);
 }
 on("newBtn","click",newContact);
-on("todayBtn","click",()=>{
-  mode=(mode==="session"&&scope)?"company":"session";
-  const rows=visible();cur=rows.length?rows[0].i:cur;render();resetScroll();
-});
+/* TODAY IS A SCREEN, not a mode of the rail. It used to relabel itself
+   "Company" and flip a flag, which left a no-op button whenever there was no
+   company to go back to. */
+on("todayBtn","click",()=>window.showConsoleView?.("today"));
 /* "+ New company", beside "+ New contact" in the header (Ayush, 2026-11-13:
    that is where it is looked for). The same form the card's company search
    opens; an open Accounts view shows the new company straight away. */
@@ -2542,8 +2518,6 @@ async function boot(){
   const saved=await Store.loadContacts();
   if(saved&&saved.length)DATA=saved;
   const log=await Store.loadLog();
-  const c=document.getElementById("logCount");
-  if(c)c.textContent=log.length;
   /* done means "logged today", derived from the log — not a stored field. */
   const t=today();
   const loggedToday=new Set(log.filter(e=>Day.dayOf(e.at)===t).map(e=>e.kid));

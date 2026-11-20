@@ -4434,6 +4434,163 @@
     document.body.appendChild(el);
   }
 
+  /* ══ TODAY — WHAT YOU OWE ═════════════════════════════════════════════
+     The one screen with a deadline. Until 1.86 "Today" was a mode of the left
+     rail listing the calls already MADE, while the Accounts card of the same
+     name listed the calls still OWED — two opposite meanings, one word, one
+     console (Ayush, 2026-11-20). Today means what is owed. What was done is
+     still here, on its own tab, because a BD does want to see the day's work;
+     it just is not the thing with the deadline.
+
+     Fed by /queue: every contact allotted to the person signed in, which is
+     the same list the dialling queue is cut from. Not the ★Focus plan — that
+     is todayCard's job on the Accounts screen, and it is deliberately
+     narrower. */
+  const TD = { rows: [], at: 0, loading: false, err: "", tab: "call", q: "", owner: "" };
+  async function loadToday(force) {
+    if (TD.loading) return;
+    if (TD.rows.length && !force && Date.now() - TD.at < 3 * 60 * 1000) return;
+    TD.loading = true; TD.err = "";
+    try {
+      const r = await API.queue();
+      TD.rows = r.contacts || []; TD.at = Date.now();
+      if (r.owners?.length) CACHE.owners = r.owners;
+    } catch (e) { TD.err = String(e.message || e).slice(0, 200); }
+    TD.loading = false;
+  }
+  /* overdue | today | later | none, from the contact's own call-back date. */
+  const tdWhen = (c) => {
+    const d = c.nextCallDate ? global.Day.daysUntil(c.nextCallDate) : null;
+    return d === null ? "none" : d < 0 ? "overdue" : d === 0 ? "today" : "later";
+  };
+  const tdDone = (c) => !!c.lastCallAt && global.Day.isToday(c.lastCallAt);
+  /* DONE COMES FROM THIS BROWSER'S OWN RECORD, not from /queue: the Airtable
+     copy a queue row is built from carries no lastCallAt (airtable.mjs
+     toConsoleContactFromAirtable), and lastCallAt is stamped here at save
+     time. This is exactly the list the old header "Today" showed — it has not
+     been lost, it has been put under the tab that says what it is. */
+  const doneToday = () => {
+    const d = typeof DATA !== "undefined" && Array.isArray(DATA) ? DATA : [];
+    return d.filter(tdDone);
+  };
+  function todayRows() {
+    const q = TD.q.trim().toLowerCase();
+    const owed = TD.rows.filter((c) => ["overdue", "today"].includes(tdWhen(c)));
+    const done = doneToday();
+    const pick = TD.tab === "done" ? done : owed;
+    const hit = (c) => !q || [c.pocName, c.company, c.owner, c.designation,
+      ...(c.phones || []).map((p) => p.value)].some((v) => String(v || "").toLowerCase().includes(q));
+    const mine = (c) => !TD.owner || String(c.owner || "") === TD.owner;
+    const rows = pick.filter((c) => hit(c) && mine(c));
+    return { rows: TD.tab === "done"
+      ? rows.sort((a, b) => String(b.lastCallAt || "").localeCompare(String(a.lastCallAt || "")))
+      /* Soonest first, so the most overdue is the first thing on screen. */
+      : rows.sort((a, b) => (global.Day.daysUntil(a.nextCallDate) ?? 0) - (global.Day.daysUntil(b.nextCallDate) ?? 0)),
+      owed: owed.length, done: done.length };
+  }
+  async function today(host) {
+    LAST_HOST = null;                     /* this is not the accounts explorer */
+    const paint = () => {
+      if (TD.loading && !TD.rows.length) { host.innerHTML = `<p class="vnote">Loading today…</p>`; return; }
+      if (TD.err && !TD.rows.length) {
+        host.innerHTML = `<div class="card explorer"><div class="exhead"><h2>Today</h2>
+          <p class="vwarn">${esc(TD.err)}</p>
+          <button class="gbtn sm" id="tdRetry" type="button">Try again</button></div></div>`;
+        host.querySelector("#tdRetry")?.addEventListener("click", () => { loadToday(true).then(paint); });
+        return;
+      }
+      const { rows, owed, done } = todayRows();
+      const owners = [...new Set(TD.rows.map((c) => c.owner).filter(Boolean))].sort();
+      const when = (c) => {
+        const d = global.Day.daysUntil(c.nextCallDate);
+        return d == null ? "—" : d < 0 ? `Overdue ${-d}d` : d === 0 ? "Today" : `In ${d}d`;
+      };
+      const row = (c) => {
+        const tel = (c.phones || [])[0];
+        const k = tdWhen(c);
+        return `<div class="vr crow" data-kid="${esc(c.kid || "")}">
+          <span><button type="button" class="clink2" data-open="${esc(c.kid || "")}"${c.kid ? "" : " disabled"}
+            title="Open the call card">${esc(c.pocName || "(no name)")}</button></span>
+          <span>${c.companyId ? `<button type="button" class="clink2" data-stop="1"
+            data-openco="${esc(c.companyId)}">${esc(c.company || "—")}</button>` : esc(c.company || "—")}</span>
+          <span>${esc(label(c.stage) || "—")}</span>
+          <span>${tel?.value ? `<button type="button" class="clink2" data-stop="1"
+            data-dial="${esc((tel.cc || "") + tel.value)}">${esc((tel.cc ? tel.cc + " " : "") + tel.value)}</button>` : "—"}</span>
+          <span>${esc(c.owner || "—")}</span>
+          <span class="num">${TD.tab === "done"
+            ? esc(c.lastCallAt ? since(c.lastCallAt) : "—")
+            : `<i class="tdw ${k}"></i> ${esc(when(c))}`}</span>
+        </div>`;
+      };
+      host.innerHTML = `<div class="card explorer">
+        <div class="exhead">
+          <h2>Today</h2>
+          <span class="exn tnum">${rows.length} ${rows.length === 1 ? "call" : "calls"}</span>
+          <button class="gbtn sm" id="tdRefresh" type="button">Refresh</button>
+          <p>${owed ? "What you owe today — the most overdue first. The name opens the call card; the number dials."
+                    : "Nothing is due today. Anything you promised later is on the account."}</p>
+        </div>
+        <div class="extools">
+          <div class="vtoggle" role="group" aria-label="Owed or done">
+            <button type="button" id="tdCall"${TD.tab === "call" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>To call ${owed}</button>
+            <button type="button" id="tdDone"${TD.tab === "done" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>Done today ${done}</button>
+          </div>
+          <div class="srch"><input id="tdQ" type="search" value="${esc(TD.q)}"
+            placeholder="Search people, companies, numbers…" aria-label="Search today" autocomplete="off"></div>
+          ${owners.length > 1 ? `<select id="tdOwner" aria-label="Owner">
+            <option value="">Every owner</option>
+            ${owners.map((o) => `<option value="${esc(o)}"${TD.owner === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
+          </select>` : ""}
+        </div>
+        <div class="accscroll"><div class="acctable tdtable">
+          <div class="vr vh"><span>Contact</span><span>Company</span><span>Stage</span>
+            <span>Phone</span><span>Owner</span><span class="num">${TD.tab === "done" ? "Called" : "Call-back"}</span></div>
+          ${rows.length ? rows.map(row).join("")
+            : `<div class="vempty">${TD.tab === "done" ? "No calls logged yet today." : "Nothing due — go and find some."}</div>`}
+        </div></div>
+      </div>`;
+      const on = (id, ev, fn) => host.querySelector("#" + id)?.addEventListener(ev, fn);
+      on("tdCall", "click", () => { TD.tab = "call"; paint(); });
+      on("tdDone", "click", () => { TD.tab = "done"; paint(); });
+      on("tdRefresh", "click", () => { loadToday(true).then(paint); });
+      on("tdQ", "input", (e) => { TD.q = e.target.value; paint();
+        const n = host.querySelector("#tdQ"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } });
+      on("tdOwner", "change", (e) => { TD.owner = e.target.value; paint(); });
+      wireRowActions(host);
+    };
+    paint();
+    await loadToday();
+    paint();
+  }
+
+  /* The name opens the card, the company opens the account, the number dials.
+     Shared by Today and by a view's Contacts, because they are the same row
+     with different columns — and because tel:/mailto: are blocked inside this
+     frame, so none of these may be links. */
+  function wireRowActions(host) {
+    host.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (b.dataset.open) global.openContactFromView?.(b.dataset.open);
+    }));
+    host.querySelectorAll("[data-openco]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (b.dataset.openco) global.openCompanyFromView?.(b.dataset.openco, b.textContent.trim());
+    }));
+    host.querySelectorAll("[data-dial]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const num = b.dataset.dial; if (!num) return;
+      if (typeof global.requestDial === "function") global.requestDial(num);
+      else if (typeof global.copyNumber === "function") global.copyNumber(num);
+    }));
+    host.querySelectorAll("[data-mail]").forEach((b) => b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const addr = b.dataset.mail; if (!addr) return;
+      navigator.clipboard?.writeText(addr)
+        .then(() => global.toast?.(`${addr} copied`))
+        .catch(() => global.toast?.(`Could not copy ${addr}`));
+    }));
+  }
+
   /* ══ THE CONTACTS HALF OF A VIEW ══════════════════════════════════════
      Same named view, one level down: the people at those accounts. The BD
      lives on the call card, so every row here is a way into one — the name
@@ -6429,7 +6586,7 @@
   let LAST_HOST = null;
   const redrawExplorer = () => { if (LAST_HOST && LAST_HOST.isConnected) companies(LAST_HOST).catch(() => {}); };
 
-  global.Views = { rollup, dashboard, companies, FILTERS, savedLanded, reassignOne,
+  global.Views = { rollup, dashboard, companies, today, FILTERS, savedLanded, reassignOne,
                   noteOwnerChange, noteAccountOwner,
                   /* The account's open-account state, for the call card (console.js). */
                   companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },

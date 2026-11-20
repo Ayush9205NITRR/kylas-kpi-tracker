@@ -19,22 +19,34 @@
 
   <header class="bar">
     <div class="id"><div class="g">EN</div><h1>Call console</h1></div>
-    <div class="pace"><span>Calls</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span></div>
+    <!-- STATUS SITS WITH STATUS. The link pill was in the button row, so a
+         server-version warning read as one more thing to press, and it cost
+         the actions width they then clipped silently. -->
+    <div class="pace"><span>Calls</span><b id="pcount">0</b><span class="meter"><i id="pbar" style="width:0%"></i></span><span id="ptarget">/ 100</span>
+      <span class="link" id="linkState" title="Checking the proxy…">·</span></div>
+    <!-- The company you are on: name, id, tiles, contacts, owner and the two
+         actions. It used to be described here AND again in a band at the top
+         of the left rail; the band is gone (Ayush, 2026-11-20: "isko top
+         mein"). renderAccount() fills it. -->
     <div class="acct" id="acct"></div>
     <div class="sp"></div>
     <!-- One group, so the actions can never wrap away from each other and
-         land on a second row the bar has no height for. -->
+         land on a second row the bar has no height for. Six controls now:
+         there were ten, two of which went to the same place and one of which
+         had been invisible since the day it was written. -->
     <div class="acts">
-      <button class="gbtn" id="backBtn" type="button" hidden>← Back</button>
+      <button class="gbtn" id="backBtn" type="button" hidden>← Accounts</button>
       <button class="gbtn" id="newBtn" type="button">+ New contact</button>
       <button class="gbtn" id="newCoBtn" type="button" title="Create a company in Kylas, with the details its score needs">+ New company</button>
-      <span class="link" id="linkState" title="Checking the proxy…">·</span>
-      <button class="gbtn" id="todayBtn" type="button" title="The calls you have made today">Today</button>
+      <button class="gbtn" id="todayBtn" type="button" title="The calls you owe today — overdue first">Today</button>
       <button class="gbtn" id="dashBtn" type="button" title="The funnel ladder, talk time and RCA — yours or the team's">Dashboard</button>
-      <button class="gbtn" id="jobBtn" type="button" hidden title="Re-assignment running on the server">Re-assigning</button>
-      <button class="gbtn" id="rcaBtn" type="button" hidden title="Stalled contacts that need a reason — and the reasons already given">Reasons</button>
-      <button class="gbtn" id="flagsBtn" type="button" hidden title="Possible duplicate contacts waiting for an admin">Flags</button>
-      <span id="logCount" hidden>0</span>
+      <!-- Counts, not sentences: three things that are only ever "how many",
+           so they cost what one button used to. -->
+      <span class="cnts">
+        <button class="gbtn cnt" id="jobBtn" type="button" hidden title="Re-assignment running on the server"><i>Re-assigning</i></button>
+        <button class="gbtn cnt" id="rcaBtn" type="button" hidden title="Stalled contacts that need a reason — and the reasons already given"><i>Reasons</i><b></b></button>
+        <button class="gbtn cnt" id="flagsBtn" type="button" hidden title="Possible duplicate contacts waiting for an admin"><i>Flags</i><b></b></button>
+      </span>
       <button class="gbtn ovOnly" id="dockBtn" title="Dock to the side">Dock</button>
       <button class="gbtn ovOnly" id="closeBtn" title="Close (Esc)">Close</button>
     </div>
@@ -46,10 +58,10 @@
     <aside class="queue">
       <!-- THE RAIL IS THE CONTACT LIST, and nothing else (Ayush, 2026-11-16:
            "contact pane ke left ka UI not required"). The Company/Today tab
-           switch and the ★ Focus / overdue summary that used to sit here are
-           gone; Today is reached from the header instead, so the mode is not
-           stranded. -->
-      <div class="qscope" id="qscope" hidden></div>
+           switch and the ★ Focus / overdue summary went first; the company
+           band followed it on 2026-11-20 — it said the same things the header
+           already said, one band further down. The header is the company
+           strip now. -->
       <!-- The search box is gone. It promised "name, company, phone" and could
            not deliver any of the three: visible() narrows to the open company
            BEFORE the query runs, so searching a contact at another company, or
