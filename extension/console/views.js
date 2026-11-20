@@ -4883,7 +4883,11 @@
       cell: (c) => { const u = webUrl(c.linkedin);
         return u ? `<a class="lnk li" href="${esc(u)}" target="_blank" rel="noopener noreferrer"
           data-stop="1" title="${esc(u)}"><i aria-hidden="true">in</i>Profile</a>` : "—"; } },
-    { k: "stage", label: "Calling stage", w: "1.1fr", on: true,
+    /* Wider than it looks like it needs: the stage names are long by nature
+       ("MQL (Marketing Qualified Lead)") and a pill that ellipsises on every
+       row makes the column decorative — you can see that something is set
+       and not what. */
+    { k: "stage", label: "Calling stage", w: "1.45fr", on: true,
       get: (c) => label(c.stage) || c.stage || "",
       cell: (c) => (c.stage ? `<span class="spill r${Math.max(0, Math.min(5, rungBand(c.stage)))}"
         title="${esc(label(c.stage) || c.stage)}">${esc(label(c.stage) || c.stage)}</span>` : "—") },
@@ -4910,8 +4914,9 @@
     const r = STAGE_RUNG[code] || 0;
     return r <= 0 ? 0 : Math.min(5, Math.ceil(r / 6));
   };
-  const cGrid = (cols) => cols.map((c) => `minmax(${c.num ? 92 : 120}px, ${c.w})`).join(" ");
-  const cMin = (cols) => cols.reduce((a, c) => a + (c.num ? 92 : 120), 0) + 14 * (cols.length - 1) + 24;
+  const cFloor = (c) => (c.num ? 92 : c.k === "stage" ? 170 : 120);
+  const cGrid = (cols) => cols.map((c) => `minmax(${cFloor(c)}px, ${c.w})`).join(" ");
+  const cMin = (cols) => cols.reduce((a, c) => a + cFloor(c), 0) + 14 * (cols.length - 1) + 24;
 
   function contactColumnPicker() {
     const opt = CCOLS.filter((c) => !c.fixed);
@@ -4953,8 +4958,15 @@
       return `${head}<div class="vr crow" data-kid="${esc(c.kid || "")}">${
         cols.map((col) => `<span${col.num ? ' class="num"' : ""}>${col.cell(c)}</span>`).join("")}</div>`;
     };
-    const chip = (set, k, lab) => `<button type="button" class="chip${set.has(k) ? " on" : ""}" data-cchip="${esc(k)}"
+    /* aria-pressed, NOT a class of its own. `.chip.on` was styled nowhere, so
+       a picked Stage filtered the list and looked exactly like an unpicked
+       one — the row was doing something and saying nothing (Ayush,
+       2026-11-20). The accounts chips next door were right all along because
+       they use the attribute, which is also what a screen reader reads. */
+    const chip = (set, k, lab) => `<button type="button" class="chip" aria-pressed="${set.has(k)}"
+      data-cchip="${esc(k)}"
       data-cset="${set === ACC.cStage ? "cStage" : set === ACC.cOwner ? "cOwner" : "cFresh"}">${esc(lab)}</button>`;
+    const chipsOn = ACC.cStage.size + ACC.cOwner.size + ACC.cFresh.size;
     return `<div class="card explorer">
       <div class="exhead">
         <h2>${esc(v.name)} · Contacts</h2>
@@ -4978,9 +4990,19 @@
           aria-pressed="${ACC.cGroup}">Group by company</button>
         ${contactColumnPicker()}
       </div>
-      ${stages.length > 1 ? `<div class="chiprow"><span class="cl">Stage</span>${stages.map((k) => chip(ACC.cStage, k, label(k) || k)).join("")}</div>` : ""}
-      ${owners.length > 1 ? `<div class="chiprow"><span class="cl">Owner</span>${owners.map((k) => chip(ACC.cOwner, k, k)).join("")}</div>` : ""}
-      <div class="chiprow"><span class="cl">Last call</span>${FRESH.map((z) => chip(ACC.cFresh, z.k, z.label)).join("")}</div>
+      <div class="chipset">
+        ${stages.length > 1 ? `<div class="chiprow"><span class="cl">Stage</span>
+          <span class="cv">${stages.map((k) => chip(ACC.cStage, k, label(k) || k)).join("")}</span></div>` : ""}
+        ${owners.length > 1 ? `<div class="chiprow"><span class="cl">Owner</span>
+          <span class="cv">${owners.map((k) => chip(ACC.cOwner, k, k)).join("")}</span></div>` : ""}
+        <div class="chiprow"><span class="cl">Last call</span>
+          <span class="cv">${FRESH.map((z) => chip(ACC.cFresh, z.k, z.label)).join("")}</span></div>
+        ${/* Only once something is on. A permanent Clear is a control that
+             does nothing on most days, and the rows are busy enough. */ ""}
+        ${chipsOn ? `<div class="chiprow"><span class="cl"></span><span class="cv">
+          <button type="button" class="chipclr" id="conClear">Clear ${chipsOn} filter${chipsOn === 1 ? "" : "s"}</button>
+        </span></div>` : ""}
+      </div>
       <div class="accscroll"><div class="acctable ctable" style="--acols:${cGrid(cols)};--amin:${cMin(cols)}px">
         <div class="vr vh">${cols.map((c) =>
           `<span${c.num ? ' class="num"' : ""}>${esc(c.label)}</span>`).join("")}</div>
@@ -6278,6 +6300,9 @@
     on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
     on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     on("conCsv", "click", exportContacts);
+    on("conClear", "click", () => {
+      ACC.cStage.clear(); ACC.cOwner.clear(); ACC.cFresh.clear(); redraw();
+    });
     on("cColBtn", "click", () => { ACC.ccolsOpen = !ACC.ccolsOpen; redraw(); });
     on("cColReset", "click", () => { ACC.ccols = new Set(CCOL_DEFAULT); saveAccPrefs(); redraw(); });
     host.querySelectorAll("[data-ccol]").forEach((b) => { b.onchange = () => {

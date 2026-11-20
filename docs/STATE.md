@@ -149,6 +149,38 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 0 · The filter rows and the view actions (1.88.1)
+
+Two crops from Ayush, 2026-11-20, and both turned out to be missing CSS
+rather than taste.
+
+**`.chiprow` and `.cl` had no styling at all.** The Contacts half was emitting
+markup nothing styled, so "Stage" sat flush against its first chip and three
+rows ran together as one block of text. The Accounts side solved this long ago
+with `.frow` / `.lbl` and a fixed label column; the Contacts half now has the
+same — labels right-aligned in a 72px column so the eye finds "Owner" without
+reading "Stage" first, and every row's chips starting on one x.
+
+**A picked chip looked exactly like an unpicked one.** The markup set
+`class="chip on"` and `.chip.on` is styled nowhere; the accounts chips next
+door were right all along because they use `aria-pressed`, which is also what
+a screen reader reads. So the filters worked and said nothing about it. Now
+the attribute drives the style, resting chips step back (a row of nine pills
+at full strength is a wall, and none of them is the answer), and a **Clear N
+filters** appears once anything is on — only then, because a permanent Clear
+is a control that does nothing on most days.
+
+**Edit / Duplicate / Delete** were three unstyled buttons at equal weight with
+Delete in rose, shouting hardest — and Delete is the rarest of the three and
+the only one that cannot be undone. One bordered group with hairline dividers
+now, which says they belong to the view above instead of floating; Delete
+rests at the same weight as its neighbours and turns rose under the pointer.
+The warning belongs at the moment of the act, not on the resting screen.
+
+Also: the stage pill was ellipsising on every row, which makes a column
+decorative — you can see that something is set and not what. Its floor is
+170px now and the full name fits.
+
 ## 1 · Last call, the column picker and an instant Contacts tab (1.88.0)
 
 ### The bug: every contact said "never"
@@ -435,7 +467,7 @@ xvfb-run -a node scripts/test-move-live.mjs   # 15 · a REAL Chrome with the ext
                                               #      loaded: the console moves, resizes,
                                               #      remembers and resets. Needs the :8778
                                               #      stub and a patched copy of extension/
-xvfb-run -a node scripts/test-export-live.mjs # 39 · Download CSV on both halves of a
+xvfb-run -a node scripts/test-export-live.mjs # 50 · Download CSV on both halves of a
                                               #      view, read back off disk with a real
                                               #      CSV parser. SEED BEFORE STARTING THE
                                               #      PROXY — it caches the company index

@@ -246,6 +246,67 @@ try {
   ok("...and a contact with no call still reads never, rather than a wrong date",
      lc.every((x) => x !== ""), lc.join(" | "));
 
+  console.log("\n8 · the filter rows and the view actions");
+  /* `.chiprow` and `.cl` had no CSS at all, so the label sat flush against
+     the first chip and three rows ran together as one block of text. */
+  const geo = await f().evaluate(() => {
+    const rows = [...document.querySelectorAll(".chiprow")];
+    const labs = rows.map((r) => r.querySelector(".cl")).filter((x) => x && x.textContent.trim());
+    const chips = rows.map((r) => r.querySelector(".chip")).filter(Boolean);
+    return { rows: rows.length,
+      labelRights: [...new Set(labs.map((l) => Math.round(l.getBoundingClientRect().right)))].length,
+      chipLefts: [...new Set(chips.map((c) => Math.round(c.getBoundingClientRect().left)))].length,
+      gap: chips.length && labs.length
+        ? Math.round(chips[0].getBoundingClientRect().left - labs[0].getBoundingClientRect().right) : 0 };
+  });
+  ok("the filter labels line up in one column", geo.labelRights === 1, `${geo.labelRights} x-positions`);
+  ok("...and every chip row starts on the same x", geo.chipLefts === 1, `${geo.chipLefts} x-positions`);
+  ok("...with the label clear of the first chip", geo.gap >= 8, `${geo.gap}px`);
+
+  /* `.chip.on` was styled nowhere and the markup carried no aria-pressed, so
+     a picked Stage filtered the list and looked exactly like an unpicked one:
+     the row was doing something and saying nothing. */
+  const chip1 = f().locator(".chipset .chip").first();
+  const bg0 = await chip1.evaluate((n) => getComputedStyle(n).backgroundColor);
+  await chip1.click(); await W(900);
+  ok("a picked chip looks picked",
+     await chip1.evaluate((n) => getComputedStyle(n).backgroundColor) !== bg0);
+  ok("...and says so to a screen reader", await chip1.getAttribute("aria-pressed") === "true");
+  ok("...and a Clear appears to undo it", await f().locator("#conClear").count() === 1);
+  await f().locator("#conClear").click(); await W(900);
+  ok("Clear turns every chip off and removes itself",
+     await f().locator('.chipset .chip[aria-pressed="true"]').count() === 0
+     && await f().locator("#conClear").count() === 0);
+
+  /* Edit / Duplicate / Delete were three unstyled buttons at equal weight
+     with Delete shouting in rose — the rarest of the three and the only one
+     that cannot be undone. */
+  const acts = await f().evaluate(() => {
+    const g = document.querySelector(".vwacts"); if (!g) return null;
+    const bs = [...g.querySelectorAll("button")];
+    const cs = getComputedStyle(g);
+    return { n: bs.length, border: cs.borderTopWidth, radius: cs.borderTopLeftRadius,
+      oneRow: new Set(bs.map((b) => Math.round(b.getBoundingClientRect().top))).size === 1,
+      del: getComputedStyle(bs[bs.length - 1]).color, other: getComputedStyle(bs[0]).color };
+  });
+  ok("the view actions are one bordered group on one row",
+     !!acts && acts.border !== "0px" && acts.radius !== "0px" && acts.oneRow, JSON.stringify(acts));
+  ok("...with Delete resting at the same weight as the others",
+     acts && acts.del === acts.other, `${acts?.del} vs ${acts?.other}`);
+  const delBtn = f().locator(".vwacts .danger");
+  if (await delBtn.count()) {
+    await delBtn.hover(); await W(400);
+    ok("...turning rose only under the pointer, where the warning belongs",
+       await delBtn.evaluate((n) => getComputedStyle(n).color) !== acts.other);
+  }
+
+  /* A pill that ellipsises on every row makes the column decorative: you can
+     see that something is set and not what. */
+  const pills = await f().evaluate(() => [...document.querySelectorAll(".ctable .spill")]
+    .map((p) => p.scrollWidth > p.clientWidth + 1));
+  ok("no stage pill is clipped at this width",
+     pills.length > 0 && !pills.some(Boolean), `${pills.filter(Boolean).length} of ${pills.length} clipped`);
+
   console.log("\n5 · nothing a spreadsheet would run");
   /* A cell beginning = + @ is how a CSV gets a spreadsheet to execute
      something. Every exporter quotes it; this one checks. */

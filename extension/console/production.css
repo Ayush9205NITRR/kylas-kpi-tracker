@@ -1563,8 +1563,67 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .vwnew{border:1px dashed var(--blueLine);background:transparent;border-radius:999px;
   padding:5px 12px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--blue);cursor:pointer}
 .vwnew:hover{background:var(--blueSoft)}
-.vwacts{display:inline-flex;gap:10px;align-items:center;margin-left:4px}
-.vwacts .danger{color:var(--rose)}
+/* EDIT · DUPLICATE · DELETE, as one control rather than three.
+   They were three unstyled buttons sitting in a row at equal weight, with
+   Delete in rose shouting hardest — and Delete is the rarest of the three
+   and the only one you cannot undo. So: one bordered group with hairline
+   dividers, which says "these three belong to the view above" instead of
+   leaving them floating; text weight, because they are secondary to the
+   view tabs; and Delete neutral until you are actually on it, where it
+   turns rose. The warning belongs at the moment of the act, not on the
+   resting screen. */
+.vwacts{display:inline-flex;align-items:stretch;margin-left:8px;
+  border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;background:var(--panel)}
+.vwacts .linkbtn{background:transparent;border:0;border-left:1px solid var(--line2);
+  padding:6px 12px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer;transition:background 90ms ease,color 90ms ease}
+.vwacts .linkbtn:first-child{border-left:0}
+.vwacts .linkbtn:hover{background:var(--panel3);color:var(--text)}
+.vwacts .linkbtn:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.vwacts .danger{color:var(--text2)}
+.vwacts .danger:hover{background:var(--roseSoft);color:var(--rose)}
+@media (prefers-reduced-motion:reduce){ .vwacts .linkbtn{transition:none} }
+
+/* ══ THE CONTACTS FILTER ROWS ══════════════════════════════════════════
+   `.chiprow` and `.cl` had no styling at all, so the label sat flush
+   against the first chip and three rows ran together as one block of text
+   (Ayush, 2026-11-20). The accounts side solved this long ago with .frow /
+   .lbl and a fixed label column; this is that, for the other half.
+
+   A COLUMN, NOT A GAP. The labels line up under each other, so the eye
+   finds "Owner" without reading "Stage" first, and the chips all start on
+   the same x — which is what makes three rows scan as three questions
+   instead of one paragraph. */
+.chipset{margin:2px 0 12px;display:flex;flex-direction:column;gap:7px}
+.chiprow{display:flex;align-items:flex-start;gap:10px;min-width:0}
+.chiprow .cl{flex:none;width:72px;padding-top:5px;text-align:right;
+  font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text3)}
+.chiprow .cv{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+
+/* The resting chip steps back. A row of nine bordered pills at full
+   strength is a wall, and none of them is the answer — the one that IS
+   picked already has the accent to say so. */
+.chipset .chip{border-color:var(--line);color:var(--text2);background:var(--panel)}
+.chipset .chip:hover{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
+.chipset .chip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);
+  color:var(--onBlue);font-weight:var(--w-strong)}
+.chipset .chip[aria-pressed="true"]:hover{background:var(--blueDeep);border-color:var(--blueDeep);
+  color:var(--onBlue)}
+.chipset .chip:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+/* Only appears once something is on, so it is allowed to be plain text. */
+.chipclr{border:0;background:none;padding:4px 2px;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-strong);color:var(--blue);cursor:pointer;text-decoration:underline;
+  text-underline-offset:2px}
+.chipclr:hover{color:var(--blueDeep)}
+.chipclr:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+
+/* Phone width: the label column costs more than it gives when the chips
+   wrap to three lines anyway. */
+@media (max-width:620px){
+  .chiprow{flex-direction:column;gap:4px}
+  .chiprow .cl{width:auto;text-align:left;padding-top:0}
+}
 .vwsnote{font-size:var(--t-meta);color:var(--text3)}
 .vwsnote.bad{color:var(--amber)}
 .vwhalf{display:flex;align-items:center;gap:12px;margin:0 0 10px;flex-wrap:wrap}
