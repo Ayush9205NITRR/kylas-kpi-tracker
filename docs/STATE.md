@@ -149,6 +149,43 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 1a · Download CSV, from a view (1.87.0)
+
+Ayush, 2026-11-20, looking at "BD <> SHRM Database · Contacts · 257 people":
+*"sirf mereko do csv file do"*. A named view answers a question the CRM's own
+export cannot — these 80 accounts, these 257 people — and until now the only
+way out of it was the screen.
+
+**Download CSV** sits beside Refresh on both halves of a view.
+
+- **What is on screen is what goes in.** The Stage / Owner / Last call chips,
+  the search box and the sort all apply: the filtering is the work, and an
+  export that ignored it would hand back the job the console just did. Accounts
+  read `EXPLORER_ROWS`, the array the table just painted, so the sheet and the
+  screen are the same list by construction rather than by a second filter
+  that can drift.
+- **Accounts reuse `ACOLS`**, the column catalogue the table and the filter
+  builder already share (`ff.get` is the raw value behind each cell), so a
+  column added there reaches the sheet with nobody remembering to. Enrichment
+  columns are included whether or not they are switched on.
+- **Contacts flatten the event rows**: two columns per event type, "… — now"
+  and "… — past", each holding that row's pax, timeline, budget and remarks.
+  One row per contact is what a sheet is for; a row per event cannot be read
+  beside the contact fields. The free text is carried verbatim — tidying
+  "approx 8L, not signed off" into a number loses the half a BD acts on.
+- **A BOM, and a quote before `= + - @`.** Without the BOM Excel on Windows
+  mangles a name; without the quote a CSV is a way to make a spreadsheet run
+  something.
+- **No button at zero rows.** An empty sheet is a worse answer than no sheet:
+  it opens, it looks like the export ran, and it says the data is gone.
+
+`scripts/test-export-live.mjs` (26) reads the file back off disk with a real
+CSV parser — asserting on the raw text passes for the wrong reason the moment
+a value contains a comma, which "Pax: 60, maybe 80" does. Its header carries
+the ordering trap that cost a run: the proxy caches the company index for 15
+minutes, so a Companies row written after the proxy started is invisible and
+the symptom is an empty table that reads as a broken export.
+
 ## 1b · The owner, big enough to recognise (1.86.1)
 
 The strip §1c moved into the header put the account owner at `--t-label` in
@@ -317,6 +354,12 @@ xvfb-run -a node scripts/test-move-live.mjs   # 15 · a REAL Chrome with the ext
                                               #      loaded: the console moves, resizes,
                                               #      remembers and resets. Needs the :8778
                                               #      stub and a patched copy of extension/
+xvfb-run -a node scripts/test-export-live.mjs # 26 · Download CSV on both halves of a
+                                              #      view, read back off disk with a real
+                                              #      CSV parser. SEED BEFORE STARTING THE
+                                              #      PROXY — it caches the company index
+                                              #      for 15 minutes and a later fixture
+                                              #      reads as an empty table
 ```
 
 `test-idempotency.mjs` is the one to imitate for anything new: it spawns its own

@@ -4638,6 +4638,113 @@
     if (ACC.cGroup) rows.sort((a, b) => String(a.company || "").localeCompare(String(b.company || "")));
     return rows;
   }
+
+  /* ── THE SHEET ─────────────────────────────────────────────────────────
+     Ayush, 2026-11-20: "sirf mereko do csv file do". A view answers a
+     question the CRM's own export cannot — these 80 accounts, these 257
+     people — and until now the only way out of it was the screen.
+
+     WHAT GOES IN IS WHAT IS ON SCREEN. The Stage / Owner / Last call chips,
+     the search box and the sort all apply, because the filtering is the
+     work: downloading the unfiltered view would hand back the job the
+     console just did. Clear the chips and it is the whole view.
+
+     EVENT ROWS ARE FLATTENED, two columns per event type — "… — now" and
+     "… — past" — each holding that row's budget, timeline, pax and remarks.
+     One row per contact is what a sheet is for; the alternative, a row per
+     event, cannot be read next to the contact fields. */
+  const EXPORT_EVENTS = ["Employee offsites", "Product launch",
+    "Sales conference / dealer meet", "Marketing events",
+    "Team-building activities", "Other engagements"];
+
+  /* Excel reads a leading =, +, - or @ as a formula, and a cell that starts
+     with one is a known way to get a spreadsheet to run something. A single
+     quote in front is what every exporter does about it. */
+  const csvCell = (v) => {
+    let t = v == null ? "" : String(v);
+    if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+    return `"${t.replace(/"/g, '""')}"`;
+  };
+  const csvFile = (rows, name) => {
+    /* A BOM, so Excel on Windows opens a name like "Rubal Sansanwal" or a
+       rupee figure as UTF-8 instead of mojibake. */
+    const body = "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([body], { type: "text/csv;charset=utf-8" }));
+    a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  const fileSafe = (s) => String(s || "view").replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+
+  /* The event sentence as the card states it, so the sheet and the screen
+     say the same thing: "Around 120 people, in March. Budget approx 8L." */
+  const evText = (r) => [
+    r.pax ? `Pax: ${r.pax}` : "", r.timeline ? `Timeline: ${r.timeline}` : "",
+    r.budget ? `Budget: ${r.budget}` : "", r.remarks ? `Remarks: ${r.remarks}` : "",
+  ].filter(Boolean).join(" · ");
+  const evOf = (c, type, period) =>
+    ((period === "past" ? c.past : c.current) || [])
+      .filter((r) => (r.eventType || "") === type).map(evText).filter(Boolean).join(" | ");
+
+  function exportContacts() {
+    const v = viewById(ACC.viewId);
+    const rows = conRows();
+    if (!rows.length) return;                      /* the button is hidden at 0 */
+    const head = ["Contact", "Salutation", "Company", "Kylas company ID", "Designation",
+      "Phone", "All phones", "Email", "All emails", "LinkedIn",
+      "Stage", "Owner", "Source of data", "Last call", "Next call date", "Next call time",
+      "Vendor info", "Mode of meeting", "Service offering", "Flagged", "Exit reason",
+      "Remarks", "Kylas contact ID"];
+    for (const t of EXPORT_EVENTS) head.push(`${t} — now`, `${t} — past`);
+    const out = [head];
+    for (const c of rows) {
+      const ph = c.phones || [], em = c.emails || [];
+      const one = (x) => (x ? (x.cc ? x.cc + " " : "") + x.value : "");
+      const r = [c.pocName || "", c.salutation || "", c.company || "", c.companyId || "",
+        c.designation || "",
+        one(ph[0]), ph.map(one).filter(Boolean).join(" | "),
+        em[0]?.value || "", em.map((e) => e.value).filter(Boolean).join(" | "),
+        c.linkedin || "",
+        label(c.stage) || c.stage || "", c.owner || "", c.source || "",
+        c.lastCalledAt || "", c.nextCallDate || "", c.nextCallTime || "",
+        c.vendorInfo || "", c.modeOfMeeting || "", c.serviceOffering ? "Yes" : "",
+        c.flagged ? "Yes" : "", c.exitReason || "", c.remarks || "", c.kid || ""];
+      for (const t of EXPORT_EVENTS) r.push(evOf(c, t, "now"), evOf(c, t, "past"));
+      out.push(r);
+    }
+    csvFile(out, `${fileSafe(v?.name)}-contacts-${stamp()}.csv`);
+  }
+
+  /* Accounts reuse ACOLS, the column catalogue the table and the filter
+     builder already share (its ff.get is the raw value behind each cell), so
+     a column added there reaches the sheet without anyone remembering to
+     add it here. The enrichment columns are included whether or not they are
+     switched on — "all fields" means all of them. */
+  function exportAccounts() {
+    /* EXPLORER_ROWS is what the table just painted: the chips, the search
+       and the sort already applied. Reading it rather than re-filtering is
+       what makes the sheet and the screen the same list by construction. */
+    const rows = EXPLORER_ROWS;
+    if (!rows.length) return;
+    const v = viewById(ACC.viewId);
+    const cols = ACOLS.filter((c) => c.ff);
+    const out = [["Company", "Kylas company ID", ...cols.filter((c) => c.k !== "company").map((c) => c.label)]];
+    for (const c of rows) {
+      const line = [c.name || "", c.id || ""];
+      for (const col of cols) {
+        if (col.k === "company") continue;
+        const val = col.ff.get(c);
+        line.push(Array.isArray(val)
+          ? val.map((x) => (col.ff.labelOf ? col.ff.labelOf(x) : x)).join(" | ")
+          : val == null ? ""
+          : col.ff.labelOf && col.ff.type === "enum" ? (col.ff.labelOf(val) ?? val) : val);
+      }
+      out.push(line);
+    }
+    csvFile(out, `${fileSafe(v?.name || "all-accounts")}-accounts-${stamp()}.csv`);
+  }
+
   function contactsHTML(all) {
     const v = viewById(ACC.viewId);
     if (!v) return `<div class="card explorer"><div class="exhead"><h2>Contacts</h2>
@@ -4690,6 +4797,8 @@
         <span class="exn tnum">${rows.length} ${rows.length === 1 ? "person" : "people"}${
           rows.length < CON.rows.length ? `<em class="exof"> of ${CON.rows.length}</em>` : ""}</span>
         <button class="gbtn sm" id="conRefresh" type="button">Refresh</button>
+        ${rows.length ? `<button class="gbtn sm" id="conCsv" type="button"
+          title="Download these ${rows.length} contacts as a spreadsheet — every field, with the filters above applied">Download CSV</button>` : ""}
         <p>Across ${v.count} account${v.count === 1 ? "" : "s"}${CON.truncated ? " (the first 400)" : ""}. The name opens the call card; the number dials.</p>
       </div>
       <div class="extools">
@@ -5329,6 +5438,8 @@
         <button class="gbtn" id="fRefresh" type="button"${loading ? " disabled" : ""}
           title="Re-read the list, and ask the server to pull fresh stage changes from Kylas">${
             loading ? "refreshing…" : "Refresh"}</button>
+        ${VIEW_MODE === "accounts" ? `<button class="gbtn" id="fCsv" type="button"
+          title="Download the accounts listed below as a spreadsheet — every field, with these filters applied">Download CSV</button>` : ""}
         ${VIEW_MODE === "board" ? `<label>Group by<select id="fGroup">
           ${AXES.map((a) => `<option value="${a.key}"${GROUP_BY === a.key ? " selected" : ""}>${esc(a.label)}</option>`).join("")}
         </select></label>` : ""}
@@ -5403,6 +5514,7 @@
     on("fSince", "change", (e) => { FILTERS.calledSince = e.target.value; companies(host); });
     on("fRefresh", "click", () => refreshEverything("fRefresh",
       () => companies(host), () => ensureCompanies(who, () => companies(host), true)));
+    on("fCsv", "click", exportAccounts);
     /* Clear is also the retry: it drops the cache so a failed fetch is tried
        again, which is otherwise a reload. */
     on("fClear", "click", () => {
@@ -5995,6 +6107,7 @@
     on("conGroup", "click", () => { ACC.cGroup = !ACC.cGroup; redraw(); });
     on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
     on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
+    on("conCsv", "click", exportContacts);
     on("conRetry", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     host.querySelectorAll("[data-cchip]").forEach((b) => b.addEventListener("click", () => {
       const set = ACC[b.dataset.cset], k = b.dataset.cchip;
