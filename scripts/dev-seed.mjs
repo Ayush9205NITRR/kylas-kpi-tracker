@@ -268,7 +268,31 @@ async function callbacks() {
     Company: made[0] ? [made[0].id] : undefined,
   }));
 
-  await post("Contacts", people);
+  const madePeople = await postBack("Contacts", people);
+
+  /* CALLS LINKED TO THE CONTACT, which nothing seeded either. The history job
+     writes 504 of them, but unlinked — they feed the period report, which
+     counts by owner and day and never asks whose they were. "Last Call At" is
+     a ROLLUP over a contact's own Call Log rows, so against that fixture it
+     is empty for everybody, and the Contacts table's Last call column read
+     "never" for every person in every view while the call card, reading the
+     company, was right (Ayush, 2026-11-20).
+     A spread again, so the freshness chips have all four bands to sort:
+     today, nine days, forty, and a contact nobody has ever rung. */
+  const AGO = [0, 9, 40, 200, 2, 65, null];
+  const calls = [];
+  madePeople.forEach((rec, i) => {
+    const ago = AGO[i % AGO.length];
+    if (rec?.id == null || ago == null) return;
+    const at_ = new Date(Date.now() - ago * 86400000);
+    calls.push({ Key: `cb-call-${i}`, "Called At": at_.toISOString(), Outcome: "No answer",
+                 Owner: "Enout Super Admin", Duration: 35, "Duration Source": "dialed",
+                 Contact: [rec.id] });
+  });
+  if (calls.length) await post("Call Log", calls);
+
+  console.log(`           ${calls.length} of those contacts have a linked call — `
+    + `the Last call column and its freshness chips read these`);
   console.log(`           ${SPREAD.length} contacts on ${PLAN[0][0]} at ${SPREAD.length} different stages `
     + `— the account sits at ${SPREAD[SPREAD.length - 1]}`);
   console.log(`callbacks  ${people.length - SPREAD.length} promised on real Kylas ids — `

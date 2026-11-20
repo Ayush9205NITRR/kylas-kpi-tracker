@@ -168,9 +168,14 @@ try {
   const cN = await f().locator('.ctable .crow').count();
   ok('Contacts shows the people at them', cN >= 2, `${cN} rows`);
   const cols = await f().locator('.ctable .vh span').allTextContents();
+  /* The DEFAULT set. Which columns show is the person's choice since 1.88.0
+     (Columns ▾), and "Stage" is spelled "Calling stage" there — a company
+     has a stage too, and the two were told apart only by which table you
+     happened to be looking at. */
   ok('...with the columns a BD needs',
-     ['Contact', 'Company', 'Designation', 'Phone', 'Email', 'Stage', 'Owner', 'Last call', 'Next call']
+     ['Contact', 'Company', 'Designation', 'Phone', 'Email', 'Calling stage', 'Owner', 'Last call', 'Next call']
        .every((h) => cols.includes(h)), cols.join('|'));
+  ok('...and a Columns picker to change them', await f().locator('#cColBtn').count() === 1);
   /* NOT a tel: link — Chrome blocks those inside the extension frame. §12
      proves the button reaches requestDial; here it just has to exist. */
   ok('the phone is a dial button, not a blocked tel: link',

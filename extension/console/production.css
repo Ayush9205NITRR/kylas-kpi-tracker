@@ -1668,3 +1668,64 @@ body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
   margin-right:6px;vertical-align:1px}
 .tdw.overdue{background:var(--rose)}
 .tdw.today{background:var(--amber)}
+
+/* ══ THE CONTACTS EXPLORER, 1.88.0 ═════════════════════════════════════
+   Everything here is the same card, the same accent and the same five sizes
+   the rest of the console uses. What changes is alignment and weight: the
+   table is read 200 times a day and a row that is one glance instead of two
+   is the whole difference. */
+
+/* THE TOOLBAR ON ONE BASELINE. The search box, the sort, the group toggle
+   and the column picker had four different heights, because three of them
+   are different elements and nothing said they should agree. */
+.extools{align-items:center}
+.extools .msel-btn{height:34px}
+.extools select,.extools .gbtn.sm{height:34px;display:inline-flex;align-items:center}
+
+/* The revalidation note. It is deliberately quiet — the rows underneath it
+   are already correct enough to work from, and a loud "refreshing" invites
+   somebody to stop and wait for something they do not need to wait for. */
+.exhead .exre{font-size:var(--t-meta);color:var(--text3);font-style:italic}
+
+/* STAGE AS A PILL, on the rung ramp this console already owns — one hue
+   stepped in lightness, the same scale the ladder's step numbers and the KPI
+   chips use. No new colour: a stage is funnel position, which is exactly
+   what that ramp encodes. */
+.ctable .spill{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;padding:2px 8px;border-radius:999px;font-size:var(--t-meta);
+  font-weight:var(--w-strong);line-height:1.5;background:var(--rn);color:var(--text2)}
+.ctable .spill.r1{background:var(--r0);color:var(--r5)}
+.ctable .spill.r2{background:var(--r1);color:var(--r5)}
+.ctable .spill.r3{background:var(--r2);color:#fff}
+.ctable .spill.r4{background:var(--r3);color:#fff}
+.ctable .spill.r5{background:var(--r4);color:#fff}
+
+/* LINKEDIN AS A LINK THAT LOOKS LIKE ONE. It is a real anchor — an https
+   page in a new tab is the one thing the extension's iframe does NOT block,
+   unlike tel: and mailto:, which is why those two are buttons two columns
+   over. The mark is the two letters, not a logo: a brand asset in a BD tool
+   is somebody else's trademark in our chrome. */
+.ctable .lnk.li{display:inline-flex;align-items:center;gap:6px;text-decoration:none;
+  color:var(--blue);font-weight:var(--w-med)}
+.ctable .lnk.li i{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-max);
+  line-height:1;padding:2px 4px;border-radius:4px;background:var(--blueSoft);color:var(--blueDeep)}
+.ctable .lnk.li:hover{text-decoration:underline;text-underline-offset:2px}
+.ctable .lnk.li:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+
+/* A REMARK IS THREE SENTENCES AND THE ROW IS ONE LINE. Clipped with the
+   whole text on the title, rather than wrapped — a row that grows to fit its
+   longest cell makes every other row harder to scan. */
+.ctable .rmk{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--text2)}
+
+/* The row answers the pointer. 90ms: fast enough to feel attached to the
+   mouse, slow enough not to flicker while the cursor crosses the table. */
+.ctable .vr.crow{transition:background 90ms ease}
+.ctable .vr.crow:hover{background:var(--panel3)}
+@media (prefers-reduced-motion:reduce){ .ctable .vr.crow{transition:none} }
+
+/* The sticky header earns its keep only if it stays legible over the rows
+   sliding under it — hence the solid surface and the rule, not a shadow
+   alone, which went transparent in dark. */
+.ctable .vr.vh{background:var(--panel2);box-shadow:0 1px 0 var(--line2);
+  text-transform:uppercase;letter-spacing:.04em}

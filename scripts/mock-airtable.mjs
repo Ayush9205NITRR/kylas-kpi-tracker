@@ -345,6 +345,35 @@ createServer(async (req, res) => {
     const formula = url.searchParams.get("filterByFormula");
     const all = Object.values(TABLES).flat();
 
+    /* THE ROLLUPS THE REAL BASE COMPUTES. This stand-in stored only what was
+       written to it, so "Last Call At" — a rollup over the contact's Call Log
+       rows — did not exist on a Contacts row here however many calls it had.
+       A caller asking for it got a 422, listTolerant quietly re-read without
+       the projection, and the field came back absent rather than wrong. That
+       is how every contact in a view read "never" for months while the call
+       card, which reads the company, was right (Ayush, 2026-11-20).
+       Being LESS capable than the real thing hides a bug exactly as surely as
+       being more capable does — this file already carries that lesson about
+       `{X (from Link)}`, learned the other way round. */
+    if (name === "Contacts" && rows.length) {
+      const calls = new Map();
+      for (const c of table("Call Log")) {
+        const owner = (c.fields?.Contact || [])[0];
+        const at_ = c.fields?.["Called At"];
+        if (!owner || !at_) continue;
+        if (!calls.has(owner)) calls.set(owner, []);
+        calls.get(owner).push(String(at_));
+      }
+      for (const r of rows) {
+        const mine = (calls.get(r.id) || []).sort();
+        if (mine.length) {
+          r.fields["Last Call At"] = mine[mine.length - 1];
+          r.fields["First Call At"] = mine[0];
+          r.fields["Call Count"] = mine.length;
+        }
+      }
+    }
+
     /* A FORMULA NAMING A FIELD THIS TABLE DOES NOT HAVE IS A 422, not an empty
        result. This stand-in used to resolve `{X (from Link)}` by hand, which
        made it MORE capable than Airtable and hid a real bug for weeks:

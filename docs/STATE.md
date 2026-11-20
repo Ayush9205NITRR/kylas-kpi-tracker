@@ -149,6 +149,87 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 1 · Last call, the column picker and an instant Contacts tab (1.88.0)
+
+### The bug: every contact said "never"
+
+`CONTACT_READ_FIELDS` never asked Airtable for **Last Call At**. Nothing
+downstream noticed, because a contact with no value for it renders exactly
+like a contact nobody has rung: `never`. So every row of every view's Contacts
+table said never, and the four freshness chips — Called ≤ 7 days, 8–30, 31–90,
+90+ — filtered against a column that was never populated. The call card was
+right the whole time, because it reads the *company*, which does ask for it.
+
+Fixed by asking for it (and First Call At as the fallback), and mapping it
+through one `dayOf` so a rollup that comes back as a timestamp, a bare date or
+an array leaves as one shape.
+
+**Two fixtures were hiding it, and both are fixed:**
+
+- `mock-airtable` stored only what was written to it, so the rollup did not
+  exist there at all and the projection 422'd — which `listTolerant` quietly
+  turns into a read without the projection. It now computes Last/First Call At
+  and Call Count from the Call Log, the way the real base does. *Being less
+  capable than the real thing hides a bug exactly as surely as being more
+  capable does* — this file already carried that lesson the other way round.
+- `dev-seed` writes 504 calls that hang off **nobody**: they feed the period
+  report, which counts by owner and day. The call-back job now also writes a
+  linked call per contact, spread across all four freshness bands with one
+  contact deliberately never called.
+
+### Columns ▾ on the Contacts half
+
+`CCOLS`, the same bargain `ACOLS` makes: one entry per column carrying its
+label, width, `cell` (the screen) and `get` (the sheet) — because those differ,
+and should. The screen says "3d ago" beside a coloured dot; a spreadsheet wants
+`2026-11-17` so it can sort and subtract. Table header, grid template, picker
+and CSV are all built from that one list.
+
+Twelve columns, eight on by default. Contact is fixed — a table of people with
+no names is not a narrower table, it is a different and useless one. LinkedIn
+is a real `<a>`: an https page in a new tab is the one thing the extension's
+iframe does **not** block, unlike `tel:` and `mailto:`, which is why those two
+are buttons. Stored separately from the Accounts columns: different questions
+about different rows.
+
+**The sheet keeps every field whatever the picker says.** The picker decides
+the screen, where width is scarce; a file has no such limit, and unticking
+Remarks to get a readable table must not mean the file you send on has no
+remarks in it. So the picker decides *order* — your columns first, then the
+rest of the record, then the ids and the flattened event columns.
+
+### The Contacts tab paints in ~50ms
+
+Not by making the fetch faster — it cannot be, on a cold view: the server falls
+back to Kylas for any account not yet mirrored and Kylas is held to one request
+every 450ms, so 60 unmirrored accounts is ~17s however the request is shaped.
+The answer is to have already asked:
+
+- **Prefetch on view select.** Picking a view starts the contacts fetch while
+  you are still reading the Accounts half.
+- **Stale-while-revalidate, per view** (`CON.by`), not one slot — flicking
+  between two views is the gesture this is for, and a single slot makes the
+  second evict the first. Rows in hand paint at once and revalidate behind the
+  row; the spinner now means "we have nothing", not "we are busy".
+- **One request per view in flight**, so picking a view, switching tab and
+  hitting Refresh is one call rather than three racing.
+- A failed *revalidation* keeps the rows it had. Minutes-old rows beat an
+  error page.
+
+Measured: 52ms to first painted row, no spinner.
+
+### And the read itself
+
+`readContactsForCompanies` called `eventsFor` **inside** its per-chunk loop —
+and `eventsFor` lists the whole Event Rows table, because it has no way to ask
+for "the rows of these contacts". An 80-account view is two chunks, so opening
+it paid for that full scan twice before a row could paint. Rows are gathered
+first and the events asked for once. Past one chunk it now reads the mirror
+once and indexes in memory rather than issuing ⌈n/40⌉ sequential `OR()`
+queries: **1 row-page for a 60-account view**, measured against the mock.
+
+`scripts/test-export-live.mjs` is now 39 assertions and covers all of this.
+
 ## 1a · Download CSV, from a view (1.87.0)
 
 Ayush, 2026-11-20, looking at "BD <> SHRM Database · Contacts · 257 people":
@@ -354,7 +435,7 @@ xvfb-run -a node scripts/test-move-live.mjs   # 15 · a REAL Chrome with the ext
                                               #      loaded: the console moves, resizes,
                                               #      remembers and resets. Needs the :8778
                                               #      stub and a patched copy of extension/
-xvfb-run -a node scripts/test-export-live.mjs # 26 · Download CSV on both halves of a
+xvfb-run -a node scripts/test-export-live.mjs # 39 · Download CSV on both halves of a
                                               #      view, read back off disk with a real
                                               #      CSV parser. SEED BEFORE STARTING THE
                                               #      PROXY — it caches the company index

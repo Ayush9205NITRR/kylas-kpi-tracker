@@ -2717,6 +2717,11 @@
                 viewId: "", half: "accounts", vFind: "",
                 cFind: "", cStage: new Set(), cOwner: new Set(), cFresh: new Set(),
                 cSort: "next", cGroup: false, cLimit: 200,
+                /* The Contacts half has its own columns, remembered separately
+                   from the Accounts ones: they are different questions about
+                   different rows, and sharing one set made picking Remarks on
+                   people quietly drop a column from the account list. */
+                ccols: new Set(), ccolsOpen: false,
                 /* the condition, as in Airtable's text filter */
                 srcOp: "contains", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
@@ -2777,6 +2782,13 @@
     try { saved = await Store.getSetting(ACC_PREF); } catch { /* first run */ }
     ACC.cols = new Set(Array.isArray(saved?.cols) ? saved.cols.filter((k) => ACOLS.some((c) => c.k === k))
                                                   : COL_DEFAULTS);
+    /* An ABSENT list is "never chosen" and takes the defaults; an EMPTY one
+       is a choice — somebody unticked everything — and is left alone. The
+       two are not the same, and treating them the same is how a stored
+       preference silently comes back. */
+    ACC.ccols = new Set(Array.isArray(saved?.ccols)
+      ? saved.ccols.filter((k) => CCOLS.some((c) => c.k === k))
+      : CCOL_DEFAULT);
     if (saved?.sort && SORT_KEYS.includes(saved.sort)) ACC.sort = saved.sort;
     if (saved?.view === "board" || saved?.view === "table") ACC.view = saved.view;
     if (saved?.bgroup === "bucket" || saved?.bgroup === "stage") ACC.bgroup = saved.bgroup;
@@ -2789,7 +2801,8 @@
     readHash();
   }
   const saveAccPrefs = () => {
-    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], sort: ACC.sort, widths: ACC.widths,
+    try { Store.setSetting(ACC_PREF, { cols: [...ACC.cols], ccols: [...ACC.ccols],
+                                       sort: ACC.sort, widths: ACC.widths,
                                        view: ACC.view, bgroup: ACC.bgroup }); }
     catch { /* a browser with no storage still works, it just forgets */ }
   };
@@ -4599,17 +4612,83 @@
      Fetched once per view and kept, because a view's accounts do not change
      while you are reading them, and a BD switching Accounts ⇄ Contacts twice
      should not pay for it twice. */
-  const CON = { id: "", rows: [], loading: false, err: "", at: 0 };
-  async function loadViewContacts(id, redraw, force) {
-    if (!id) { CON.id = ""; CON.rows = []; return; }
-    if (CON.id === id && !force && Date.now() - CON.at < 5 * 60 * 1000) return;
-    CON.id = id; CON.loading = true; CON.err = ""; redraw();
-    try {
+  /* ── THE CONTACTS CACHE ────────────────────────────────────────────
+     STALE WHILE REVALIDATE, PER VIEW. Switching to Contacts used to mean
+     watching "Loading the people at 80 accounts…", every time, including
+     the second time — the fetch is slow for a reason nothing on this side
+     can fix (the server falls back to Kylas for any account not yet
+     mirrored, and Kylas is held to one request every 450ms, so an 80-account
+     view that is cold is tens of seconds of waiting however the request is
+     shaped).
+
+     So the answer is not to make the person wait better, it is to have
+     already asked. Rows are kept PER VIEW rather than for "the current one",
+     because flicking between two views is the gesture this is for and a
+     single slot makes the second one evict the first. A view in hand paints
+     at once and revalidates behind the row, and the spinner now means "we
+     have nothing", not "we are busy". */
+  const CON = { id: "", rows: [], loading: false, err: "", at: 0, truncated: false,
+                by: new Map(), inflight: new Map() };
+  const CON_TTL = 5 * 60 * 1000;
+  const conShow = (id) => {
+    const hit = CON.by.get(id);
+    CON.id = id;
+    CON.rows = hit?.rows || [];
+    CON.truncated = !!hit?.truncated;
+    CON.at = hit?.at || 0;
+    CON.err = hit?.err || "";
+  };
+
+  /* `quiet` is the prefetch: fetch, fill the cache, do not touch the
+     spinner or the error line, because nobody asked for this one and a
+     failure they did not request must not paint an error over the screen
+     they are actually looking at. */
+  async function loadViewContacts(id, redraw, force, { quiet = false } = {}) {
+    if (!id) { CON.id = ""; CON.rows = []; CON.err = ""; return; }
+    if (!quiet) conShow(id);
+    const hit = CON.by.get(id);
+    const fresh = hit && !hit.err && Date.now() - hit.at < CON_TTL;
+    if (fresh && !force) { if (!quiet) redraw(); return; }
+
+    /* ONE REQUEST PER VIEW IN FLIGHT. Picking a view, then switching to
+       Contacts, then hitting Refresh is three calls for one answer; without
+       this they race and the slowest one wins. */
+    if (CON.inflight.has(id) && !force) {
+      if (!quiet) { CON.loading = !hit; redraw(); }
+      try { await CON.inflight.get(id); } catch { /* reported below */ }
+      if (!quiet) { conShow(id); CON.loading = false; redraw(); }
+      return;
+    }
+
+    if (!quiet) { CON.loading = !hit?.rows?.length; CON.err = ""; redraw(); }
+    const job = (async () => {
       const r = await API.viewContacts(id);
-      CON.rows = r.contacts || []; CON.at = Date.now(); CON.truncated = !!r.truncated;
-    } catch (e) { CON.err = String(e.message || e).slice(0, 200); CON.rows = []; }
-    CON.loading = false; redraw();
+      CON.by.set(id, { rows: r.contacts || [], at: Date.now(), truncated: !!r.truncated, err: "" });
+    })();
+    CON.inflight.set(id, job);
+    try { await job; }
+    catch (e) {
+      const msg = String(e.message || e).slice(0, 200);
+      /* A failed REVALIDATION keeps the rows it already had: they are a few
+         minutes old, which is a far better answer than an error page. */
+      if (hit?.rows?.length) CON.by.set(id, { ...hit, err: "" });
+      else if (!quiet) CON.by.set(id, { rows: [], at: 0, truncated: false, err: msg });
+    }
+    finally { CON.inflight.delete(id); }
+    if (!quiet) { conShow(id); CON.loading = false; redraw(); }
+    else if (ACC.viewId === id && ACC.half === "contacts") { conShow(id); redraw(); }
   }
+
+  /* Called the moment a view is picked, while the person is still reading
+     the Accounts half. By the time they reach the Contacts tab the rows are
+     usually already in hand and the switch is a repaint. */
+  const prefetchViewContacts = (id) => {
+    if (!id) return;
+    const hit = CON.by.get(id);
+    if (hit && Date.now() - hit.at < CON_TTL) return;
+    if (CON.inflight.has(id)) return;
+    loadViewContacts(id, () => {}, false, { quiet: true }).catch(() => {});
+  };
   const conFresh = (c) => {
     const d = c.lastCalledAt ? Math.floor((Date.now() - new Date(c.lastCalledAt).getTime()) / 86400000) : null;
     return d == null ? "never" : d <= 7 ? "fresh" : d <= 30 ? "warm" : d <= 90 ? "cool" : "cold";
@@ -4689,27 +4768,34 @@
 
   function exportContacts() {
     const v = viewById(ACC.viewId);
+    /* conRows(), NOT the `shown` slice. The table paints cLimit rows and
+       offers "Show 200 more"; a sheet that stopped at the same place would
+       be a silent, plausible-looking truncation — 200 of 257, with nothing
+       on the row to say so. The download is the whole filtered set. */
     const rows = conRows();
     if (!rows.length) return;                      /* the button is hidden at 0 */
-    const head = ["Contact", "Salutation", "Company", "Kylas company ID", "Designation",
-      "Phone", "All phones", "Email", "All emails", "LinkedIn",
-      "Stage", "Owner", "Source of data", "Last call", "Next call date", "Next call time",
-      "Vendor info", "Mode of meeting", "Service offering", "Flagged", "Exit reason",
-      "Remarks", "Kylas contact ID"];
+
+    /* THE COLUMNS YOU CHOSE LEAD IT; NOTHING IS DROPPED BEHIND THEM.
+       The picker decides the SCREEN, where width is scarce and eight columns
+       is already a lot. A sheet has no such limit, and the two jobs pull
+       opposite ways: unticking Remarks to get a readable table should not
+       quietly mean the file you send on has no remarks in it. Ayush asked
+       for all fields in the sheet and for the sheet to follow the picker —
+       both, and they only disagree about ORDER, so order is what the picker
+       gets: your columns first, in your order, then the rest of the record.
+
+       LinkedIn and both Kylas ids are in either way. The ids are how a row
+       is joined back to the CRM by whoever receives the file, and they are
+       the one thing that cannot be recovered from a name. */
+    const chosen = ccolsOn();
+    const rest = CCOLS.filter((c) => !chosen.includes(c));
+    const cols = [...chosen, ...rest];
+    const head = [...cols.map((c) => c.label), "Kylas contact ID", "Kylas company ID"];
     for (const t of EXPORT_EVENTS) head.push(`${t} — now`, `${t} — past`);
+
     const out = [head];
     for (const c of rows) {
-      const ph = c.phones || [], em = c.emails || [];
-      const one = (x) => (x ? (x.cc ? x.cc + " " : "") + x.value : "");
-      const r = [c.pocName || "", c.salutation || "", c.company || "", c.companyId || "",
-        c.designation || "",
-        one(ph[0]), ph.map(one).filter(Boolean).join(" | "),
-        em[0]?.value || "", em.map((e) => e.value).filter(Boolean).join(" | "),
-        c.linkedin || "",
-        label(c.stage) || c.stage || "", c.owner || "", c.source || "",
-        c.lastCalledAt || "", c.nextCallDate || "", c.nextCallTime || "",
-        c.vendorInfo || "", c.modeOfMeeting || "", c.serviceOffering ? "Yes" : "",
-        c.flagged ? "Yes" : "", c.exitReason || "", c.remarks || "", c.kid || ""];
+      const r = [...cols.map((col) => col.get(c)), c.kid || "", c.companyId || ""];
       for (const t of EXPORT_EVENTS) r.push(evOf(c, t, "now"), evOf(c, t, "past"));
       out.push(r);
     }
@@ -4745,49 +4831,127 @@
     csvFile(out, `${fileSafe(v?.name || "all-accounts")}-accounts-${stamp()}.csv`);
   }
 
+  /* ── THE CONTACTS COLUMNS ──────────────────────────────────────────
+     The same bargain ACOLS makes, for the other half of a view: ONE entry
+     per column, carrying its label, its width, how to draw the cell and how
+     to get the raw value. The table header, the grid template, the picker
+     and the CSV are all built from this list, so a column added here appears
+     in all four — the failure ACOLS' own comment describes (a column added
+     to the table and forgotten in the filter list is invisible: it works,
+     and the only thing that goes wrong is a thing nobody reports).
+
+     `get` is the sheet's value and `cell` the screen's, because they are not
+     the same thing: the screen says "3d ago" against a coloured dot, and a
+     spreadsheet wants 2026-11-17 so it can sort and subtract.
+
+     Contact is fixed. A table of people with no names is not a narrower
+     table, it is a different and useless one. */
+  const CCOLS = [
+    { k: "name", label: "Contact", w: "1.3fr", fixed: true,
+      get: (c) => c.pocName || "",
+      cell: (c) => `<button type="button" class="clink2" data-open="${esc(c.kid || "")}"
+        ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button>` },
+    { k: "company", label: "Company", w: "1.1fr", on: true,
+      get: (c) => c.company || "",
+      cell: (c) => (c.companyId ? `<button type="button" class="clink2" data-stop="1"
+        data-openco="${esc(c.companyId)}" title="Open ${esc(c.company || "this account")}">${esc(c.company || "—")}</button>`
+        : esc(c.company || "—")) },
+    { k: "designation", label: "Designation", w: "1fr", on: true,
+      get: (c) => c.designation || "", cell: (c) => esc(c.designation || "—") },
+    /* NOT tel: AND NOT mailto:. Chrome refuses both inside the extension's
+       own iframe — "This content is blocked" — so the number looked like a
+       link and did nothing (Ayush, 2026-11-19). requestDial clicks Kylas'
+       own dialler on the host page; the address copies. */
+    { k: "phone", label: "Phone", w: ".9fr", on: true,
+      get: (c) => (c.phones || []).map((p) => (p.cc ? p.cc + " " : "") + p.value).filter(Boolean).join(" | "),
+      cell: (c) => { const t = (c.phones || [])[0];
+        return t?.value ? `<button type="button" class="clink2" data-stop="1"
+          data-dial="${esc((t.cc || "") + t.value)}"
+          title="Dial ${esc(c.pocName || "")} through Kylas">${esc((t.cc ? t.cc + " " : "") + t.value)}</button>` : "—"; } },
+    { k: "email", label: "Email", w: "1.1fr", on: true,
+      get: (c) => (c.emails || []).map((e) => e.value).filter(Boolean).join(" | "),
+      cell: (c) => { const m = (c.emails || [])[0];
+        return m?.value ? `<button type="button" class="clink2" data-stop="1"
+          data-mail="${esc(m.value)}" title="Copy this address">${esc(m.value)}</button>` : "—"; } },
+    /* A REAL LINK, because this one can be: it leaves for a normal https
+       page in a new tab, which the iframe does not block the way it blocks
+       tel: and mailto:. Normalised through webUrl first — a stored
+       "linkedin.com/in/x" with no scheme resolved against the extension's
+       own origin and went nowhere. */
+    { k: "linkedin", label: "LinkedIn", w: ".8fr",
+      get: (c) => webUrl(c.linkedin) || c.linkedin || "",
+      cell: (c) => { const u = webUrl(c.linkedin);
+        return u ? `<a class="lnk li" href="${esc(u)}" target="_blank" rel="noopener noreferrer"
+          data-stop="1" title="${esc(u)}"><i aria-hidden="true">in</i>Profile</a>` : "—"; } },
+    { k: "stage", label: "Calling stage", w: "1.1fr", on: true,
+      get: (c) => label(c.stage) || c.stage || "",
+      cell: (c) => (c.stage ? `<span class="spill r${Math.max(0, Math.min(5, rungBand(c.stage)))}"
+        title="${esc(label(c.stage) || c.stage)}">${esc(label(c.stage) || c.stage)}</span>` : "—") },
+    { k: "owner", label: "Owner", w: ".9fr", on: true,
+      get: (c) => c.owner || "", cell: (c) => esc(c.owner || "—") },
+    { k: "last", label: "Last call", w: ".8fr", on: true, num: true,
+      get: (c) => c.lastCalledAt || "",
+      cell: (c) => `<i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}` },
+    { k: "next", label: "Next call", w: ".75fr", on: true, num: true,
+      get: (c) => c.nextCallDate || "", cell: (c) => esc(c.nextCallDate || "—") },
+    { k: "source", label: "Source of data", w: ".9fr",
+      get: (c) => c.source || "", cell: (c) => esc(c.source || "—") },
+    /* One line on screen, whole on the sheet. A remark is three sentences
+       about a venue and a finance review; the row is 36px. */
+    { k: "remarks", label: "Remarks", w: "1.4fr",
+      get: (c) => c.remarks || "",
+      cell: (c) => (c.remarks ? `<span class="rmk" title="${esc(c.remarks)}">${esc(c.remarks)}</span>` : "—") },
+  ];
+  const ccolsOn = () => CCOLS.filter((c) => c.fixed || ACC.ccols.has(c.k));
+  const CCOL_DEFAULT = CCOLS.filter((c) => c.on).map((c) => c.k);
+  /* The rung a stage sits on, squashed to the six-step ramp the ladder and
+     the KPI chips already use, so a stage pill cannot invent a seventh hue. */
+  const rungBand = (code) => {
+    const r = STAGE_RUNG[code] || 0;
+    return r <= 0 ? 0 : Math.min(5, Math.ceil(r / 6));
+  };
+  const cGrid = (cols) => cols.map((c) => `minmax(${c.num ? 92 : 120}px, ${c.w})`).join(" ");
+  const cMin = (cols) => cols.reduce((a, c) => a + (c.num ? 92 : 120), 0) + 14 * (cols.length - 1) + 24;
+
+  function contactColumnPicker() {
+    const opt = CCOLS.filter((c) => !c.fixed);
+    const n = opt.filter((c) => ACC.ccols.has(c.k)).length;
+    return `<div class="msel" id="cColPick">
+      <button type="button" class="msel-btn" id="cColBtn"
+        aria-haspopup="true" aria-expanded="${ACC.ccolsOpen}">
+        <span class="msel-k">Columns</span><span class="msel-v">${n}</span><span class="msel-caret" aria-hidden="true">▾</span>
+      </button>
+      ${ACC.ccolsOpen ? `<div class="msel-pop" role="dialog" aria-label="Which contact columns to show">
+        <div class="msel-list">${opt.map((c) => `<label class="msel-opt">
+          <input type="checkbox" data-ccol="${esc(c.k)}"${ACC.ccols.has(c.k) ? " checked" : ""}>
+          <span>${esc(c.label)}</span></label>`).join("")}</div>
+        <div class="msel-foot"><span></span>
+          <button type="button" class="gbtn sm" id="cColReset">Reset</button></div>
+      </div>` : ""}
+    </div>`;
+  }
+
   function contactsHTML(all) {
     const v = viewById(ACC.viewId);
     if (!v) return `<div class="card explorer"><div class="exhead"><h2>Contacts</h2>
       <p>Pick a view first — Contacts shows the people at a view's accounts.</p></div></div>`;
-    if (CON.loading) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
+    /* The spinner means "nothing to show", not "busy": with rows in hand the
+       table paints and the revalidation says so in the header instead. */
+    if (CON.loading && !CON.rows.length) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
       <p>Loading the people at ${v.count} account${v.count === 1 ? "" : "s"}…</p></div></div>`;
-    if (CON.err) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
+    if (CON.err && !CON.rows.length) return `<div class="card explorer"><div class="exhead"><h2>${esc(v.name)} · Contacts</h2>
       <p class="vwarn">${esc(CON.err)}</p><button class="gbtn sm" id="conRetry" type="button">Try again</button></div></div>`;
     const rows = conRows();
     const stages = [...new Set(CON.rows.map((c) => c.stage).filter(Boolean))];
     const owners = [...new Set(CON.rows.map((c) => c.owner).filter(Boolean))].sort();
     const shown = rows.slice(0, ACC.cLimit);
     let lastCo = "";
+    const cols = ccolsOn();
     const row = (c) => {
       const head = ACC.cGroup && c.company !== lastCo ? (lastCo = c.company,
         `<div class="cgrouph">${esc(c.company || "No company")}</div>`) : "";
-      const tel = (c.phones || [])[0];
-      const mail = (c.emails || [])[0];
-      return `${head}<div class="vr crow" data-kid="${esc(c.kid || "")}">
-        <span><button type="button" class="clink2" data-open="${esc(c.kid || "")}"
-          ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button></span>
-        <span>${c.companyId ? `<button type="button" class="clink2" data-stop="1"
-          data-openco="${esc(c.companyId)}" title="Open ${esc(c.company || "this account")}">${esc(c.company || "—")}</button>`
-          : esc(c.company || "—")}</span>
-        <span>${esc(c.designation || "—")}</span>
-        ${/* NOT tel: AND NOT mailto:. Both are handed to whatever the OS
-             registered, and inside the extension's own iframe Chrome refuses
-             them outright — "This content is blocked" — so the number looked
-             like a link and did nothing (Ayush, 2026-11-19). The card has
-             always gone through requestDial, which clicks Kylas' own dialler
-             on the host page and falls back to copying; the email copies,
-             the same choice console.js made for the call bar. Buttons, not
-             anchors, so there is no navigation to block in the first place. */ ""}
-        <span>${tel?.value ? `<button type="button" class="clink2" data-stop="1"
-          data-dial="${esc((tel.cc || "") + tel.value)}"
-          title="Dial ${esc(c.pocName || "")} through Kylas">${esc((tel.cc ? tel.cc + " " : "") + tel.value)}</button>` : "—"}</span>
-        <span>${mail?.value ? `<button type="button" class="clink2" data-stop="1"
-          data-mail="${esc(mail.value)}" title="Copy this address">${esc(mail.value)}</button>` : "—"}</span>
-        <span>${esc(label(c.stage) || "—")}</span>
-        <span>${esc(c.owner || "—")}</span>
-        <span class="num"><i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}</span>
-        <span class="num">${esc(c.nextCallDate || "—")}</span>
-      </div>`;
+      return `${head}<div class="vr crow" data-kid="${esc(c.kid || "")}">${
+        cols.map((col) => `<span${col.num ? ' class="num"' : ""}>${col.cell(c)}</span>`).join("")}</div>`;
     };
     const chip = (set, k, lab) => `<button type="button" class="chip${set.has(k) ? " on" : ""}" data-cchip="${esc(k)}"
       data-cset="${set === ACC.cStage ? "cStage" : set === ACC.cOwner ? "cOwner" : "cFresh"}">${esc(lab)}</button>`;
@@ -4797,6 +4961,7 @@
         <span class="exn tnum">${rows.length} ${rows.length === 1 ? "person" : "people"}${
           rows.length < CON.rows.length ? `<em class="exof"> of ${CON.rows.length}</em>` : ""}</span>
         <button class="gbtn sm" id="conRefresh" type="button">Refresh</button>
+        ${CON.inflight.has(ACC.viewId) ? `<span class="exre" title="Checking for changes behind the list you are already looking at">refreshing…</span>` : ""}
         ${rows.length ? `<button class="gbtn sm" id="conCsv" type="button"
           title="Download these ${rows.length} contacts as a spreadsheet — every field, with the filters above applied">Download CSV</button>` : ""}
         <p>Across ${v.count} account${v.count === 1 ? "" : "s"}${CON.truncated ? " (the first 400)" : ""}. The name opens the call card; the number dials.</p>
@@ -4811,13 +4976,14 @@
         </select>
         <button type="button" class="gbtn sm${ACC.cGroup ? " on" : ""}" id="conGroup"
           aria-pressed="${ACC.cGroup}">Group by company</button>
+        ${contactColumnPicker()}
       </div>
       ${stages.length > 1 ? `<div class="chiprow"><span class="cl">Stage</span>${stages.map((k) => chip(ACC.cStage, k, label(k) || k)).join("")}</div>` : ""}
       ${owners.length > 1 ? `<div class="chiprow"><span class="cl">Owner</span>${owners.map((k) => chip(ACC.cOwner, k, k)).join("")}</div>` : ""}
       <div class="chiprow"><span class="cl">Last call</span>${FRESH.map((z) => chip(ACC.cFresh, z.k, z.label)).join("")}</div>
-      <div class="accscroll"><div class="acctable ctable">
-        <div class="vr vh"><span>Contact</span><span>Company</span><span>Designation</span><span>Phone</span>
-          <span>Email</span><span>Stage</span><span>Owner</span><span class="num">Last call</span><span class="num">Next call</span></div>
+      <div class="accscroll"><div class="acctable ctable" style="--acols:${cGrid(cols)};--amin:${cMin(cols)}px">
+        <div class="vr vh">${cols.map((c) =>
+          `<span${c.num ? ' class="num"' : ""}>${esc(c.label)}</span>`).join("")}</div>
         ${shown.length ? shown.map(row).join("") : `<div class="vempty">Nobody matches those filters.</div>`}
       </div></div>
       ${rows.length > ACC.cLimit ? `<button class="gbtn" id="conMore" type="button">Show ${
@@ -5988,7 +6154,8 @@
         for (const [open, id, clear] of [["srcOpen", "#srcPick", () => { ACC.srcFind = ""; }],
                                          ["stageOpen", "#stagePick", () => { ACC.stageFind = ""; }],
                                          ["ownerOpen", "#ownerPick", () => { ACC.ownerFind = ""; }],
-                                         ["colsOpen", "#colPick", () => {}]]) {
+                                         ["colsOpen", "#colPick", () => {}],
+                                         ["ccolsOpen", "#cColPick", () => {}]]) {
           if (!ACC[open] || e.target.closest?.(id)) continue;
           ACC[open] = false; clear(); shut = true;
         }
@@ -6063,7 +6230,10 @@
       if (v?.filters) applyFilters(v.filters);
       ACC.limit = 100; ACC.busy = "";
       redraw();
+      /* Both halves start the fetch. On Contacts it is the load; on Accounts
+         it is the head start that makes the tab switch free. */
       if (ACC.half === "contacts") loadViewContacts(id, redraw);
+      else prefetchViewContacts(id);
     }));
     host.querySelectorAll("[data-pin]").forEach((n) => {
       const go = async (e) => {
@@ -6108,6 +6278,13 @@
     on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
     on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     on("conCsv", "click", exportContacts);
+    on("cColBtn", "click", () => { ACC.ccolsOpen = !ACC.ccolsOpen; redraw(); });
+    on("cColReset", "click", () => { ACC.ccols = new Set(CCOL_DEFAULT); saveAccPrefs(); redraw(); });
+    host.querySelectorAll("[data-ccol]").forEach((b) => { b.onchange = () => {
+      const k = b.dataset.ccol;
+      b.checked ? ACC.ccols.add(k) : ACC.ccols.delete(k);
+      saveAccPrefs(); redraw();
+    }; });
     on("conRetry", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     host.querySelectorAll("[data-cchip]").forEach((b) => b.addEventListener("click", () => {
       const set = ACC[b.dataset.cset], k = b.dataset.cchip;

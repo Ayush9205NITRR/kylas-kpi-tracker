@@ -711,6 +711,13 @@ function eventRows(rows) {
   return { past, current };
 }
 
+/* Airtable hands a date back as "2026-04-17", "2026-04-17T09:15:00.000Z" or,
+   from a rollup over several rows, an array. One shape out. */
+function dayOf(v) {
+  const x = Array.isArray(v) ? v.filter(Boolean).sort().pop() : v;
+  return x ? String(x).slice(0, 10) : "";
+}
+
 export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
   const f = rec?.fields || {};
   const { past, current } = eventRows(events || []);
@@ -737,6 +744,13 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
     vendorInfo: f["Vendor Info"] || "",
     serviceOffering: !!f["Service Offering"],
     modeOfMeeting: f["Mode of Meeting"] || "",
+    /* A rollup comes back as an ISO timestamp or a bare date depending on the
+       field it rolls up; everything downstream (since, daysSince, freshOf,
+       the chips) compares bare dates as strings, so it is cut here, once,
+       rather than in each of them. First Call At is the fallback: a contact
+       that has been called exactly once has it, and reading "never" for
+       somebody you spoke to yesterday is the bug this is fixing. */
+    lastCalledAt: dayOf(f["Last Call At"]) || dayOf(f["First Call At"]) || "",
     done: false,
     flagged: !!f.Flagged,
     exitReason: f["Exit Reason"] || "",
@@ -771,6 +785,15 @@ export const CONTACT_READ_FIELDS = [
   "Current Stage", "KPI Rank", "Kylas Updated At",
   "Vendor Info", "Mode of Meeting", "Service Offering", "Flagged", "Exit Reason",
   "Company",
+  /* LAST CALL AT was missing, and nothing downstream noticed, because a
+     contact with no value for it reads exactly like a contact nobody asked
+     about: "never". So every row in the view's Contacts table said never,
+     and the freshness chips — Called <= 7 days, 8-30, 31-90, 90+ — filtered
+     against a field that was never populated (Ayush, 2026-11-20). The card
+     was right all along; it reads the company, which does ask for this.
+     listTolerant covers a base that predates the rollup: an unknown name
+     makes it re-read without the projection rather than fail the request. */
+  "Last Call At", "First Call At",
 ];
 
 /* Event rows for a set of contacts, in ONE read rather than one per contact.
@@ -946,39 +969,58 @@ export async function readContactsForCompanies(at, kids = [], { chunk = 40 } = {
   const ids = [...new Set((kids || []).map((x) => String(x)).filter(Boolean))];
   if (!ids.length) return [];
   const { byKid } = await companyIndex(at);
-  const out = [];
+
+  /* ONE EVENTS READ, NOT ONE PER CHUNK. eventsFor lists the WHOLE Event Rows
+     table — it has no way to ask for "the rows of these contacts" — and it
+     used to be called inside the per-chunk loop. A view of 80 accounts is
+     two chunks, so opening it paid for that whole-table scan twice, behind
+     the rate-limit gap, before a single row could paint. Rows are gathered
+     first and the events asked for once, at the end.
+
+     AND ONE SCAN INSTEAD OF N FORMULA QUERIES once a view is big enough.
+     The OR(...) form is genuinely cheaper for a handful of accounts, because
+     the server does the filtering. Past a chunk it stops being cheaper: each
+     extra chunk is another sequential round trip, while the full scan is one
+     request whose result is cached for SCAN_TTL and shared with the queue
+     read the console has usually just done anyway. So: one chunk, ask the
+     server; more than one, read the mirror and index it here. */
+  const rows = [];
   const seen = new Set();
-  const take = async (rows) => {
-    const events = await eventsFor(at, rows.map((r) => r.id));
-    for (const r of rows) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      const co = byKid.get(String((r.fields?.["Company Kylas ID"] || [])[0]
-        ?? r.fields?.["Company Kylas ID"] ?? ""))
-        || [...byKid.values()].find((c) => c.recordId === (r.fields?.Company || [])[0]);
-      out.push(toConsoleContactFromAirtable(r, { company: co, events: events.get(r.id) || [] }));
-    }
-  };
-  if (!noCompanyRollup) {
+  const push = (rs) => { for (const r of rs) if (!seen.has(r.id)) { seen.add(r.id); rows.push(r); } };
+
+  const wantRec = new Set();
+  for (const k of ids) { const co = byKid.get(String(k)); if (co?.recordId) wantRec.add(co.recordId); }
+  const wantKid = new Set(ids.map(String));
+  const kidOf = (f) => String((Array.isArray(f?.["Company Kylas ID"])
+    ? f["Company Kylas ID"][0] : f?.["Company Kylas ID"]) ?? "");
+
+  const scan = async () => push((await allContacts(at))
+    .filter((r) => wantRec.has((r.fields?.Company || [])[0]) || wantKid.has(kidOf(r.fields))));
+
+  if (noCompanyRollup || ids.length > chunk) {
+    await scan();
+  } else {
     try {
-      for (let i = 0; i < ids.length; i += chunk) {
-        const part = ids.slice(i, i + chunk);
-        const rows = await listTolerant(at, "Contacts", {
-          formula: `OR(${part.map((k) => `{Company Kylas ID} = '${esc(k)}'`).join(",")})`,
-          fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 40 });
-        await take(rows);
-      }
-      return out;
+      push(await listTolerant(at, "Contacts", {
+        formula: `OR(${ids.map((k) => `{Company Kylas ID} = '${esc(k)}'`).join(",")})`,
+        fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 40 }));
     } catch (e) {
       if (!/INVALID_FILTER_BY_FORMULA|UNKNOWN_FIELD_NAME|422/i.test(e.message)) throw e;
       noCompanyRollup = true;
       at.log?.(`  Contacts has no "Company Kylas ID" rollup — scanning instead. Run repair-base.`);
+      await scan();
     }
   }
-  const want = new Set();
-  for (const k of ids) { const co = byKid.get(String(k)); if (co?.recordId) want.add(co.recordId); }
-  await take((await allContacts(at)).filter((r) => want.has((r.fields?.Company || [])[0])));
-  return out;
+
+  const events = await eventsFor(at, rows.map((r) => r.id));
+  const byRecId = new Map();
+  for (const c of byKid.values()) if (c.recordId) byRecId.set(c.recordId, c);
+  return rows.map((r) => toConsoleContactFromAirtable(r, {
+    /* The link first, the rollup second: the link is the relationship, the
+       rollup is a copy of it, and a copy can be stale. */
+    company: byRecId.get((r.fields?.Company || [])[0]) || byKid.get(kidOf(r.fields)),
+    events: events.get(r.id) || [],
+  }));
 }
 
 /* The dialling queue: every contact, optionally narrowed to one owner. */

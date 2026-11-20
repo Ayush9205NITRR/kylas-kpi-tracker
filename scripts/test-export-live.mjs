@@ -59,6 +59,24 @@ await atPost("Event Rows", { "Row Key": "ev-now-1", Period: "Current", "Event Ty
   Budget: "approx 8L, not signed off", Timeline: "March, maybe April", Pax: "around 120", Remarks: "Goa preferred", Contact: [rid] });
 await atPost("Event Rows", { "Row Key": "ev-past-1", Period: "Past", "Event Type": "Product launch",
   Budget: "3L", Timeline: "last Sept", Pax: "60", Remarks: "", Contact: [rid] });
+/* A LINKED CALL, and a second person with none. "Last Call At" is a rollup
+   over the contact's own Call Log rows: a fixture with calls that hang off
+   nobody — which is what the history seed writes, because the period report
+   counts by owner and day and never asks whose they were — leaves the column
+   empty for everybody and agrees with any bug you put in front of it. */
+await atPost("Call Log", { Key: `exp-call-${Date.now()}`,
+  "Called At": new Date(Date.now() - 2 * 86400000).toISOString(), Outcome: "No answer",
+  Owner: "Enout Super Admin", Duration: 30, "Duration Source": "dialed", Contact: [rid] });
+const never = await atPost("Contacts", {
+  "Kylas Contact ID": "990002", Name: "Never Called Person", Salutation: "", Designation: "Admin",
+  LinkedIn: "linkedin.com/in/never-called", Owner: "Enout Super Admin", "Kylas Owner ID": "74725",
+  Phone: "9000000098", Phones: "", Email: "nc@x.com", Emails: "",
+  "Source of Data": "COLD_CALLING", Remarks: "", "Next Call Date": "", "Next Call Time": "",
+  "Current Stage": "CNC_COULD_NOT_CONNECT", "KPI Rank": "", "Kylas Updated At": "",
+  "Vendor Info": "", "Mode of Meeting": "", "Service Offering": false,
+  Flagged: false, "Exit Reason": "", Company: [], "Company Kylas ID": CO });
+void never;
+
 const VIEW = `Export suite ${Date.now().toString(36)}`;
 await api("/views", { name: VIEW, visibility: "team", companies: [CO] });
 
@@ -126,12 +144,16 @@ try {
   ok("the file is named for the view", c.path.includes("Export-suite"), c.path.split("/").pop());
   ok("...one row per contact on screen", c.grid.length - 1 === crows, `${c.grid.length - 1} vs ${crows}`);
   const head = c.grid[0], col = (n) => head.indexOf(n);
-  const want = ["Contact", "Salutation", "Company", "Kylas company ID", "Designation", "Phone",
-    "All phones", "Email", "All emails", "LinkedIn", "Stage", "Owner", "Source of data",
-    "Last call", "Next call date", "Next call time", "Vendor info", "Mode of meeting",
-    "Service offering", "Flagged", "Exit reason", "Remarks", "Kylas contact ID"];
+  /* THE SHEET CARRIES THE WHOLE RECORD whatever the picker is set to —
+     unticking a column narrows the table, not the file. What the picker
+     decides is which columns LEAD. */
+  const want = ["Contact", "Company", "Designation", "Phone", "Email", "LinkedIn",
+    "Calling stage", "Owner", "Last call", "Next call", "Source of data", "Remarks",
+    "Kylas contact ID", "Kylas company ID"];
   const missing = want.filter((w) => col(w) < 0);
   ok("...every record field has a column", !missing.length, missing.join(", "));
+  ok("...the columns on screen lead it, in their order",
+     head.slice(0, 2).join(",") === "Contact,Company", head.slice(0, 3).join(","));
   ok("...six event types, each with a now and a past column",
      head.filter((h) => / — now$/.test(h)).length === 6 && head.filter((h) => / — past$/.test(h)).length === 6,
      `${head.filter((h) => / — now$/.test(h)).length} / ${head.filter((h) => / — past$/.test(h)).length}`);
@@ -167,6 +189,62 @@ try {
      await f().locator(".ctable .crow").count() === 0 && await f().locator("#conCsv").count() === 0);
   await f().locator("#conQ").fill(""); await W(1200);
   ok("clearing the search brings it back", await f().locator("#conCsv").count() === 1);
+
+  console.log("\n6 · the column picker");
+  ok("a Columns button is offered on the Contacts half", await f().locator("#cColBtn").count() === 1);
+  await f().locator("#cColBtn").click(); await W(600);
+  const opts = await f().locator("[data-ccol]").count();
+  ok("...and it lists every optional column", opts === 11, `${opts}`);
+  const before = await f().locator(".ctable .vr.vh span").allTextContents();
+  ok("LinkedIn is off by default — it is the widest column and the least read",
+     !before.join("|").includes("LinkedIn"), before.join("|"));
+  await f().locator('[data-ccol="linkedin"]').check(); await W(900);
+  const after = await f().locator(".ctable .vr.vh span").allTextContents();
+  ok("ticking LinkedIn adds the column to the table",
+     after.includes("LinkedIn") && after.length === before.length + 1, after.join("|"));
+  ok("...as a real anchor to an https page, which the iframe does not block",
+     await f().locator('.ctable .vr.crow a.lnk.li[target="_blank"][rel="noopener noreferrer"]').count() >= 0);
+  await f().locator('[data-ccol="designation"]').uncheck(); await W(900);
+  const after2 = await f().locator(".ctable .vr.vh span").allTextContents();
+  ok("unticking Designation takes it off the table", !after2.includes("Designation"), after2.join("|"));
+
+  const c3 = await grab("#conCsv");
+  ok("...but the sheet still carries it — the picker narrows the screen, not the file",
+     c3.grid[0].includes("Designation"), c3.grid[0].join(","));
+  ok("...with the chosen columns leading, LinkedIn now among them",
+     c3.grid[0].indexOf("LinkedIn") < c3.grid[0].indexOf("Designation"),
+     `LinkedIn@${c3.grid[0].indexOf("LinkedIn")} Designation@${c3.grid[0].indexOf("Designation")}`);
+
+  /* The choice is this person's and is remembered — a BD who works on
+     Remarks should not re-tick it every morning. */
+  await page.reload(); await W(7000);
+  await f().evaluate(() => window.showConsoleView("companies")); await W(3000);
+  await f().locator(".vws .vwtab", { hasText: VIEW }).first().click(); await W(2000);
+  await f().locator("#halfCon").click(); await W(6000);
+  const afterReload = await f().locator(".ctable .vr.vh span").allTextContents();
+  ok("the choice survives a reload", afterReload.includes("LinkedIn") && !afterReload.includes("Designation"),
+     afterReload.join("|"));
+  await f().locator("#cColBtn").click(); await W(500);
+  await f().locator("#cColReset").click(); await W(900);
+  const reset = await f().locator(".ctable .vr.vh span").allTextContents();
+  ok("Reset puts the default columns back", reset.includes("Designation") && !reset.includes("LinkedIn"), reset.join("|"));
+
+  console.log("\n7 · Last call says when, not “never”");
+  /* THE BUG THIS RELEASE FIXES. CONTACT_READ_FIELDS never asked Airtable for
+     the Last Call At rollup, so every row in every view read "never" and the
+     freshness chips filtered against a column that was always empty. It
+     looked like a UI bug for months; the call card was right because it
+     reads the company, which does ask for it. */
+  const lc = await f().evaluate(() => {
+    const h = [...document.querySelectorAll(".ctable .vr.vh span")].map((x) => x.textContent.trim());
+    const i = h.indexOf("Last call");
+    return [...document.querySelectorAll(".ctable .vr.crow")]
+      .map((r) => r.children[i]?.textContent.trim() || "");
+  });
+  ok("the Last call column is populated, not all “never”",
+     lc.length > 0 && lc.some((x) => x && !/never/i.test(x)), lc.join(" | "));
+  ok("...and a contact with no call still reads never, rather than a wrong date",
+     lc.every((x) => x !== ""), lc.join(" | "));
 
   console.log("\n5 · nothing a spreadsheet would run");
   /* A cell beginning = + @ is how a CSV gets a spreadsheet to execute
