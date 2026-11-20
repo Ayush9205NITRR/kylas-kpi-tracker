@@ -149,6 +149,26 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 1b · The owner, big enough to recognise (1.86.1)
+
+The strip §1c moved into the header put the account owner at `--t-label` in
+`--text2` — the same voice as the contact count beside it, so finding it cost a
+deliberate look. Ayush, 2026-11-20: *"make the owner look Big … I am able to see
+who the owner is without much of the req. input."* The point is recognition,
+not reading.
+
+So: an **initials chip** (`.cav`, `.rdAv`'s shape at 28px, `--blueSoft` on
+`--blueDeep`) and then OWNER over the name, the name at **`--t-sec`** in the
+full `--text`, `max-width` 18ch → 24ch. On a 200-call day the shape answers
+"is this the account I think it is" before any text is parsed.
+
+Five sizes still, two faces still, one accent still — the chip reuses the
+avatar that the re-assign panel already draws. The strip is its own grid row,
+so the height it gains is vertical only and cannot push a button off row one;
+the browser check asserts `.acts` and `.bar` do not clip at 1500, 1280, 1100
+and 980px, and that a 41-character owner name ellipsises rather than widening
+the bar.
+
 ## 1c · The top bar, the company strip and Today (1.86.0)
 
 Ayush drew an arrow across the header and asked what Company and Today were

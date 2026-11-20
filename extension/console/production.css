@@ -1621,13 +1621,22 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
    (Ayush, 2026-11-20: "isko top mein"). The band is gone; what was only in
    it, the owner and the two actions, is here. One accent, existing tokens. */
 .acct .cid{font-family:var(--m,ui-monospace);font-size:var(--t-meta);color:var(--text3);flex:none}
-.acct .cown{display:flex;align-items:baseline;gap:6px;min-width:0;flex:0 1 auto;white-space:nowrap}
+/* THE OWNER IS READ AS A SHAPE FIRST. It sat at label size in the secondary
+   grey — the same voice as the contact count next to it — so finding it cost
+   a deliberate look. Initials chip, then OWNER over the name at section size
+   in the full text colour. The chip is `.rdAv` at 28px: one accent, no token
+   of its own, and the scale stays at five sizes. */
+.acct .cown{display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto;white-space:nowrap}
+.acct .cav{flex:none;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;
+  font:var(--w-strong) var(--t-label) var(--display);background:var(--blueSoft);color:var(--blueDeep);
+  font-style:normal;letter-spacing:.01em}
+.acct .cowt{display:flex;flex-direction:column;min-width:0;line-height:1.15}
 .acct .cown em{font-style:normal;font-size:var(--t-meta);color:var(--text3);
   text-transform:uppercase;letter-spacing:.04em;flex:none}
 /* The NAME gives way by ellipsis, never by collapsing to one letter — which
    is what happened when it was allowed to shrink inside .acct's overflow. */
-.acct .cown b{font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2);
-  min-width:5ch;max-width:18ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct .cown b{font-size:var(--t-sec);font-weight:var(--w-strong);color:var(--text);
+  min-width:5ch;max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct .cown em{flex:none}
 /* THE COMPANY'S ACTIONS BELONG TO THE CALL CARD. With a full-screen view open
    the card is behind it, so "Move contacts…" and × are acting on something

@@ -765,7 +765,16 @@ function renderAccount(){
   if(!id)return;
   const acc=accountOwner();
   if(acc.name||acc.id){
-    const o=el("span","cown",`<em>Owner</em><b>${esc(acc.name||("#"+acc.id))}</b>`);
+    /* RECOGNITION BEFORE READING (Ayush, 2026-11-20: "make the owner look
+       Big … without much of the req. input"). On a 200-call day the question
+       is not what the owner's name spells, it is whether it is the one you
+       expected — so the initials come first, as a shape, and the name is at
+       section size rather than the label size it shared with the contact
+       count. `.rdAv`'s chip, scaled down; no new token, no new hue. */
+    const nm=acc.name||("#"+acc.id);
+    const o=el("span","cown",
+      `${acc.name?`<i class="cav" aria-hidden="true">${esc(initials(acc.name))}</i>`:""}
+       <span class="cowt"><em>Owner</em><b>${esc(nm)}</b></span>`);
     o.title="Who this account belongs to in Kylas — not the same thing as who owns this contact";
     W.appendChild(o);
     if(window.Views?.reassignOne&&acc.id){
@@ -950,6 +959,14 @@ async function moveContactsSheet(sc){
    the Airtable branch's company row), so the card already holds it the moment
    the account is open. The Accounts-view cache is only a fallback: it is empty
    until that view has run at least once, which on a cold open it has not. */
+/* "Enout Super Admin" -> "ES". One word gives its first two letters, so a
+   single-name owner still fills the chip rather than floating one glyph. */
+function initials(name){
+  const w=String(name||"").trim().split(/\s+/).filter(Boolean);
+  if(!w.length)return "?";
+  return (w.length>1?w[0][0]+w[1][0]:w[0].slice(0,2)).toUpperCase();
+}
+
 function accountOwner(){
   const k=scope?.kylas||null;
   if(k&&(k.owner||k.ownerId)){

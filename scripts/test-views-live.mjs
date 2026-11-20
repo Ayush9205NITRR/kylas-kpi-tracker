@@ -390,13 +390,26 @@ try {
   const strip = await f().evaluate(() => {
     const n = document.getElementById('acct'); if (!n) return null;
     const b = n.querySelector('.cown b');
+    const cs = b && getComputedStyle(b);
     return { name: n.querySelector('.scope')?.textContent || '',
              owner: b?.textContent || '', ownerVisible: !!b && b.getBoundingClientRect().width > 40,
+             size: cs?.fontSize || '', colour: cs?.color || '',
+             metaColour: getComputedStyle(n.querySelector('.cown em')).color,
+             av: n.querySelector('.cav')?.textContent?.trim() || '',
              change: !!n.querySelector('.clink'), move: !!n.querySelector('.cmv'),
              ownRow: n.getBoundingClientRect().top > document.querySelector('.acts').getBoundingClientRect().top };
   });
   ok('the company strip is in the header', !!strip?.name, JSON.stringify(strip));
   ok('...with the owner readable, not crushed', strip?.ownerVisible === true, `“${strip?.owner}”`);
+  /* The point of 1.86.1: recognisable without a deliberate look. Size and
+     colour are asserted because "looks bigger" is the kind of change a later
+     tidy-up silently folds back into the label voice it came from. */
+  ok('...at section size, not the label size it shared with the count',
+     strip?.size === '17px', `${strip?.size}`);
+  ok('...in the full text colour, not the secondary grey',
+     !!strip?.colour && strip.colour !== strip.metaColour, `${strip?.colour}`);
+  ok('...behind an initials chip you can read before the name',
+     /^[A-Z0-9]{2}$/.test(strip?.av || ''), `“${strip?.av}”`);
   ok('...and a Change link beside it', strip?.change === true);
   ok('...on a row of its own, under the buttons', strip?.ownRow === true);
 
@@ -409,6 +422,19 @@ try {
     });
     ok(`nothing clips at ${w}px`, fits === true);
   }
+  /* The widest the strip can get: a long company AND a long owner, which is
+     the pair that broke the band before the strip moved up here. */
+  await page.setViewportSize({ width: 1280, height: 900 }); await W(600);
+  const longFits = await f().evaluate(() => {
+    const b = document.querySelector('.acct .cown b'); if (!b) return null;
+    const was = b.textContent;
+    b.textContent = 'Priyadarshini Venkataraghavan-Subramaniam';
+    const acts = document.querySelector('.acts'), bar = document.querySelector('.bar');
+    const r = acts.scrollWidth <= acts.clientWidth + 1 && bar.scrollWidth <= bar.clientWidth + 1;
+    b.textContent = was; return r;
+  });
+  ok('nothing clips at 1280px with a long company and a long owner', longFits === true);
+
   await page.setViewportSize({ width: 1600, height: 950 }); await W(600);
 
   console.log('\n17 · Today means what you owe');
