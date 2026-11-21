@@ -2539,7 +2539,12 @@ let warnedMissing=false;
 /* THE ONE PLACE A SAVE IS KNOWN TO HAVE LANDED — both the direct reply and a
    queued job finishing come through here. If the dashboard is open, it is now
    showing numbers that predate this save, so it is told. */
-function savedLanded(){ try{ Views?.savedLanded?.(); }catch{ /* views not loaded */ } }
+function savedLanded(){
+  try{ Views?.savedLanded?.(); }catch{ /* views not loaded */ }
+  /* A save is one of the three moments the reply count can have moved —
+     see overlay.js, where the badge stopped polling. */
+  try{ window.refreshWaBadge?.(); }catch{ /* no badge on this screen */ }
+}
 
 function applySaved(a,res){
     /* ANY id coming back, not only one from a create. When the proxy recognises

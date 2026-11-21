@@ -725,7 +725,7 @@
   const dealsBtn = document.getElementById("dealsBtn");
   if (dealsBtn) dealsBtn.onclick = () => showView("deals");
   const waBtn = document.getElementById("waBtn");
-  if (waBtn) waBtn.onclick = () => showView("whatsapp");
+  if (waBtn) waBtn.onclick = () => { showView("whatsapp"); waBadge(); };
   /* The unread badge. Polled rather than pushed: the reply arrives at the
      Worker from the bot, and the console has no socket to be told on. Once a
      minute is often enough for something a BD acts on by opening the screen,
@@ -741,8 +741,12 @@
                       : "Compose and queue WhatsApp messages";
     } catch { /* offline, or no D1: the button still works */ }
   }
+  /* NO POLLING. Eight consoles asking a Worker every minute, all day, for a
+     number that changes a few times a week is a bill for nothing. It is
+     refreshed when it can actually have changed: on open, after a save, and
+     whenever the WhatsApp screen is opened. */
   waBadge();
-  setInterval(waBadge, 60000);
+  window.refreshWaBadge = waBadge;
 
   /* THE FLAGS BUTTON IS AN ADMIN'S. Shown only once the server has said this
      person is one (state.role is set by /meta; before that it is unknown, and

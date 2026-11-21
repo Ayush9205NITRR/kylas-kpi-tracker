@@ -2043,3 +2043,71 @@ body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
   text-underline-offset:2px}
 .waN{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-max);background:var(--rose);
   color:#fff;border-radius:999px;padding:0 6px;margin-left:6px}
+
+/* ══ WARMUP vs CNC, THE BRAKES, AND THE NUMBERS ════════════════════════
+   Two ladders and a strip of rates. Structure and the one accent as ever;
+   the only colour with meaning here is the amber on a paused switch and the
+   rose on what did not get delivered, both of which CLAUDE.md already
+   assigns to flags and to trouble. */
+.waModes{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.waModes>button[role="tab"]{border:1px solid var(--line2);background:var(--panel);
+  border-radius:999px;padding:6px 15px;font:inherit;font-size:var(--t-label);
+  font-weight:var(--w-med);color:var(--text2);cursor:pointer}
+.waModes>button[aria-selected="true"]{background:var(--blue);border-color:var(--blue);
+  color:var(--onBlue);font-weight:var(--w-strong)}
+.waRungs{display:flex;gap:4px;margin-left:10px;padding-left:12px;border-left:1px solid var(--line2)}
+.waRung{border:1px solid var(--line2);background:var(--panel);border-radius:999px;
+  padding:5px 12px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer}
+.waRung:hover{border-color:var(--blueLine);color:var(--blue)}
+.waRung.on{background:var(--blueSoft);border-color:var(--blue);color:var(--blue);font-weight:var(--w-strong)}
+
+.wmStrip{display:flex;gap:9px;flex-wrap:wrap;margin:0 0 12px}
+.wmC{flex:1 1 120px;display:flex;flex-direction:column;gap:1px;border:1px solid var(--line2);
+  background:var(--panel);border-radius:var(--r);padding:9px 12px}
+.wmC em{font-style:normal;font-size:var(--t-meta);color:var(--text3);text-transform:uppercase;
+  letter-spacing:.04em}
+.wmC b{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);color:var(--text);line-height:1.2}
+.wmC i{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+.wmC.bad b{color:var(--rose)}
+
+.wsBar{display:flex;align-items:flex-end;gap:11px;flex-wrap:wrap;border:1px solid var(--line2);
+  background:var(--panel2);border-radius:var(--r);padding:10px 12px;margin-bottom:12px}
+.wsBar.killed{border-color:var(--amberLine);background:var(--amberSoft)}
+.wsF{display:flex;flex-direction:column;gap:3px;font-size:var(--t-meta);color:var(--text3)}
+.wsF input{width:74px;border:1px solid var(--line2);border-radius:5px;background:var(--panel);
+  padding:4px 7px;font:inherit;font-size:var(--t-label);color:var(--text)}
+.wsF input[disabled]{opacity:.6;cursor:not-allowed}
+.wsKill{margin-left:auto;border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
+  padding:7px 14px;font:inherit;font-size:var(--t-label);font-weight:var(--w-strong);
+  color:var(--text2);cursor:pointer}
+.wsKill:hover:not([disabled]){border-color:var(--rose);color:var(--rose);background:var(--roseSoft)}
+.wsKill.on{background:var(--amber);border-color:var(--amber);color:#fff}
+.wsKill[disabled]{opacity:.5;cursor:not-allowed}
+.wsNote{font-size:var(--t-meta);color:var(--text3)}
+.wsNote.bad{color:var(--amber);font-weight:var(--w-strong)}
+
+/* A skipped contact says why, on its own row. */
+.waR{grid-template-columns:auto 1.1fr 1.1fr .9fr .9fr auto}
+.waR.off{opacity:.62}
+.waRst{font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.waWhy{font-size:var(--t-meta);color:var(--text3);white-space:nowrap}
+.waWhy.ok{color:var(--blue);font-weight:var(--w-med)}
+.waCount em{display:block;margin-top:2px;font-style:normal;color:var(--amber)}
+.waVis{display:flex;align-items:center;gap:6px;font-size:var(--t-meta);color:var(--text3)}
+.waMap.custom .waMapH{color:var(--blue)}
+
+/* The status column in Contacts. One hue, lightness doing the work: the
+   further along the ladder, the stronger the pill. Replied is the accent
+   because it is the one that wants a human; DND and Not on WA are neutral,
+   because they are facts rather than alarms. */
+.ctable .wast{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;padding:2px 8px;border-radius:999px;font-size:var(--t-meta);
+  font-weight:var(--w-med);background:var(--panel3);color:var(--text3)}
+.ctable .w-cnc-1-sent,.ctable .w-warmup-1-sent{background:var(--r0);color:var(--r5)}
+.ctable .w-cnc-2-sent,.ctable .w-warmup-2-sent{background:var(--r1);color:var(--r5)}
+.ctable .w-cnc-3-sent,.ctable .w-warmup-3-sent{background:var(--r2);color:#fff}
+.ctable .w-replied{background:var(--blue);color:var(--onBlue);font-weight:var(--w-strong)}
+.ctable .w-dnd,.ctable .w-not-on-wa{background:var(--panel3);color:var(--text3);
+  text-decoration:line-through}

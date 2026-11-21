@@ -73,8 +73,9 @@ import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 import { openOf } from "./open-accounts.mjs";
 import { createAllotJobs, performItem as performAllotItem } from "./allot-jobs.mjs";
-import { createWaJobs, waPlan, waVars, renderTemplate, varsUsed, TEMPLATE_VARS,
-         VAR_FALLBACK, WARM_STAGES } from "./wa-jobs.mjs";
+import { createWaJobs, waPlan, waVars, renderTemplate, varsUsed, customVarsIn, TEMPLATE_VARS,
+         VAR_FALLBACK, TEMPLATE_VISIBILITY, WA_DEFAULTS, WA_STATUS, eligible,
+         WARM_STAGES } from "./wa-jobs.mjs";
 import { createDeals, buildDeal, handoverNote, parseBudget, PLAYBOOK_ORDER, REASON_CHIPS } from "./deals.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
@@ -3414,9 +3415,11 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          Testing `!body` therefore never fired and a plain read fell through
          to the save branch and answered "a template needs a name". */
       if (!body || !Object.keys(body).length)
-        return { templates: await waJobs.templates(), vars: TEMPLATE_VARS, fallbacks: VAR_FALLBACK };
+        return { templates: await waJobs.templates(), vars: TEMPLATE_VARS,
+                 fallbacks: VAR_FALLBACK, visibilities: TEMPLATE_VISIBILITY,
+                 me: (await viewer()).email };
       if (body.action === "delete") return waJobs.deleteTemplate(body.id);
-      const r = await waJobs.saveTemplate(body);
+      const r = await waJobs.saveTemplate({ ...body, owner: (await viewer()).email });
       log(`wa template ${r.id} saved by ${userName(await viewer())}`);
       return { ...r, templates: await waJobs.templates() };
     },
@@ -3426,7 +3429,56 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/wa/preview": async (url, body) => {
       const vars = body?.vars || {};
       return { text: renderTemplate(body?.body || "", vars, body?.fallbacks || {}),
-               used: varsUsed(body?.body || "") };
+               used: varsUsed(body?.body || ""), custom: customVarsIn(body?.body || "") };
+    },
+    /* ADMIN ONLY, BOTH WAYS. A BD may read the caps — the composer greys
+       people out and has to say why — but only an admin moves them, because
+       the person who wants the brakes off is never the person who pays for a
+       banned number. */
+    "/wa/settings": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const who = await viewer();
+      if (!body || !Object.keys(body).length)
+        return { settings: await waJobs.settings(), defaults: WA_DEFAULTS, canEdit: !!who.admin };
+      if (!who.admin) throw Object.assign(new Error("Only an admin can change the outreach limits."), { status: 403 });
+      const out = await waJobs.saveSettings(body, who.name || who.email);
+      log(`wa settings by ${who.name}: ${Object.entries(body).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+      /* Pausing may also clear what is already waiting — asked for
+         explicitly, because "stop" and "stop and throw away" are different
+         decisions and only one of them is reversible. */
+      if (Number(body.killSwitch) && body.cancelQueued)
+        out.cancelled = (await waJobs.cancelAllQueued(who.name || who.email)).cancelled;
+      return { settings: out, canEdit: true };
+    },
+    "/wa/metrics": async () => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      return waJobs.metrics();
+    },
+    /* The Contacts column and the composer's gating read the SAME thing. */
+    "/wa/contact-status": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const ids = Array.isArray(body?.ids) ? body.ids : String(url.searchParams.get("ids") || "").split(",");
+      return { statuses: await waJobs.statuses(ids.filter(Boolean)) };
+    },
+    /* Who the next step may go to, and why everybody else may not. Decided
+       on the server so the screen and the queue cannot disagree. */
+    "/wa/eligible": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const list = Array.isArray(body?.contacts) ? body.contacts : [];
+      const cfg = await waJobs.settings();
+      const st = await waJobs.statuses(list.map((c) => c.contactId));
+      const rows = await waJobs.sequencesFor(list.map((c) => c.contactId));
+      const seat = String(body?.seat || "");
+      const used = seat ? await waJobs.sentToday(seat) : 0;
+      const capReached = seat ? used >= Number(cfg.dailyCapPerSeat) : false;
+      const seq = String(body?.seq || "cnc"), step = Number(body?.step || 1);
+      return {
+        settings: cfg, sentToday: used, status: st,
+        rows: list.map((c) => ({ contactId: String(c.contactId),
+          status: st[String(c.contactId)] || WA_STATUS.NONE,
+          ...eligible(c, rows[String(c.contactId)] || null,
+            { seq, step, cooldownHours: Number(cfg.cooldownHours), capReached }) })),
+      };
     },
     "/wa/status": async () => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });

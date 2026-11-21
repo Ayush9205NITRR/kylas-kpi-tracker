@@ -11,7 +11,8 @@
  * D1 fake uses.
  */
 import { fakeD1 } from "./d1-fake.mjs";
-import { renderTemplate, varsUsed, TEMPLATE_VARS, VAR_FALLBACK, DEFAULT_TEMPLATES,
+import { statusOf, eligible, customVarsIn, WA_STATUS, WA_DEFAULTS, TEMPLATE_VISIBILITY,
+         renderTemplate, varsUsed, TEMPLATE_VARS, VAR_FALLBACK, DEFAULT_TEMPLATES,
          createWaJobs, inBusinessHours, nextBusinessSlot, istMinutes, waPlan, waVars,
          onInboundReply, onNoReplyAdvance, onCallSupersedes, onMultiThreadGuard,
          onDeliveryFailure, onOptOut, WARM_STAGES } from "./wa-jobs.mjs";
@@ -217,6 +218,139 @@ ok("a queued job carries the edited text and the seat it was sent from", !!ov.id
 const sent = await db.prepare("SELECT vars, seat FROM wa_jobs WHERE id = ?").bind(ov.id).first();
 ok("...and the bot reads the exact string, not a re-render",
    JSON.parse(sent.vars).body_override === "Hand written, this one." && sent.seat === "seat-3");
+
+console.log("\n7 · where somebody is on the ladder");
+ok("nothing sent is Not Sent", statusOf(null) === WA_STATUS.NONE);
+ok("a sent step reads as its rung",
+   statusOf({ seq: "cnc", sent_step: 2 }) === "CNC-2 Sent", statusOf({ seq: "cnc", sent_step: 2 }));
+ok("...and warmup has its own ladder",
+   statusOf({ seq: "warmup", sent_step: 1 }) === "Warmup-1 Sent");
+ok("a reply outranks the rung it was on",
+   statusOf({ seq: "cnc", sent_step: 2, reason: "inbound_reply", state: "paused" }) === WA_STATUS.REPLIED);
+ok("...and DND outranks everything", statusOf({ seq: "cnc", sent_step: 2, dnd: 1 }) === WA_STATUS.DND);
+ok("not-on-WhatsApp is its own answer",
+   statusOf({ seq: "cnc", sent_step: 1, reason: "not_on_wa" }) === WA_STATUS.NOT_ON_WA);
+
+console.log("\n8 · the gate, and why somebody is skipped");
+const C1 = { contactId: "1", phone: "+91900" };
+ok("step 1 goes to somebody untouched", eligible(C1, null, { seq: "cnc", step: 1 }).ok === true);
+ok("...but not to somebody already at CNC-1",
+   eligible(C1, { seq: "cnc", sent_step: 1 }, { seq: "cnc", step: 1 }).ok === false);
+/* THE SEQUENTIAL RULE. */
+ok("CNC-2 goes ONLY to CNC-1 Sent",
+   eligible(C1, { seq: "cnc", sent_step: 1, sent_at: OPEN - 72 * 3600000 }, { seq: "cnc", step: 2, now: OPEN }).ok === true);
+ok("...not to somebody untouched",
+   eligible(C1, null, { seq: "cnc", step: 2 }).why === "needs CNC-1 first",
+   eligible(C1, null, { seq: "cnc", step: 2 }).why);
+ok("CNC-3 goes ONLY to CNC-2 Sent",
+   eligible(C1, { seq: "cnc", sent_step: 2, sent_at: OPEN - 72 * 3600000 }, { seq: "cnc", step: 3, now: OPEN }).ok === true
+   && eligible(C1, { seq: "cnc", sent_step: 1 }, { seq: "cnc", step: 3 }).ok === false);
+ok("Warmup walks its own ladder, not the CNC one",
+   eligible(C1, { seq: "warmup", sent_step: 1, sent_at: OPEN - 72 * 3600000 }, { seq: "warmup", step: 2, now: OPEN }).ok === true
+   && eligible(C1, { seq: "cnc", sent_step: 1 }, { seq: "warmup", step: 2 }).ok === false);
+ok("a reply takes somebody out of the sequence for good",
+   eligible(C1, { seq: "cnc", sent_step: 1, reason: "inbound_reply" }, { seq: "cnc", step: 2 }).why === "replied — talk to them");
+ok("...so does opting out", eligible(C1, { dnd: 1 }, { seq: "cnc", step: 1 }).why === "opted out");
+ok("...and not being on WhatsApp",
+   eligible(C1, { reason: "not_on_wa" }, { seq: "cnc", step: 1 }).why === "not on WhatsApp");
+ok("no number, no message", eligible({ contactId: "1" }, null, {}).why === "no number");
+/* The gap between two steps of one ladder: three in an hour is what gets a
+   number banned. */
+const soon = eligible(C1, { seq: "cnc", sent_step: 1, sent_at: OPEN - 3600000 },
+                      { seq: "cnc", step: 2, now: OPEN, cooldownHours: 48 });
+ok("a step inside the cooldown waits, and says how long", soon.ok === false && /h to go/.test(soon.why), soon.why);
+ok("the daily cap takes everybody out, with the reason said",
+   eligible(C1, null, { seq: "cnc", step: 1, capReached: true }).why === "daily cap reached");
+
+console.log("\n9 · anti-ban settings, and the kill switch");
+ok("the defaults are the brakes we agreed",
+   WA_DEFAULTS.dailyCapPerSeat === 80 && WA_DEFAULTS.maxCnc === 3
+   && WA_DEFAULTS.maxWarmup === 4 && WA_DEFAULTS.cooldownHours === 48 && WA_DEFAULTS.killSwitch === 0,
+   JSON.stringify(WA_DEFAULTS));
+const cfg0 = await wa.settings();
+ok("a fresh database reads the defaults", cfg0.dailyCapPerSeat === 80);
+await wa.saveSettings({ dailyCapPerSeat: 2 }, "admin");
+ok("...and a saved one sticks", (await wa.settings()).dailyCapPerSeat === 2);
+await wa.saveSettings({ dailyCapPerSeat: "nonsense", maxCnc: -4 }, "admin");
+ok("...while rubbish is ignored rather than stored",
+   (await wa.settings()).dailyCapPerSeat === 2 && (await wa.settings()).maxCnc === 3);
+
+/* $0.00 GUARDRAIL: the empty poll must cost one SELECT and no writes. */
+const empty = await wa.drain({ seat: "seat-empty", limit: 10 });
+/* NOTHING DUE MEANS NOTHING ELSE IS READ — not the settings, not the cap.
+   That is the point of the ordering, so the empty poll eight laptops make
+   all day costs one indexed SELECT and no writes. It also means an empty
+   drain cannot report `paused`: there was nothing to pause. */
+ok("an empty drain returns no jobs", (empty.jobs || []).length === 0);
+ok("...and does not even look at the settings to do it",
+   empty.paused === undefined && empty.capped === undefined && empty.cap === undefined,
+   JSON.stringify(empty));
+
+const kq = await wa.queue({ contactId: "960", companyId: "903", phone: "+919000000960",
+  stage: "CNC_COULD_NOT_CONNECT", seat: "seat-kill", dueAt: OPEN });
+await wa.saveSettings({ killSwitch: 1 }, "admin");
+const killed = await wa.drain({ seat: "seat-kill", limit: 10 });
+ok("the kill switch stops a drain that DID have work", (killed.jobs || []).length === 0
+   && killed.paused === true, JSON.stringify(killed));
+ok("...and the job is still there, not thrown away",
+   (await db.prepare("SELECT state FROM wa_jobs WHERE id = ?").bind(kq.id).first()).state === "queued");
+await (async () => { try { await wa.queue({ contactId: "970", companyId: "9", phone: "+91900",
+    stage: "CNC_COULD_NOT_CONNECT" }); ok("...and refuses new jobs too", false); }
+  catch (e) { ok("...and refuses new jobs too, rather than building a flood", e.status === 423, e.message); } })();
+/* The other half of the switch, which is a separate decision: stop, versus
+   stop and throw away. */
+const killedAll = await wa.cancelAllQueued("admin");
+ok("...unless the admin also asks for the queue to be cleared",
+   killedAll.cancelled >= 1
+   && (await db.prepare("SELECT state FROM wa_jobs WHERE id = ?").bind(kq.id).first()).state === "cancelled",
+   JSON.stringify(killedAll));
+await wa.saveSettings({ killSwitch: 0, dailyCapPerSeat: 80 }, "admin");
+
+/* The cap, proved rather than assumed. */
+await wa.saveSettings({ dailyCapPerSeat: 1 }, "admin");
+await wa.queue({ contactId: "961", companyId: "903", phone: "+919000000961", stage: "CNC_COULD_NOT_CONNECT", seat: "seat-cap", dueAt: OPEN });
+await wa.queue({ contactId: "962", companyId: "903", phone: "+919000000962", stage: "CNC_COULD_NOT_CONNECT", seat: "seat-cap", dueAt: OPEN });
+const first = await wa.drain({ seat: "seat-cap", limit: 10 });
+ok("a seat under its cap drains", first.jobs.length >= 1, `${first.jobs.length}`);
+await wa.webhook({ event: "sent", jobId: first.jobs[0].id, contactId: first.jobs[0].contact_id });
+const second = await wa.drain({ seat: "seat-cap", limit: 10 });
+ok("...and is cut off once the day's cap is spent",
+   second.jobs.length === 0 && second.capped === true && second.cap === 1, JSON.stringify(second));
+await wa.saveSettings({ dailyCapPerSeat: 80 }, "admin");
+
+console.log("\n10 · custom variables, visibility and metrics");
+ok("a custom variable is spotted", customVarsIn("Hi {{name}} at {{venue_city}}").join(",") === "venue_city");
+ok("...and substituted once it is mapped",
+   renderTemplate("at {{venue_city}}", { venue_city: "Goa" }) === "at Goa");
+ok("...or left visible while it is not",
+   renderTemplate("at {{venue_city}}", {}) === "at {{venue_city}}");
+ok("...and a fallback counts as mapping it",
+   renderTemplate("at {{venue_city}}", {}, { venue_city: "your city" }) === "at your city");
+ok("the three visibilities exist", TEMPLATE_VISIBILITY.join(",") === "private,team,official");
+const vt = await wa.saveTemplate({ name: "Private one", stageGroup: "cnc", body: "Hi {{name}}", visibility: "private", owner: "a@b.c" });
+const got = (await wa.templates()).find((x) => x.id === vt.id);
+ok("a template remembers its visibility and its owner", got.visibility === "private" && got.owner === "a@b.c");
+ok("...and the seeded ones default to team",
+   (await wa.templates()).find((x) => x.id === "event").visibility === "team");
+
+const jm = await wa.queue({ contactId: "980", companyId: "903", phone: "+919000000980",
+  stage: "CNC_COULD_NOT_CONNECT", template: "cnc", seat: "bd-exec-1", dueAt: OPEN });
+await wa.webhook({ event: "sent", jobId: jm.id, contactId: "980" });
+await wa.webhook({ event: "delivered", jobId: jm.id, contactId: "980" });
+await wa.webhook({ event: "read", jobId: jm.id, contactId: "980" });
+const m = await wa.metrics();
+ok("metrics count sent, delivered and read", m.total.sent >= 1 && m.total.delivered >= 1 && m.total.read >= 1,
+   JSON.stringify(m.total));
+ok("...per template and per seat",
+   m.byTemplate.some((x) => x.template === "cnc") && m.bySeat.some((x) => x.seat === "bd-exec-1"),
+   JSON.stringify(m.bySeat));
+ok("...and give the three rates the strip shows",
+   typeof m.rates.delivered === "number" && typeof m.rates.read === "number"
+   && typeof m.rates.replied === "number", JSON.stringify(m.rates));
+/* A SEND is what advances the ladder — not a queue. */
+const st980 = await wa.statuses(["980"]);
+ok("a sent message moves the contact up the ladder", st980["980"] === "CNC-1 Sent", st980["980"]);
+ok("...and sentToday counts it against the seat's cap", (await wa.sentToday("bd-exec-1")) >= 1);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

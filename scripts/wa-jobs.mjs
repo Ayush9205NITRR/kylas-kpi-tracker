@@ -210,8 +210,15 @@ export const DEFAULT_TEMPLATES = [
    preview computed one way and a send computed another is how somebody sends
    "Hi {{name}}" to a prospect. */
 export function renderTemplate(body, vars = {}, fallbacks = {}) {
-  return String(body || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (whole, key) => {
-    if (!TEMPLATE_VARS.includes(key)) return whole;        /* unknown: leave visible */
+  return String(body || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (whole, key) => {
+    /* A CUSTOM VARIABLE IS SUBSTITUTED IF THE CALLER MAPPED IT, and left
+       visible if nobody did. Both halves matter: the mapper exists so a BD
+       can type {{venue_city}} and fill it, and the "left visible" half is
+       what stops an unmapped one going out as a blank. */
+    if (!TEMPLATE_VARS.includes(key)) {
+      const c = String(vars[key] ?? "").trim() || String(fallbacks[key] ?? "").trim();
+      return c || whole;
+    }
     const v = String(vars[key] ?? "").trim();
     if (v) return v;
     const f = fallbacks[key] ?? VAR_FALLBACK[key] ?? "";
@@ -224,8 +231,81 @@ export function renderTemplate(body, vars = {}, fallbacks = {}) {
 
 /* Which variables a body actually uses, for the mapper. */
 export const varsUsed = (body) =>
-  [...new Set([...String(body || "").matchAll(/\{\{\s*([a-zA-Z]+)\s*\}\}/g)].map((m) => m[1]))]
+  [...new Set([...String(body || "").matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map((m) => m[1]))]
     .filter((v) => TEMPLATE_VARS.includes(v));
+
+/* ── SEQUENCES, AND THE ONE COLUMN THAT SAYS WHERE SOMEBODY IS ───────
+   Two ladders, each walked in order and never jumped:
+     CNC-1 → CNC-2 → CNC-3        nobody picked up
+     Warmup-1 → Warmup-2 → Warmup-3   Activation / MQL, keeping it warm
+   Step N only ever targets people who are AT step N-1 and have not replied,
+   been called, opted out or turned out not to be on WhatsApp. That rule is
+   `eligible()` below and it is the whole reason this is sequence-based: no
+   calendar, no cron, nothing to go wrong at 3am — the next step is simply
+   whoever the last step reached.
+
+   THE STATUS IS DERIVED, NEVER STORED TWICE. It comes out of wa_sequences,
+   which the webhook already maintains, so the Contacts column and the
+   composer's gating cannot disagree — and Airtable gains no rows. */
+export const WA_STATUS = {
+  NONE: "Not Sent", REPLIED: "Replied", DND: "DND", NOT_ON_WA: "Not on WA",
+};
+export const SEQ_LABEL = { cnc: "CNC", warmup: "Warmup" };
+
+export function statusOf(seq) {
+  if (!seq) return WA_STATUS.NONE;
+  if (seq.dnd || seq.state === "opted_out") return WA_STATUS.DND;
+  if (seq.reason === "not_on_wa") return WA_STATUS.NOT_ON_WA;
+  if (seq.reason === "inbound_reply") return WA_STATUS.REPLIED;
+  const n = Number(seq.sent_step || 0);
+  if (!n) return WA_STATUS.NONE;
+  return `${SEQ_LABEL[seq.seq] || seq.seq}-${n} Sent`;
+}
+
+/* Who the NEXT step may go to. `step` is the one about to be sent, so step 1
+   is anybody untouched and step N>1 is exactly those sitting at N-1.
+   A reply, a DND, a not-on-WhatsApp or a cooldown that has not elapsed all
+   take somebody out — and each returns WHY, because a contact silently
+   missing from a list is the fastest way to lose trust in the list. */
+export function eligible(contact, seqRow, { seq = "cnc", step = 1, now = Date.now(),
+                                            cooldownHours = 48, capReached = false } = {}) {
+  if (!contact?.phone) return { ok: false, why: "no number" };
+  const st = statusOf(seqRow);
+  if (st === WA_STATUS.DND) return { ok: false, why: "opted out" };
+  if (st === WA_STATUS.NOT_ON_WA) return { ok: false, why: "not on WhatsApp" };
+  if (st === WA_STATUS.REPLIED) return { ok: false, why: "replied — talk to them" };
+  if (capReached) return { ok: false, why: "daily cap reached" };
+  const want = step > 1 ? `${SEQ_LABEL[seq]}-${step - 1} Sent` : WA_STATUS.NONE;
+  if (st !== want) return { ok: false, why: st === WA_STATUS.NONE ? `needs ${SEQ_LABEL[seq]}-${step - 1} first` : `at ${st}` };
+  /* The gap between two steps of the same ladder. Three messages in an hour
+     is what gets a number banned; this is the floor under that. */
+  if (step > 1 && seqRow?.sent_at && now - Number(seqRow.sent_at) < cooldownHours * 3600000)
+    return { ok: false, why: `too soon — ${Math.ceil((cooldownHours * 3600000 - (now - Number(seqRow.sent_at))) / 3600000)}h to go` };
+  return { ok: true };
+}
+
+/* ── ANTI-BAN ────────────────────────────────────────────────────────
+   whatsapp-web.js drives a real logged-in phone. A number that sends 300
+   cold messages in a morning is a number that stops existing, and it takes
+   the BD's own WhatsApp with it. These are the brakes, and they are
+   admin-only because the person who wants them lifted is never the person
+   who pays for a ban. */
+export const WA_DEFAULTS = {
+  dailyCapPerSeat: 80,     /* per phone, per day */
+  maxCnc: 3,
+  maxWarmup: 4,
+  cooldownHours: 48,
+  killSwitch: 0,
+};
+
+/* Custom variables: anything the template editor finds that is not one of
+   the eight built-ins. They are rendered from the same vars object, so a
+   mapper row that supplies a static value just puts it there. */
+export const customVarsIn = (body) =>
+  [...new Set([...String(body || "").matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map((m) => m[1]))]
+    .filter((v) => !TEMPLATE_VARS.includes(v));
+
+export const TEMPLATE_VISIBILITY = ["private", "team", "official"];
 
 /* ── the store ───────────────────────────────────────────────────── */
 export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
@@ -251,7 +331,40 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, stage_group TEXT NOT NULL,
       auto_send INTEGER NOT NULL DEFAULT 0, body TEXT NOT NULL,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`),
-  ]).then(() => seedTemplates()).catch((e) => { schema = null; throw e; }));
+    db.prepare(`CREATE TABLE IF NOT EXISTS wa_settings (
+      k TEXT PRIMARY KEY, v TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT)`),
+    /* One row per template per seat. Counters, not events: the event log is
+       the bot's, and this only has to answer "is seat 4 getting read" and
+       "does the CNC-2 wording land". */
+    db.prepare(`CREATE TABLE IF NOT EXISTS wa_metrics (
+      k TEXT PRIMARY KEY, template TEXT NOT NULL, seat TEXT NOT NULL,
+      sent INTEGER NOT NULL DEFAULT 0, delivered INTEGER NOT NULL DEFAULT 0,
+      read INTEGER NOT NULL DEFAULT 0, replied INTEGER NOT NULL DEFAULT 0,
+      failed INTEGER NOT NULL DEFAULT 0, not_on_wa INTEGER NOT NULL DEFAULT 0,
+      opt_out INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`),
+  ]).then(() => migrate()).then(() => seedTemplates()).catch((e) => { schema = null; throw e; }));
+
+  /* Columns added after the table existed. SQLite has no "ADD COLUMN IF NOT
+     EXISTS", and a database created before this release has the table but
+     not the column — so each one is attempted and the "duplicate column"
+     refusal is the success case. */
+  async function migrate() {
+    for (const [t, col, decl] of [
+      ["wa_sequences", "sent_step", "INTEGER NOT NULL DEFAULT 0"],
+      ["wa_sequences", "sent_at", "INTEGER"],
+      ["wa_jobs", "sent_at", "INTEGER"],
+      ["wa_templates", "visibility", "TEXT NOT NULL DEFAULT 'team'"],
+      ["wa_templates", "owner_email", "TEXT"],
+    ]) {
+      try { await db.prepare(`ALTER TABLE ${t} ADD COLUMN ${col} ${decl}`).run(); }
+      catch { /* already there */ }
+    }
+    /* AFTER the columns, not with the tables: an index on a column that the
+       ALTER above is about to add fails the whole batch, and ready() then
+       rejects on every call. */
+    try { await db.prepare("CREATE INDEX IF NOT EXISTS wa_jobs_sent ON wa_jobs (seat, sent_at)").run(); }
+    catch { /* older sqlite, or the column genuinely is not there */ }
+  }
 
   /* INSERT OR IGNORE, so the defaults appear on a fresh database and an
      edited one is never quietly reset to the factory wording. */
@@ -267,20 +380,29 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     await ready();
     const rows = (await db.prepare("SELECT * FROM wa_templates ORDER BY stage_group, name").all()).results || [];
     return rows.map((r) => ({ id: r.id, name: r.name, stageGroup: r.stage_group,
-                              autoSend: !!r.auto_send, body: r.body, updatedAt: r.updated_at }));
+                              autoSend: !!r.auto_send, body: r.body,
+                              /* team unless somebody chose otherwise: a
+                                 template nobody else can see is the default
+                                 that quietly stops a team sharing wording. */
+                              visibility: r.visibility || "team", owner: r.owner_email || "",
+                              updatedAt: r.updated_at }));
   }
-  async function saveTemplate({ id = "", name = "", stageGroup = "cnc", autoSend = false, body = "" }) {
+  async function saveTemplate({ id = "", name = "", stageGroup = "cnc", autoSend = false,
+                                body = "", visibility = "team", owner = "" }) {
     await ready();
     const clean = String(body || "").slice(0, 4000);
     if (!String(name).trim()) throw Object.assign(new Error("a template needs a name"), { status: 400 });
     if (!clean.trim()) throw Object.assign(new Error("a template needs a message"), { status: 400 });
     const t = now();
     const key = String(id || "").trim() || `t${t.toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
-    await db.prepare(`INSERT INTO wa_templates (id, name, stage_group, auto_send, body, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+    const vis = TEMPLATE_VISIBILITY.includes(String(visibility)) ? String(visibility) : "team";
+    await db.prepare(`INSERT INTO wa_templates (id, name, stage_group, auto_send, body, visibility, owner_email, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, stage_group = excluded.stage_group,
-        auto_send = excluded.auto_send, body = excluded.body, updated_at = excluded.updated_at`)
-      .bind(key, String(name).slice(0, 120), String(stageGroup), autoSend ? 1 : 0, clean, t, t).run();
+        auto_send = excluded.auto_send, body = excluded.body, visibility = excluded.visibility,
+        updated_at = excluded.updated_at`)
+      .bind(key, String(name).slice(0, 120), String(stageGroup), autoSend ? 1 : 0, clean, vis,
+            String(owner || ""), t, t).run();
     return { id: key };
   }
   async function deleteTemplate(id) {
@@ -307,6 +429,11 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     const cid = String(contactId || "");
     if (!cid || !phone) throw Object.assign(new Error("a WhatsApp job needs a contact and a number"), { status: 400 });
     const t = now();
+    /* Queuing is refused too — the switch is "pause all outreach", and a
+       queue that fills while it is down is a flood the moment it lifts. */
+    const cfg = await settings();
+    if (Number(cfg.killSwitch))
+      throw Object.assign(new Error("Outreach is paused by an admin (kill switch)."), { status: 423 });
     const plan = waPlan(stage, {});
     const seqId = `${cid}:${plan.seq || "adhoc"}`;
     const id = crypto.randomUUID();
@@ -332,6 +459,13 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
 
   /* The bot's poll. Leases rather than deletes, so a seat that dies mid-send
      does not silently drop the message. */
+  /* EIGHT LAPTOPS POLL THIS, ALL DAY, AND MOST POLLS HAVE NOTHING TO DO.
+     So the empty case costs exactly ONE indexed SELECT and ZERO writes —
+     no lease, no counter, no settings read unless there is something to
+     hand over. That is the difference between a queue that is free to run
+     and one that bills by the poll.
+     ORDER: the cheap SELECT first, the kill switch and the cap only once
+     there is actually work. */
   async function drain({ seat = "", limit = 20 } = {}) {
     await ready();
     const t = now();
@@ -341,10 +475,23 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
          AND (seat = '' OR seat IS NULL OR seat = ?) ORDER BY due_at LIMIT ?`)
       .bind(t, t, String(seat), n).all()).results || [];
     if (!rows.length) return { jobs: [] };
-    await db.batch(rows.map((r) => db.prepare(
+
+    const cfg = await settings();
+    /* THE KILL SWITCH IS CHECKED HERE, not only at queue time: the whole
+       point of it is to stop sending that is ALREADY queued, in the middle
+       of a morning, from one button. */
+    if (Number(cfg.killSwitch)) return { jobs: [], paused: true, reason: "kill switch" };
+
+    const already = await sentToday(seat);
+    const room = Math.max(0, Number(cfg.dailyCapPerSeat) - already);
+    if (!room) return { jobs: [], capped: true, sentToday: already, cap: Number(cfg.dailyCapPerSeat) };
+    const take = rows.slice(0, room);
+
+    await db.batch(take.map((r) => db.prepare(
       "UPDATE wa_jobs SET state = 'leased', lease_until = ?, seat = ?, tries = tries + 1, updated_at = ? WHERE id = ?")
       .bind(t + LEASE_MS, String(seat), t, r.id)));
-    return { jobs: rows.map((r) => ({ ...r, vars: JSON.parse(r.vars || "{}") })) };
+    return { jobs: take.map((r) => ({ ...r, vars: JSON.parse(r.vars || "{}") })),
+             sentToday: already, cap: Number(cfg.dailyCapPerSeat) };
   }
 
   /* What the bot tells us afterwards. One route, every outcome, because the
@@ -355,9 +502,25 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     const cid = String(contactId || "");
     const out = { event, applied: [] };
 
-    if (event === "sent" || event === "delivered") {
-      await db.prepare("UPDATE wa_jobs SET state = 'sent', updated_at = ? WHERE id = ?").bind(t, jobId).run();
-      out.applied.push("sent");
+    /* The job row knows its template and seat; the metrics are keyed on
+       those, so nothing extra has to be passed in from the bot. */
+    const job = jobId ? await db.prepare("SELECT * FROM wa_jobs WHERE id = ?").bind(String(jobId)).first() : null;
+    const tpl = job?.template || "adhoc", st = job?.seat || "";
+
+    if (event === "sent" || event === "delivered" || event === "read") {
+      if (event === "sent") {
+        await db.batch([
+          db.prepare("UPDATE wa_jobs SET state = 'sent', sent_at = ?, updated_at = ? WHERE id = ?").bind(t, t, jobId),
+          /* THE LADDER MOVES ON A SEND, not on a queue. A message that sat
+             in the outbox and never went has not advanced anybody, and
+             treating it as if it had is how CNC-2 goes to somebody who never
+             got CNC-1. */
+          db.prepare(`UPDATE wa_sequences SET sent_step = MAX(sent_step, step), sent_at = ?, updated_at = ?
+            WHERE id = ?`).bind(t, t, job?.seq_id || ""),
+        ]);
+      }
+      await bump(tpl, st, event === "read" ? "read" : event === "delivered" ? "delivered" : "sent");
+      out.applied.push(event);
       return out;
     }
     if (event === "inbound_reply") {
@@ -366,6 +529,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         db.prepare("UPDATE wa_sequences SET state = 'paused', reason = 'inbound_reply', updated_at = ? WHERE contact_id = ?").bind(t, cid),
       ]);
       out.applied.push("paused", "cancelled");
+      await bump(tpl, st, "replied");
       out.reply = onInboundReply({ id: cid }, { at: t });
       return out;
     }
@@ -385,6 +549,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         db.prepare("UPDATE wa_sequences SET state = 'opted_out', reason = 'opt_out', dnd = 1, updated_at = ? WHERE contact_id = ?").bind(t, cid),
       ]);
       out.applied.push("dnd");
+      await bump(tpl, st, "opt_out");
       return out;
     }
     if (event === "not_on_wa" || event === "seat_offline") {
@@ -397,6 +562,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
       if (d.pauseSequence && cid)
         await db.prepare("UPDATE wa_sequences SET state = 'paused', reason = ?, updated_at = ? WHERE contact_id = ?")
           .bind(event, t, cid).run();
+      await bump(tpl, st, event === "not_on_wa" ? "not_on_wa" : "failed");
       out.applied.push(d.state);
       return out;
     }
@@ -429,5 +595,133 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
              replies: replies.n || 0, dueNow: due.n || 0, inHours: inBusinessHours(t) };
   }
 
-  return { queue, drain, webhook, status, ready, templates, saveTemplate, deleteTemplate };
+  /* ── settings ──────────────────────────────────────────────────── */
+  async function settings() {
+    await ready();
+    const rows = (await db.prepare("SELECT k, v FROM wa_settings").all()).results || [];
+    const out = { ...WA_DEFAULTS };
+    for (const r of rows) {
+      const n = Number(r.v);
+      out[r.k] = Number.isFinite(n) ? n : r.v;
+    }
+    return out;
+  }
+  async function saveSettings(patch = {}, by = "") {
+    await ready();
+    const t = now();
+    const keys = Object.keys(WA_DEFAULTS);
+    const stmts = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!keys.includes(k)) continue;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) continue;
+      stmts.push(db.prepare(`INSERT INTO wa_settings (k, v, updated_at, updated_by) VALUES (?, ?, ?, ?)
+        ON CONFLICT(k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+        .bind(k, String(n), t, by));
+    }
+    if (stmts.length) await db.batch(stmts);
+    return settings();
+  }
+
+  /* ── metrics ───────────────────────────────────────────────────── */
+  const METRIC_COLS = ["sent", "delivered", "read", "replied", "failed", "not_on_wa", "opt_out"];
+  async function bump(template, seat, col) {
+    if (!METRIC_COLS.includes(col)) return;
+    const t = now();
+    const tpl = String(template || "adhoc"), st = String(seat || "");
+    await db.prepare(`INSERT INTO wa_metrics (k, template, seat, ${col}, updated_at)
+      VALUES (?, ?, ?, 1, ?)
+      ON CONFLICT(k) DO UPDATE SET ${col} = ${col} + 1, updated_at = excluded.updated_at`)
+      .bind(`${tpl}|${st}`, tpl, st, t).run();
+  }
+  async function metrics() {
+    await ready();
+    const rows = (await db.prepare("SELECT * FROM wa_metrics").all()).results || [];
+    const zero = () => Object.fromEntries(METRIC_COLS.map((c) => [c, 0]));
+    const total = zero(), byTemplate = {}, bySeat = {};
+    for (const r of rows) {
+      for (const c of METRIC_COLS) {
+        total[c] += r[c] || 0;
+        (byTemplate[r.template] ||= { ...zero(), template: r.template })[c] += r[c] || 0;
+        (bySeat[r.seat || "unassigned"] ||= { ...zero(), seat: r.seat || "unassigned" })[c] += r[c] || 0;
+      }
+    }
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    return { total, byTemplate: Object.values(byTemplate), bySeat: Object.values(bySeat),
+             rates: { delivered: pct(total.delivered, total.sent), read: pct(total.read, total.sent),
+                      replied: pct(total.replied, total.sent) } };
+  }
+
+  /* ── statuses, for the Contacts column and the composer's gating ── */
+  async function statuses(contactIds = []) {
+    await ready();
+    const ids = [...new Set(contactIds.map(String).filter(Boolean))];
+    if (!ids.length) return {};
+    const out = {};
+    /* Chunked IN(), because a view can hold 400 people and SQLite has a
+       limit on bound parameters. */
+    for (let i = 0; i < ids.length; i += 200) {
+      const part = ids.slice(i, i + 200);
+      const rows = (await db.prepare(
+        `SELECT * FROM wa_sequences WHERE contact_id IN (${part.map(() => "?").join(",")})`)
+        .bind(...part).all()).results || [];
+      for (const r of rows) {
+        /* A contact can own a cnc row AND a dnd row; the hardest state wins,
+           which is what statusOf's own order already encodes. */
+        const next = statusOf(r);
+        const have = out[r.contact_id];
+        const rank = (x) => (x === WA_STATUS.DND ? 4 : x === WA_STATUS.NOT_ON_WA ? 3
+          : x === WA_STATUS.REPLIED ? 2 : x === WA_STATUS.NONE ? 0 : 1);
+        if (!have || rank(next) > rank(have)) out[r.contact_id] = next;
+      }
+    }
+    for (const id of ids) out[id] ||= WA_STATUS.NONE;
+    return out;
+  }
+
+  /* How many a seat has actually SENT today, against the cap. Counted off
+     wa_jobs.sent_at, which the webhook stamps — not off what was queued,
+     because a queue that never went out has banned nobody. */
+  async function sentToday(seat) {
+    await ready();
+    const since = new Date(new Date(now()).setUTCHours(0, 0, 0, 0)).getTime() - IST_OFFSET_MIN * 60000;
+    const r = await db.prepare("SELECT COUNT(*) AS n FROM wa_jobs WHERE seat = ? AND sent_at >= ?")
+      .bind(String(seat || ""), since).first();
+    return r?.n || 0;
+  }
+
+  /* The raw rows, for the gate — statuses() flattens to one label per
+     contact and the cooldown needs sent_at, which the label has thrown away. */
+  async function sequencesFor(contactIds = []) {
+    await ready();
+    const ids = [...new Set(contactIds.map(String).filter(Boolean))];
+    const out = {};
+    for (let i = 0; i < ids.length; i += 200) {
+      const part = ids.slice(i, i + 200);
+      if (!part.length) break;
+      const rows = (await db.prepare(
+        `SELECT * FROM wa_sequences WHERE contact_id IN (${part.map(() => "?").join(",")})`)
+        .bind(...part).all()).results || [];
+      for (const r of rows) {
+        const have = out[r.contact_id];
+        if (!have || Number(r.sent_step || 0) > Number(have.sent_step || 0) || r.dnd) out[r.contact_id] = r;
+      }
+    }
+    return out;
+  }
+
+  /* The kill switch's optional second half. */
+  async function cancelAllQueued(by = "") {
+    await ready();
+    const t = now();
+    const r = await db.prepare(
+      "UPDATE wa_jobs SET state = 'cancelled', error = 'kill_switch', updated_at = ? WHERE state IN ('queued','leased')")
+      .bind(t).run();
+    log(`wa kill switch by ${by}: queued jobs cancelled`);
+    return { cancelled: r?.meta?.changes ?? r?.changes ?? 0 };
+  }
+
+  return { queue, drain, webhook, status, ready, templates, saveTemplate, deleteTemplate,
+           settings, saveSettings, metrics, statuses, sequencesFor, sentToday, bump,
+           cancelAllQueued };
 }

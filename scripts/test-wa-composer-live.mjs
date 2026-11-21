@@ -45,12 +45,44 @@ console.log('\n1 · who');
 ok('three steps are offered', await f().locator('.waSteps button').count()===3);
 ok('step 1 lists the contacts', await f().locator('.waR').count()>0, `${await f().locator('.waR').count()}`);
 ok('...with stage families as chips', await f().locator('[data-wagrp]').count()>0);
-ok('...and says how many are reachable vs skipped',
-   /reachable of/.test(await f().locator('.waCount').innerText()), await f().locator('.waCount').innerText());
+ok('...and says how many are eligible for this rung, of those shown',
+   /eligible for CNC-1 of/.test(await f().locator('.waCount').innerText()),
+   await f().locator('.waCount').innerText());
 ok('Next is disabled until somebody is picked', await f().locator('#waOn').isDisabled());
 await f().locator('#waAll').click();await W(1200);
 const picked=await f().locator('.waR.on').count();
 ok('Select all picks the reachable ones', picked>0, `${picked}`);
+console.log('\n1b · two ladders, and the rung gate');
+ok('CNC and Warmup are separate tabs', await f().locator('[data-wamode]').count()===2);
+ok('...with a rung picker', await f().locator('[data-warung]').count()>=3);
+const cncRungs=await f().locator('[data-warung]').allTextContents();
+ok('...naming the CNC steps', cncRungs.join(',').includes('CNC-1'), cncRungs.join(','));
+ok('every row shows a WhatsApp status', await f().locator('.waRst').count()>0);
+ok('...and says ready or why not', await f().locator('.waWhy').count()>0);
+await f().locator('[data-warung="2"]').click();await W(2500);
+const blocked=await f().locator('.waR.off').count();
+ok('CNC-2 greys out everyone not at CNC-1 Sent', blocked>0, `${blocked} greyed`);
+const why=await f().locator('.waWhy').first().innerText();
+ok('...and says needs CNC-1 first', /needs CNC-1 first/.test(why), why);
+ok('...with their checkboxes disabled',
+   await f().locator('.waR.off input[disabled]').count()>0);
+await f().locator('[data-wamode="warmup"]').click();await W(2500);
+const wRungs=await f().locator('[data-warung]').allTextContents();
+ok('Warmup has its own ladder', wRungs.join(',').includes('Warmup-1'), wRungs.join(','));
+await f().locator('[data-wamode="cnc"]').click();await W(2500);
+await f().locator('[data-warung="1"]').click();await W(2500);
+/* Changing ladder or rung clears the picks on purpose — a selection made
+   against one gate is meaningless against another — so re-select here. */
+await f().locator('#waAll').click();await W(1200);
+
+console.log('\n1c · the brakes');
+ok('the anti-ban caps are on screen', await f().locator('[data-waset="dailyCapPerSeat"]').count()===1);
+ok('...defaulting to 80 a day per phone',
+   (await f().locator('[data-waset="dailyCapPerSeat"]').inputValue())==='80');
+ok('...with cooldown and max steps', await f().locator('[data-waset="cooldownHours"]').count()===1
+   && await f().locator('[data-waset="maxCnc"]').count()===1);
+ok('and a kill switch', await f().locator('#waKill').count()===1);
+
 await f().locator('#waOn').click();await W(1500);
 
 console.log('\n2 · what');
@@ -58,6 +90,7 @@ ok('a template is loaded', (await f().locator('#waBody').inputValue()).length>10
 const tpls=await f().locator('#waTpl option').allTextContents();
 ok('...and all five playbooks are offered', tpls.length>=5, tpls.join(' | '));
 ok('variable chips are one click', await f().locator('[data-wavar]').count()===8);
+
 ok('the mapper lists the variables this body uses', await f().locator('.waMapR').count()>0,
    `${await f().locator('.waMapR').count()}`);
 ok('...naming the source and the live value',
@@ -70,6 +103,13 @@ ok('editing the body re-maps the variables', await f().locator('.waMapR').count(
    `${before} -> ${await f().locator('.waMapR').count()}`);
 await f().locator('[data-wavar="timeline"]').click();await W(800);
 ok('a chip inserts its token', (await f().locator('#waBody').inputValue()).includes('{{timeline}}'));
+await f().locator('#waBody').fill('Hi {{name}}, meeting at {{venue_city}}.');
+await f().locator('#waBody').blur();await W(1200);
+ok('a custom {{var}} is detected and given a mapper row',
+   await f().locator('.waMap.custom .waMapR').count()===1,
+   `${await f().locator('.waMap.custom .waMapR').count()}`);
+await f().locator('.waMap.custom [data-wafb]').fill('Goa');await f().locator('.waMap.custom [data-wafb]').dispatchEvent('change');await W(1000);
+ok('template visibility can be set', await f().locator('#waVis').count()===1);
 await f().locator('#waOn').click();await W(3500);
 
 console.log('\n3 · check and queue');
@@ -77,13 +117,20 @@ const bub=await f().locator('.waBubble').innerText();
 console.log('   preview:',bub.slice(0,110));
 ok('a preview bubble is rendered', bub.length>10);
 ok('...with the variables substituted, not the braces', !/\{\{/.test(bub), bub.slice(0,80));
+ok('...including the custom one, once it was given a value', /Goa/.test(bub), bub.slice(0,90));
 ok('...and a blank name falls back rather than reading “Hi ,”', !/Hi ,/.test(bub));
 ok('there is a seat picker', await f().locator('#waSeat').count()===1);
 const nav=await f().locator('.waPrevH').innerText();
 ok('...and prev/next across recipients', /of \d+/.test(nav), nav.replace(/\n/g,' '));
 if(await f().locator('#waNext').isEnabled()){
-  const first=bub;await f().locator('#waNext').click();await W(1200);
-  ok('Next shows a different recipient’s message', (await f().locator('.waBubble').innerText())!==first);
+  /* The HEADER, not the bubble: these fixtures are "Callback Contact 1/2/3"
+     and the template greets by first name, so two consecutive messages are
+     legitimately identical. What must change is who it is addressed to. */
+  const head=await f().locator('.waPrevH').innerText();
+  await f().locator('#waNext').click();await W(1200);
+  ok('Next moves to the next recipient',
+     (await f().locator('.waPrevH').innerText())!==head,
+     (await f().locator('.waPrevH').innerText()).replace(/\n/g,' '));
 }
 await f().locator('#waSeat').selectOption('seat-3');await W(400);
 const beforeQ=await (await fetch(BASE+'/wa/status')).json();
@@ -118,4 +165,5 @@ if(mine.length){
 }
 await page.screenshot({path:'/tmp/claude-0/wa.png'});
 ok('no console errors', errs.length===0, errs.slice(0,3).join(' | '));
+}catch(e){console.log('\n! the run itself failed:',e?.stack||e);fail++;
 }finally{console.log(`\n${pass} passed, ${fail} failed`);await ctx.close();process.exit(fail?1:0);}

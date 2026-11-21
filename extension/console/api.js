@@ -394,6 +394,11 @@
     /* Rendered by the SERVER with the same function the save path uses, so
        the preview and the sent message cannot drift apart. */
     waPreview: (body) => req("/wa/preview", { method: "POST", body, timeout: 10000 }),
+    waSettings: () => req("/wa/settings", { timeout: 10000 }),
+    waSettingsSave: (body) => req("/wa/settings", { method: "POST", body, timeout: 12000 }),
+    waMetrics: () => req("/wa/metrics", { timeout: 10000 }),
+    waEligible: (body) => req("/wa/eligible", { method: "POST", body, timeout: 15000 }),
+    waContactStatus: (ids) => req("/wa/contact-status", { method: "POST", body: { ids }, timeout: 12000 }),
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),

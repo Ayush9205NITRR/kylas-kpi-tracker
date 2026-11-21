@@ -149,6 +149,61 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 0 · Warmup, anti-ban brakes and delivery metrics (1.91.0)
+
+**Two ladders, walked in order, no calendar.** CNC-1 → CNC-2 → CNC-3 and
+Warmup-1 → Warmup-2 → Warmup-3 (Activation / MQL), each its own sub-tab
+inside the WhatsApp screen. Step N targets **only** people sitting at N-1:
+`eligible()` is the rule and it is why this needs no scheduler — the next
+step is simply whoever the last step reached. A reply, an opt-out, a
+not-on-WhatsApp or an unexpired cooldown takes somebody out, and each
+returns WHY, which the row prints. "47 selected, 41 queued" with no
+explanation is how people stop trusting a list.
+
+**The ladder moves on a SEND, not on a queue.** A message that sat in the
+outbox and never went has advanced nobody, and treating it as if it had is
+exactly how CNC-2 reaches somebody who never got CNC-1.
+
+**The status is derived, never stored twice** — `statusOf()` over
+`wa_sequences`, which the webhook already maintains. The Contacts column and
+the composer's gating therefore cannot disagree, and **Airtable gains no
+rows** (0 against the 50k cap).
+
+**Anti-ban.** `wa_settings` in D1, admin-only to change and readable by
+everyone because the composer has to say why somebody is greyed out:
+`dailyCapPerSeat` 80, `maxCnc` 3, `maxWarmup` 4, `cooldownHours` 48, and a
+kill switch that stops **queueing and draining** across all eight seats.
+Clearing the queue is a second, separate question, because stopping and
+throwing away are different decisions and only one is reversible.
+whatsapp-web.js drives a real logged-in phone: a number that sends 300 cold
+messages in a morning stops existing, and takes the BD's own WhatsApp with it.
+
+**Cloudflare $0.00 guardrails.** `/wa/drain` does ONE indexed SELECT and
+returns `{jobs: []}` with zero writes — and without even reading the settings
+— when nothing is due, which is what eight laptops polling all day mostly
+hit. The kill switch and the cap are consulted only once there is work. The
+badge's `setInterval` is gone: it refreshes on open, on a save, and when the
+WhatsApp screen is opened.
+
+**Custom variables and visibility.** Any `{{token}}` the editor does not
+recognise gets its own mapper row with a value box; until it is filled the
+renderer leaves it **visible** rather than sending a blank. Templates carry
+`private | team | official`, defaulting to team — a template nobody else can
+see is the default that quietly stops a team sharing wording.
+
+**`wa_metrics`** counts sent / delivered / read / replied / failed /
+not_on_wa / opt_out per template and per seat, shown as a
+Delivered / Read / Replied strip at the top of the screen.
+
+`test-wa-jobs.mjs` is 109 and `test-wa-composer-live.mjs` 41. Three test
+defects were fixed along the way, all of the same family — an assertion that
+passed for the wrong reason: a kill-switch check on a drain that had nothing
+to pause (an empty drain returns before the switch is read, by design); a
+custom-variable preview whose body a later `fill()` had overwritten; and
+"Next shows a different message", which is false for fixtures called
+"Callback Contact 1/2/3" since the template greets by first name — the
+header is what must change.
+
 ## 0 · The WhatsApp composer (1.90.0)
 
 The outbox shipped with an on/off pill, which meant the one thing a BD wants

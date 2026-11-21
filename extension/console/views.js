@@ -4740,6 +4740,12 @@
     const job = (async () => {
       const r = await API.viewContacts(id);
       CON.by.set(id, { rows: r.contacts || [], at: Date.now(), truncated: !!r.truncated, err: "" });
+      /* One request for the whole list. Best effort: without D1 the column
+         simply reads "Not Sent" rather than the view failing to open. */
+      try {
+        const ids = (r.contacts || []).map((c) => c.kid).filter(Boolean);
+        if (ids.length) WA_STATUS_MAP = { ...WA_STATUS_MAP, ...(await API.waContactStatus(ids)).statuses };
+      } catch { /* no outbox configured */ }
     })();
     CON.inflight.set(id, job);
     try { await job; }
@@ -4974,6 +4980,14 @@
       cell: (c) => `<i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}` },
     { k: "next", label: "Next call", w: ".75fr", on: true, num: true,
       get: (c) => c.nextCallDate || "", cell: (c) => esc(c.nextCallDate || "—") },
+    /* WHERE THIS PERSON IS ON THE WHATSAPP LADDER. Read from D1 —
+       wa_sequences, which the webhook already maintains — so the column and
+       the composer's gating cannot disagree, and Airtable gains no rows for
+       it. Off by default: it is only meaningful once outreach is running. */
+    { k: "wa", label: "WhatsApp", w: ".95fr",
+      get: (c) => WA_STATUS_MAP[c.kid] || "Not Sent",
+      cell: (c) => { const v = WA_STATUS_MAP[c.kid] || "Not Sent";
+        return `<span class="wast w-${esc(String(v).toLowerCase().replace(/[^a-z0-9]+/g, "-"))}">${esc(v)}</span>`; } },
     { k: "source", label: "Source of data", w: ".9fr",
       get: (c) => c.source || "", cell: (c) => esc(c.source || "—") },
     /* One line on screen, whole on the sheet. A remark is three sentences
@@ -4982,6 +4996,8 @@
       get: (c) => c.remarks || "",
       cell: (c) => (c.remarks ? `<span class="rmk" title="${esc(c.remarks)}">${esc(c.remarks)}</span>` : "—") },
   ];
+  /* Filled by one call when a view's contacts land, not per row. */
+  let WA_STATUS_MAP = {};
   const ccolsOn = () => CCOLS.filter((c) => c.fixed || ACC.ccols.has(c.k));
   const CCOL_DEFAULT = CCOLS.filter((c) => c.on).map((c) => c.k);
   /* The rung a stage sits on, squashed to the six-step ramp the ladder and
@@ -7251,9 +7267,15 @@
      Recipients come from CON.rows — the contacts of the view that is open —
      because "who do I message" is the same question as "who am I working",
      and a second contact list would be a second answer to it. */
-  const WA = { step: 1, tpl: "", templates: [], vars: [], fallbacks: {},
+  const WA = { step: 1, tpl: "", templates: [], vars: [], fallbacks: {}, visibilities: [],
                body: "", picked: new Set(), stage: new Set(), owner: "", find: "",
-               seat: "", preview: 0, previews: [], editing: null, busy: "", err: "", loaded: false };
+               seat: "", preview: 0, previews: [], editing: null, busy: "", err: "", loaded: false,
+               /* WHICH LADDER, AND WHICH RUNG. The two are kept apart because
+                  they are different jobs: CNC is chasing somebody who did not
+                  pick up, warmup is keeping an interested account warm, and a
+                  BD doing one is not doing the other. */
+               mode: "cnc", rung: 1,
+               settings: null, canEdit: false, metrics: null, gate: null, custom: [] };
 
   const WA_SEATS = ["", "seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "seat-7", "seat-8"];
   /* The stage families the composer filters by, in the words the chips use
@@ -7307,26 +7329,103 @@
     if (WA.loaded) return;
     WA.loaded = true;
     try {
-      const r = await API.waTemplates();
+      const [r, st, m] = await Promise.all([API.waTemplates(), API.waSettings(), API.waMetrics()]);
       WA.templates = r.templates || []; WA.vars = r.vars || []; WA.fallbacks = { ...(r.fallbacks || {}) };
-      if (!WA.tpl && WA.templates.length) { WA.tpl = WA.templates[0].id; WA.body = WA.templates[0].body; }
+      WA.visibilities = r.visibilities || ["private", "team", "official"];
+      WA.settings = st.settings || null; WA.canEdit = !!st.canEdit;
+      WA.metrics = m || null;
+      waPickTemplate();
     } catch (e) { WA.err = String(e.message || e).slice(0, 180); }
     redraw();
   }
+  /* The template that matches the ladder being walked, so switching from CNC
+     to Warmup does not leave the CNC wording in the box. */
+  function waPickTemplate() {
+    const want = WA.mode === "warmup" ? "event" : "cnc";
+    const t = WA.templates.find((x) => x.id === WA.tpl && x.stageGroup === want)
+      || WA.templates.find((x) => x.stageGroup === want) || WA.templates[0];
+    if (t) { WA.tpl = t.id; WA.body = t.body; }
+  }
+
+  /* THE GATE, ASKED OF THE SERVER. The screen could compute it — it has the
+     statuses — but then the thing that greys a checkbox and the thing that
+     refuses the job would be two implementations of one rule, and they would
+     disagree the first time one of them changed. */
+  async function waGate() {
+    const pool = waPool().matched;
+    if (!pool.length) { WA.gate = null; return; }
+    try {
+      WA.gate = await API.waEligible({
+        seq: WA.mode, step: WA.rung, seat: WA.seat,
+        contacts: pool.map((c) => ({ contactId: c.kid, phone: waPhone(c) })),
+      });
+    } catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.gate = null; }
+  }
+  const gateOf = (kid) => (WA.gate?.rows || []).find((r) => r.contactId === String(kid)) || null;
+
+  /* The delivery strip. Three numbers, because they are the three questions:
+     did it arrive, did they look, did they answer. */
+  function waMetricsStrip() {
+    const m = WA.metrics;
+    if (!m || !m.total?.sent) return "";
+    const cell = (lab, pct, n) => `<span class="wmC"><em>${esc(lab)}</em><b>${pct}%</b><i>${n}</i></span>`;
+    return `<div class="wmStrip">
+      ${cell("Delivered", m.rates.delivered, m.total.delivered)}
+      ${cell("Read", m.rates.read, m.total.read)}
+      ${cell("Replied", m.rates.replied, m.total.replied)}
+      <span class="wmC"><em>Sent</em><b>${m.total.sent}</b><i>all time</i></span>
+      ${m.total.failed || m.total.not_on_wa || m.total.opt_out
+        ? `<span class="wmC bad"><em>Not delivered</em><b>${m.total.failed + m.total.not_on_wa}</b>
+           <i>${m.total.opt_out} opted out</i></span>` : ""}
+    </div>`;
+  }
+
+  /* The brakes. A BD sees them and cannot move them; the reason is written
+     on the panel rather than left to be discovered. */
+  function waSettingsBar() {
+    const st = WA.settings;
+    if (!st) return "";
+    const killed = Number(st.killSwitch) === 1;
+    const num = (k, lab, hint) => `<label class="wsF" title="${esc(hint)}">${esc(lab)}
+      <input type="number" min="0" data-waset="${k}" value="${esc(String(st[k]))}"
+        ${WA.canEdit ? "" : "disabled"}></label>`;
+    return `<div class="wsBar${killed ? " killed" : ""}">
+      ${num("dailyCapPerSeat", "Daily cap / phone", "A number that sends hundreds of cold messages a day stops existing")}
+      ${num("maxCnc", "Max CNC steps", "")}
+      ${num("maxWarmup", "Max warmup steps", "")}
+      ${num("cooldownHours", "Cooldown (h)", "The gap between two steps of the same ladder")}
+      <button type="button" class="wsKill${killed ? " on" : ""}" id="waKill"
+        ${WA.canEdit ? "" : "disabled"}
+        title="${killed ? "Outreach is paused for all eight seats" : "Stop all sending immediately, across every seat"}"
+        >${killed ? "Resume outreach" : "Pause all outreach"}</button>
+      ${WA.canEdit ? "" : `<span class="wsNote">Limits are set by an admin.</span>`}
+      ${killed ? `<span class="wsNote bad">Paused — nothing is being sent.</span>` : ""}
+    </div>`;
+  }
+
+
 
   /* ── step 1 ───────────────────────────────────────────────────── */
   function waStep1() {
     const { matched, ok, skipped } = waPool();
     const stages = [...new Set((CON.rows || []).map((c) => c.stage).filter(Boolean))];
     const owners = [...new Set((CON.rows || []).map((c) => c.owner).filter(Boolean))].sort();
-    const row = (c) => `<label class="waR${WA.picked.has(c.kid) ? " on" : ""}">
+    /* A SKIPPED CONTACT SAYS WHY, ON THE ROW. "47 selected, 41 queued" with
+       no explanation is how people stop trusting a list; "at CNC-1 Sent" and
+       "daily cap reached" are things a BD can act on. */
+    const row = (c) => {
+      const g = gateOf(c.kid);
+      const blocked = g && !g.ok;
+      return `<label class="waR${WA.picked.has(c.kid) ? " on" : ""}${blocked ? " off" : ""}">
       <input type="checkbox" data-wapick="${esc(c.kid)}"${WA.picked.has(c.kid) ? " checked" : ""}
-        ${waPhone(c) ? "" : " disabled"}>
+        ${blocked || !waPhone(c) ? " disabled" : ""}>
       <span class="waRn">${esc(c.pocName || "(no name)")}</span>
       <span class="waRc">${esc(c.company || "—")}</span>
-      <span class="waRs">${esc(label(c.stage) || "—")}</span>
+      <span class="waRst">${esc(g?.status || "—")}</span>
       <span class="waRp">${waPhone(c) ? esc(waPhone(c)) : "no number"}</span>
+      ${blocked ? `<span class="waWhy">${esc(g.why)}</span>` : `<span class="waWhy ok">ready</span>`}
     </label>`;
+    };
     return `<div class="waPanel">
       <div class="extools">
         <div class="srch"><input id="waFind" type="search" value="${esc(WA.find)}"
@@ -7346,8 +7445,20 @@
         }).join("")}
         ${stages.length ? `<button type="button" class="chip" aria-pressed="${!WA.stage.size}" data-wagrp="">Everyone</button>` : ""}
       </span></div></div>
-      <p class="waCount"><b>${WA.picked.size}</b> picked · ${ok.length} reachable of ${matched.length} shown${
-        skipped.length ? ` · <em>${skipped.length} skipped (no number)</em>` : ""}</p>
+      ${(() => {
+        const rows = WA.gate?.rows || [];
+        const able = rows.filter((r) => r.ok).length;
+        const why = {};
+        for (const r of rows) if (!r.ok) why[r.why] = (why[r.why] || 0) + 1;
+        const cap = WA.gate?.settings?.dailyCapPerSeat;
+        return `<p class="waCount"><b>${WA.picked.size}</b> picked · ${
+          rows.length ? `${able} eligible for ${WA.mode === "warmup" ? "Warmup" : "CNC"}-${WA.rung}`
+                      : `${ok.length} reachable`} of ${matched.length} shown
+          ${WA.seat && cap ? ` · seat has sent ${WA.gate?.sentToday ?? 0} of ${cap} today` : ""}
+          ${Object.keys(why).length ? `<em>${Object.entries(why)
+            .map(([w, n]) => `${n} ${w}`).join(" · ")}</em>` : ""}
+          ${skipped.length && !rows.length ? `<em>${skipped.length} skipped (no number)</em>` : ""}</p>`;
+      })()}
       <div class="waList">${matched.length ? matched.map(row).join("")
         : `<p class="vnote">No contacts match. The composer reads the people in the view you have open.</p>`}</div>
     </div>`;
@@ -7356,8 +7467,13 @@
   /* ── step 2 ───────────────────────────────────────────────────── */
   function waStep2() {
     const t = WA.templates.find((x) => x.id === WA.tpl);
-    const used = [...new Set([...String(WA.body || "").matchAll(/\{\{\s*([a-zA-Z]+)\s*\}\}/g)].map((m) => m[1]))]
-      .filter((v) => WA.vars.includes(v));
+    const all = [...new Set([...String(WA.body || "").matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map((m) => m[1]))];
+    const used = all.filter((v) => WA.vars.includes(v));
+    /* ANYTHING ELSE THE BD TYPED. {{venue_city}} is not a CRM field and
+       never will be, but it is a perfectly good thing to want in a message —
+       so it gets a mapper row with a box to fill, and until it is filled the
+       renderer leaves it visible rather than sending a blank. */
+    const custom = all.filter((v) => !WA.vars.includes(v));
     const sample = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k)).filter(Boolean)[0];
     const sv = sample ? waValues(sample) : {};
     return `<div class="waPanel">
@@ -7366,6 +7482,12 @@
           ${WA.templates.map((x) => `<option value="${esc(x.id)}"${WA.tpl === x.id ? " selected" : ""}>${
             esc(x.name)} · ${esc(WA_GROUP_LABEL[x.stageGroup] || x.stageGroup)}${x.autoSend ? " · auto" : ""}</option>`).join("")}
         </select>
+        <label class="waVis">Visible to
+          <select id="waVis" aria-label="Who can see this template">
+            ${(WA.visibilities || []).map((v) => `<option value="${esc(v)}"${
+              (t?.visibility || "team") === v ? " selected" : ""}>${
+              esc({ private: "Only me", team: "The team", official: "Official" }[v] || v)}</option>`).join("")}
+          </select></label>
         <button type="button" class="gbtn sm" id="waNew">+ New template</button>
         <button type="button" class="gbtn sm" id="waSaveTpl">${WA.tpl ? "Save changes" : "Save as template"}</button>
         ${t && !["cnc", "event", "confirm", "noshow", "inputs"].includes(t.id)
@@ -7375,6 +7497,17 @@
         title="Insert at the cursor">+ {{${esc(v)}}}</button>`).join("")}</div>
       <textarea id="waBody" class="waBody" rows="7"
         placeholder="Write the message. Use the chips above to drop a variable in.">${esc(WA.body)}</textarea>
+      ${custom.length ? `<div class="waMap custom">
+        <div class="waMapH">Your own variables — not in the CRM, so give each a value</div>
+        ${custom.map((v) => `<div class="waMapR">
+          <code>{{${esc(v)}}}</code>
+          <span class="waSrc">Static text</span>
+          <span class="waLive">${WA.fallbacks[v] ? esc(String(WA.fallbacks[v]).slice(0, 40)) : "— not set, will send as {{" + esc(v) + "}}"}</span>
+          <label class="waFb">value
+            <input type="text" data-wafb="${esc(v)}" value="${esc(WA.fallbacks[v] ?? "")}"
+              placeholder="(type it)"></label>
+        </div>`).join("")}
+      </div>` : ""}
       ${used.length ? `<div class="waMap">
         <div class="waMapH">Variables in this message</div>
         ${used.map((v) => {
@@ -7437,6 +7570,7 @@
     host.closest(".vwrap")?.classList.remove("wide", "board");
     const redraw = () => whatsapp(host);
     await waLoad(redraw);
+    if (!WA.gate) { await waGate(); }
     const { ok: reachable } = waPool();
     const picked = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k))
       .filter((c) => c && waPhone(c));
@@ -7447,6 +7581,19 @@
       ${WA.err ? `<p class="vwarn">${esc(WA.err)}</p>` : ""}
       ${!(CON.rows || []).length ? `<p class="vnote">Open a view's <b>Contacts</b> tab first — the composer
         messages the people you are working, rather than keeping a second list of its own.</p>` : `
+      ${waMetricsStrip()}
+      <div class="waModes" role="tablist" aria-label="Which sequence">
+        <button type="button" role="tab" aria-selected="${WA.mode === "cnc"}" data-wamode="cnc"
+          title="They did not pick up: CNC-1, then 2, then 3">CNC outreach</button>
+        <button type="button" role="tab" aria-selected="${WA.mode === "warmup"}" data-wamode="warmup"
+          title="Activation and MQL: keeping an interested account warm">Warmup</button>
+        <span class="waRungs">${Array.from({ length: WA.mode === "warmup"
+          ? Number(WA.settings?.maxWarmup || 4) : Number(WA.settings?.maxCnc || 3) }, (_, i) => i + 1)
+          .map((n) => `<button type="button" class="waRung${WA.rung === n ? " on" : ""}" data-warung="${n}"
+            title="${n === 1 ? "Everybody not yet messaged" : `Only those at ${WA.mode === "warmup" ? "Warmup" : "CNC"}-${n - 1} Sent`}"
+            >${WA.mode === "warmup" ? "Warmup" : "CNC"}-${n}</button>`).join("")}</span>
+      </div>
+      ${waSettingsBar()}
       <div class="waSteps" role="tablist">${steps.map((s, n) => `<button type="button" role="tab"
         aria-selected="${WA.step === n + 1}" data-wastep="${n + 1}"
         ${n + 1 === 3 && !picked.length ? "disabled" : ""}><em>${n + 1}</em>${esc(s)}</button>`).join("")}</div>
@@ -7462,6 +7609,36 @@
     void reachable;
 
     const on = (id, fn) => { const n = host.querySelector(`#${id}`); if (n) n.onclick = fn; };
+    host.querySelectorAll("[data-wamode]").forEach((b) => { b.onclick = async () => {
+      WA.mode = b.dataset.wamode; WA.rung = 1; WA.picked.clear();
+      waPickTemplate(); redraw(); await waGate(); redraw();
+    }; });
+    host.querySelectorAll("[data-warung]").forEach((b) => { b.onclick = async () => {
+      WA.rung = Number(b.dataset.warung); WA.picked.clear();
+      redraw(); await waGate(); redraw();
+    }; });
+    host.querySelectorAll("[data-waset]").forEach((b) => { b.onchange = async () => {
+      WA.busy = "saving…"; redraw();
+      try { const r = await API.waSettingsSave({ [b.dataset.waset]: Number(b.value) });
+            WA.settings = r.settings; }
+      catch (e) { WA.err = String(e.message || e).slice(0, 180); }
+      WA.busy = ""; redraw(); await waGate(); redraw();
+    }; });
+    on("waKill", async () => {
+      const off = Number(WA.settings?.killSwitch) === 1;
+      if (!off && !confirm("Pause outreach on all eight seats?\n\nNothing already queued will be sent until you resume."))
+        return;
+      /* Clearing the queue is a SECOND question, because stopping and
+         throwing away are different decisions and only one is reversible. */
+      const clear = !off && confirm("Also cancel everything already queued?\n\nOK cancels them. Cancel leaves them waiting for you to resume.");
+      WA.busy = off ? "resuming…" : "pausing…"; redraw();
+      try {
+        const r = await API.waSettingsSave({ killSwitch: off ? 0 : 1, ...(clear ? { cancelQueued: 1 } : {}) });
+        WA.settings = r.settings;
+        WA.busy = off ? "" : `paused${r.settings?.cancelled ? ` · ${r.settings.cancelled} cancelled` : ""}`;
+      } catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.busy = ""; }
+      redraw();
+    });
     host.querySelectorAll("[data-wastep]").forEach((b) => { b.onclick = async () => {
       WA.step = Number(b.dataset.wastep);
       if (WA.step === 3) { WA.busy = "rendering…"; redraw(); await waRenderPreviews(); WA.busy = ""; }
@@ -7494,7 +7671,12 @@
     if (find) find.oninput = () => { WA.find = find.value; redraw(); find.focus(); };
     const own = host.querySelector("#waOwner");
     if (own) own.onchange = () => { WA.owner = own.value; redraw(); };
-    on("waAll", () => { for (const c of waPool().ok) WA.picked.add(c.kid); redraw(); });
+    /* Select all means every ELIGIBLE one — picking somebody the server
+       will refuse is a queue that silently drops them. */
+    on("waAll", () => {
+      for (const c of waPool().ok) { const g = gateOf(c.kid); if (!g || g.ok) WA.picked.add(c.kid); }
+      redraw();
+    });
     on("waNone", () => { WA.picked.clear(); redraw(); });
 
     /* step 2 */
@@ -7545,8 +7727,10 @@
       WA.busy = "saving…"; redraw();
       try {
         const t = WA.templates.find((x) => x.id === WA.tpl);
+        const vis = host.querySelector("#waVis")?.value || t?.visibility || "team";
         const r = await API.waTemplateSave({ id: WA.tpl || "", name, body: WA.body,
-          stageGroup: t?.stageGroup || "cnc", autoSend: !!t?.autoSend });
+          stageGroup: t?.stageGroup || (WA.mode === "warmup" ? "event" : "cnc"),
+          autoSend: !!t?.autoSend, visibility: vis });
         WA.templates = r.templates || WA.templates; WA.tpl = r.id;
       } catch (e) { WA.err = String(e.message || e).slice(0, 180); }
       WA.busy = ""; redraw();
@@ -7565,6 +7749,7 @@
         try {
           await API.waQueue({ contactId: c.kid, companyId: c.companyId, phone: waPhone(c),
             stage: c.stage || "CONNECT_LATER", template: WA.tpl || "adhoc", seat: WA.seat,
+            seq: WA.mode, step: WA.rung,
             /* The EXACT string that was on screen. */
             vars: { ...waValues(c), body_override: WA.previews[i] ?? WA.body } });
           n++;
@@ -7572,7 +7757,8 @@
       }
       WA.busy = `${n} queued.`;
       WA.picked.clear(); WA.step = 1;
-      redraw();
+      try { WA.metrics = await API.waMetrics(); } catch { /* strip just stays */ }
+      redraw(); await waGate(); redraw();
     });
   }
 
