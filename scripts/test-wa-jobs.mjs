@@ -11,7 +11,8 @@
  * D1 fake uses.
  */
 import { fakeD1 } from "./d1-fake.mjs";
-import { createWaJobs, inBusinessHours, nextBusinessSlot, istMinutes, waPlan, waVars,
+import { renderTemplate, varsUsed, TEMPLATE_VARS, VAR_FALLBACK, DEFAULT_TEMPLATES,
+         createWaJobs, inBusinessHours, nextBusinessSlot, istMinutes, waPlan, waVars,
          onInboundReply, onNoReplyAdvance, onCallSupersedes, onMultiThreadGuard,
          onDeliveryFailure, onOptOut, WARM_STAGES } from "./wa-jobs.mjs";
 
@@ -154,6 +155,68 @@ ok("5 (stored) · an offline seat puts the job back on the queue, not in the bin
 await wa.webhook({ event: "not_on_wa", jobId: q5.id, contactId: "906" });
 const dead = await db.prepare("SELECT state FROM wa_jobs WHERE id = ?").bind(q5.id).first();
 ok("...and not_on_wa fails it for good", dead.state === "failed", dead.state);
+
+console.log("\n6 · templates and the renderer");
+const V = { name: "Sana Kausar", company: "pinelabs", eventType: "Employee offsites",
+            pax: "120", timeline: "March", budget: "approx 8L, not signed off",
+            nextCallDate: "2026-11-25", bdName: "Gurnoor" };
+ok("every variable substitutes",
+   renderTemplate("{{name}} {{company}} {{eventType}} {{pax}} {{timeline}} {{budget}} {{nextCallDate}} {{bdName}}", V)
+   === "Sana Kausar pinelabs Employee offsites 120 March approx 8L, not signed off 2026-11-25 Gurnoor");
+ok("free text goes through untouched",
+   renderTemplate("Budget {{budget}}.", V) === "Budget approx 8L, not signed off.");
+ok("a blank value takes its fallback, so nobody gets “Hi ,”",
+   renderTemplate("Hi {{name}},", { name: "" }) === "Hi there,");
+ok("...and a caller's own fallback wins over the default",
+   renderTemplate("Hi {{name}},", { name: "" }, { name: "team" }) === "Hi team,");
+/* An unknown token is LEFT VISIBLE. A half-substituted message gets noticed;
+   a silently blanked one gets sent. */
+ok("an unknown {{token}} is left visible rather than blanked",
+   renderTemplate("Hi {{nope}}", V) === "Hi {{nope}}", renderTemplate("Hi {{nope}}", V));
+ok("whitespace inside the braces is tolerated",
+   renderTemplate("Hi {{ name }}", V) === "Hi Sana Kausar");
+ok("a hole left by an empty value does not become a double space",
+   renderTemplate("for about {{pax}} people", { pax: "" }) === "for about people",
+   renderTemplate("for about {{pax}} people", { pax: "" }));
+ok("...nor a space before punctuation",
+   renderTemplate("around {{timeline}}.", { timeline: "" }) === "around.");
+ok("varsUsed lists only the real ones",
+   varsUsed("{{name}} {{nope}} {{pax}} {{name}}").join(",") === "name,pax",
+   varsUsed("{{name}} {{nope}} {{pax}} {{name}}").join(","));
+ok("there are exactly eight variables", TEMPLATE_VARS.length === 8, TEMPLATE_VARS.join(","));
+ok("...and each has a fallback entry", TEMPLATE_VARS.every((v) => v in VAR_FALLBACK));
+ok("the five playbooks are seeded",
+   ["cnc", "event", "confirm", "noshow", "inputs"].every((g) => DEFAULT_TEMPLATES.some((t) => t.stageGroup === g)));
+ok("...and only the CNC one auto-sends",
+   DEFAULT_TEMPLATES.filter((t) => t.autoSend).map((t) => t.id).join(",") === "cnc");
+ok("every default body uses only known variables",
+   DEFAULT_TEMPLATES.every((t) => varsUsed(t.body).every((v) => TEMPLATE_VARS.includes(v))
+     && !/\{\{(?!\s*(name|company|eventType|pax|timeline|budget|nextCallDate|bdName)\s*\}\})/.test(t.body)));
+
+const tpl = await wa.templates();
+ok("the store seeds them on first read", tpl.length >= 5, `${tpl.length}`);
+const saved = await wa.saveTemplate({ name: "My own", stageGroup: "cnc", body: "Hi {{name}} — {{bdName}}" });
+ok("a BD can save their own", !!saved.id);
+ok("...and it comes back", (await wa.templates()).some((t) => t.id === saved.id));
+await wa.saveTemplate({ id: "cnc", name: "Could not connect", stageGroup: "cnc", autoSend: true, body: "Edited {{name}}" });
+ok("editing a built-in sticks", (await wa.templates()).find((t) => t.id === "cnc").body === "Edited {{name}}");
+await wa.ready();
+ok("...and a later seed does not reset it",
+   (await wa.templates()).find((t) => t.id === "cnc").body === "Edited {{name}}");
+await (async () => { try { await wa.deleteTemplate("cnc"); ok("deleting a built-in is refused", false); }
+  catch (e) { ok("deleting a built-in is refused, not a silent no-op", e.status === 400); } })();
+await wa.deleteTemplate(saved.id);
+ok("...but a BD's own can be deleted", !(await wa.templates()).some((t) => t.id === saved.id));
+await (async () => { try { await wa.saveTemplate({ name: "", body: "x" }); ok("a nameless template is refused", false); }
+  catch (e) { ok("a nameless template is refused", e.status === 400); } })();
+
+const ov = await wa.queue({ contactId: "950", companyId: "903", phone: "+919000000950",
+  stage: "CNC_COULD_NOT_CONNECT", vars: { name: "X", body_override: "Hand written, this one." },
+  seat: "seat-3", dueAt: OPEN });
+ok("a queued job carries the edited text and the seat it was sent from", !!ov.id);
+const sent = await db.prepare("SELECT vars, seat FROM wa_jobs WHERE id = ?").bind(ov.id).first();
+ok("...and the bot reads the exact string, not a re-render",
+   JSON.parse(sent.vars).body_override === "Hand written, this one." && sent.seat === "seat-3");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

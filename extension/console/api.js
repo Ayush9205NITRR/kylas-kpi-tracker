@@ -380,10 +380,20 @@
        the pill. See scripts/wa-jobs.mjs. */
     save: (contact, call, opts = {}) => req("/save", { method: "POST",
       body: { contact, call, queue: true,
-              ...(opts.sendWa === undefined ? {} : { sendWa: !!opts.sendWa }) }, timeout: 20000 }),
+              ...(opts.sendWa === undefined ? {} : { sendWa: !!opts.sendWa }),
+              /* What the BD read in the expanded pill, sent verbatim. */
+              ...(opts.waBody ? { waBody: opts.waBody } : {}),
+              ...(opts.waTemplate ? { waTemplate: opts.waTemplate } : {}) }, timeout: 20000 }),
     waStatus: () => req("/wa/status", { timeout: 8000 }),
     deals: (owner = "") => req(`/deals${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 15000 }),
     dealItem: (body) => req("/deal-item", { method: "POST", body, timeout: 15000 }),
+    waTemplates: () => req("/wa/templates", { timeout: 10000 }),
+    waTemplateSave: (body) => req("/wa/templates", { method: "POST", body, timeout: 10000 }),
+    waTemplateDelete: (id) => req("/wa/templates", { method: "POST", body: { action: "delete", id }, timeout: 10000 }),
+    waQueue: (body) => req("/wa/queue", { method: "POST", body, timeout: 15000 }),
+    /* Rendered by the SERVER with the same function the save path uses, so
+       the preview and the sent message cannot drift apart. */
+    waPreview: (body) => req("/wa/preview", { method: "POST", body, timeout: 10000 }),
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
@@ -436,7 +446,8 @@
                   lid: contact.lid || "", contact, call,
                   at: new Date().toISOString(), tries: 0 };
     try {
-      const res = await API.save(contact, call, { sendWa: contact.sendWa });
+      const res = await API.save(contact, call,
+        { sendWa: contact.sendWa, waBody: contact.waBody, waTemplate: contact.waTemplate });
       return { ok: true, ...res };
     } catch (e) {
       /* The outbox is for an outage, not for a value Kylas will never accept.
@@ -478,7 +489,8 @@
           if (kid) contact = { ...contact, kid: String(kid), pendingCreate: false };
         }
         try {
-          const res = await API.save(contact, job.call, { sendWa: contact.sendWa });
+          const res = await API.save(contact, job.call,
+            { sendWa: contact.sendWa, waBody: contact.waBody, waTemplate: contact.waTemplate });
           /* Any id, not only a create's — the proxy answers a recognised retry
              with the id it made the first time and created:false. */
           if (res?.kid && lid) learned.set(lid, String(res.kid));

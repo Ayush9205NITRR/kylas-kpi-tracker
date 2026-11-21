@@ -244,8 +244,13 @@ async function callbacks() {
     "Stage: MQL · Owner: Enout Super Admin · written by the console",
     "",
   ];
+  /* A NUMBER ON EVERY ONE. Nothing seeded a phone, so the Contacts table's
+     dial button had nothing to dial and the WhatsApp composer reported every
+     contact "skipped (no number)" — which looks exactly like a broken
+     filter. Fake numbers in a documented range, never real ones. */
   const people = PLAN.map(([, d], i) => ({
     Name: `Callback Contact ${i + 1}`, "Kylas Contact ID": String(72000 + i),
+    Phone: `+9190000${String(72000 + i).slice(-5)}`,
     Owner: i % 2 ? "Priya Deshmukh" : "Enout Super Admin",
     Remarks: NOTE[i] || undefined,
     /* NOT an exit stage: progress.mjs drops a call-back promised to somebody
@@ -264,6 +269,7 @@ async function callbacks() {
   const SPREAD = ["CNC_COULD_NOT_CONNECT", "MQL_MARKETING_QUALIFIED_LEAD", "FOLLOW_UP_2"];
   SPREAD.forEach((stage, i) => people.push({
     Name: `Spread Contact ${i + 1}`, "Kylas Contact ID": String(72100 + i),
+    Phone: `+9190000${String(72100 + i).slice(-5)}`,
     Owner: "Enout Super Admin", "Current Stage": stage,
     Company: made[0] ? [made[0].id] : undefined,
   }));

@@ -98,6 +98,7 @@
       : which === "flags" ? Flags.view
       : which === "today" ? Views.today
       : which === "deals" ? Views.deals
+      : which === "whatsapp" ? Views.whatsapp
       : Views.companies)(wrap)
       .then(() => { if (which === "companies" && view === "companies") port.scrollTop = accountsTop; })
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
@@ -723,6 +724,25 @@
   if (dashBtn) dashBtn.onclick = () => showView("dashboard");
   const dealsBtn = document.getElementById("dealsBtn");
   if (dealsBtn) dealsBtn.onclick = () => showView("deals");
+  const waBtn = document.getElementById("waBtn");
+  if (waBtn) waBtn.onclick = () => showView("whatsapp");
+  /* The unread badge. Polled rather than pushed: the reply arrives at the
+     Worker from the bot, and the console has no socket to be told on. Once a
+     minute is often enough for something a BD acts on by opening the screen,
+     and cheap enough not to think about. */
+  async function waBadge() {
+    if (!waBtn) return;
+    try {
+      const s = await API.waStatus();
+      const n = Number(s?.replies || 0);
+      const i = waBtn.querySelector(".waN");
+      if (i) { i.textContent = n ? String(n) : ""; i.hidden = !n; }
+      waBtn.title = n ? `${n} contact${n === 1 ? " has" : "s have"} replied on WhatsApp`
+                      : "Compose and queue WhatsApp messages";
+    } catch { /* offline, or no D1: the button still works */ }
+  }
+  waBadge();
+  setInterval(waBadge, 60000);
 
   /* THE FLAGS BUTTON IS AN ADMIN'S. Shown only once the server has said this
      person is one (state.role is set by /meta; before that it is unknown, and

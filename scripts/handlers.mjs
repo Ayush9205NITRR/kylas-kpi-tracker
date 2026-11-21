@@ -73,7 +73,8 @@ import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 import { openOf } from "./open-accounts.mjs";
 import { createAllotJobs, performItem as performAllotItem } from "./allot-jobs.mjs";
-import { createWaJobs, waPlan, waVars, WARM_STAGES } from "./wa-jobs.mjs";
+import { createWaJobs, waPlan, waVars, renderTemplate, varsUsed, TEMPLATE_VARS,
+         VAR_FALLBACK, WARM_STAGES } from "./wa-jobs.mjs";
 import { createDeals, buildDeal, handoverNote, parseBudget, PLAYBOOK_ORDER, REASON_CHIPS } from "./deals.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
@@ -2262,10 +2263,17 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
              asked for it or a person who ticked it. */
           const wants = body.sendWa === true || (plan.offer && plan.auto && body.sendWa !== false);
           if (wants && plan.offer && phone) {
+            const me = userName(await viewer());
+            const vars = { ...waVars(c, { name: c.company }),
+                           nextCallDate: c.nextCallDate || "", bdName: c.owner || me };
+            /* What the BD actually read in the expanded pill, if they opened
+               it. Rendered on the card with the same renderTemplate, so this
+               is the exact string — not a re-render that might differ. */
+            if (body.waBody) vars.body_override = String(body.waBody).slice(0, 4000);
             const q = await waJobs.queue({
               contactId: String(result.kid), companyId: String(c.companyId || ""), phone,
-              stage, template: plan.seq, vars: waVars(c, { name: c.company }),
-              owner: userName(await viewer()), seat: body.seat || "" });
+              stage, template: body.waTemplate || plan.seq, vars,
+              owner: me, seat: body.seat || "" });
             result.wa = { queued: true, id: q.id, seq: q.seqId, dueAt: q.dueAt };
           } else if (plan.offer) {
             result.wa = { queued: false, offer: true, seq: plan.seq, multiThread: !!plan.multiThread };
@@ -3396,6 +3404,29 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const r = await waJobs.webhook(body || {});
       if (r.applied?.length) log(`wa ${body?.event} ${String(body?.contactId || body?.jobId || "").slice(0, 12)} — ${r.applied.join(", ")}`);
       return r;
+    },
+    "/wa/templates": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      /* One route, three verbs — the console posts {action} rather than the
+         proxy growing a path parser for one table.
+         A GET arrives as an EMPTY OBJECT here, not as null: the proxy parses
+         the body for every method and hands a route {} when there was none.
+         Testing `!body` therefore never fired and a plain read fell through
+         to the save branch and answered "a template needs a name". */
+      if (!body || !Object.keys(body).length)
+        return { templates: await waJobs.templates(), vars: TEMPLATE_VARS, fallbacks: VAR_FALLBACK };
+      if (body.action === "delete") return waJobs.deleteTemplate(body.id);
+      const r = await waJobs.saveTemplate(body);
+      log(`wa template ${r.id} saved by ${userName(await viewer())}`);
+      return { ...r, templates: await waJobs.templates() };
+    },
+    /* The composer's preview. Rendered SERVER-SIDE with the same function the
+       save path uses, so what a BD reads on screen cannot differ from what
+       the bot sends. */
+    "/wa/preview": async (url, body) => {
+      const vars = body?.vars || {};
+      return { text: renderTemplate(body?.body || "", vars, body?.fallbacks || {}),
+               used: varsUsed(body?.body || "") };
     },
     "/wa/status": async () => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });

@@ -174,6 +174,59 @@ export function waVars(contact = {}, company = {}) {
   };
 }
 
+/* ── TEMPLATES ───────────────────────────────────────────────────────
+   The copy was the bot's, which meant changing a sentence was a deploy of a
+   different repo. It lives here now: five playbooks, each one row, editable
+   from the console by anyone who can see the queue.
+
+   The eight variables are the only ones that exist. A body may name any of
+   them and nothing else — an unknown {{token}} is left alone rather than
+   silently blanked, because a half-substituted message is worse than an
+   obviously wrong one: one gets noticed, the other gets sent. */
+export const TEMPLATE_VARS = ["name", "company", "eventType", "pax", "timeline",
+                              "budget", "nextCallDate", "bdName"];
+/* What each one falls back to when the record has nothing. "there" rather
+   than a blank, because "Hi ," is the single most obvious tell that a human
+   did not write the message. */
+export const VAR_FALLBACK = { name: "there", company: "your team", eventType: "your event",
+  pax: "", timeline: "", budget: "", nextCallDate: "", bdName: "" };
+
+export const DEFAULT_TEMPLATES = [
+  { id: "cnc", name: "Could not connect", stageGroup: "cnc", autoSend: 1,
+    body: "Hi {{name}}, this is {{bdName}} from Enout. Tried reaching you about {{company}}'s upcoming event plans — is now a bad time? Happy to call back whenever suits you." },
+  { id: "event", name: "Event detail follow-up", stageGroup: "event", autoSend: 0,
+    body: "Hi {{name}}, great speaking just now. Noting what you shared for {{company}}: {{eventType}} for about {{pax}} people around {{timeline}}, budget {{budget}}. I'll put together a couple of options — anything else I should factor in?" },
+  { id: "confirm", name: "Meeting confirmation", stageGroup: "confirm", autoSend: 0,
+    body: "Hi {{name}}, confirming our call on {{nextCallDate}} about {{company}}'s {{eventType}}. I'll share a short agenda beforehand. — {{bdName}}, Enout" },
+  { id: "noshow", name: "Missed the call", stageGroup: "noshow", autoSend: 0,
+    body: "Hi {{name}}, we had a call scheduled today and I could not reach you — no problem at all. Shall I try again on {{nextCallDate}}? — {{bdName}}, Enout" },
+  { id: "inputs", name: "Awaiting inputs", stageGroup: "inputs", autoSend: 0,
+    body: "Hi {{name}}, following up on the inputs for {{company}}'s {{eventType}} ({{pax}} pax, {{timeline}}). Once I have those I can get you costed options. — {{bdName}}" },
+];
+
+/* THE RENDERER, AND IT IS THE ONLY ONE. The composer previews with it, the
+   save path renders with it, and the body that reaches the bot is the string
+   it produced — so what a BD read on screen is exactly what goes out. A
+   preview computed one way and a send computed another is how somebody sends
+   "Hi {{name}}" to a prospect. */
+export function renderTemplate(body, vars = {}, fallbacks = {}) {
+  return String(body || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (whole, key) => {
+    if (!TEMPLATE_VARS.includes(key)) return whole;        /* unknown: leave visible */
+    const v = String(vars[key] ?? "").trim();
+    if (v) return v;
+    const f = fallbacks[key] ?? VAR_FALLBACK[key] ?? "";
+    return String(f);
+  })
+  /* A row with no pax leaves "for about  people"; collapsing the hole is the
+     difference between a gap and a typo. */
+  .replace(/[ \t]{2,}/g, " ").replace(/ +([,.!?])/g, "$1").trim();
+}
+
+/* Which variables a body actually uses, for the mapper. */
+export const varsUsed = (body) =>
+  [...new Set([...String(body || "").matchAll(/\{\{\s*([a-zA-Z]+)\s*\}\}/g)].map((m) => m[1]))]
+    .filter((v) => TEMPLATE_VARS.includes(v));
+
 /* ── the store ───────────────────────────────────────────────────── */
 export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
   if (!db) throw new Error("the WhatsApp outbox needs a D1 binding");
@@ -194,12 +247,60 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     db.prepare("CREATE INDEX IF NOT EXISTS wa_jobs_contact ON wa_jobs (contact_id, state)"),
     db.prepare("CREATE INDEX IF NOT EXISTS wa_seq_contact ON wa_sequences (contact_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS wa_seq_co ON wa_sequences (company_id, state)"),
-  ]).catch((e) => { schema = null; throw e; }));
+    db.prepare(`CREATE TABLE IF NOT EXISTS wa_templates (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, stage_group TEXT NOT NULL,
+      auto_send INTEGER NOT NULL DEFAULT 0, body TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`),
+  ]).then(() => seedTemplates()).catch((e) => { schema = null; throw e; }));
+
+  /* INSERT OR IGNORE, so the defaults appear on a fresh database and an
+     edited one is never quietly reset to the factory wording. */
+  async function seedTemplates() {
+    const t = now();
+    await db.batch(DEFAULT_TEMPLATES.map((x) => db.prepare(
+      `INSERT OR IGNORE INTO wa_templates (id, name, stage_group, auto_send, body, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(x.id, x.name, x.stageGroup, x.autoSend, x.body, t, t)));
+  }
+
+  async function templates() {
+    await ready();
+    const rows = (await db.prepare("SELECT * FROM wa_templates ORDER BY stage_group, name").all()).results || [];
+    return rows.map((r) => ({ id: r.id, name: r.name, stageGroup: r.stage_group,
+                              autoSend: !!r.auto_send, body: r.body, updatedAt: r.updated_at }));
+  }
+  async function saveTemplate({ id = "", name = "", stageGroup = "cnc", autoSend = false, body = "" }) {
+    await ready();
+    const clean = String(body || "").slice(0, 4000);
+    if (!String(name).trim()) throw Object.assign(new Error("a template needs a name"), { status: 400 });
+    if (!clean.trim()) throw Object.assign(new Error("a template needs a message"), { status: 400 });
+    const t = now();
+    const key = String(id || "").trim() || `t${t.toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+    await db.prepare(`INSERT INTO wa_templates (id, name, stage_group, auto_send, body, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, stage_group = excluded.stage_group,
+        auto_send = excluded.auto_send, body = excluded.body, updated_at = excluded.updated_at`)
+      .bind(key, String(name).slice(0, 120), String(stageGroup), autoSend ? 1 : 0, clean, t, t).run();
+    return { id: key };
+  }
+  async function deleteTemplate(id) {
+    await ready();
+    /* The five defaults come back on the next read anyway (INSERT OR IGNORE),
+       so deleting one is refused rather than being a confusing no-op. */
+    if (DEFAULT_TEMPLATES.some((x) => x.id === String(id)))
+      throw Object.assign(new Error("that is a built-in template — edit it instead of deleting it"), { status: 400 });
+    await db.prepare("DELETE FROM wa_templates WHERE id = ?").bind(String(id)).run();
+    return { deleted: String(id) };
+  }
 
   const LEASE_MS = 3 * 60 * 1000;
 
   /* THE HOT PATH. /save calls this and waits for it, so it is one INSERT and
      one UPDATE, no reads of Kylas, no reads of Airtable, no network at all. */
+  /* `vars.body_override` is the composer's rendered, possibly hand-edited
+     text. When it is there the bot sends it verbatim and the template is
+     only a label — which is the whole point of letting a BD edit before
+     sending. */
   async function queue({ contactId, companyId, phone, stage, template, vars = {},
                          owner = "", seat = "", dueAt = null }) {
     await ready();
@@ -328,5 +429,5 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
              replies: replies.n || 0, dueNow: due.n || 0, inHours: inBusinessHours(t) };
   }
 
-  return { queue, drain, webhook, status, ready };
+  return { queue, drain, webhook, status, ready, templates, saveTemplate, deleteTemplate };
 }

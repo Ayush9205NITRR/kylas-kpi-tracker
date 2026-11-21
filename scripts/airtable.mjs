@@ -730,7 +730,15 @@ export function toConsoleContactFromAirtable(rec, { company, events } = {}) {
     linkedin: f.LinkedIn || "",
     designation: f.Designation || "",
     emails: jsonOr(f.Emails, f.Email ? [{ type: "OFFICE", value: f.Email, primary: true }] : []),
-    phones: jsonOr(f.Phones, []),
+    /* FALLS BACK TO THE PLAIN "Phone" COLUMN, exactly as emails fall back to
+       "Email" on the line above. They did not, and the asymmetry was
+       invisible until something needed the number for more than display: a
+       contact carrying only Phone showed no number on the card, had nothing
+       to dial, and was reported "skipped (no number)" by the WhatsApp
+       composer — which reads as a broken filter rather than a missing
+       fallback (2026-11-21). */
+    phones: jsonOr(f.Phones, f.Phone
+      ? [{ type: "MOBILE", cc: "", value: String(f.Phone), primary: true }] : []),
     stage: f["Current Stage"] || "",
     stageLabel: STAGE_LABEL[f["Current Stage"]] || "",
     source: f["Source of Data"] || "",

@@ -149,6 +149,58 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 0 · The WhatsApp composer (1.90.0)
+
+The outbox shipped with an on/off pill, which meant the one thing a BD wants
+to check before a message goes to a prospect — the words — was the one thing
+they could not see. The copy also lived in the bot, so changing a sentence
+was a deploy of another repo.
+
+**`wa_templates` in D1**, five seeded playbooks (`cnc`, `event`, `confirm`,
+`noshow`, `inputs`), eight variables, editable from the console. `INSERT OR
+IGNORE` on seed, so an edited template is never quietly reset; deleting a
+built-in is refused rather than being a no-op that un-deletes itself on the
+next read.
+
+**One renderer, used three times.** `renderTemplate` runs on the server, and
+the composer's preview, the call card's expanded pill and the save path all
+go through it — a preview computed one way and a send computed another is how
+somebody sends "Hi {{name}}" to a prospect. An unknown `{{token}}` is left
+VISIBLE rather than blanked: a half-substituted message gets noticed, a
+silently blanked one gets sent. Empty values take a fallback ("there"), and
+the hole left behind is collapsed so "for about  people" does not ship.
+
+**Three steps**, in the order the question is asked: who (filter by stage
+family, owner, search; multi-select for multi-threading a company; reachable
+vs skipped stated, never silently dropped) → what (template picker, inline
+editor, one-click variable chips, and a mapper showing each variable's
+source, its live value for the contact in hand, and an editable fallback) →
+check and queue (a preview bubble with ‹ Prev / Next › across recipients, a
+seat picker, and `Queue WhatsApp (N)`, which posts each rendered string as
+`vars.body_override` so the bot sends exactly what was on screen).
+
+The call card's pill grew a caret that opens the same rendered text, editable,
+before Save & next.
+
+**Two bugs this turned up, both outside the composer:**
+
+- `/wa/templates` read as a GET answered *"a template needs a name"*. The
+  proxy parses a body for every method and hands a route `{}` when there was
+  none, so `if (!body)` never fired and a plain read fell through to the save
+  branch.
+- `toConsoleContactFromAirtable` mapped `Phones` but — unlike emails, which
+  fall back to `Email` on the line above — never fell back to the plain
+  `Phone` column. A contact carrying only `Phone` showed no number on the
+  card, had nothing to dial, and was reported "skipped (no number)" by the
+  composer, which reads as a broken filter. `dev-seed` now writes numbers too.
+
+`test-wa-jobs.mjs` is 67 and `test-wa-composer-live.mjs` (25) walks the three
+steps in Chrome. Its header carries the two ways an assertion lies here:
+outside business hours `/wa/drain` is correctly empty, so "every drained job
+has the seat" passes on an empty array; and re-queueing a contact cancels
+what was waiting, so counting `queued` alone reads a working supersede as a
+failed queue.
+
 ## 0a · Deals, the WhatsApp outbox, and three dashboards (1.89.0)
 
 Four things, and the thread between them is that none of it goes near

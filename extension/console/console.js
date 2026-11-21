@@ -2117,16 +2117,35 @@ const blocks=a=>[...a.past,...a.current].filter(r=>r.eventType);
    to the server, and a round trip to find out whether to draw a button is a
    round trip on every stage change. The server decides what is actually
    queued — this only decides what is shown. */
+/* Ask the server to render the stage's template with this contact's values.
+   Server-side on purpose: the composer, the card and the save path all go
+   through one renderTemplate, so the three cannot disagree about what the
+   message says. */
+async function waFill(a){
+  try{
+    const r=await API.waTemplates();
+    const want=(WA_PLAN[a.stage]||{}).seq||"cnc";
+    const t=(r.templates||[]).find(x=>x.stageGroup===want)||(r.templates||[])[0];
+    if(!t)return;
+    const rows=[...(a.current||[]),...(a.past||[])];
+    const ev=rows.find(x=>x.budget||x.timeline||x.pax)||rows[0]||{};
+    const p=await API.waPreview({body:t.body,fallbacks:r.fallbacks||{},vars:{
+      name:String(a.pocName||"").split(/\s+/)[0]||"",company:a.company||"",
+      eventType:ev.eventType||"",pax:ev.pax||"",timeline:ev.timeline||"",budget:ev.budget||"",
+      nextCallDate:a.nextCallDate||"",bdName:String(a.owner||"").split(/\s+/)[0]||""}});
+    a.waBody=p.text||t.body;a.waTemplate=t.id;
+  }catch{ /* offline: the pill still works, the bot uses the stage default */ }
+}
 const WA_PLAN={
-  CNC_COULD_NOT_CONNECT:{auto:true,why:"No answer \u2014 a nudge goes out"},
-  CNC_COULD_NOT_CONNECT_2:{auto:true,why:"Second no-answer \u2014 a nudge goes out"},
-  CNC_COULD_NOT_CONNECT_3:{auto:true,multiThread:true,why:"Third no-answer \u2014 a nudge goes out"},
-  CONNECT_LATER:{auto:true,why:"Asked to call later \u2014 a nudge goes out"},
-  ACTIVATION:{auto:false,why:"Will quote the event detail on this card"},
-  MQL_MARKETING_QUALIFIED_LEAD:{auto:false,why:"Will quote the event detail on this card"},
-  DISCOVERY_CALL_BOOKED:{auto:false,why:"Confirms the meeting"},
-  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:{auto:false,why:"Asks for the inputs"},
-  ACTIVE_REQUIREMENT_CALL_BOOKED:{auto:false,why:"Confirms the meeting"},
+  CNC_COULD_NOT_CONNECT:{seq:"cnc",auto:true,why:"No answer \u2014 a nudge goes out"},
+  CNC_COULD_NOT_CONNECT_2:{seq:"cnc",auto:true,why:"Second no-answer \u2014 a nudge goes out"},
+  CNC_COULD_NOT_CONNECT_3:{seq:"cnc",auto:true,multiThread:true,why:"Third no-answer \u2014 a nudge goes out"},
+  CONNECT_LATER:{seq:"cnc",auto:true,why:"Asked to call later \u2014 a nudge goes out"},
+  ACTIVATION:{seq:"event",auto:false,why:"Will quote the event detail on this card"},
+  MQL_MARKETING_QUALIFIED_LEAD:{seq:"event",auto:false,why:"Will quote the event detail on this card"},
+  DISCOVERY_CALL_BOOKED:{seq:"confirm",auto:false,why:"Confirms the meeting"},
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:{seq:"inputs",auto:false,why:"Asks for the inputs"},
+  ACTIVE_REQUIREMENT_CALL_BOOKED:{seq:"confirm",auto:false,why:"Confirms the meeting"},
 };
 const isReq=(a,id)=>missing().some(([,anc])=>anc===id);
 function validate(){
@@ -2171,9 +2190,33 @@ function validate(){
       :"Queue a WhatsApp for this contact when you save.";
     b.onclick=()=>{a.sendWa=!a.sendWa;validate();};
     w.appendChild(b);
+    /* THE CARET OPENS WHAT IS ACTUALLY GOING OUT. The pill was on/off, which
+       meant the one thing a BD wants to check — the words — was the one
+       thing they could not see. Expanding renders the template with THIS
+       contact's values and lets it be edited; whatever is in the box is what
+       the bot sends, verbatim (handlers passes it as vars.body_override). */
+    const ex=el("button","waex",a.sendWa?(a.waOpen?"\u25b4":"\u25be"):"");ex.type="button";
+    ex.title="Read and edit the message before it goes";
+    ex.hidden=!a.sendWa;
+    ex.onclick=async()=>{a.waOpen=!a.waOpen;if(a.waOpen&&!a.waBody)await waFill(a);validate();};
+    w.appendChild(ex);
     w.append(el("span","wapw",plan.why));
     if(plan.multiThread)w.append(el("span","wamt","Third no-answer \u2014 worth finding a second POC here"));
     msg.parentNode.insertBefore(w,msg.nextSibling);
+    if(a.sendWa&&a.waOpen){
+      const box=el("div","waedit");
+      const ta=el("textarea");ta.rows=4;ta.value=a.waBody||"";
+      ta.placeholder="Loading the template\u2026";
+      ta.oninput=()=>{a.waBody=ta.value;};
+      box.appendChild(ta);
+      const foot=el("div","waeditF");
+      foot.append(el("span",null,"This exact text is what gets sent."));
+      const re=el("button",null,"Reset to template");re.type="button";
+      re.onclick=async()=>{a.waBody="";await waFill(a);validate();};
+      foot.appendChild(re);
+      box.appendChild(foot);
+      w.parentNode.insertBefore(box,w.nextSibling);
+    }
   }
 
   /* Advisories go BELOW, in their own quiet line, and never touch sv.disabled. */
