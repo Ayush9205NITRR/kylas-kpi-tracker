@@ -735,6 +735,31 @@ export function createClient(key, {
        carries none of updateCompany's risk. The duplicate check happens before
        this is called (handlers /company-create). */
     createCompany: (body) => call("POST", "/v1/companies", body),
+
+    /* ── DEALS AND TASKS ────────────────────────────────────────────────
+       ADDITIVE ONLY, AND THAT IS THE WHOLE DESIGN. Every call below is a
+       POST or a stage PATCH on a record this console created. Nothing here
+       touches /v1/contacts with a PUT — a PUT on a contact REPLACES it, and
+       this repo has already lost one contact's name, phone and email to
+       exactly that (docs/STATE.md §3). A deal that fails to be created costs
+       a deal; a contact write that goes wrong costs the contact. */
+    createDeal: (body) => call("POST", "/v1/deals", body),
+    /* The stage move is its own call rather than a field on an update,
+       because Kylas validates the transition and answers with the reason. */
+    moveDealStage: (id, pipelineStageId) =>
+      call("PUT", `/v1/deals/${id}/stage`, { pipelineStageId: Number(pipelineStageId) }),
+    searchDeals: async (text, size = 20) => {
+      const r = await call("POST", `/v1/search/deal?sort=updatedAt,desc&page=0&size=${size}`,
+        { fields: ["id", "name", "pipeline", "pipelineStage", "estimatedValue", "company", "updatedAt"],
+          jsonRule: { rules: [{ field: "name", operator: "contains", value: String(text || "") }] } });
+      return r?.content || [];
+    },
+    /* A note hangs off the record by relation, so the handover survives
+       wherever the deal is read from. */
+    addDealNote: (dealId, note) => call("POST", "/v1/notes/relation",
+      { note: String(note || ""), relation: { id: Number(dealId), entityType: "deal" } }),
+    createTask: (body) => call("POST", "/v1/tasks", body),
+    updateTask: (id, body) => call("PATCH", `/v1/tasks/${id}`, body),
     /* Free-text company search, for a name newer than the cached crawl. */
     async companiesMatching(text, size = 20) {
       const r = await call("POST", `/v1/search/company?sort=updatedAt,desc&page=0&size=${size}`,

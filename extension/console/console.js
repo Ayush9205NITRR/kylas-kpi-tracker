@@ -2112,6 +2112,22 @@ function advisories(){
   return out;
 }
 const blocks=a=>[...a.past,...a.current].filter(r=>r.eventType);
+/* Mirrors WA_STAGES in scripts/wa-jobs.mjs. Duplicated on purpose and kept
+   short: the card has to know whether to OFFER the pill before it has talked
+   to the server, and a round trip to find out whether to draw a button is a
+   round trip on every stage change. The server decides what is actually
+   queued — this only decides what is shown. */
+const WA_PLAN={
+  CNC_COULD_NOT_CONNECT:{auto:true,why:"No answer \u2014 a nudge goes out"},
+  CNC_COULD_NOT_CONNECT_2:{auto:true,why:"Second no-answer \u2014 a nudge goes out"},
+  CNC_COULD_NOT_CONNECT_3:{auto:true,multiThread:true,why:"Third no-answer \u2014 a nudge goes out"},
+  CONNECT_LATER:{auto:true,why:"Asked to call later \u2014 a nudge goes out"},
+  ACTIVATION:{auto:false,why:"Will quote the event detail on this card"},
+  MQL_MARKETING_QUALIFIED_LEAD:{auto:false,why:"Will quote the event detail on this card"},
+  DISCOVERY_CALL_BOOKED:{auto:false,why:"Confirms the meeting"},
+  DISCOVERY_CALL_DONE_AWAITING_CLIENT_INPUTS:{auto:false,why:"Asks for the inputs"},
+  ACTIVE_REQUIREMENT_CALL_BOOKED:{auto:false,why:"Confirms the meeting"},
+};
 const isReq=(a,id)=>missing().some(([,anc])=>anc===id);
 function validate(){
   setTimeout(renderDupe,0);
@@ -2129,6 +2145,36 @@ function validate(){
   }
   else if(a.done){msg.textContent="Logged \u2014 nice one.";msg.className="msg";}
   else{msg.textContent="Everything needed is in. Save & next when you're ready.";msg.className="msg";}
+
+  /* ── [✓ Send WA] ────────────────────────────────────────────────────
+     Beside the save, because it is part of the save: the message is a
+     consequence of this call and the two travel together (see api.js). It
+     appears only where the stage has a playbook, and it says which one.
+
+     The CNC rungs and Connect Later arrive already ticked, because those are
+     exactly the calls a BD has no time to type into — nobody reaches CNC-2
+     and then composes a WhatsApp. Everything else arrives unticked, because
+     those messages quote what the prospect actually said and a human should
+     look before they go.
+
+     Nothing is ever sent from here. It sets one flag on the save, which adds
+     a row to a table the outreach bot drains. */
+  document.querySelectorAll(".wapill").forEach(n=>n.remove());
+  const plan=WA_PLAN[a.stage];
+  const phone=(a.phones||[])[0]?.value||"";
+  if(plan&&phone){
+    if(a.sendWa===undefined)a.sendWa=!!plan.auto;
+    const w=el("div","wapill"+(a.sendWa?" on":""));
+    const b=el("button",null,`${a.sendWa?"\u2713":"\u2715"} Send WA`);b.type="button";
+    b.title=plan.auto
+      ?"Queued automatically at this stage. Untick to send nothing."
+      :"Queue a WhatsApp for this contact when you save.";
+    b.onclick=()=>{a.sendWa=!a.sendWa;validate();};
+    w.appendChild(b);
+    w.append(el("span","wapw",plan.why));
+    if(plan.multiThread)w.append(el("span","wamt","Third no-answer \u2014 worth finding a second POC here"));
+    msg.parentNode.insertBefore(w,msg.nextSibling);
+  }
 
   /* Advisories go BELOW, in their own quiet line, and never touch sv.disabled. */
   document.querySelectorAll(".advice").forEach(n=>n.remove());

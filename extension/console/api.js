@@ -373,7 +373,17 @@
        server stores the save and replies at once; Kylas and Airtable get it
        behind the reply (scripts/save-queue.mjs). A server without a queue
        ignores the flag and answers with the finished save, as before. */
-    save: (contact, call) => req("/save", { method: "POST", body: { contact, call, queue: true }, timeout: 20000 }),
+    /* `sendWa` rides along with the save rather than being a second request:
+       the message is a consequence of the call, and two requests can disagree
+       about whether it happened. Undefined means "let the stage decide" —
+       the CNC rungs and Connect Later auto-queue, everything else waits for
+       the pill. See scripts/wa-jobs.mjs. */
+    save: (contact, call, opts = {}) => req("/save", { method: "POST",
+      body: { contact, call, queue: true,
+              ...(opts.sendWa === undefined ? {} : { sendWa: !!opts.sendWa }) }, timeout: 20000 }),
+    waStatus: () => req("/wa/status", { timeout: 8000 }),
+    deals: (owner = "") => req(`/deals${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`, { timeout: 15000 }),
+    dealItem: (body) => req("/deal-item", { method: "POST", body, timeout: 15000 }),
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),
@@ -426,7 +436,7 @@
                   lid: contact.lid || "", contact, call,
                   at: new Date().toISOString(), tries: 0 };
     try {
-      const res = await API.save(contact, call);
+      const res = await API.save(contact, call, { sendWa: contact.sendWa });
       return { ok: true, ...res };
     } catch (e) {
       /* The outbox is for an outage, not for a value Kylas will never accept.
@@ -468,7 +478,7 @@
           if (kid) contact = { ...contact, kid: String(kid), pendingCreate: false };
         }
         try {
-          const res = await API.save(contact, job.call);
+          const res = await API.save(contact, job.call, { sendWa: contact.sendWa });
           /* Any id, not only a create's — the proxy answers a recognised retry
              with the id it made the first time and created:false. */
           if (res?.kid && lid) learned.set(lid, String(res.kid));

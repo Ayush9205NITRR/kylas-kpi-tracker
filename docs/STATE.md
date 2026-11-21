@@ -149,6 +149,80 @@ that row — an owner id with a blank name — and fails without the fix.
 nested/folder views, and `/view-contacts` caps at 400 accounts per request
 (it says so when it truncates).
 
+## 0a · Deals, the WhatsApp outbox, and three dashboards (1.89.0)
+
+Four things, and the thread between them is that none of it goes near
+Airtable (the base is near its 50k cap) and none of it goes near a contact
+`PUT` (one of those has already cost this repo a contact's name, phone and
+email — §3).
+
+**The dashboard is three questions, not one scroll.** Today & Ladder /
+Trends & Conversion / Portfolio & Score, plus All sections. The four-tile
+strip stays gone. One bug came out of the split and is worth remembering:
+`ladderHTML` reads `REP.data`, but the fetch that fills it lived inside
+`reportSection` — which now renders only on the Trends tab, so the ladder on
+its own tab read a REP nothing had ever filled. Blank, no error, nothing
+loading. `ensureReport` is called from `dashboard()` now, where both tabs
+can see it.
+
+**Accounts lost a band of chrome.** The "Companies" heading above "All
+accounts 18076" said the same sentence in worse words; Work today is a
+one-line ribbon with every one-click filter it had and an Expand; and the
+five chip rows are one Quick-filters bar plus a drawer that opens itself
+whenever something inside it is narrowing the list.
+
+**`scripts/wa-jobs.mjs` is a queue, not a WhatsApp integration.** The bot
+(`whatsapp-bd-outreach`, 8 seats) already exists and polls `/wa/drain`;
+`/save` does one INSERT (**p95 0.09ms**, measured) and returns. Nothing in
+the file touches the network, because the moment it does a sleeping laptop
+becomes a slow save. The six post-send cases are pure functions over plain
+objects — reply, no-reply advance (09:30–19:30 IST), call-supersedes,
+multi-thread guard, not-on-WA vs seat-offline, opt-out — so they are tested
+without a phone. One real bug came out of that: an `opt_out` for a contact
+with no sequence row updated zero rows and the DND was silently forgotten,
+so the next stage change would message somebody who said stop. It upserts now.
+
+**`scripts/deals.mjs` is one module for deals, action items and the radar.**
+Every Kylas write is a POST (`/v1/deals`, `/v1/notes/relation`, `/v1/tasks`);
+`toKylasContact` is untouched and the hand-off test asserts the contact still
+has its name, phone, email and designation afterwards. Every action item
+carries **two clocks** — `baseline_due_at` never moves, `current_due_at` does
+— and TAT is measured against the baseline, because an SLA you may quietly
+edit reports 100% on time forever. Pushing a date **requires a reason chip**,
+and the chip sets the ball-in-court, which is the whole mechanism that keeps
+a Planning Team delay off a BD's number. The Pre-SQL radar counts deals *and*
+rupees by court; the rupee figure is parsed from the free-text budget **for
+this console only** and is never sent to Kylas, because "approx 8L, not
+signed off" in Sales' forecast would be a number nobody said.
+
+New suites: `test-wa-jobs.mjs` (43), `test-deals.mjs` (69),
+`test-handoff.mjs` (23, spawns its own stack), `test-console-shape-live.mjs`
+(21), `test-deals-live.mjs` (13). `test-worker.mjs` stays at 201.
+
+`test-role-stress.mjs` (59) is the one that runs the whole surface as BOTH
+people. It spawns the mocks once and **two** proxies against them — :8787
+with `ADMIN_IDS` matching the mock's user, :8788 with `ADMIN_EMAILS` naming
+somebody else — with **separate `JOBS_DB` files**, because one shared
+database would let the admin read the associate's queues and deals and every
+scoping assertion would pass for the wrong reason.
+
+Two things it caught, both in the test rather than the product, and both the
+kind that would have made a green run worthless:
+
+- **Three "passes" were vacuous.** The supersede, multi-thread and opt-out
+  cases all assert "this contact is not among the drained jobs" — which is
+  trivially true when *nothing* drains, and nothing drains outside 09:30–19:30
+  IST, because that is what the queue is for. Every assertion that depends on
+  a drain now queues with an explicit `dueAt`, and a separate assertion checks
+  that a job queued with no date does land inside business hours.
+- **The TAT assertion could not tell the two clocks apart.** It only checked
+  that a number came back. It now checks the SIZE: the baseline is +4h and the
+  pushed date is +2d, so ≈ -4h means the baseline was used and ≈ -48h would
+  mean it had quietly started measuring the pushed date — the exact failure
+  the two-clock design exists to prevent.
+
+There is no `/me`; the signed-in user and their role come back on `/health`.
+
 ## 0 · The filter rows and the view actions (1.88.1)
 
 Two crops from Ayush, 2026-11-20, and both turned out to be missing CSS

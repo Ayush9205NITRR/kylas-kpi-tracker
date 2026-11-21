@@ -34,6 +34,12 @@ offsite-source-*.csv
 offsite-source-undo-*.json
 reassign-snapshot-*.json
 .allot-jobs.sqlite
+# The two personas test-role-stress.mjs runs as. Separate files on purpose:
+# one shared database would let the admin read the associate's queues and
+# deals, and every scoping assertion in that suite would pass for the wrong
+# reason.
+.role-admin.sqlite
+.role-bda.sqlite
 db/.go-live.json
 db/cutover-*.json
 db/d1-import.sql

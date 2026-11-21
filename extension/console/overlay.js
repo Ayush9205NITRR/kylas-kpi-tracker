@@ -97,6 +97,7 @@
     (which === "dashboard" ? Views.dashboard
       : which === "flags" ? Flags.view
       : which === "today" ? Views.today
+      : which === "deals" ? Views.deals
       : Views.companies)(wrap)
       .then(() => { if (which === "companies" && view === "companies") port.scrollTop = accountsTop; })
       .catch((e) => { wrap.innerHTML = `<p class="vwarn">Could not build this view — ${e.message}</p>`; });
@@ -720,6 +721,8 @@
   window.openLocalDash = openDash;
   const dashBtn = document.getElementById("dashBtn");
   if (dashBtn) dashBtn.onclick = () => showView("dashboard");
+  const dealsBtn = document.getElementById("dealsBtn");
+  if (dealsBtn) dealsBtn.onclick = () => showView("deals");
 
   /* THE FLAGS BUTTON IS AN ADMIN'S. Shown only once the server has said this
      person is one (state.role is set by /meta; before that it is unknown, and

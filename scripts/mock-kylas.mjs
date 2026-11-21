@@ -55,6 +55,8 @@ const userName = (id) => [USERS[id]?.firstName, USERS[id]?.lastName].filter(Bool
 const NO_CO_NAMES = process.env.MOCK_NO_COMPANY_NAMES === "1";
 /* Mutable, because POST /__hang toggles it without a restart — a restart would
    throw away the contacts the test needs the recovery path to find. */
+const DEALS = [];
+const TASKS = [];
 let hangCreate = process.env.MOCK_HANG_CREATE === "1";
 let callLogs404 = false, callLogsUnfiltered = false;
 /* POST /__refuse?name=<substring> makes Kylas turn down a create by name. The
@@ -648,6 +650,46 @@ createServer(async (req, res) => {
     if (String(ph?.dialCode || "+91") === "+91" && v.length !== 10) return true;
     return false;
   });
+
+  /* ── DEALS, NOTES AND TASKS ──────────────────────────────────────────
+     Added for the Active Requirement hand-off. Deliberately strict about the
+     tenant values: a deal posted to the wrong pipeline or in the wrong
+     currency is accepted silently by a permissive stand-in and then lands in
+     a list nobody looks at. Here it is a 400 that names the field. */
+  if (p === "/v1/deals" && req.method === "POST") {
+    const b = JSON.parse(await text(req) || "{}");
+    if (Number(b?.pipeline?.id) !== 32572)
+      return json(res, 400, { message: "pipeline must be Demand Funnel (32572)" });
+    if (Number(b?.currencyId) !== 431)
+      return json(res, 400, { message: "currencyId must be 431 (INR)" });
+    if (!b?.name) return json(res, 400, { message: "a deal needs a name" });
+    const id = 900000 + (DEALS.length + 1);
+    DEALS.push({ id, ...b, notes: [], tasks: [] });
+    return json(res, 200, { id, name: b.name });
+  }
+  if (p === "/v1/notes/relation" && req.method === "POST") {
+    const b = JSON.parse(await text(req) || "{}");
+    const d = DEALS.find((x) => x.id === Number(b?.relation?.id));
+    if (!d) return json(res, 404, { message: "no such deal" });
+    d.notes.push(String(b.note || ""));
+    return json(res, 200, { id: d.notes.length });
+  }
+  if (p === "/v1/tasks" && req.method === "POST") {
+    const b = JSON.parse(await text(req) || "{}");
+    const d = DEALS.find((x) => x.id === Number(b?.relation?.id));
+    const id = 800000 + TASKS.length + 1;
+    TASKS.push({ id, ...b });
+    if (d) d.tasks.push(id);
+    return json(res, 200, { id, name: b.name });
+  }
+  if (/^\/v1\/tasks\/\d+$/.test(p) && req.method === "PATCH") {
+    const b = JSON.parse(await text(req) || "{}");
+    const t = TASKS.find((x) => String(x.id) === p.split("/").pop());
+    if (!t) return json(res, 404, { message: "no such task" });
+    Object.assign(t, b);
+    return json(res, 200, { id: t.id });
+  }
+  if (p === "/__deals") return json(res, 200, { deals: DEALS, tasks: TASKS });
 
   if (p === "/v1/contacts" && req.method === "POST") {
     const body = JSON.parse(await text(req));

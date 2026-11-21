@@ -2357,6 +2357,37 @@
      than serve what it holds, because what it holds is older than the save. */
   let REPORT_FORCE = false;
 
+  /* ── THE DASHBOARD, IN THREE QUESTIONS ─────────────────────────────
+     It was eight sections on one scroll: the stall strip, today's calls, the
+     ladder, the period table, the mode split, the score bands and the worked
+     mix. Every one earns its place and the page still could not be read,
+     because they answer three different questions and nothing said so —
+     "what do I do now", "are we converting better than last month", and
+     "what is the shape of what I hold".
+
+     So: three tabs, in that order, and an All sections toggle for the days
+     somebody wants the whole scroll back (and for printing). The default is
+     the first, because the first is the one a BD opens at 9am.
+
+     NO FOUR-TILE STRIP COMES BACK. The tiles counted companies sitting at a
+     rung right now, all time; the ladder counts companies that FIRST reached
+     it inside the period. Both are useful, they are not the same question,
+     and under the same six words on one screen "Companies reached 34" above
+     "Companies reached 0" reads as a bug. */
+  const DASH_TABS = [
+    { k: "today", label: "Today & Ladder", hint: "What to do now, and where the funnel stands this period" },
+    { k: "trends", label: "Trends & Conversion", hint: "Period over period, and where it leaks" },
+    { k: "portfolio", label: "Portfolio & Score", hint: "The shape of what you hold" },
+  ];
+  let DASH_TAB = "today";
+  const dashHas = (k) => DASH_TAB === "all" || DASH_TAB === k;
+  const dashTabs = () => `<div class="dtabs" role="tablist" aria-label="Dashboard sections">
+    ${DASH_TABS.map((t) => `<button type="button" role="tab" data-dtab="${t.k}"
+      aria-selected="${DASH_TAB === t.k}" title="${esc(t.hint)}">${esc(t.label)}</button>`).join("")}
+    <button type="button" role="tab" data-dtab="all" aria-selected="${DASH_TAB === "all"}"
+      class="dtall" title="Every section on one scroll, as it was">All sections</button>
+  </div>`;
+
   async function dashboard(host) {
     await restore();
     /* The dashboard is prose and stat tiles — it keeps the reading measure the
@@ -2371,6 +2402,16 @@
     const cos = fromStore.length ? fromStore : rollup(DATA, dbase, dbase.length > 0);
     const team = DASH_OWNER === "all";
     const names = [...new Set(CACHE.owners.map((o) => o.name).filter(Boolean))].sort();
+
+    /* THE LADDER AND THE PERIOD TABLE ARE ONE REQUEST, and only one of them
+       asks for it. ensureReport used to be called from inside reportSection,
+       which was always on the page — so ladderHTML(REP.data) always had data
+       by the time it ran. With the sections split across tabs, reportSection
+       renders only on Trends, and the ladder on its own tab was left reading
+       a REP that nothing had ever filled: permanently blank, with no error
+       and nothing loading. Asking here, where both tabs can see it, is the
+       fix; the call is idempotent, so reportSection asking again is free. */
+    ensureReport(DASH_LEVEL, DASH_OWNER, () => dashboard(host), DASH_FROM, DASH_TO, false);
 
     host.innerHTML = `
       <div class="vhead">
@@ -2409,30 +2450,32 @@
            conversions in it, so it keeps the labels. headlineHTML is still in
            this file if the all-time view is wanted back somewhere it cannot be
            mistaken for this one. */""}
-      ${rcaStrip()}
+      ${dashTabs()}
+      ${dashHas("today") ? `${rcaStrip()}
       ${/* WORK TODAY on the dashboard too (Ayush, 2026-10-29): the same block as
-           the Accounts pane, over the same allotted list. */ todayCard(rollup(DATA, dbase, dbase.length > 0))}
-      ${/* THE LADDER FIRST, then the period table under it. The ladder is this
-           period across the team and each associate; the table is every period.
-           Same numbers, same report, one request. */
-        ladderHTML(REP.data)}
-      ${workedMixHTML(REP.data)}
-      ${scoreSection(rollup(DATA, dbase, dbase.length > 0))}
-      <div class="vsec">${/* THE PERSON PICKED IN "Who", not "me" (Ayush, 2026-11-03: Sejal picked,
-           the ladder still showed Ayush). This report feeds the ladder above too,
-           so a single person used to collapse to the admin's own numbers. */
+           the Accounts pane, over the same allotted list. */
+        todayCard(rollup(DATA, dbase, dbase.length > 0))}
+      ${/* THE LADDER, then — on the Trends tab — the period table. The ladder is
+           this period across the team and each associate; the table is every
+           period. Same numbers, same report, one request. */
+        ladderHTML(REP.data)}` : ""}
+      ${dashHas("trends") ? `<div class="vsec">${/* THE PERSON PICKED IN "Who", not
+           "me" (Ayush, 2026-11-03: Sejal picked, the ladder still showed Ayush).
+           This report feeds the ladder above too, so a single person used to
+           collapse to the admin's own numbers. */
         reportSection(DASH_OWNER)}</div>
-      <div class="vsec">${modeSplitSection()}</div>
       ${/* THE PER-ASSOCIATE COMPARISON SURVIVES, but only where it answers
-           something. On your own numbers it is one row saying what the four
-           tiles above already said; across the team it is the only place you
-           can see whose funnel is leaking. The funnel table, the stacked bar
-           and the trend chart are gone from the page — each was a fifth view of
-           the same six numbers. stepTable, stackedByOwner, funnelHTML and
-           trendChart are all still in this file, so putting any of them back is
-           one line. */
-        team ? `<div class="vsec">${stepTable(REP.data)}</div>` : ""}`;
+           something. On your own numbers it is one row saying what the ladder
+           already said; across the team it is the only place you can see whose
+           funnel is leaking. */
+        team ? `<div class="vsec">${stepTable(REP.data)}</div>` : ""}
+      <div class="vsec">${modeSplitSection()}</div>` : ""}
+      ${dashHas("portfolio") ? `${scoreSection(rollup(DATA, dbase, dbase.length > 0))}
+      ${workedMixHTML(REP.data)}` : ""}`;
 
+    host.querySelectorAll("[data-dtab]").forEach((b) => {
+      b.onclick = () => { DASH_TAB = b.dataset.dtab; dashboard(host); };
+    });
     const lc = document.getElementById("dLocal");
     if (lc) lc.onclick = () => global.openLocalDash?.();
     const sel = document.getElementById("dOwner");
@@ -2722,6 +2765,13 @@
                    different rows, and sharing one set made picking Remarks on
                    people quietly drop a column from the account list. */
                 ccols: new Set(), ccolsOpen: false,
+                /* The Work today card on the Accounts view: a ribbon by
+                   default, the full card when asked for. Remembered. */
+                todayBig: false,
+                /* The filter drawer. `null` is "never touched", which lets it
+                   open itself when something inside it is on; once somebody
+                   clicks it the answer is theirs. */
+                drawer: null,
                 /* the condition, as in Airtable's text filter */
                 srcOp: "contains", srcText: "",
                 /* "" | "focus" | "normal" | "depri" — the focus-list status */
@@ -4157,7 +4207,7 @@
       <span class="tdAv">${esc(String(c.name || "?").trim().charAt(0).toUpperCase())}</span>
       <span class="tdMid"><span class="n">${esc(c.name)}</span><span class="m">${esc(meta)}</span></span>
       <span class="tdTag ${cls}">${esc(tag)}</span><span class="tdArr" aria-hidden="true">›</span></button>`;
-  function todayCard(all) {
+  function todayCard(all, { compact = false } = {}) {
     const P = todayPlan(all);
     if (!P.call.length && !P.poc.length && !P.open && !P.moved.length) return "";
     const tab = ACC.todayTab === "poc" ? "poc" : "call";
@@ -4180,6 +4230,32 @@
     const hello = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
     const when = new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
     const line = (k, text, n) => `<button type="button" class="tdNeed${ACC.openNeed === k ? " on" : ""}" data-open="${k}"><span>${text}</span><b>${n}</b></button>`;
+
+    /* ONE LINE BY DEFAULT ON THE ACCOUNTS VIEW. The full card is a hero
+       number, a progress bar, three funnel buttons and a ten-row list —
+       right for the dashboard, where it is the thing you came for, and
+       wrong above a table you came to filter: it pushed the first account
+       below the fold every morning (Ayush, 2026-11-21).
+
+       EVERY ONE-CLICK FILTER SURVIVES. The ribbon carries the same buttons,
+       with the same data-open and data-tab hooks the full card uses, so the
+       handlers below are untouched and nothing moved behind a menu. The
+       expander is remembered, so a BD who wants the card gets the card. */
+    if (compact) {
+      const seg = (k, text, n) => `<button type="button" class="tdrSeg${
+        ACC.todaySet === k ? " on" : ""}" data-tab="${k}" data-ribbon="1"><span>${esc(text)}</span><em>${n}</em></button>`;
+      return `<div class="tdRibbon">
+        <span class="tdrN"><b>${total}</b> call${total === 1 ? "" : "s"} today</span>
+        <span class="tdrBar" title="${P.done} done, ${toGo} to go"><i style="width:${pct}%"></i></span>
+        <span class="tdrDone">${P.done}/${total}</span>
+        <span class="tdrSep" aria-hidden="true"></span>
+        ${seg("call", "Call today", P.call.length)}${seg("poc", "No Right POC yet", P.poc.length)}
+        <span class="tdrSep" aria-hidden="true"></span>
+        ${line("right", "Right POC", P.needs.right)}${line("discovery", "Discovery", P.needs.discovery)}${line("sql", "SQL", P.needs.sql)}
+        <button type="button" class="tdrOpen" id="tdExpand"
+          title="Show the full Work today card">Expand</button>
+      </div>`;
+    }
     return `<div class="tdWrap">
       <div class="tdHero">
         <div class="tdHi">${esc(when)}${first ? ` · ${hello}, ${esc(first)}` : ""}</div>
@@ -5030,6 +5106,34 @@
     </div>`;
   }
 
+  /* What the drawer is holding, as a count — so a closed drawer can still
+     say that it is doing something. */
+  const chipDrawerOn = () => ACC.kpis.size + ACC.fresh.size + ACC.nextSet.size
+    + ACC.focusSet.size + ACC.coldSet.size + (moreActive() ? 1 : 0);
+  /* Opens by itself while a filter inside it is narrowing the list. A filter
+     you cannot see is how you end up certain you have forty accounts. */
+  const drawerOpen = () => (ACC.drawer === null ? chipDrawerOn() > 0 : !!ACC.drawer);
+
+  /* THE DAILY CHIPS, PROMOTED OUT OF THE ROWS. Call-backs due today and
+     overdue, and the going-cold highlight: the three that get pressed every
+     morning. They are the same Sets the drawer's rows write to, so a chip
+     pressed here lights up there and the counts agree — one filter, two
+     places to reach it, never two filters. */
+  function qfChips(all) {
+    const out = [];
+    const tog = (set, k, text, extra = "") => {
+      const on = set.has(k);
+      out.push(`<button type="button" class="chip qf" aria-pressed="${on}"
+        data-qf="${esc(k)}" data-qfset="${set === ACC.nextSet ? "nextSet" : "coldSet"}"
+        >${extra}${esc(text)}</button>`);
+    };
+    for (const k of ["overdue", "today"])
+      if (NEXT_CHIPS[k]) tog(ACC.nextSet, k, NEXT_CHIPS[k]);
+    tog(ACC.coldSet, "cold", `Going cold`, `<span class="sw cold"></span>`);
+    void all;
+    return out.join("");
+  }
+
   function explorerHTML(all) {
     const cols = colsOn();
     /* Rebuilt each paint so a value list offers what the data holds now. */
@@ -5135,7 +5239,7 @@
       return `${viewsStrip(all)}${modeSwitch()}${contactsHTML(all)}`;
 
     return `
-      ${todayCard(all)}
+      ${todayCard(all, { compact: !ACC.todayBig })}
       ${strip}
       ${viewsStrip(all)}
       ${modeSwitch()}
@@ -5183,14 +5287,38 @@
           ${sourcePicker(all, sources)}
           ${columnPicker()}
         </div>
-        ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
-          (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
-        ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
-          (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
-        ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
-        ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
-        ${chipRow(all, "Highlight", "cold", ["cold"], () => `Going cold · open, no call in ${OPEN_STALE_DAYS}d+`, ACC.coldSet, () => `<span class="sw cold"></span>`)}
-        ${moreFilters(all)}
+        ${/* FIVE LABELLED ROWS BECAME ONE BAR AND A DRAWER. KPI status, Last
+             call, Next call, Focus list and Highlight were five full-width
+             rows of chips, every one of them always on screen, together about
+             a third of the viewport before a single account appeared. They
+             are not equally used: "call-backs due" and "going cold" are
+             pressed daily and the rest are pressed when somebody is doing a
+             particular piece of analysis.
+
+             So the daily ones sit in a single Quick filters bar, and the
+             rest move behind "Filters & chips ▾" — which opens by itself
+             whenever anything inside it is doing something, because a filter
+             narrowing the list from behind a closed drawer is how you end up
+             certain you have forty accounts. Nothing is removed: every chip
+             that existed is still one click away. */ ""}
+        <div class="qfbar">
+          <span class="lbl">Quick filters</span>
+          ${qfChips(all)}
+          <button type="button" class="qfmore${chipDrawerOn() ? " on" : ""}" id="fDrawer"
+            aria-expanded="${drawerOpen()}"
+            title="KPI status, Last call, Focus list, Highlight and the enrichment bands">Filters &amp; chips <i aria-hidden="true">▾</i>${
+              chipDrawerOn() ? `<em>${chipDrawerOn()}</em>` : ""}</button>
+        </div>
+        ${drawerOpen() ? `<div class="qfdrawer">
+          ${chipRow(all, "KPI status", "kpi", [-1, 0, 1, 2, 3, 4, 5],
+            (v) => KPI_LABELS[v + 1], ACC.kpis, (v) => `<span class="sw r${v < 0 ? "n" : v}"></span>`)}
+          ${chipRow(all, "Last call", "fresh", FRESH.map((z) => z.k),
+            (v) => FRESH.find((z) => z.k === v).label, ACC.fresh, (v) => `<span class="sw f-${v}"></span>`)}
+          ${chipRow(all, "Next call", "next", Object.keys(NEXT_CHIPS), (v) => NEXT_CHIPS[v], ACC.nextSet)}
+          ${chipRow(all, "Focus list", "focus", Object.keys(FOCUS_CHIPS), (v) => FOCUS_CHIPS[v], ACC.focusSet)}
+          ${chipRow(all, "Highlight", "cold", ["cold"], () => `Going cold · open, no call in ${OPEN_STALE_DAYS}d+`, ACC.coldSet, () => `<span class="sw cold"></span>`)}
+          ${moreFilters(all)}
+        </div>` : ""}
         ${ACC.view === "board" ? boardHTML(rows) : `
         <div class="accscroll"><div class="acctable" style="--acols:${gridOf(cols)};--amin:${minOf(cols)}px">
           <div class="vr vh">${cols.map((col) =>
@@ -5584,12 +5712,13 @@
     };
 
     host.innerHTML = `
-      <div class="vhead">
-        <h2>Companies</h2>
-        <span class="vsub">${loading ? "loading…"
-          : VIEW_MODE === "accounts" ? `${all.length} allotted`
-          : `${rows.length} of ${all.length}`}</span>
-      </div>
+      ${/* NO "Companies" HEADING. The views strip right under it opens with
+           "All accounts 18076", which is the same sentence in better words —
+           it names the list AND it is the control that changes it. A heading
+           that only repeats the thing below it costs a band of vertical space
+           on a screen a BD reads 200 times a day (Ayush, 2026-11-21). The
+           count it carried moves onto the filter line, beside the owner it
+           is counting. */ ""}
       ${API.state.user?.kylasMatch === false ? `<p class="vwarn">You are signed in as <b>${esc(API.state.user.email)}</b>, but no Kylas
         user has that email — so “Me” owns no accounts. Ask an admin to set your Kylas user's email to this address.</p>` : ""}
       <div class="vfilters">
@@ -5641,6 +5770,9 @@
         ${VIEW_MODE === "board" ? "" : `<button class="gbtn" id="fDensity" type="button"
           title="${DENSITY === "compact" ? "Roomier rows" : "Fit more rows on screen"}"
         >${DENSITY === "compact" ? "Comfortable" : "Compact"}</button>`}
+        <span class="vsub">${loading ? "loading…"
+          : VIEW_MODE === "accounts" ? `${all.length} allotted`
+          : `${rows.length} of ${all.length}`}</span>
         <span class="vage">${CACHE.at ? esc(ageText())
           : ""}</span>
         ${kpiNote(all, { repaint: () => companies(host) })}
@@ -6300,6 +6432,13 @@
     on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
     on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     on("conCsv", "click", exportContacts);
+    on("fDrawer", "click", () => { ACC.drawer = !drawerOpen(); redraw(); });
+    on("tdExpand", "click", () => { ACC.todayBig = true; redraw(); });
+    host.querySelectorAll("[data-qf]").forEach((b) => { b.onclick = () => {
+      const set = ACC[b.dataset.qfset], k = b.dataset.qf;
+      set.has(k) ? set.delete(k) : set.add(k);
+      redraw();
+    }; });
     on("conClear", "click", () => {
       ACC.cStage.clear(); ACC.cOwner.clear(); ACC.cFresh.clear(); redraw();
     });
@@ -6901,7 +7040,205 @@
   let LAST_HOST = null;
   const redrawExplorer = () => { if (LAST_HOST && LAST_HOST.isConnected) companies(LAST_HOST).catch(() => {}); };
 
-  global.Views = { rollup, dashboard, companies, today, FILTERS, savedLanded, reassignOne,
+  /* ══ DEALS, THEIR ACTION ITEMS, AND WHAT IS HOLDING THEM UP ═══════════
+     One screen for everything after the hand-off. The deal lives in Kylas,
+     because that is where Sales works; the clocks, the slips and the
+     ball-in-court live in D1, because Kylas has nowhere to put them and they
+     are the only things that answer "why has this not moved".
+
+     THE RADAR IS FIRST, AND IT IS NOT A SUMMARY OF THE LIST BELOW IT. The
+     list says what you have; the radar says whose fault it is that none of
+     it has moved — split by court, counted in deals AND rupees, because "11
+     stuck" and "₹1.4 Cr stuck" get very different meetings.
+
+     AND A BD IS NEVER THE DEFAULT ANSWER. Pushing a date needs a reason
+     chip, the chip moves the court, and the radar reads the court — so a
+     fortnight lost to a cost sheet shows against the Planning Team, where it
+     happened, instead of against the BD who was chasing it. */
+  const DEALS = { list: [], radar: null, chips: [], loading: false, err: "", at: 0,
+                  open: "", court: "" };
+
+  const inr = (n) => {
+    const v = Number(n) || 0;
+    if (v >= 1e7) return `₹${(v / 1e7).toFixed(v >= 1e8 ? 0 : 1)} Cr`;
+    if (v >= 1e5) return `₹${(v / 1e5).toFixed(v >= 1e6 ? 0 : 1)} L`;
+    return v ? `₹${Math.round(v).toLocaleString("en-IN")}` : "—";
+  };
+  /* A countdown that reads like a person would say it. Overdue is its own
+     word, not a negative number: "-2d" takes a beat to parse and this is a
+     column somebody scans. */
+  const dueText = (ms) => {
+    if (!ms) return "no date";
+    const d = ms - Date.now();
+    const h = Math.round(d / 3600000);
+    if (d < 0) return Math.abs(h) < 24 ? `${Math.abs(h)}h overdue` : `${Math.round(Math.abs(h) / 24)}d overdue`;
+    if (h < 1) return "due now";
+    return h < 24 ? `in ${h}h` : `in ${Math.round(h / 24)}d`;
+  };
+  const dueClass = (ms) => (!ms ? "" : ms < Date.now() ? "late" : ms - Date.now() < 4 * 3600000 ? "soon" : "ok");
+
+  /* The quick chips. Minutes rather than dates, because the answer to "when
+     will you know" is almost always "later today" or "tomorrow", and making
+     somebody open a date picker for that is how the date stops being moved
+     at all — which is worse than a vague date, since then nothing is true. */
+  const PUSH_CHIPS = [["+4h", 4], ["Today", 0], ["Tomorrow", 24], ["+2d", 48], ["+3d", 72], ["Next week", 168]];
+  const pushAt = (h) => (h === 0
+    ? new Date(new Date().setHours(19, 0, 0, 0)).getTime()      /* "today" means end of today */
+    : Date.now() + h * 3600000);
+
+  async function loadDeals(redraw, force) {
+    if (DEALS.loading) return;
+    if (!force && DEALS.at && Date.now() - DEALS.at < 60000) return;
+    DEALS.loading = true; DEALS.err = ""; redraw?.();
+    try {
+      const r = await API.deals(API.isAdmin ? "all" : "");
+      DEALS.list = r.deals || []; DEALS.radar = r.radar || null; DEALS.chips = r.chips || [];
+      DEALS.at = Date.now();
+    } catch (e) { DEALS.err = String(e.message || e).slice(0, 200); }
+    DEALS.loading = false; redraw?.();
+  }
+
+  function radarStrip() {
+    const r = DEALS.radar;
+    if (!r || !r.total) return "";
+    return `<div class="rdr">
+      <div class="rdrH">
+        <h3>Pre-SQL bottleneck</h3>
+        <span class="rdrSub">${r.total} deal${r.total === 1 ? "" : "s"} · ${esc(inr(r.value))} between
+          Active Requirement Call Done and SQL, by whose court they are in</span>
+      </div>
+      <div class="rdrRow">${r.all.map((c) => `<button type="button" class="rdrC${
+        DEALS.court === c.court ? " on" : ""}${c.deals ? "" : " zero"}" data-court="${esc(c.court)}"
+        title="${c.overdue} of these are past their date">
+        <span class="rdrL">${esc(c.label)}</span>
+        <b>${c.deals}</b>
+        <span class="rdrV">${esc(inr(c.value))}</span>
+        ${c.overdue ? `<em class="rdrO">${c.overdue} late</em>` : ""}
+      </button>`).join("")}</div>
+    </div>`;
+  }
+
+  function itemRow(d, it) {
+    const slipped = Number(it.current_due_at) > Number(it.baseline_due_at);
+    const done = it.state === "done";
+    return `<div class="dItem${done ? " done" : ""}">
+      <button type="button" class="dTick" data-done="${esc(it.id)}" data-task="${esc(it.kylas_task_id || "")}"
+        title="${done ? "Done" : "Mark done"}" ${done ? "disabled" : ""}>${done ? "✓" : ""}</button>
+      <span class="dLbl">${esc(it.label)}<em class="dPb">${esc(PLAYBOOK_LABEL[it.playbook] || it.playbook)}</em></span>
+      <span class="dCourt c-${esc(it.court)}">${esc(COURT_LABEL[it.court] || it.court)}</span>
+      ${/* BOTH CLOCKS, ALWAYS VISIBLE. The target is what we are promising
+           now; the baseline is what we promised first, and it only appears
+           once they differ — a row that says the same date twice is noise,
+           and a row that quietly stopped saying the first one is the problem
+           this whole mechanism exists to prevent. */ ""}
+      <span class="dDue ${dueClass(Number(it.current_due_at))}">${esc(dueText(Number(it.current_due_at)))}</span>
+      ${slipped ? `<span class="dSlip" title="First promised ${new Date(Number(it.baseline_due_at)).toLocaleString("en-IN")}">
+        slipped ${it.slip_count}×</span>` : ""}
+      ${done ? `<span class="dTat">${Number(it.completed_at) <= Number(it.baseline_due_at)
+        ? "on time" : `${Math.round((Number(it.completed_at) - Number(it.baseline_due_at)) / 3600000)}h over`}</span>` : ""}
+      ${done ? "" : `<span class="dPush">
+        ${PUSH_CHIPS.map(([lab, h]) => `<button type="button" data-push="${esc(it.id)}" data-h="${h}"
+          data-deal="${esc(d.id)}">${esc(lab)}</button>`).join("")}
+      </span>`}
+    </div>`;
+  }
+
+  const PLAYBOOK_LABEL = { pre_call: "Pre-Call Prep", post_call: "Post-Call / DMM",
+                           dmm_walk: "Walkthrough & Re-work", venue_lock: "Venue Lock & SQL" };
+  const COURT_LABEL = { client_poc: "Client POC", planning_team: "Planning Team",
+                        sales_poc: "Sales POC", bd: "BD" };
+
+  function dealCard(d) {
+    const t = d.timeline || {};
+    const open = DEALS.open === d.id;
+    return `<div class="dCard${open ? " open" : ""}">
+      <button type="button" class="dHead" data-deal-open="${esc(d.id)}">
+        <span class="dName">${esc(d.name || "(unnamed deal)")}</span>
+        <span class="dMeta">${esc(d.owner || "")}${d.value ? ` · ${esc(inr(d.value))}` : ""}</span>
+        <span class="dCourt c-${esc(t.court || d.court || "bd")}">${esc(COURT_LABEL[t.court || d.court] || "BD")}</span>
+        <span class="dDue ${dueClass(Number(t.currentDueAt))}">${esc(dueText(Number(t.currentDueAt)))}</span>
+        ${t.slipped ? `<span class="dSlip">slipped ${t.slipCount}×</span>` : ""}
+        <span class="dOpenN">${t.open || 0} open</span>
+      </button>
+      ${open ? `<div class="dItems">${(d.items || [])
+        .sort((a, b) => Number(a.current_due_at) - Number(b.current_due_at))
+        .map((it) => itemRow(d, it)).join("")}</div>` : ""}
+    </div>`;
+  }
+
+  async function deals(host) {
+    host.closest(".vwrap")?.classList.remove("wide", "board");
+    const redraw = () => deals(host);
+    loadDeals(redraw);
+    const list = DEALS.court
+      ? DEALS.list.filter((d) => (d.timeline?.court || d.court) === DEALS.court)
+      : DEALS.list;
+    host.innerHTML = `
+      <div class="vhead"><h2>Deals</h2>
+        <span class="vsub">Handed to Sales. The clocks and the reasons live here; the deal lives in Kylas.</span></div>
+      ${DEALS.err ? `<p class="vwarn">${esc(DEALS.err)}</p>` : ""}
+      ${DEALS.loading && !DEALS.list.length ? `<p class="vnote">Loading…</p>` : ""}
+      ${radarStrip()}
+      ${DEALS.court ? `<div class="qfbar"><span class="lbl">Showing</span>
+        <button type="button" class="chip" aria-pressed="true" id="dClear">${
+          esc(COURT_LABEL[DEALS.court])} only — clear</button></div>` : ""}
+      ${list.length ? `<div class="dList">${list.map(dealCard).join("")}</div>`
+        : (!DEALS.loading ? `<p class="vnote">No deals yet. One is created the moment a contact
+           is saved on Active Requirement Call Booked.</p>` : "")}`;
+
+    host.querySelectorAll("[data-court]").forEach((b) => { b.onclick = () => {
+      DEALS.court = DEALS.court === b.dataset.court ? "" : b.dataset.court; redraw();
+    }; });
+    const clr = host.querySelector("#dClear");
+    if (clr) clr.onclick = () => { DEALS.court = ""; redraw(); };
+    host.querySelectorAll("[data-deal-open]").forEach((b) => { b.onclick = () => {
+      DEALS.open = DEALS.open === b.dataset.dealOpen ? "" : b.dataset.dealOpen; redraw();
+    }; });
+    host.querySelectorAll("[data-done]").forEach((b) => { b.onclick = async () => {
+      b.disabled = true;
+      try { await API.dealItem({ action: "complete", id: b.dataset.done, kylasTaskId: b.dataset.task || "" }); }
+      catch (e) { DEALS.err = String(e.message || e); }
+      await loadDeals(redraw, true);
+    }; });
+    /* A push needs a reason, and the reason is asked for HERE rather than
+       defaulted — the whole mechanism is worthless if the common path sets
+       the court to BD without anybody choosing it. */
+    host.querySelectorAll("[data-push]").forEach((b) => { b.onclick = async () => {
+      const chip = await askReason();
+      if (!chip) return;
+      const d = DEALS.list.find((x) => x.id === b.dataset.deal);
+      try {
+        await API.dealItem({ action: "push", id: b.dataset.push, to: pushAt(Number(b.dataset.h)),
+          chip, contactId: d?.contact_id || "", companyId: d?.company_id || "",
+          phone: d?.phone || "", name: d?.name || "" });
+      } catch (e) { DEALS.err = String(e.message || e); }
+      await loadDeals(redraw, true);
+    }; });
+  }
+
+  /* The reason picker. A tiny modal rather than a select, because the chips
+     are the vocabulary of the thing and a dropdown of seven phrases reads as
+     paperwork. */
+  function askReason() {
+    return new Promise((resolve) => {
+      const back = el("div", "dAsk");
+      back.innerHTML = `<div class="dAskBox" role="dialog" aria-label="Why is this moving?">
+        <h3>Why is this moving?</h3>
+        <p>This decides whose court the deal is in — so a Planning Team or Sales delay is not counted against you.</p>
+        <div class="dAskChips">${(DEALS.chips || []).map((c) => `<button type="button" data-chip="${esc(c.k)}">${esc(c.label)}</button>`).join("")}</div>
+        <button type="button" class="linkbtn" data-chip="">Cancel</button>
+      </div>`;
+      back.onclick = (e) => {
+        const b = e.target.closest("[data-chip]");
+        if (!b && e.target !== back) return;
+        back.remove();
+        resolve(b ? b.dataset.chip : "");
+      };
+      document.body.appendChild(back);
+    });
+  }
+
+  global.Views = { rollup, dashboard, companies, today, deals, FILTERS, savedLanded, reassignOne,
                   noteOwnerChange, noteAccountOwner,
                   /* The account's open-account state, for the call card (console.js). */
                   companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },

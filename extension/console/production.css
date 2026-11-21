@@ -1788,3 +1788,169 @@ body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
    alone, which went transparent in dark. */
 .ctable .vr.vh{background:var(--panel2);box-shadow:0 1px 0 var(--line2);
   text-transform:uppercase;letter-spacing:.04em}
+
+/* ══ THE DASHBOARD'S THREE TABS ════════════════════════════════════════
+   Eight sections on one scroll answered three different questions and
+   nothing said so. Same card surface, same accent, no new hue: the tabs
+   are structure, which is how this console separates sections. */
+.dtabs{display:flex;gap:4px;flex-wrap:wrap;margin:2px 0 14px;padding:3px;
+  background:var(--panel3);border-radius:calc(var(--r) + 3px)}
+.dtabs button{border:0;background:none;border-radius:var(--r);padding:7px 14px;
+  font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--text2);
+  cursor:pointer;transition:background 90ms ease,color 90ms ease}
+.dtabs button:hover{color:var(--text)}
+.dtabs button[aria-selected="true"]{background:var(--panel);color:var(--text);
+  font-weight:var(--w-strong);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.dtabs .dtall{margin-left:auto;font-size:var(--t-meta);color:var(--text3)}
+.dtabs .dtall[aria-selected="true"]{color:var(--text)}
+.dtabs button:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+@media (prefers-reduced-motion:reduce){ .dtabs button{transition:none} }
+
+/* ══ WORK TODAY, AS ONE LINE ═══════════════════════════════════════════
+   The full card is right on the dashboard, where it is the thing you came
+   for, and wrong above a table you came to filter — it put the first
+   account below the fold every morning. Every one-click filter it carried
+   is still here; only the hero number and the ten-row list are folded. */
+.tdRibbon{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:9px 12px;margin-bottom:10px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:calc(var(--r) + 3px)}
+.tdRibbon .tdrN{font-size:var(--t-label);color:var(--text2);white-space:nowrap}
+.tdRibbon .tdrN b{font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);
+  color:var(--text);margin-right:4px}
+.tdRibbon .tdrBar{flex:0 1 120px;min-width:60px;height:6px;border-radius:999px;
+  background:var(--panel3);overflow:hidden}
+.tdRibbon .tdrBar i{display:block;height:100%;background:var(--blue);border-radius:999px}
+.tdRibbon .tdrDone{font-size:var(--t-meta);color:var(--text3);white-space:nowrap}
+.tdRibbon .tdrSep{width:1px;align-self:stretch;background:var(--line2);margin:0 2px}
+/* width and margin are reset explicitly: .tdNeed is full-width by design
+   inside the hero card (calc(100% + 16px) with a negative margin, so the
+   hover band bleeds to the card edge), and inherited here it made every
+   button its own line — a "one-line ribbon" 207px tall. */
+.tdRibbon .tdrSeg,.tdRibbon .tdNeed{display:inline-flex;align-items:center;gap:6px;
+  width:auto;margin:0;justify-content:flex-start;
+  border:1px solid var(--line2);background:var(--panel);border-radius:999px;
+  padding:4px 11px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer;white-space:nowrap}
+.tdRibbon .tdrSeg:hover,.tdRibbon .tdNeed:hover{border-color:var(--blueLine);
+  background:var(--blueSoft);color:var(--blue)}
+.tdRibbon .tdrSeg.on,.tdRibbon .tdNeed.on{background:var(--blue);border-color:var(--blue);
+  color:var(--onBlue);font-weight:var(--w-strong)}
+.tdRibbon .tdrSeg em,.tdRibbon .tdNeed b{font-style:normal;font-weight:var(--w-max);
+  font-family:var(--f);font-size:var(--t-meta)}
+.tdRibbon .tdrOpen{margin-left:auto;border:0;background:none;padding:4px 2px;font:inherit;
+  font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--blue);cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px}
+.tdRibbon :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+/* ══ ONE QUICK-FILTER BAR, AND A DRAWER ════════════════════════════════
+   Five labelled rows of chips were always on screen — about a third of the
+   viewport before a single account appeared — and they are not equally
+   used. The daily three are promoted; the rest are one click away and the
+   drawer opens itself whenever something inside it is narrowing the list. */
+.qfbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:2px 0 8px}
+.qfbar .lbl{font-size:var(--t-meta);font-weight:var(--w-med);color:var(--text3);
+  margin-right:3px}
+.qfmore{display:inline-flex;align-items:center;gap:6px;margin-left:auto;
+  border:1px solid var(--line2);background:var(--panel);border-radius:var(--r);
+  padding:5px 11px;font:inherit;font-size:var(--t-meta);font-weight:var(--w-med);
+  color:var(--text2);cursor:pointer}
+.qfmore:hover{border-color:var(--blueLine);color:var(--blue)}
+.qfmore.on{border-color:var(--blue);background:var(--blueSoft);color:var(--blue)}
+.qfmore em{font-style:normal;font-weight:var(--w-max);background:var(--blue);
+  color:var(--onBlue);border-radius:999px;padding:0 6px;font-size:var(--t-meta)}
+.qfmore:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* A rule, not a tint: the drawer is a part of the same card, folded. */
+.qfdrawer{border-top:1px solid var(--line2);padding-top:10px;margin-bottom:6px}
+
+/* ══ [✓ Send WA] ═══════════════════════════════════════════════════════
+   Beside the save, because it is part of the save. One accent, no new hue:
+   ticked is the accent, unticked is the resting surface — the same two
+   states every other toggle in this console has. */
+.wapill{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px}
+.wapill button{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);
+  background:var(--panel);border-radius:999px;padding:4px 12px;font:inherit;
+  font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text2);cursor:pointer}
+.wapill button:hover{border-color:var(--blueLine);color:var(--blue)}
+.wapill.on button{background:var(--blue);border-color:var(--blue);color:var(--onBlue)}
+.wapill button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.wapill .wapw{font-size:var(--t-meta);color:var(--text3)}
+/* The CNC-3 prompt. Amber, because CLAUDE.md gives amber to flags and this
+   is one: it is telling the BD the thread is going nowhere. */
+.wapill .wamt{font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);
+  background:var(--amberSoft);border-radius:999px;padding:2px 9px}
+
+/* ══ DEALS, AND THE PRE-SQL RADAR ══════════════════════════════════════
+   Structure and the one accent, as everywhere else. The four courts are
+   NOT four hues — that is the rainbow this console already rejected once.
+   They are one surface with the name written on them; what carries the
+   meaning is the number, and the red is reserved for late. */
+.rdr{background:var(--panel);border:1px solid var(--line2);border-radius:calc(var(--r) + 4px);
+  padding:13px 14px;margin-bottom:14px}
+.rdrH h3{margin:0;font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max);
+  letter-spacing:-.012em}
+.rdrH .rdrSub{display:block;margin:2px 0 11px;font-size:var(--t-meta);color:var(--text3)}
+.rdrRow{display:flex;gap:9px;flex-wrap:wrap}
+.rdrC{flex:1 1 150px;display:grid;grid-template-columns:1fr auto;grid-template-areas:
+  "l l" "n v" "o o";gap:2px 8px;text-align:left;border:1px solid var(--line2);
+  background:var(--panel2);border-radius:var(--r);padding:9px 12px;font:inherit;cursor:pointer}
+.rdrC:hover{border-color:var(--blueLine);background:var(--blueSoft)}
+.rdrC.on{border-color:var(--blue);background:var(--blueSoft)}
+.rdrC.zero{opacity:.5}
+.rdrC .rdrL{grid-area:l;font-size:var(--t-meta);color:var(--text3);text-transform:uppercase;
+  letter-spacing:.04em}
+.rdrC b{grid-area:n;font-family:var(--display);font-size:var(--t-name);font-weight:var(--w-max);
+  line-height:1.1;color:var(--text)}
+.rdrC .rdrV{grid-area:v;align-self:end;font-size:var(--t-label);font-weight:var(--w-strong);color:var(--text2)}
+.rdrC .rdrO{grid-area:o;font-style:normal;font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--rose)}
+.rdrC:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+.dList{display:flex;flex-direction:column;gap:8px}
+.dCard{border:1px solid var(--line2);border-radius:calc(var(--r) + 3px);background:var(--panel);overflow:hidden}
+.dCard.open{border-color:var(--blueLine)}
+.dHead{display:flex;align-items:center;gap:11px;width:100%;border:0;background:none;
+  padding:11px 13px;font:inherit;text-align:left;cursor:pointer}
+.dHead:hover{background:var(--panel3)}
+.dName{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:var(--t-body);font-weight:var(--w-strong);color:var(--text)}
+.dMeta,.dOpenN{font-size:var(--t-meta);color:var(--text3);white-space:nowrap}
+/* The court is a label, not a colour: four hues here would be the rainbow
+   CLAUDE.md already threw out. */
+.dCourt{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text2);
+  background:var(--panel3);border-radius:999px;padding:2px 9px;white-space:nowrap}
+.dDue{font-size:var(--t-meta);font-weight:var(--w-strong);color:var(--text2);white-space:nowrap}
+.dDue.soon{color:var(--amber)}
+.dDue.late{color:var(--rose)}
+.dSlip{font-size:var(--t-meta);font-weight:var(--w-med);color:var(--amber);
+  background:var(--amberSoft);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.dTat{font-size:var(--t-meta);color:var(--text3)}
+
+.dItems{border-top:1px solid var(--line2);padding:4px 13px 10px}
+.dItem{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;
+  border-bottom:1px solid var(--line2)}
+.dItem:last-child{border-bottom:0}
+.dItem.done .dLbl{color:var(--text3);text-decoration:line-through}
+.dTick{flex:none;width:21px;height:21px;border-radius:7px;border:1px solid var(--line2);
+  background:var(--panel);font-size:var(--t-meta);color:var(--blue);cursor:pointer;line-height:1}
+.dTick:hover:not([disabled]){border-color:var(--blue);background:var(--blueSoft)}
+.dItem.done .dTick{background:var(--blueSoft);border-color:var(--blueLine)}
+.dLbl{flex:1 1 220px;min-width:0;font-size:var(--t-label);color:var(--text)}
+.dLbl .dPb{display:block;font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+.dPush{display:flex;gap:4px;flex-wrap:wrap}
+.dPush button{border:1px solid var(--line2);background:var(--panel);border-radius:999px;
+  padding:2px 9px;font:inherit;font-size:var(--t-meta);color:var(--text2);cursor:pointer}
+.dPush button:hover{border-color:var(--blueLine);background:var(--blueSoft);color:var(--blue)}
+
+/* The reason picker. A dialog, because it is the one place the console
+   refuses to guess for you. */
+.dAsk{position:fixed;inset:0;background:rgba(17,16,34,.42);display:grid;place-items:center;z-index:60}
+.dAskBox{background:var(--panel);border-radius:calc(var(--r) + 6px);padding:20px;max-width:430px;
+  box-shadow:0 18px 50px rgba(0,0,0,.28)}
+.dAskBox h3{margin:0 0 4px;font-family:var(--display);font-size:var(--t-sec);font-weight:var(--w-max)}
+.dAskBox p{margin:0 0 13px;font-size:var(--t-meta);color:var(--text3)}
+.dAskChips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+.dAskChips button{border:1px solid var(--line2);background:var(--panel2);border-radius:999px;
+  padding:6px 13px;font:inherit;font-size:var(--t-label);color:var(--text);cursor:pointer}
+.dAskChips button:hover{border-color:var(--blue);background:var(--blueSoft);color:var(--blue)}
+/* The badge on the top-bar button. */
+.dealsN{font-style:normal;font-size:var(--t-meta);font-weight:var(--w-max);background:var(--rose);
+  color:#fff;border-radius:999px;padding:0 6px;margin-left:6px}

@@ -73,6 +73,8 @@ import { auditOffsite } from "./offsite-audit.mjs";
 import { readPushLog, summarisePush } from "./push-log.mjs";
 import { openOf } from "./open-accounts.mjs";
 import { createAllotJobs, performItem as performAllotItem } from "./allot-jobs.mjs";
+import { createWaJobs, waPlan, waVars, WARM_STAGES } from "./wa-jobs.mjs";
+import { createDeals, buildDeal, handoverNote, parseBudget, PLAYBOOK_ORDER, REASON_CHIPS } from "./deals.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -251,6 +253,13 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   /* The re-assignment jobs live in D1 on the Worker; the laptop proxy hands in
      a local SQLite file (jobsDb) so the same flow works there. */
   const allotJobs = (jobsDb || db) ? createAllotJobs({ db: jobsDb || db, log }) : null;
+  /* The WhatsApp outbox. Same database, same shape: a table the console
+     writes and the outreach bot drains. Null without D1, and every /wa route
+     then answers 503 rather than pretending to have queued something. */
+  const waJobs = (jobsDb || db) ? createWaJobs({ db: jobsDb || db, log }) : null;
+  /* Deals, their action items and the radar. Same database again — nothing
+     of this goes near Airtable, which is near its 50k cap. */
+  const dealsStore = (jobsDb || db) ? createDeals({ db: jobsDb || db, log }) : null;
   /* Say so either way. On a fresh install the absence of a warning is not a
      signal anyone can act on — it reads the same as a line that never printed. */
   if (airtable) log(`airtable: ${AT_BASE}`);
@@ -2167,6 +2176,105 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                                recorded: !!kept.stored };
         }
       }
+      /* ── THE DEAL LEG ───────────────────────────────────────────────
+         ACTIVE_REQUIREMENT_CALL_BOOKED is the hand-off: the BD has done
+         their job and Sales takes it from here. The deal is created NOW, in
+         the same save, because a deal created by tonight's cron is a deal
+         Sales cannot see during the afternoon they were handed it.
+
+         ADDITIVE ONLY. POST /v1/deals, POST /v1/notes/relation, POST
+         /v1/tasks. Nothing in this block touches the contact — the contact
+         was already written above by the normal path, through the same
+         read-merge-write toKylasContact as every other save. A PUT on a
+         contact REPLACES it and this repo has already lost one contact's
+         name, phone and email that way (docs/STATE.md §3); a deal is not
+         worth going anywhere near that.
+
+         AND IT NEVER FAILS THE SAVE. The call is logged, the stage is set,
+         the KPIs are right. If Kylas refuses the deal the BD is told in the
+         response and the work is not lost. */
+      if (dealsStore && result.kid && c.stage === "ACTIVE_REQUIREMENT_CALL_BOOKED") {
+        try {
+          const ev = [...(c.current || []), ...(c.past || [])]
+            .find((r) => r.budget || r.timeline || r.pax) || (c.current || [])[0] || {};
+          const co = { id: c.companyId, name: c.company };
+          const made = await kylas.createDeal(buildDeal({ ...c, kid: result.kid }, co, ev));
+          const dealId = made?.id || made?.data?.id || "";
+          if (dealId) {
+            await kylas.addDealNote(dealId, handoverNote({ ...c, kid: result.kid }, co, ev, {
+              salesPoc: body.salesPoc || "", slot: body.slot || c.nextCallDate || "",
+              research: body.research || "" })).catch((e) =>
+                log(`! deal ${dealId}: handover note not attached — ${String(e.message).slice(0, 90)}`));
+            /* The action items live in D1; the tasks live in Kylas, so Sales
+               sees them where they already work. Two homes for one list is
+               a cost, and the alternative — Airtable rows — is a cost the
+               base cannot pay. */
+            const seeded = await dealsStore.create({
+              kylasDealId: String(dealId), companyId: String(c.companyId || ""),
+              contactId: String(result.kid), name: buildDeal({ ...c, kid: result.kid }, co, ev).name,
+              owner: c.owner || userName(await viewer()), stage: c.stage,
+              /* Derived from the free-text budget for this console's own
+                 radar, and never sent to Kylas — see parseBudget. */
+              value: parseBudget(ev.budget),
+              playbooks: ["pre_call"] });
+            for (const it of await dealsStore.items(seeded.id)) {
+              await kylas.createTask({ name: it.label, dueDate: new Date(it.current_due_at).toISOString(),
+                relation: { id: Number(dealId), entityType: "deal" } })
+                .then((t) => t?.id && db?.prepare?.(
+                  "UPDATE deal_items SET kylas_task_id = ? WHERE id = ?").bind(String(t.id), it.id).run())
+                .catch((e) => log(`! deal task "${it.label}" — ${String(e.message).slice(0, 80)}`));
+            }
+            result.deal = { id: dealId, local: seeded.id, items: PLAYBOOK_ORDER[0] };
+            log(`deal ${dealId} created for ${c.company} — ${c.pocName}`);
+          }
+        } catch (e) {
+          result.deal = { created: false, error: String(e.message || e).slice(0, 160) };
+          log(`! deal not created for ${c.pocName} — ${String(e.message || e).slice(0, 140)}`);
+        }
+      }
+
+      /* ── THE WHATSAPP LEG ───────────────────────────────────────────
+         LAST, AND NEVER AWAITED FOR CORRECTNESS. Everything above has
+         already happened; this adds a row to a local table. It is wrapped
+         because a queue that cannot write must not turn a successful save
+         into a failed one — the contact IS saved, and a message that did not
+         get queued is a message, not a record.
+
+         Three of the six cases live here rather than in the webhook, because
+         they are consequences of the CALL and not of anything WhatsApp did:
+           call_supersedes_wa  — queue() cancels this contact's waiting jobs
+                                 in the same batch that adds the new one.
+           multi_thread_guard  — reaching a warm stage holds the cold chase
+                                 on everybody else at the account.
+           opt_out             — a contact marked DND never gets a new row;
+                                 the INSERT is conditional on it in SQL. */
+      if (waJobs && result.kid) {
+        const stage = c.stage || "";
+        const phone = (c.phones || [])[0]?.value || "";
+        const plan = waPlan(stage, { hasPhone: !!phone });
+        try {
+          if (WARM_STAGES.has(stage) && c.companyId)
+            await waJobs.webhook({ event: "stage_warm", contactId: String(result.kid),
+                                   companyId: String(c.companyId), stage });
+          /* `auto` stages queue themselves; the rest wait for the pill on the
+             card, which sends sendWa with the save. Either way the BD can
+             turn it off per save — nothing is ever sent without a stage that
+             asked for it or a person who ticked it. */
+          const wants = body.sendWa === true || (plan.offer && plan.auto && body.sendWa !== false);
+          if (wants && plan.offer && phone) {
+            const q = await waJobs.queue({
+              contactId: String(result.kid), companyId: String(c.companyId || ""), phone,
+              stage, template: plan.seq, vars: waVars(c, { name: c.company }),
+              owner: userName(await viewer()), seat: body.seat || "" });
+            result.wa = { queued: true, id: q.id, seq: q.seqId, dueAt: q.dueAt };
+          } else if (plan.offer) {
+            result.wa = { queued: false, offer: true, seq: plan.seq, multiThread: !!plan.multiThread };
+          }
+        } catch (e) {
+          result.wa = { queued: false, error: String(e.message || e).slice(0, 140) };
+          log(`! wa: not queued for ${result.kid} — ${String(e.message || e).slice(0, 120)}`);
+        }
+      }
       return result;
       });
   }
@@ -3225,6 +3333,75 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        save-queue.mjs. Only for a console that says it understands the reply
        ({queue: true}); an older build still gets the save carried out before
        the answer, because it needs the Kylas id back in that answer. */
+    /* ── THE WHATSAPP OUTBOX ────────────────────────────────────────
+       Three routes, and the bot owns the other end of all three. Nothing
+       here reaches the network: /wa/queue is on the critical path of /save
+       and must stay one INSERT. */
+    /* ── DEALS ──────────────────────────────────────────────────────
+       Read-mostly. The one that writes to Kylas is /deal-create, and it only
+       ever POSTs. */
+    "/deals": async (url) => {
+      if (!dealsStore) throw Object.assign(new Error("Deals need the server's database (D1)."), { status: 503 });
+      const who = await viewer();
+      const mine = url.searchParams.get("owner");
+      return { ...(await dealsStore.list({ owner: mine === "all" ? "" : (mine || userName(who)) })),
+               chips: REASON_CHIPS, playbooks: PLAYBOOK_ORDER };
+    },
+    "/deal-item": async (url, body) => {
+      if (!dealsStore) throw Object.assign(new Error("Deals need the server's database (D1)."), { status: 503 });
+      const who = await viewer();
+      if (body.action === "complete") {
+        const r = await dealsStore.complete(body.id);
+        /* Two-way sync: the Kylas task closes with it, when there is one. */
+        if (body.kylasTaskId) await kylas.updateTask(body.kylasTaskId, { status: "COMPLETED" })
+          .catch((e) => log(`! deal task ${body.kylasTaskId} not closed — ${String(e.message).slice(0, 90)}`));
+        return r;
+      }
+      if (body.action === "push") {
+        const r = await dealsStore.push(body.id, { to: body.to, chip: body.chip, by: userName(who) });
+        /* A push that says "POC didn't pick" queues the nudge, because that
+           is the one chip with an obvious next action and making the BD go
+           and press a second button is how it stops happening. */
+        if (r.waNudge && waJobs && body.contactId && body.phone) {
+          await waJobs.queue({ contactId: String(body.contactId), companyId: String(body.companyId || ""),
+            phone: body.phone, stage: "CONNECT_LATER", template: "nudge",
+            vars: { name: body.name || "" }, owner: userName(who) }).catch(() => {});
+          r.nudged = true;
+        }
+        return r;
+      }
+      if (body.action === "seed") return dealsStore.seed(body.dealId, body.playbook);
+      throw Object.assign(new Error("unknown action"), { status: 400 });
+    },
+
+    "/wa/queue": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const who = await viewer();
+      const r = await waJobs.queue({
+        contactId: body.contactId, companyId: body.companyId, phone: body.phone,
+        stage: body.stage, template: body.template, vars: body.vars || {},
+        owner: userName(who), seat: body.seat || "", dueAt: body.dueAt || null });
+      log(`wa queue ${String(body.contactId)} ${body.stage || ""} -> ${r.id.slice(0, 8)}`);
+      return r;
+    },
+    /* The bot polls this. GET so a seat can be checked from a browser while
+       somebody is debugging a laptop at 11pm. */
+    "/wa/drain": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      return waJobs.drain({ seat: body?.seat || url.searchParams.get("seat") || "",
+                            limit: body?.limit || url.searchParams.get("limit") || 20 });
+    },
+    "/wa/webhook": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const r = await waJobs.webhook(body || {});
+      if (r.applied?.length) log(`wa ${body?.event} ${String(body?.contactId || body?.jobId || "").slice(0, 12)} — ${r.applied.join(", ")}`);
+      return r;
+    },
+    "/wa/status": async () => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      return waJobs.status({});
+    },
+
     "/save": async (url, body) => {
       if (!saves || !body.queue) return performSave(body);
       const raw = body.contact;
