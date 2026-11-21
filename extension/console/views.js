@@ -4704,7 +4704,10 @@
      at once and revalidates behind the row, and the spinner now means "we
      have nothing", not "we are busy". */
   const CON = { id: "", rows: [], loading: false, err: "", at: 0, truncated: false,
-                by: new Map(), inflight: new Map() };
+                by: new Map(), inflight: new Map(),
+                /* Ticked for a bulk WhatsApp. Kylas ids, not row indexes —
+                   the list re-sorts under the ticks. */
+                picked: new Set() };
   const CON_TTL = 5 * 60 * 1000;
   const conShow = (id) => {
     const hit = CON.by.get(id);
@@ -4744,7 +4747,7 @@
          simply reads "Not Sent" rather than the view failing to open. */
       try {
         const ids = (r.contacts || []).map((c) => c.kid).filter(Boolean);
-        if (ids.length) WA_STATUS_MAP = { ...WA_STATUS_MAP, ...(await API.waContactStatus(ids)).statuses };
+        if (ids.length) WA_FIELDS = { ...WA_FIELDS, ...(await API.waContactStatus(ids)).fields };
       } catch { /* no outbox configured */ }
     })();
     CON.inflight.set(id, job);
@@ -4929,10 +4932,25 @@
      Contact is fixed. A table of people with no names is not a narrower
      table, it is a different and useless one. */
   const CCOLS = [
-    { k: "name", label: "Contact", w: "1.3fr", fixed: true,
+    { k: "name", label: "Contact", w: "1.45fr", fixed: true,
       get: (c) => c.pocName || "",
-      cell: (c) => `<button type="button" class="clink2" data-open="${esc(c.kid || "")}"
-        ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button>` },
+      /* The tick and the WA icon live on the name column because it is the
+         one that is always there. A contact who cannot be messaged — no
+         number, opted out, not on WhatsApp — has the tick DISABLED and the
+         reason on the title, rather than being silently selectable and then
+         silently dropped. */
+      cell: (c) => { const f = waF(c.kid);
+        const why = !(c.phones || [])[0]?.value ? "no number"
+          : f.status === "DND" ? "opted out"
+          : f.status === "Not on WA" ? "not on WhatsApp" : "";
+        return `<input class="cpick cwpick" type="checkbox" data-cpick="${esc(c.kid || "")}"
+            ${CON.picked.has(c.kid) ? " checked" : ""}${why ? " disabled" : ""}
+            title="${why ? esc(`Cannot message — ${why}`) : "Select for a WhatsApp"}"
+            aria-label="Select ${esc(c.pocName || "")}">
+          <button type="button" class="clink2" data-open="${esc(c.kid || "")}"
+            ${c.kid ? "" : "disabled"} title="Open the call card">${esc(c.pocName || "(no name)")}</button>
+          ${why ? "" : `<button type="button" class="cwa" data-cwa="${esc(c.kid || "")}" data-stop="1"
+            title="Message just this contact">WA</button>`}`; } },
     { k: "company", label: "Company", w: "1.1fr", on: true,
       get: (c) => c.company || "",
       cell: (c) => (c.companyId ? `<button type="button" class="clink2" data-stop="1"
@@ -4984,10 +5002,34 @@
        wa_sequences, which the webhook already maintains — so the column and
        the composer's gating cannot disagree, and Airtable gains no rows for
        it. Off by default: it is only meaningful once outreach is running. */
-    { k: "wa", label: "WhatsApp", w: ".95fr",
-      get: (c) => WA_STATUS_MAP[c.kid] || "Not Sent",
-      cell: (c) => { const v = WA_STATUS_MAP[c.kid] || "Not Sent";
+    { k: "wa", label: "WhatsApp status", w: ".95fr",
+      get: (c) => waF(c.kid).status || "Not Sent",
+      cell: (c) => { const v = waF(c.kid).status || "Not Sent";
         return `<span class="wast w-${esc(String(v).toLowerCase().replace(/[^a-z0-9]+/g, "-"))}">${esc(v)}</span>`; } },
+    /* The rest of the eight. All off by default — they are the columns you
+       turn on for a morning of outreach, not ones to carry every day — and
+       all filterable through the same picker as everything else, because a
+       column you cannot filter on is a column you can only look at. */
+    { k: "waCampaign", label: "WA campaign", w: ".9fr",
+      get: (c) => waF(c.kid).campaign || "", cell: (c) => esc(waF(c.kid).campaign || "—") },
+    { k: "waSent", label: "Last WA sent", w: ".8fr", num: true,
+      get: (c) => waF(c.kid).lastSentAt || "", cell: (c) => esc(waF(c.kid).lastSentAt || "—") },
+    { k: "waTpl", label: "Last WA template", w: ".85fr",
+      get: (c) => waF(c.kid).lastTemplate || "", cell: (c) => esc(waF(c.kid).lastTemplate || "—") },
+    { k: "waDeliv", label: "WA delivery", w: ".8fr",
+      get: (c) => waF(c.kid).deliveryState || "", cell: (c) => esc(waF(c.kid).deliveryState || "—") },
+    { k: "waCount", label: "WA sends", w: ".6fr", num: true,
+      get: (c) => waF(c.kid).sentCount ?? 0, cell: (c) => String(waF(c.kid).sentCount ?? 0) },
+    { k: "waReply", label: "WA replied at", w: ".8fr", num: true,
+      get: (c) => waF(c.kid).replyAt || "", cell: (c) => esc(waF(c.kid).replyAt || "—") },
+    { k: "waSeat", label: "WA seat", w: ".7fr",
+      get: (c) => waF(c.kid).seat || "", cell: (c) => esc(waF(c.kid).seat || "—") },
+    /* The account's own rung, beside the contact's — the two differ, and
+       "my contact is at CNC-2 but the account is at Discovery" is exactly
+       the case you want to catch before sending another chase. */
+    { k: "acctStage", label: "Account stage", w: "1.1fr",
+      get: (c) => label(accStageOfContact(c)) || "",
+      cell: (c) => esc(label(accStageOfContact(c)) || "—") },
     { k: "source", label: "Source of data", w: ".9fr",
       get: (c) => c.source || "", cell: (c) => esc(c.source || "—") },
     /* One line on screen, whole on the sheet. A remark is three sentences
@@ -4996,8 +5038,15 @@
       get: (c) => c.remarks || "",
       cell: (c) => (c.remarks ? `<span class="rmk" title="${esc(c.remarks)}">${esc(c.remarks)}</span>` : "—") },
   ];
-  /* Filled by one call when a view's contacts land, not per row. */
-  let WA_STATUS_MAP = {};
+  /* The eight WA fields per contact, filled by ONE call when a view's
+     contacts land — not per row, and never from Airtable. */
+  let WA_FIELDS = {};
+  const waF = (kid) => WA_FIELDS[String(kid)] || {};
+  /* The account's stage, from the companies already in hand. */
+  const accStageOfContact = (c) => {
+    const co = (CACHE.companies || []).find((x) => String(x.id) === String(c.companyId));
+    return co ? (acctStageOf(co) || co.stage || "") : "";
+  };
   const ccolsOn = () => CCOLS.filter((c) => c.fixed || ACC.ccols.has(c.k));
   const CCOL_DEFAULT = CCOLS.filter((c) => c.on).map((c) => c.k);
   /* The rung a stage sits on, squashed to the six-step ramp the ladder and
@@ -5095,6 +5144,12 @@
           <button type="button" class="chipclr" id="conClear">Clear ${chipsOn} filter${chipsOn === 1 ? "" : "s"}</button>
         </span></div>` : ""}
       </div>
+      ${CON.picked.size ? `<div class="cbulk">
+        <span class="cbn"><b>${CON.picked.size}</b> selected</span>
+        <button type="button" class="gbtn p" id="conWa">Send WhatsApp</button>
+        <button type="button" class="linkbtn" id="conWaNone">Clear</button>
+        <span class="cbhint">Opens the composer with these ${CON.picked.size} already picked.</span>
+      </div>` : ""}
       <div class="accscroll"><div class="acctable ctable" style="--acols:${cGrid(cols)};--amin:${cMin(cols)}px">
         <div class="vr vh">${cols.map((c) =>
           `<span${c.num ? ' class="num"' : ""}>${esc(c.label)}</span>`).join("")}</div>
@@ -6458,6 +6513,17 @@
     on("conClear", "click", () => {
       ACC.cStage.clear(); ACC.cOwner.clear(); ACC.cFresh.clear(); redraw();
     });
+    host.querySelectorAll("[data-cpick]").forEach((b) => { b.onchange = () => {
+      const k = b.dataset.cpick;
+      b.checked ? CON.picked.add(k) : CON.picked.delete(k);
+      redraw();
+    }; });
+    host.querySelectorAll("[data-cwa]").forEach((b) => { b.onclick = (e) => {
+      e.stopPropagation();
+      openWaModal([b.dataset.cwa]);
+    }; });
+    on("conWaNone", "click", () => { CON.picked.clear(); redraw(); });
+    on("conWa", "click", () => openWaModal([...CON.picked]));
     on("cColBtn", "click", () => { ACC.ccolsOpen = !ACC.ccolsOpen; redraw(); });
     on("cColReset", "click", () => { ACC.ccols = new Set(CCOL_DEFAULT); saveAccPrefs(); redraw(); });
     host.querySelectorAll("[data-ccol]").forEach((b) => { b.onchange = () => {
@@ -7275,6 +7341,13 @@
                   pick up, warmup is keeping an interested account warm, and a
                   BD doing one is not doing the other. */
                mode: "cnc", rung: 1,
+               /* SESSION ONLY. The campaign label and any edit to the copy
+                  live for as long as this screen is open and are never
+                  written to D1 — a BD renaming a batch should not quietly
+                  change a playbook the other seven are sending. The stage
+                  playbooks remain the only saved copy. */
+               campaign: "", testTo: "", testNote: "",
+               preset: null,
                settings: null, canEdit: false, metrics: null, gate: null, custom: [] };
 
   const WA_SEATS = ["", "seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "seat-7", "seat-8"];
@@ -7482,16 +7555,10 @@
           ${WA.templates.map((x) => `<option value="${esc(x.id)}"${WA.tpl === x.id ? " selected" : ""}>${
             esc(x.name)} · ${esc(WA_GROUP_LABEL[x.stageGroup] || x.stageGroup)}${x.autoSend ? " · auto" : ""}</option>`).join("")}
         </select>
-        <label class="waVis">Visible to
-          <select id="waVis" aria-label="Who can see this template">
-            ${(WA.visibilities || []).map((v) => `<option value="${esc(v)}"${
-              (t?.visibility || "team") === v ? " selected" : ""}>${
-              esc({ private: "Only me", team: "The team", official: "Official" }[v] || v)}</option>`).join("")}
-          </select></label>
-        <button type="button" class="gbtn sm" id="waNew">+ New template</button>
-        <button type="button" class="gbtn sm" id="waSaveTpl">${WA.tpl ? "Save changes" : "Save as template"}</button>
-        ${t && !["cnc", "event", "confirm", "noshow", "inputs"].includes(t.id)
-          ? `<button type="button" class="gbtn sm" id="waDelTpl">Delete</button>` : ""}
+        <label class="waCamp">Campaign
+          <input id="waCamp" type="text" value="${esc(WA.campaign)}" maxlength="60"
+            placeholder="e.g. GPTW batch 3" title="Your label for this blast — kept for this session and stamped on the metrics"></label>
+        <span class="waSess">Edits are for this session only — the playbook is not changed.</span>
       </div>
       <div class="waVarRow">${WA.vars.map((v) => `<button type="button" class="chip" data-wavar="${esc(v)}"
         title="Insert at the cursor">+ {{${esc(v)}}}</button>`).join("")}</div>
@@ -7541,6 +7608,13 @@
           </select></label>
         <span class="vsub">${list.length} message${list.length === 1 ? "" : "s"} will be queued</span>
       </div>
+      <div class="waTest">
+        <label>Send one to
+          <input id="waTestTo" type="tel" value="${esc(WA.testTo)}" placeholder="8690022224"
+            title="A number of your own. The test carries no contact, so it cannot advance anybody's sequence."></label>
+        <button type="button" class="gbtn sm" id="waTestGo">Send test</button>
+        <span class="waTestN">${esc(WA.testNote)}</span>
+      </div>
       ${list.length ? `<div class="waPrev">
         <div class="waPrevH">
           <button type="button" class="gbtn sm" id="waPrev" ${i <= 0 ? "disabled" : ""}>‹ Prev</button>
@@ -7564,6 +7638,29 @@
         return r.text || "";
       } catch { return WA.body; }
     }));
+  }
+
+  /* THE SAME COMPOSER, IN A POP-UP, PRE-LOADED. Not a second
+     implementation — a BD who ticks nine rows in Contacts and a BD who
+     opens the WhatsApp screen are doing one thing, and two screens that do
+     one thing drift apart by the second release. It renders `whatsapp()`
+     into an overlay and seeds WA.picked. */
+  function openWaModal(kids = []) {
+    const ids = kids.map(String).filter(Boolean);
+    WA.picked = new Set(ids);
+    WA.step = ids.length ? 2 : 1;      /* who is already answered */
+    document.querySelector(".waModal")?.remove();
+    const back = document.createElement("div");
+    back.className = "waModal";
+    back.innerHTML = `<div class="waModalBox" role="dialog" aria-label="Send WhatsApp">
+      <button type="button" class="waModalX" title="Close">×</button>
+      <div class="waModalBody"></div></div>`;
+    back.onclick = (e) => {
+      if (e.target === back || e.target.closest(".waModalX")) back.remove();
+    };
+    document.body.appendChild(back);
+    whatsapp(back.querySelector(".waModalBody"));
+    return back;
   }
 
   async function whatsapp(host) {
@@ -7604,7 +7701,7 @@
         ${WA.step < 3 ? `<button type="button" class="gbtn p" id="waOn"
           ${WA.step === 1 && !WA.picked.size ? "disabled" : ""}>Next</button>`
         : `<button type="button" class="gbtn p" id="waGo" ${picked.length ? "" : "disabled"}
-          >Queue WhatsApp (${picked.length})</button>`}
+          >Queue &amp; send at scale (${picked.length})</button>`}
       </div>`}`;
     void reachable;
 
@@ -7706,35 +7803,31 @@
     host.querySelectorAll("[data-wafb]").forEach((b) => { b.onchange = () => {
       WA.fallbacks[b.dataset.wafb] = b.value; redraw();
     }; });
-    on("waNew", () => {
-      const name = prompt("Name this template");
-      if (!name) return;
-      WA.tpl = ""; WA.editing = name; WA.body = WA.body || "Hi {{name}}, ";
-      saveTpl(name);
-    });
-    on("waSaveTpl", () => {
-      const t = WA.templates.find((x) => x.id === WA.tpl);
-      saveTpl(t?.name || prompt("Name this template") || "");
-    });
-    on("waDelTpl", async () => {
-      if (!confirm("Delete this template?")) return;
-      try { await API.waTemplateDelete(WA.tpl); WA.loaded = false; WA.tpl = ""; }
-      catch (e) { WA.err = String(e.message || e); }
+    const camp = host.querySelector("#waCamp");
+    if (camp) camp.oninput = () => { WA.campaign = camp.value; };
+    const tto = host.querySelector("#waTestTo");
+    if (tto) tto.oninput = () => { WA.testTo = tto.value; };
+    on("waTestGo", async () => {
+      if (!WA.testTo.trim()) { WA.testNote = "Type a number first."; redraw(); return; }
+      WA.testNote = "sending…"; redraw();
+      try {
+        /* The FIRST recipient's rendering, because that is the one with real
+           values in it — a test of the raw template with {{name}} unfilled
+           tests nothing. */
+        await API.waTestSend({ phone: WA.testTo, seat: WA.seat, template: WA.tpl,
+          body: WA.previews[0] ?? WA.body });
+        WA.testNote = "queued — check that phone.";
+      } catch (e) { WA.testNote = String(e.message || e).slice(0, 120); }
       redraw();
     });
-    async function saveTpl(name) {
-      if (!name) return;
-      WA.busy = "saving…"; redraw();
-      try {
-        const t = WA.templates.find((x) => x.id === WA.tpl);
-        const vis = host.querySelector("#waVis")?.value || t?.visibility || "team";
-        const r = await API.waTemplateSave({ id: WA.tpl || "", name, body: WA.body,
-          stageGroup: t?.stageGroup || (WA.mode === "warmup" ? "event" : "cnc"),
-          autoSend: !!t?.autoSend, visibility: vis });
-        WA.templates = r.templates || WA.templates; WA.tpl = r.id;
-      } catch (e) { WA.err = String(e.message || e).slice(0, 180); }
-      WA.busy = ""; redraw();
-    }
+    /* NO TEMPLATE CRUD HERE ANY MORE. Saving, renaming and deleting
+       playbooks was built and then taken out on purpose: eight BDs editing
+       one shared set of templates mid-campaign is how a sentence changes
+       under somebody who is halfway through sending it. The stage playbooks
+       are the saved copy; everything a BD does in this box is theirs, for
+       this session, and goes out as vars.body_override.
+       If per-person saved templates are wanted later, they want an owner and
+       a visibility, which is a bigger decision than a Save button. */
 
     /* step 3 */
     const seat = host.querySelector("#waSeat");
@@ -7749,7 +7842,7 @@
         try {
           await API.waQueue({ contactId: c.kid, companyId: c.companyId, phone: waPhone(c),
             stage: c.stage || "CONNECT_LATER", template: WA.tpl || "adhoc", seat: WA.seat,
-            seq: WA.mode, step: WA.rung,
+            seq: WA.mode, step: WA.rung, campaign: WA.campaign,
             /* The EXACT string that was on screen. */
             vars: { ...waValues(c), body_override: WA.previews[i] ?? WA.body } });
           n++;
@@ -7762,7 +7855,7 @@
     });
   }
 
-  global.Views = { rollup, dashboard, companies, today, deals, whatsapp, FILTERS, savedLanded, reassignOne,
+  global.Views = { rollup, dashboard, companies, today, deals, whatsapp, openWaModal, FILTERS, savedLanded, reassignOne,
                   noteOwnerChange, noteAccountOwner,
                   /* The account's open-account state, for the call card (console.js). */
                   companyOwner: (id) => { const c = (CACHE.companies || []).find((x) => String(x.id) === String(id)); return c?.ownerId ? { id: String(c.ownerId), name: c.owner || String(c.ownerId) } : null; },

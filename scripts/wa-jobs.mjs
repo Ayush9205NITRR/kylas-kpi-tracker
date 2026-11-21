@@ -291,7 +291,7 @@ export function eligible(contact, seqRow, { seq = "cnc", step = 1, now = Date.no
    admin-only because the person who wants them lifted is never the person
    who pays for a ban. */
 export const WA_DEFAULTS = {
-  dailyCapPerSeat: 80,     /* per phone, per day */
+  dailyCapPerSeat: 60,     /* per phone, per day */
   maxCnc: 3,
   maxWarmup: 4,
   cooldownHours: 48,
@@ -306,6 +306,29 @@ export const customVarsIn = (body) =>
     .filter((v) => !TEMPLATE_VARS.includes(v));
 
 export const TEMPLATE_VISIBILITY = ["private", "team", "official"];
+
+/* A SEAT IN TROUBLE, BEFORE THE BAN. whatsapp-web.js drives a real logged-in
+   phone, and the two things that precede a number being cut off are people
+   blocking it and people ignoring it. Neither is visible in a total: one seat
+   out of eight can be burning while the team average looks fine.
+
+   The thresholds are deliberately unsubtle — this is a smoke alarm, not a
+   dashboard. The reply floor only applies once a seat has sent enough for a
+   rate to mean anything; below that it is noise, and flagging on noise is how
+   an alarm gets ignored. */
+export const SEAT_FLAGS = { badRate: 0.05, replyFloor: 0.08, minSends: 30 };
+
+export function seatHealth(row = {}) {
+  const sent = Number(row.sent || 0);
+  const bad = Number(row.opt_out || 0) + Number(row.failed || 0) + Number(row.not_on_wa || 0);
+  const replied = Number(row.replied || 0);
+  const flags = [];
+  if (sent && bad / sent > SEAT_FLAGS.badRate)
+    flags.push({ k: "burning", why: `${Math.round((bad / sent) * 100)}% opted out or failed — rest this number` });
+  if (sent >= SEAT_FLAGS.minSends && replied / sent < SEAT_FLAGS.replyFloor)
+    flags.push({ k: "ignored", why: `${Math.round((replied / sent) * 100)}% reply on ${sent} sends — the wording is not landing` });
+  return { seat: row.seat || "", sent, bad, replied, flags, ok: !flags.length };
+}
 
 /* ── the store ───────────────────────────────────────────────────── */
 export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
@@ -353,6 +376,13 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
       ["wa_sequences", "sent_step", "INTEGER NOT NULL DEFAULT 0"],
       ["wa_sequences", "sent_at", "INTEGER"],
       ["wa_jobs", "sent_at", "INTEGER"],
+      ["wa_jobs", "delivered_at", "INTEGER"],
+      /* The BD's own label for this blast — "GPTW batch 3", "Mumbai FMCG".
+         Session-only in the UI (never a saved template) but stored ON THE
+         JOB, because a metric with no campaign against it cannot answer
+         "which batch actually worked". */
+      ["wa_jobs", "campaign", "TEXT"],
+      ["wa_metrics", "campaign", "TEXT"],
       ["wa_templates", "visibility", "TEXT NOT NULL DEFAULT 'team'"],
       ["wa_templates", "owner_email", "TEXT"],
     ]) {
@@ -424,7 +454,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
      only a label — which is the whole point of letting a BD edit before
      sending. */
   async function queue({ contactId, companyId, phone, stage, template, vars = {},
-                         owner = "", seat = "", dueAt = null }) {
+                         owner = "", seat = "", dueAt = null, campaign = "" }) {
     await ready();
     const cid = String(contactId || "");
     if (!cid || !phone) throw Object.assign(new Error("a WhatsApp job needs a contact and a number"), { status: 400 });
@@ -448,11 +478,11 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         ON CONFLICT(id) DO UPDATE SET step = excluded.step, state =
           CASE WHEN wa_sequences.dnd = 1 THEN 'opted_out' ELSE 'active' END, updated_at = excluded.updated_at`)
         .bind(seqId, cid, String(companyId || ""), plan.seq || "adhoc", plan.step || 1, owner, seat, t, t),
-      db.prepare(`INSERT INTO wa_jobs (id, seq_id, contact_id, company_id, seat, phone, template, vars, due_at, created_at, updated_at)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      db.prepare(`INSERT INTO wa_jobs (id, seq_id, contact_id, company_id, seat, phone, template, vars, campaign, due_at, created_at, updated_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE NOT EXISTS (SELECT 1 FROM wa_sequences WHERE contact_id = ? AND dnd = 1)`)
         .bind(id, seqId, cid, String(companyId || ""), seat, String(phone), String(template || plan.seq || "adhoc"),
-              JSON.stringify(vars), Number(dueAt) || nextBusinessSlot(t), t, t, cid),
+              JSON.stringify(vars), String(campaign || ""), Number(dueAt) || nextBusinessSlot(t), t, t, cid),
     ]);
     return { id, seqId, dueAt: Number(dueAt) || nextBusinessSlot(t) };
   }
@@ -505,7 +535,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     /* The job row knows its template and seat; the metrics are keyed on
        those, so nothing extra has to be passed in from the bot. */
     const job = jobId ? await db.prepare("SELECT * FROM wa_jobs WHERE id = ?").bind(String(jobId)).first() : null;
-    const tpl = job?.template || "adhoc", st = job?.seat || "";
+    const tpl = job?.template || "adhoc", st = job?.seat || "", cp = job?.campaign || "";
 
     if (event === "sent" || event === "delivered" || event === "read") {
       if (event === "sent") {
@@ -519,7 +549,12 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
             WHERE id = ?`).bind(t, t, job?.seq_id || ""),
         ]);
       }
-      await bump(tpl, st, event === "read" ? "read" : event === "delivered" ? "delivered" : "sent");
+      /* Delivery is STAMPED, not just counted: the reply rate is replies
+         inside seven days over what was delivered in that window, and a
+         counter with no clock on it cannot answer a windowed question. */
+      if (event === "delivered")
+        await db.prepare("UPDATE wa_jobs SET delivered_at = ? WHERE id = ?").bind(t, jobId).run();
+      await bump(tpl, st, event === "read" ? "read" : event === "delivered" ? "delivered" : "sent", cp);
       out.applied.push(event);
       return out;
     }
@@ -529,7 +564,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         db.prepare("UPDATE wa_sequences SET state = 'paused', reason = 'inbound_reply', updated_at = ? WHERE contact_id = ?").bind(t, cid),
       ]);
       out.applied.push("paused", "cancelled");
-      await bump(tpl, st, "replied");
+      await bump(tpl, st, "replied", cp);
       out.reply = onInboundReply({ id: cid }, { at: t });
       return out;
     }
@@ -549,7 +584,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         db.prepare("UPDATE wa_sequences SET state = 'opted_out', reason = 'opt_out', dnd = 1, updated_at = ? WHERE contact_id = ?").bind(t, cid),
       ]);
       out.applied.push("dnd");
-      await bump(tpl, st, "opt_out");
+      await bump(tpl, st, "opt_out", cp);
       return out;
     }
     if (event === "not_on_wa" || event === "seat_offline") {
@@ -562,7 +597,7 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
       if (d.pauseSequence && cid)
         await db.prepare("UPDATE wa_sequences SET state = 'paused', reason = ?, updated_at = ? WHERE contact_id = ?")
           .bind(event, t, cid).run();
-      await bump(tpl, st, event === "not_on_wa" ? "not_on_wa" : "failed");
+      await bump(tpl, st, event === "not_on_wa" ? "not_on_wa" : "failed", cp);
       out.applied.push(d.state);
       return out;
     }
@@ -591,8 +626,20 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     const due = (await db.prepare(
       "SELECT COUNT(*) AS n FROM wa_jobs WHERE state = 'queued' AND due_at <= ?").bind(t).first()) || {};
     void owner;
+    const cfg = await settings();
+    const seats = (await db.prepare("SELECT * FROM wa_metrics").all()).results || [];
+    const bySeat = {};
+    for (const r of seats) {
+      const k = r.seat || "unassigned";
+      const acc = (bySeat[k] ||= { seat: k, sent: 0, replied: 0, failed: 0, opt_out: 0, not_on_wa: 0 });
+      for (const c of ["sent", "replied", "failed", "opt_out", "not_on_wa"]) acc[c] += r[c] || 0;
+    }
     return { by: Object.fromEntries(rows.map((r) => [r.state, r.n])),
-             replies: replies.n || 0, dueNow: due.n || 0, inHours: inBusinessHours(t) };
+             replies: replies.n || 0, dueNow: due.n || 0, inHours: inBusinessHours(t),
+             killSwitch: Number(cfg.killSwitch) === 1,
+             /* Only the seats actually in trouble: a list of eight "fine"s
+                is a list nobody reads, and the one that matters hides in it. */
+             seatFlags: Object.values(bySeat).map(seatHealth).filter((x) => !x.ok) };
   }
 
   /* ── settings ──────────────────────────────────────────────────── */
@@ -625,14 +672,14 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
 
   /* ── metrics ───────────────────────────────────────────────────── */
   const METRIC_COLS = ["sent", "delivered", "read", "replied", "failed", "not_on_wa", "opt_out"];
-  async function bump(template, seat, col) {
+  async function bump(template, seat, col, campaign = "") {
     if (!METRIC_COLS.includes(col)) return;
     const t = now();
-    const tpl = String(template || "adhoc"), st = String(seat || "");
-    await db.prepare(`INSERT INTO wa_metrics (k, template, seat, ${col}, updated_at)
-      VALUES (?, ?, ?, 1, ?)
+    const tpl = String(template || "adhoc"), st = String(seat || ""), cp = String(campaign || "");
+    await db.prepare(`INSERT INTO wa_metrics (k, template, seat, campaign, ${col}, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?)
       ON CONFLICT(k) DO UPDATE SET ${col} = ${col} + 1, updated_at = excluded.updated_at`)
-      .bind(`${tpl}|${st}`, tpl, st, t).run();
+      .bind(`${cp}|${tpl}|${st}`, tpl, st, cp, t).run();
   }
   async function metrics() {
     await ready();
@@ -646,10 +693,30 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
         (bySeat[r.seat || "unassigned"] ||= { ...zero(), seat: r.seat || "unassigned" })[c] += r[c] || 0;
       }
     }
+    const byCampaign = {};
+    for (const r of rows) {
+      const c = r.campaign || "(none)";
+      for (const col of METRIC_COLS) (byCampaign[c] ||= { ...zero(), campaign: c })[col] += r[col] || 0;
+    }
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+    /* REPLY RATE IS A WINDOWED, UNIQUE-PERSON NUMBER: distinct contacts who
+       replied in the last seven days over what was delivered in the same
+       seven days. The raw counter would count one chatty prospect three
+       times and divide it by six months of sends — a figure that only ever
+       goes down and tells nobody anything. */
+    const cut = now() - 7 * 86400000;
+    const r7 = await db.prepare(
+      "SELECT COUNT(DISTINCT contact_id) AS n FROM wa_sequences WHERE reason = 'inbound_reply' AND updated_at >= ?")
+      .bind(cut).first();
+    const d7 = await db.prepare(
+      "SELECT COUNT(*) AS n FROM wa_jobs WHERE delivered_at >= ?").bind(cut).first();
+
     return { total, byTemplate: Object.values(byTemplate), bySeat: Object.values(bySeat),
+             byCampaign: Object.values(byCampaign),
+             window7d: { replied: r7?.n || 0, delivered: d7?.n || 0, rate: pct(r7?.n || 0, d7?.n || 0) },
              rates: { delivered: pct(total.delivered, total.sent), read: pct(total.read, total.sent),
-                      replied: pct(total.replied, total.sent) } };
+                      replied: pct(r7?.n || 0, d7?.n || 0) } };
   }
 
   /* ── statuses, for the Contacts column and the composer's gating ── */
@@ -690,6 +757,61 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     return r?.n || 0;
   }
 
+  /* THE EIGHT FIELDS THE CONTACTS TABLE SHOWS, in one query. Joined here
+     rather than on the client because the client would need the job rows
+     too, and shipping a view's worth of jobs to paint one column is the
+     opposite of the point. Airtable is not touched. */
+  async function contactFields(contactIds = []) {
+    await ready();
+    const ids = [...new Set(contactIds.map(String).filter(Boolean))];
+    if (!ids.length) return {};
+    const out = {};
+    for (let i = 0; i < ids.length; i += 150) {
+      const part = ids.slice(i, i + 150);
+      const marks = part.map(() => "?").join(",");
+      const [seqs, jobs] = await Promise.all([
+        db.prepare(`SELECT * FROM wa_sequences WHERE contact_id IN (${marks})`).bind(...part).all(),
+        /* One row per contact: the latest job, plus the counts. */
+        db.prepare(`SELECT contact_id,
+             COUNT(*) AS n,
+             SUM(CASE WHEN state = 'sent' THEN 1 ELSE 0 END) AS sent,
+             MAX(sent_at) AS last_sent,
+             MAX(delivered_at) AS last_delivered
+           FROM wa_jobs WHERE contact_id IN (${marks}) GROUP BY contact_id`).bind(...part).all(),
+        ]);
+      const latest = {};
+      for (const r of (await db.prepare(
+        `SELECT contact_id, template, seat, campaign, state, sent_at FROM wa_jobs
+           WHERE contact_id IN (${marks}) ORDER BY COALESCE(sent_at, updated_at)`).bind(...part).all()).results || [])
+        latest[r.contact_id] = r;
+      const byC = {};
+      for (const r of seqs.results || []) {
+        const have = byC[r.contact_id];
+        if (!have || Number(r.sent_step || 0) > Number(have.sent_step || 0) || r.dnd) byC[r.contact_id] = r;
+      }
+      const counts = Object.fromEntries((jobs.results || []).map((r) => [r.contact_id, r]));
+      for (const id of part) {
+        const q = byC[id], j = latest[id], c = counts[id];
+        out[id] = {
+          status: statusOf(q),
+          campaign: j?.campaign || "",
+          lastSentAt: c?.last_sent ? new Date(Number(c.last_sent)).toISOString().slice(0, 10) : "",
+          lastTemplate: j?.template || "",
+          /* The DELIVERY state of the last message, which is not the same
+             question as where they are on the ladder: "CNC-2 Sent, failed"
+             is a real and important pair. */
+          deliveryState: q?.reason === "not_on_wa" ? "not on WhatsApp"
+            : c?.last_delivered ? "delivered" : j?.state || "",
+          sentCount: Number(c?.sent || 0),
+          replyAt: q?.reason === "inbound_reply" && q?.updated_at
+            ? new Date(Number(q.updated_at)).toISOString().slice(0, 10) : "",
+          seat: j?.seat || q?.seat || "",
+        };
+      }
+    }
+    return out;
+  }
+
   /* The raw rows, for the gate — statuses() flattens to one label per
      contact and the cooldown needs sent_at, which the label has thrown away. */
   async function sequencesFor(contactIds = []) {
@@ -722,6 +844,6 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
   }
 
   return { queue, drain, webhook, status, ready, templates, saveTemplate, deleteTemplate,
-           settings, saveSettings, metrics, statuses, sequencesFor, sentToday, bump,
-           cancelAllQueued };
+           settings, saveSettings, metrics, statuses, contactFields, sequencesFor,
+           sentToday, bump, cancelAllQueued };
 }

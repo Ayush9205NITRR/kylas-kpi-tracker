@@ -11,7 +11,7 @@
  * D1 fake uses.
  */
 import { fakeD1 } from "./d1-fake.mjs";
-import { statusOf, eligible, customVarsIn, WA_STATUS, WA_DEFAULTS, TEMPLATE_VISIBILITY,
+import { statusOf, eligible, customVarsIn, seatHealth, SEAT_FLAGS, WA_STATUS, WA_DEFAULTS, TEMPLATE_VISIBILITY,
          renderTemplate, varsUsed, TEMPLATE_VARS, VAR_FALLBACK, DEFAULT_TEMPLATES,
          createWaJobs, inBusinessHours, nextBusinessSlot, istMinutes, waPlan, waVars,
          onInboundReply, onNoReplyAdvance, onCallSupersedes, onMultiThreadGuard,
@@ -264,11 +264,11 @@ ok("the daily cap takes everybody out, with the reason said",
 
 console.log("\n9 · anti-ban settings, and the kill switch");
 ok("the defaults are the brakes we agreed",
-   WA_DEFAULTS.dailyCapPerSeat === 80 && WA_DEFAULTS.maxCnc === 3
+   WA_DEFAULTS.dailyCapPerSeat === 60 && WA_DEFAULTS.maxCnc === 3
    && WA_DEFAULTS.maxWarmup === 4 && WA_DEFAULTS.cooldownHours === 48 && WA_DEFAULTS.killSwitch === 0,
    JSON.stringify(WA_DEFAULTS));
 const cfg0 = await wa.settings();
-ok("a fresh database reads the defaults", cfg0.dailyCapPerSeat === 80);
+ok("a fresh database reads the defaults", cfg0.dailyCapPerSeat === 60, `${cfg0.dailyCapPerSeat}`);
 await wa.saveSettings({ dailyCapPerSeat: 2 }, "admin");
 ok("...and a saved one sticks", (await wa.settings()).dailyCapPerSeat === 2);
 await wa.saveSettings({ dailyCapPerSeat: "nonsense", maxCnc: -4 }, "admin");
@@ -304,7 +304,7 @@ ok("...unless the admin also asks for the queue to be cleared",
    killedAll.cancelled >= 1
    && (await db.prepare("SELECT state FROM wa_jobs WHERE id = ?").bind(kq.id).first()).state === "cancelled",
    JSON.stringify(killedAll));
-await wa.saveSettings({ killSwitch: 0, dailyCapPerSeat: 80 }, "admin");
+await wa.saveSettings({ killSwitch: 0, dailyCapPerSeat: 60 }, "admin");
 
 /* The cap, proved rather than assumed. */
 await wa.saveSettings({ dailyCapPerSeat: 1 }, "admin");
@@ -316,7 +316,7 @@ await wa.webhook({ event: "sent", jobId: first.jobs[0].id, contactId: first.jobs
 const second = await wa.drain({ seat: "seat-cap", limit: 10 });
 ok("...and is cut off once the day's cap is spent",
    second.jobs.length === 0 && second.capped === true && second.cap === 1, JSON.stringify(second));
-await wa.saveSettings({ dailyCapPerSeat: 80 }, "admin");
+await wa.saveSettings({ dailyCapPerSeat: 60 }, "admin");
 
 console.log("\n10 · custom variables, visibility and metrics");
 ok("a custom variable is spotted", customVarsIn("Hi {{name}} at {{venue_city}}").join(",") === "venue_city");
@@ -351,6 +351,58 @@ ok("...and give the three rates the strip shows",
 const st980 = await wa.statuses(["980"]);
 ok("a sent message moves the contact up the ladder", st980["980"] === "CNC-1 Sent", st980["980"]);
 ok("...and sentToday counts it against the seat's cap", (await wa.sentToday("bd-exec-1")) >= 1);
+
+console.log("\n11 · a seat in trouble, before the ban");
+ok("a healthy seat raises nothing",
+   seatHealth({ seat: "bd-exec-1", sent: 100, replied: 20, failed: 1, opt_out: 1 }).ok === true);
+ok("more than 5% opted out or failed is a burning number",
+   seatHealth({ seat: "x", sent: 100, replied: 20, opt_out: 4, failed: 3 }).flags
+     .some((f) => f.k === "burning"));
+ok("...and the flag says what to do about it",
+   /rest this number/.test(seatHealth({ seat: "x", sent: 100, opt_out: 9 }).flags[0].why));
+ok("under 8% reply on 30+ sends means the wording is not landing",
+   seatHealth({ seat: "x", sent: 40, replied: 2 }).flags.some((f) => f.k === "ignored"));
+/* A rate on four sends is noise, and flagging on noise is how an alarm gets
+   ignored. */
+ok("...but a seat with too few sends is not judged on a rate",
+   seatHealth({ seat: "x", sent: 4, replied: 0 }).flags.every((f) => f.k !== "ignored"),
+   JSON.stringify(seatHealth({ seat: "x", sent: 4, replied: 0 }).flags));
+ok("the thresholds are the ones agreed",
+   SEAT_FLAGS.badRate === 0.05 && SEAT_FLAGS.replyFloor === 0.08 && SEAT_FLAGS.minSends === 30);
+const stt = await wa.status({});
+ok("/wa/status carries the flags and the switch",
+   Array.isArray(stt.seatFlags) && typeof stt.killSwitch === "boolean", JSON.stringify(stt.seatFlags));
+
+console.log("\n12 · the eight fields the Contacts table shows");
+const cf = await wa.contactFields(["980", "999999"]);
+ok("a contact that has been messaged carries its status and template",
+   cf["980"].status === "CNC-1 Sent" && cf["980"].lastTemplate === "cnc", JSON.stringify(cf["980"]));
+ok("...the seat that sent it", cf["980"].seat === "bd-exec-1", cf["980"].seat);
+ok("...a send count and a date", cf["980"].sentCount >= 1 && /^\d{4}-\d\d-\d\d$/.test(cf["980"].lastSentAt),
+   JSON.stringify({ n: cf["980"].sentCount, at: cf["980"].lastSentAt }));
+ok("...and a delivery state separate from the rung",
+   typeof cf["980"].deliveryState === "string" && cf["980"].deliveryState.length > 0, cf["980"].deliveryState);
+ok("a contact nobody has touched reads Not Sent, with blanks not nulls",
+   cf["999999"].status === "Not Sent" && cf["999999"].lastTemplate === ""
+   && cf["999999"].sentCount === 0, JSON.stringify(cf["999999"]));
+
+console.log("\n13 · campaign metrics, and a reply rate that means something");
+const cq = await wa.queue({ contactId: "990", companyId: "903", phone: "+919000000990",
+  stage: "CNC_COULD_NOT_CONNECT", template: "cnc", seat: "bd-exec-2",
+  campaign: "GPTW batch 3", dueAt: OPEN });
+await wa.webhook({ event: "sent", jobId: cq.id, contactId: "990" });
+await wa.webhook({ event: "delivered", jobId: cq.id, contactId: "990" });
+await wa.webhook({ event: "inbound_reply", contactId: "990", jobId: cq.id });
+const mm = await wa.metrics();
+ok("metrics are cut by campaign as well as template and seat",
+   mm.byCampaign.some((c) => c.campaign === "GPTW batch 3"), JSON.stringify(mm.byCampaign.map((c) => c.campaign)));
+/* UNIQUE PEOPLE, INSIDE SEVEN DAYS, OVER WHAT WAS DELIVERED IN THAT WINDOW.
+   The raw counter would count one chatty prospect three times and divide it
+   by six months of sends. */
+ok("the reply rate is unique repliers in 7 days over 7 days of delivery",
+   mm.window7d.replied >= 1 && mm.window7d.delivered >= 1
+   && mm.rates.replied === Math.round((mm.window7d.replied / mm.window7d.delivered) * 100),
+   JSON.stringify(mm.window7d));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

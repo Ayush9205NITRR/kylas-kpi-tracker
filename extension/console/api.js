@@ -399,6 +399,7 @@
     waMetrics: () => req("/wa/metrics", { timeout: 10000 }),
     waEligible: (body) => req("/wa/eligible", { method: "POST", body, timeout: 15000 }),
     waContactStatus: (ids) => req("/wa/contact-status", { method: "POST", body: { ids }, timeout: 12000 }),
+    waTestSend: (body) => req("/wa/test-send", { method: "POST", body, timeout: 12000 }),
     /* Is anybody already holding this phone number or email? Read-only; asked while a
        new contact is being typed. { verdict: clear | existing | flag | unverified, summary, ... } */
     checkContact: (contact) => req("/check-contact", { method: "POST", body: { contact }, timeout: 15000 }),

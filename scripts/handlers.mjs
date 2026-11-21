@@ -3389,6 +3389,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const r = await waJobs.queue({
         contactId: body.contactId, companyId: body.companyId, phone: body.phone,
         stage: body.stage, template: body.template, vars: body.vars || {},
+        campaign: body.campaign || "",
         owner: userName(who), seat: body.seat || "", dueAt: body.dueAt || null });
       log(`wa queue ${String(body.contactId)} ${body.stage || ""} -> ${r.id.slice(0, 8)}`);
       return r;
@@ -3458,7 +3459,28 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     "/wa/contact-status": async (url, body) => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
       const ids = Array.isArray(body?.ids) ? body.ids : String(url.searchParams.get("ids") || "").split(",");
-      return { statuses: await waJobs.statuses(ids.filter(Boolean)) };
+      /* The eight columns, joined in D1 and sent as one object per contact. */
+      return { fields: await waJobs.contactFields(ids.filter(Boolean)) };
+    },
+    /* ONE MESSAGE, TO A NUMBER YOU TYPE. The last thing between a BD and
+       sending a template with a broken variable to forty prospects: send it
+       to yourself first. Due immediately — a test that lands tomorrow
+       morning is not a test. */
+    "/wa/test-send": async (url, body) => {
+      if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
+      const phone = String(body?.phone || "").replace(/[^\d+]/g, "");
+      if (phone.replace(/\D/g, "").length < 8)
+        throw Object.assign(new Error("That does not look like a phone number."), { status: 400 });
+      const who = await viewer();
+      const r = await waJobs.queue({
+        /* A test is not part of anybody's sequence: it carries no contact id,
+           so it cannot advance a ladder or be counted against a prospect. */
+        contactId: `test-${Date.now()}`, companyId: "", phone, stage: "CONNECT_LATER",
+        template: body?.template || "test", campaign: "test send",
+        vars: { body_override: String(body?.body || "").slice(0, 4000) },
+        owner: userName(who), seat: body?.seat || "", dueAt: Date.now() });
+      log(`wa test send to ${phone.slice(-4).padStart(phone.length, "•")} by ${userName(who)}`);
+      return { ...r, phone };
     },
     /* Who the next step may go to, and why everybody else may not. Decided
        on the server so the screen and the queue cannot disagree. */

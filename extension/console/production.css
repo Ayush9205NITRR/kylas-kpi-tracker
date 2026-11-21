@@ -2111,3 +2111,30 @@ body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
 .ctable .w-replied{background:var(--blue);color:var(--onBlue);font-weight:var(--w-strong)}
 .ctable .w-dnd,.ctable .w-not-on-wa{background:var(--panel3);color:var(--text3);
   text-decoration:line-through}
+
+/* The bulk bar over the contacts table, and the composer as a pop-up. */
+.cbulk{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:8px 0;
+  padding:9px 12px;background:var(--blueSoft);border:1px solid var(--blueLine);
+  border-radius:var(--r)}
+.cbulk .cbn{font-size:var(--t-label);color:var(--text2)}
+.cbulk .cbn b{font-size:var(--t-sec);font-family:var(--display);font-weight:var(--w-max);color:var(--text)}
+.cbulk .cbhint{font-size:var(--t-meta);color:var(--text3)}
+.ctable .cwpick{margin-right:8px;accent-color:var(--blue);vertical-align:middle}
+.ctable .cwa{margin-left:7px;border:1px solid var(--line2);background:var(--panel);
+  border-radius:999px;padding:0 7px;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-strong);color:var(--text3);cursor:pointer}
+.ctable .vr.crow:hover .cwa{border-color:var(--blueLine);color:var(--blue)}
+.waModal{position:fixed;inset:0;background:rgba(17,16,34,.45);z-index:70;display:grid;
+  place-items:start center;padding:28px 16px;overflow:auto}
+.waModalBox{position:relative;width:min(960px,100%);background:var(--bg,var(--panel));
+  border-radius:calc(var(--r) + 8px);padding:20px;box-shadow:0 22px 60px rgba(0,0,0,.3)}
+.waModalX{position:absolute;top:10px;right:12px;border:0;background:none;font-size:var(--t-name);
+  line-height:1;color:var(--text3);cursor:pointer}
+.waModalX:hover{color:var(--text)}
+.waCamp,.waTest label{display:flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text3)}
+.waCamp input,.waTest input{border:1px solid var(--line2);border-radius:5px;background:var(--panel);
+  padding:5px 9px;font:inherit;font-size:var(--t-label);color:var(--text);min-width:150px}
+.waSess{font-size:var(--t-meta);color:var(--text3);font-style:italic}
+.waTest{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 11px;
+  padding:9px 11px;border:1px dashed var(--line2);border-radius:var(--r)}
+.waTestN{font-size:var(--t-meta);color:var(--text3)}
