@@ -688,7 +688,10 @@
     }
   }
   function ensureCompanies(_owner, onReady, force) {
-    if (inflight) return true;
+    /* Returns TRUE only when the caller has nothing to paint. A revalidation
+       behind a list that is already on screen is not a reason to say
+       "loading…" over it. */
+    if (inflight) return CACHE.loading;
     const fresh = CACHE.at && Date.now() - CACHE.at < FRESH_MS;
     if (!force && fresh) return false;
     if (!force && Date.now() < retryAt) return false;
@@ -700,7 +703,13 @@
     if (force) { WHY.asked = false; WHY.text = ""; WHY.detail = ""; }
 
     inflight = true;
-    CACHE.loading = true;
+    /* STALE WHILE REVALIDATE. `loading` is what makes the screen say so, and
+       with rows already in hand there is nothing to wait for: the list is a
+       few minutes old, which is a far better answer than a spinner over the
+       top of it. So `loading` now means "we have nothing", and a refresh
+       behind a painted list says so quietly instead. */
+    CACHE.loading = !CACHE.companies.length;
+    CACHE.revalidating = !!CACHE.companies.length;
     API.companies("all", force)
       .then(async (r) => {
         /* The server has no company list from Kylas yet — its background job
@@ -751,7 +760,7 @@
         retryGap = Math.min(retryGap ? retryGap * 2 : 30e3, FRESH_MS);
         retryAt = Date.now() + retryGap;
       })
-      .finally(() => { inflight = false; CACHE.loading = false; onReady(); });
+      .finally(() => { inflight = false; CACHE.loading = false; CACHE.revalidating = false; onReady(); });
     return true;
   }
 
@@ -4743,12 +4752,13 @@
     const job = (async () => {
       const r = await API.viewContacts(id);
       CON.by.set(id, { rows: r.contacts || [], at: Date.now(), truncated: !!r.truncated, err: "" });
-      /* One request for the whole list. Best effort: without D1 the column
-         simply reads "Not Sent" rather than the view failing to open. */
-      try {
-        const ids = (r.contacts || []).map((c) => c.kid).filter(Boolean);
-        if (ids.length) WA_FIELDS = { ...WA_FIELDS, ...(await API.waContactStatus(ids)).fields };
-      } catch { /* no outbox configured */ }
+      /* The WA columns are fetched for the rows that will be PAINTED, not
+         for the whole view: a 400-person view asked about 400 contacts to
+         fill a column showing 200, and every one of those ids is a bound
+         parameter on the other end. waFieldsFor() tops it up as the list
+         grows. Best effort — without D1 the column reads "Not Sent" rather
+         than the view failing to open. */
+      waFieldsFor((r.contacts || []).slice(0, ACC.cLimit)).catch(() => {});
     })();
     CON.inflight.set(id, job);
     try { await job; }
@@ -5042,6 +5052,18 @@
      contacts land — not per row, and never from Airtable. */
   let WA_FIELDS = {};
   const waF = (kid) => WA_FIELDS[String(kid)] || {};
+  /* Only the ids not already in hand, so paging through a view asks about
+     the new 200 rather than all 400 again. */
+  async function waFieldsFor(rows = [], redraw) {
+    const ids = rows.map((c) => c?.kid).filter((k) => k && !(k in WA_FIELDS));
+    if (!ids.length) return;
+    const got = (await API.waContactStatus(ids)).fields || {};
+    WA_FIELDS = { ...WA_FIELDS, ...got };
+    /* Mark the ones the server said nothing about, so they are not asked
+       for again on every repaint. */
+    for (const k of ids) WA_FIELDS[k] ||= { status: "Not Sent", sentCount: 0 };
+    redraw?.();
+  }
   /* The account's stage, from the companies already in hand. */
   const accStageOfContact = (c) => {
     const co = (CACHE.companies || []).find((x) => String(x.id) === String(c.companyId));
@@ -6500,7 +6522,12 @@
       const n = host.querySelector("#conQ"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } });
     on("conSort", "change", (e) => { ACC.cSort = e.target.value; redraw(); });
     on("conGroup", "click", () => { ACC.cGroup = !ACC.cGroup; redraw(); });
-    on("conMore", "click", () => { ACC.cLimit += 200; redraw(); });
+    on("conMore", "click", () => {
+      ACC.cLimit += 200;
+      /* The newly visible rows need their WA columns too — see waFieldsFor. */
+      waFieldsFor(conRows().slice(0, ACC.cLimit), redraw).catch(() => {});
+      redraw();
+    });
     on("conRefresh", "click", () => loadViewContacts(ACC.viewId, redraw, true));
     on("conCsv", "click", exportContacts);
     on("fDrawer", "click", () => { ACC.drawer = !drawerOpen(); redraw(); });
@@ -7348,6 +7375,19 @@
                   playbooks remain the only saved copy. */
                campaign: "", testTo: "", testNote: "",
                preset: null,
+               /* WHICH STAGE THE FILTER MEANS. A contact sits at CNC-2 while
+                  the account sits at Discovery, and "stage" without saying
+                  which one is the question people answer differently and
+                  then disagree about. Contact is the default because this
+                  screen messages people, not accounts. */
+               basis: "contact",
+               /* FREE SEND. Stage gating is right for a sequence and wrong
+                  for "these forty, now" — a named view a BD built by hand is
+                  already the selection, and making them satisfy a ladder
+                  they never started is a rule getting in the way of the job.
+                  The caps and DND still apply; those protect the number. */
+               free: false,
+               csv: null,
                settings: null, canEdit: false, metrics: null, gate: null, custom: [] };
 
   const WA_SEATS = ["", "seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "seat-7", "seat-8"];
@@ -7367,6 +7407,13 @@
   /* The eight values, for one contact. Same sources as the server's waVars,
      plus the two the card knows: the call-back it just set and who owns it. */
   function waValues(c) {
+    /* A CSV row brings its own columns, and they win: the whole point of
+       uploading a sheet with a venue_city in it is that {{venue_city}}
+       resolves. */
+    if (c?._csv) return { name: String(c._csv.name || "").split(/\s+/)[0] || "",
+      company: c._csv.company || "", eventType: "", pax: "", timeline: "", budget: "",
+      nextCallDate: "", bdName: String(API.state?.user?.name || "").split(/\s+/)[0] || "",
+      ...c._csv.vars };
     const rows = [...(c.current || []), ...(c.past || [])];
     const ev = rows.find((r) => r.budget || r.timeline || r.pax) || rows[0] || {};
     return { name: String(c.pocName || "").split(/\s+/)[0] || "",
@@ -7384,7 +7431,8 @@
     const q = (WA.find || "").trim().toLowerCase();
     const all = CON.rows || [];
     const matched = all.filter((c) => {
-      if (WA.stage.size && !WA.stage.has(String(c.stage || ""))) return false;
+      const stage = WA.basis === "account" ? String(accStageOfContact(c) || "") : String(c.stage || "");
+      if (WA.stage.size && !WA.stage.has(stage)) return false;
       if (WA.owner && String(c.owner || "") !== WA.owner) return false;
       if (!q) return true;
       return [c.pocName, c.company, c.designation, waPhone(c)]
@@ -7420,6 +7468,72 @@
     if (t) { WA.tpl = t.id; WA.body = t.body; }
   }
 
+  /* ── CSV, FOR A WARMUP LIST THAT IS NOT IN THE CRM YET ──────────────
+     A list from a conference, a GPTW export, a spreadsheet somebody was
+     sent. Those people are not contacts in Kylas and should not be invented
+     as contacts to message them — so the rows go STRAIGHT INTO wa_jobs,
+     keyed by a csv: id, and nothing is written to Airtable or to Kylas.
+
+     name, phone and company are understood; EVERY OTHER COLUMN becomes a
+     {{custom_var}} of the same name, which is what makes a list with a
+     "venue_city" column worth uploading at all. */
+  function parseCsv(text) {
+    /* Quoted fields with commas in them are the normal case in an export,
+       so this is a real reader rather than a split(","). */
+    const rows = [];
+    let row = [], cur = "", q = false;
+    const t = String(text || "").replace(/\r\n?/g, "\n");
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (q) { if (c === '"' && t[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(cur); cur = ""; }
+      else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+      else cur += c;
+    }
+    if (cur || row.length) { row.push(cur); rows.push(row); }
+    const head = (rows.shift() || []).map((h) => h.trim());
+    if (!head.length) return { head: [], rows: [] };
+    const key = (h) => h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    const keys = head.map(key);
+    const iOf = (names) => keys.findIndex((k) => names.includes(k));
+    const iName = iOf(["name", "contact", "contact_name", "full_name", "poc"]);
+    const iPhone = iOf(["phone", "mobile", "number", "phone_number", "whatsapp"]);
+    const iCo = iOf(["company", "account", "organisation", "organization", "company_name"]);
+    const out = [];
+    for (const r of rows) {
+      if (!r.some((x) => String(x).trim())) continue;          /* blank line */
+      const phone = normPhone(iPhone >= 0 ? r[iPhone] : "");
+      const vars = {};
+      keys.forEach((k, i) => {
+        if (i === iName || i === iPhone || i === iCo) return;
+        const v = String(r[i] ?? "").trim();
+        if (v) vars[k] = v;                                    /* -> {{k}} */
+      });
+      out.push({ name: String(iName >= 0 ? r[iName] : "").trim(),
+                 company: String(iCo >= 0 ? r[iCo] : "").trim(),
+                 phone, vars, ok: !!phone });
+    }
+    return { head, keys, rows: out, extra: keys.filter((k, i) => i !== iName && i !== iPhone && i !== iCo) };
+  }
+
+  /* +91 unless something else is already there. A sheet holds
+     "98739 15513", "098739-15513" and "+91 98739 15513" in one column, and
+     the bot needs one shape. Ten digits is the Indian mobile case; anything
+     already carrying a country code is left as it is. */
+  function normPhone(v) {
+    const raw = String(v || "").trim();
+    if (!raw) return "";
+    const plus = raw.startsWith("+");
+    const d = raw.replace(/\D/g, "");
+    if (!d) return "";
+    if (plus) return `+${d}`;
+    if (d.length === 10) return `+91${d}`;
+    if (d.length === 11 && d.startsWith("0")) return `+91${d.slice(1)}`;
+    if (d.length === 12 && d.startsWith("91")) return `+${d}`;
+    return `+${d}`;
+  }
+
   /* THE GATE, ASKED OF THE SERVER. The screen could compute it — it has the
      statuses — but then the thing that greys a checkbox and the thing that
      refuses the job would be two implementations of one rule, and they would
@@ -7427,6 +7541,21 @@
   async function waGate() {
     const pool = waPool().matched;
     if (!pool.length) { WA.gate = null; return; }
+    /* FREE SEND SKIPS THE LADDER, NOT THE BRAKES. Everybody with a number is
+       eligible; opted out, not-on-WhatsApp and the seat's daily cap are
+       still asked of the server, because those are what keep a phone alive
+       rather than what keeps a sequence tidy. */
+    if (WA.free) {
+      try {
+        const st = await API.waEligible({ seq: WA.mode, step: 1, seat: WA.seat,
+          contacts: pool.map((c) => ({ contactId: c.kid, phone: waPhone(c) })) });
+        WA.gate = { ...st, rows: st.rows.map((r) => {
+          const hard = ["opted out", "not on WhatsApp", "no number", "daily cap reached"];
+          return hard.includes(r.why) ? r : { ...r, ok: true, why: "" };
+        }) };
+      } catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.gate = null; }
+      return;
+    }
     try {
       WA.gate = await API.waEligible({
         seq: WA.mode, step: WA.rung, seat: WA.seat,
@@ -7508,11 +7637,23 @@
         </select>
         <button type="button" class="gbtn sm" id="waAll">Select all ${ok.length}</button>
         <button type="button" class="gbtn sm" id="waNone">Clear</button>
+        <div class="vtoggle waBasis" role="group" aria-label="Filter by which stage">
+          <button type="button" id="waBasisC"${WA.basis === "contact" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}
+            title="The rung this PERSON is on">Contact stage</button>
+          <button type="button" id="waBasisA"${WA.basis === "account" ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}
+            title="The rung the ACCOUNT is on — the furthest any of its contacts has reached">Account stage</button>
+        </div>
+        <button type="button" class="gbtn sm${WA.free ? " on" : ""}" id="waFree"
+          aria-pressed="${WA.free}"
+          title="Ignore the sequence and message whoever is picked. The daily cap and DND still apply.">Free send (any stage)</button>
+        ${WA.mode === "warmup" ? `<button type="button" class="gbtn sm" id="waCsv">+ Upload CSV</button>
+          <input type="file" id="waCsvIn" accept=".csv,text/csv" hidden>` : ""}
       </div>
       <div class="chipset"><div class="chiprow"><span class="cl">Stage</span><span class="cv">
         ${Object.entries(WA_GROUPS).map(([g, list]) => {
           const on = list.some((k) => WA.stage.has(k));
-          const n = (CON.rows || []).filter((c) => list.includes(String(c.stage || ""))).length;
+          const n = (CON.rows || []).filter((c) => list.includes(
+            WA.basis === "account" ? String(accStageOfContact(c) || "") : String(c.stage || ""))).length;
           return n ? `<button type="button" class="chip" aria-pressed="${on}" data-wagrp="${esc(g)}"
             >${esc(WA_GROUP_LABEL[g])}<em class="waC">${n}</em></button>` : "";
         }).join("")}
@@ -7532,6 +7673,16 @@
             .map(([w, n]) => `${n} ${w}`).join(" · ")}</em>` : ""}
           ${skipped.length && !rows.length ? `<em>${skipped.length} skipped (no number)</em>` : ""}</p>`;
       })()}
+      ${WA.csv ? `<div class="waCsvBox">
+        <div class="waCsvH"><b>${WA.csv.rows.length}</b> row${WA.csv.rows.length === 1 ? "" : "s"} from the file ·
+          <span>${WA.csv.rows.filter((r) => r.ok).length} with a usable number</span>
+          ${WA.csv.extra?.length ? `· <span>extra columns become ${WA.csv.extra.map((k) => `{{${esc(k)}}}`).join(" ")}</span>` : ""}
+          <button type="button" class="linkbtn" id="waCsvX">Remove</button></div>
+        <div class="waCsvList">${WA.csv.rows.slice(0, 8).map((r) => `<div class="waCsvR${r.ok ? "" : " off"}">
+          <span>${esc(r.name || "(no name)")}</span><span>${esc(r.company || "—")}</span>
+          <span>${esc(r.phone || "no usable number")}</span></div>`).join("")}
+          ${WA.csv.rows.length > 8 ? `<div class="waCsvR more">…and ${WA.csv.rows.length - 8} more</div>` : ""}</div>
+      </div>` : ""}
       <div class="waList">${matched.length ? matched.map(row).join("")
         : `<p class="vnote">No contacts match. The composer reads the people in the view you have open.</p>`}</div>
     </div>`;
@@ -7594,8 +7745,7 @@
 
   /* ── step 3 ───────────────────────────────────────────────────── */
   function waStep3() {
-    const list = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k))
-      .filter((c) => c && waPhone(c));
+    const list = waRecipients();
     const i = Math.min(WA.preview, Math.max(0, list.length - 1));
     const c = list[i];
     const text = WA.previews[i] ?? "";
@@ -7629,9 +7779,22 @@
     </div>`;
   }
 
-  async function waRenderPreviews() {
-    const list = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k))
+  /* Everybody this send will go to: the ticked contacts, plus any CSV rows
+     with a usable number. A CSV row is not a contact and never becomes one —
+     it carries a csv: id so the job can exist without inventing a record in
+     Kylas or a row in Airtable. */
+  function waRecipients() {
+    const picked = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k))
       .filter((c) => c && waPhone(c));
+    const csv = (WA.csv?.rows || []).filter((r) => r.ok).map((r, i) => ({
+      kid: `csv:${i}:${r.phone}`, pocName: r.name, company: r.company, companyId: "",
+      phones: [{ value: r.phone }], current: [], past: [], _csv: r,
+    }));
+    return [...picked, ...csv];
+  }
+
+  async function waRenderPreviews() {
+    const list = waRecipients();
     WA.previews = await Promise.all(list.map(async (c) => {
       try {
         const r = await API.waPreview({ body: WA.body, vars: waValues(c), fallbacks: WA.fallbacks });
@@ -7669,8 +7832,7 @@
     await waLoad(redraw);
     if (!WA.gate) { await waGate(); }
     const { ok: reachable } = waPool();
-    const picked = [...WA.picked].map((k) => (CON.rows || []).find((c) => c.kid === k))
-      .filter((c) => c && waPhone(c));
+    const picked = waRecipients();
     const steps = ["Who it goes to", "What it says", "Check and queue"];
     host.innerHTML = `
       <div class="vhead"><h2>WhatsApp</h2>
@@ -7770,6 +7932,21 @@
     if (own) own.onchange = () => { WA.owner = own.value; redraw(); };
     /* Select all means every ELIGIBLE one — picking somebody the server
        will refuse is a queue that silently drops them. */
+    on("waCsv", () => host.querySelector("#waCsvIn")?.click());
+    const csvIn = host.querySelector("#waCsvIn");
+    if (csvIn) csvIn.onchange = async () => {
+      const f = csvIn.files?.[0];
+      if (!f) return;
+      try {
+        WA.csv = parseCsv(await f.text());
+        WA.err = WA.csv.rows.length ? "" : "That file had no rows this could read.";
+      } catch (e) { WA.err = String(e.message || e).slice(0, 160); }
+      redraw();
+    };
+    on("waCsvX", () => { WA.csv = null; redraw(); });
+    on("waBasisC", async () => { WA.basis = "contact"; WA.picked.clear(); redraw(); await waGate(); redraw(); });
+    on("waBasisA", async () => { WA.basis = "account"; WA.picked.clear(); redraw(); await waGate(); redraw(); });
+    on("waFree", async () => { WA.free = !WA.free; redraw(); await waGate(); redraw(); });
     on("waAll", () => {
       for (const c of waPool().ok) { const g = gateOf(c.kid); if (!g || g.ok) WA.picked.add(c.kid); }
       redraw();
@@ -7840,7 +8017,7 @@
       for (let i = 0; i < picked.length; i++) {
         const c = picked[i];
         try {
-          await API.waQueue({ contactId: c.kid, companyId: c.companyId, phone: waPhone(c),
+          await API.waQueue({ contactId: c.kid, companyId: c.companyId || "", phone: waPhone(c),
             stage: c.stage || "CONNECT_LATER", template: WA.tpl || "adhoc", seat: WA.seat,
             seq: WA.mode, step: WA.rung, campaign: WA.campaign,
             /* The EXACT string that was on screen. */

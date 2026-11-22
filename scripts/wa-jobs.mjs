@@ -330,6 +330,21 @@ export function seatHealth(row = {}) {
   return { seat: row.seat || "", sent, bad, replied, flags, ok: !flags.length };
 }
 
+/* HOW MANY IDS GO INTO ONE IN(), AND WHY IT IS THIS SMALL.
+   D1 allows far fewer bound parameters per statement than SQLite's own 999.
+   A view of a few hundred people went over it and every read here failed
+   with D1_ERROR "too many SQL variables" — which surfaced as the Contacts
+   table quietly having no WhatsApp columns, a failure that reads as a
+   missing feature rather than a broken query.
+
+   ONE constant, because this was three numbers (150, 200, 200) in three
+   functions and only one of them would have been fixed. Exported so a test
+   can hold it under the ceiling: the local SQLite the suites run against
+   does NOT enforce D1's limit, so nothing else would notice it creeping
+   back up. */
+export const D1_PARAM_CEILING = 100;
+export const IN_CHUNK = 80;
+
 /* ── the store ───────────────────────────────────────────────────── */
 export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
   if (!db) throw new Error("the WhatsApp outbox needs a D1 binding");
@@ -727,8 +742,8 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     const out = {};
     /* Chunked IN(), because a view can hold 400 people and SQLite has a
        limit on bound parameters. */
-    for (let i = 0; i < ids.length; i += 200) {
-      const part = ids.slice(i, i + 200);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const part = ids.slice(i, i + IN_CHUNK);
       const rows = (await db.prepare(
         `SELECT * FROM wa_sequences WHERE contact_id IN (${part.map(() => "?").join(",")})`)
         .bind(...part).all()).results || [];
@@ -766,8 +781,8 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     const ids = [...new Set(contactIds.map(String).filter(Boolean))];
     if (!ids.length) return {};
     const out = {};
-    for (let i = 0; i < ids.length; i += 150) {
-      const part = ids.slice(i, i + 150);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const part = ids.slice(i, i + IN_CHUNK);
       const marks = part.map(() => "?").join(",");
       const [seqs, jobs] = await Promise.all([
         db.prepare(`SELECT * FROM wa_sequences WHERE contact_id IN (${marks})`).bind(...part).all(),
@@ -818,8 +833,8 @@ export function createWaJobs({ db, log = () => {}, now = () => Date.now() }) {
     await ready();
     const ids = [...new Set(contactIds.map(String).filter(Boolean))];
     const out = {};
-    for (let i = 0; i < ids.length; i += 200) {
-      const part = ids.slice(i, i + 200);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const part = ids.slice(i, i + IN_CHUNK);
       if (!part.length) break;
       const rows = (await db.prepare(
         `SELECT * FROM wa_sequences WHERE contact_id IN (${part.map(() => "?").join(",")})`)

@@ -11,7 +11,7 @@
  * D1 fake uses.
  */
 import { fakeD1 } from "./d1-fake.mjs";
-import { statusOf, eligible, customVarsIn, seatHealth, SEAT_FLAGS, WA_STATUS, WA_DEFAULTS, TEMPLATE_VISIBILITY,
+import { statusOf, eligible, customVarsIn, seatHealth, SEAT_FLAGS, IN_CHUNK, D1_PARAM_CEILING, WA_STATUS, WA_DEFAULTS, TEMPLATE_VISIBILITY,
          renderTemplate, varsUsed, TEMPLATE_VARS, VAR_FALLBACK, DEFAULT_TEMPLATES,
          createWaJobs, inBusinessHours, nextBusinessSlot, istMinutes, waPlan, waVars,
          onInboundReply, onNoReplyAdvance, onCallSupersedes, onMultiThreadGuard,
@@ -403,6 +403,39 @@ ok("the reply rate is unique repliers in 7 days over 7 days of delivery",
    mm.window7d.replied >= 1 && mm.window7d.delivered >= 1
    && mm.rates.replied === Math.round((mm.window7d.replied / mm.window7d.delivered) * 100),
    JSON.stringify(mm.window7d));
+
+console.log("\n14 · a view bigger than one IN() clause");
+/* THE LIVE BUG. D1 allows far fewer bound parameters per statement than
+   SQLite's own 999, so a view of a few hundred people made every one of
+   these read fail with D1_ERROR "too many SQL variables" — and the symptom
+   was the Contacts table quietly having no WhatsApp columns, which reads as
+   a missing feature rather than a broken query.
+   250 ids is past the old 150/200 chunks and past D1's limit either way. */
+const many = Array.from({ length: 250 }, (_, i) => String(500000 + i));
+await wa.queue({ contactId: many[0], companyId: "903", phone: "+919000500000",
+  stage: "CNC_COULD_NOT_CONNECT", template: "cnc", seat: "bd-exec-1", dueAt: OPEN });
+const bigS = await wa.statuses(many);
+ok("statuses() answers for 250 contacts", Object.keys(bigS).length === 250, `${Object.keys(bigS).length}`);
+ok("...and every one of them has an answer, not a gap",
+   many.every((id) => typeof bigS[id] === "string"));
+const bigF = await wa.contactFields(many);
+ok("contactFields() answers for 250 contacts", Object.keys(bigF).length === 250, `${Object.keys(bigF).length}`);
+ok("...the one that was messaged is right, in the middle of the batch",
+   bigF[many[0]].lastTemplate === "cnc" && bigF[many[0]].seat === "bd-exec-1",
+   JSON.stringify(bigF[many[0]]));
+ok("...and the other 249 read as untouched rather than undefined",
+   many.slice(1).every((id) => bigF[id] && bigF[id].status === "Not Sent" && bigF[id].sentCount === 0));
+const bigQ = await wa.sequencesFor(many);
+ok("sequencesFor() survives the same list", typeof bigQ === "object" && !!bigQ[many[0]]);
+/* The chunk has to divide the work, not just be smaller: 250 over 80 is four
+   round trips and the last one is 10 ids. */
+/* The local SQLite does NOT enforce D1's parameter limit, so the assertions
+   above would pass with the old 200 too. This is the one that actually
+   guards the live failure. */
+ok("the IN() chunk stays under D1's parameter ceiling",
+   IN_CHUNK <= D1_PARAM_CEILING, `${IN_CHUNK} vs ${D1_PARAM_CEILING}`);
+ok("...and the remainder of an uneven batch is still read",
+   250 % IN_CHUNK > 0 && Object.keys(bigF).length === 250, `${250 % IN_CHUNK} left over`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
