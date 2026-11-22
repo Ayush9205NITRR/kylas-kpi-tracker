@@ -2138,3 +2138,54 @@ body.viewing .acct .cmv,body.viewing .acct .cx{display:none}
 .waTest{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 11px;
   padding:9px 11px;border:1px dashed var(--line2);border-radius:var(--r)}
 .waTestN{font-size:var(--t-meta);color:var(--text3)}
+
+/* ══ THE ADMIN DRAWER, AND THE SEAT PILL ═══════════════════════════════
+   Shut by default, because four controls nobody touches on a normal
+   morning should not sit above the ones everybody touches. The summary
+   line stays visible for a BD: the caps explain why a contact is greyed
+   out, and hiding them entirely makes the gating look arbitrary. */
+.wsLine{display:flex;align-items:center;gap:10px;margin-bottom:11px;padding:7px 12px;
+  border:1px solid var(--line2);border-radius:var(--r);background:var(--panel2)}
+.wsLine.killed{border-color:var(--amberLine);background:var(--amberSoft)}
+.wsSum{flex:1;font-size:var(--t-meta);color:var(--text3)}
+.wsLine.killed .wsSum{color:var(--amber);font-weight:var(--w-strong)}
+.wsOpen{border:0;background:none;padding:0;font:inherit;font-size:var(--t-meta);
+  font-weight:var(--w-strong);color:var(--blue);cursor:pointer}
+.wsDrawer{border:1px solid var(--blueLine);border-radius:calc(var(--r) + 3px);
+  background:var(--panel);margin-bottom:12px;overflow:hidden}
+.wsDrawer.killed{border-color:var(--amberLine)}
+.wsHead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:9px 12px;
+  background:var(--panel3);border-bottom:1px solid var(--line2)}
+.wsHead strong{font-size:var(--t-label);margin-right:6px}
+.wsTab{border:1px solid transparent;background:none;border-radius:999px;padding:3px 11px;
+  font:inherit;font-size:var(--t-meta);color:var(--text2);cursor:pointer}
+.wsTab:hover{color:var(--blue)}
+.wsTab.on{background:var(--panel);border-color:var(--line2);color:var(--text);font-weight:var(--w-strong)}
+.wsX{margin-left:auto;border:0;background:none;font-size:var(--t-sec);line-height:1;
+  color:var(--text3);cursor:pointer}
+.wsBody{display:flex;align-items:flex-end;gap:11px;flex-wrap:wrap;padding:12px}
+.wsBody.wsGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));align-items:start}
+.wsRow{display:flex;gap:6px}
+.wsRow input{flex:1;min-width:0;border:1px solid var(--line2);border-radius:5px;background:var(--panel);
+  padding:4px 8px;font:inherit;font-size:var(--t-meta);color:var(--text)}
+.wsPb{display:flex;flex-direction:column;gap:6px}
+.wsPb b{font-size:var(--t-meta);text-transform:uppercase;letter-spacing:.04em;color:var(--text3)}
+.wsF em{font-style:normal;font-size:var(--t-meta);color:var(--text3)}
+.wsTpl{flex-direction:column;align-items:stretch}
+.wsTpl textarea{width:100%;box-sizing:border-box;border:1px solid var(--line2);border-radius:var(--r);
+  background:var(--panel2);padding:9px;font:inherit;font-size:var(--t-label);line-height:1.5;
+  color:var(--text);resize:vertical}
+.wsAuto{display:flex;align-items:center;gap:7px;font-size:var(--t-meta);color:var(--text2)}
+
+/* Is the phone this is about to send from actually logged in? "Queued" from
+   a seat whose WhatsApp Web has dropped looks exactly like "sent" until
+   nobody replies. Amber for needs-a-QR, grey for not reporting — no new
+   hue, and green is not used because "connected" is the resting state. */
+.waSeatPill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);
+  background:var(--panel2);border-radius:999px;padding:4px 11px;font-size:var(--t-meta);
+  font-weight:var(--w-med);color:var(--text2)}
+.waSeatPill i{width:7px;height:7px;border-radius:50%;background:var(--text3)}
+.waSeatPill.s-ready i,.waSeatPill.s-connected i{background:var(--blue)}
+.waSeatPill.s-qr{border-color:var(--amberLine);background:var(--amberSoft);color:var(--amber)}
+.waSeatPill.s-qr i{background:var(--amber)}
+.waSeatPill.s-unknown i{background:var(--text3)}

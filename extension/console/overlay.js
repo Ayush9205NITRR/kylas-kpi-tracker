@@ -25,6 +25,38 @@
   };
 
   /* ── host page → console ─────────────────── */
+  /* ── WHICH CONSOLE VIEW A KYLAS PAGE MEANS ──────────────────────────
+     Opening the console on the deals list and landing on a call card is a
+     click of correction every single time. The mapping is small and it
+     belongs here rather than in the host page, because the VIEWS are here:
+     the host's job is to say where it is, not to know what this console
+     calls that.
+
+     LIMIT, STATED PLAINLY: content/inject.js currently recognises only
+     /sales/home and /sales/companies/list, plus record pages. On any other
+     page it sends "focus" and no path at all — so /sales/contacts and
+     /sales/deals can only be picked up from document.referrer, which is set
+     when the iframe is created and therefore works on OPEN but not on a
+     later SPA navigation. Teaching the host to post { type: "page", path }
+     on every navigation is two lines in inject.js and the handler above is
+     already waiting for it. */
+  const ROUTES = [
+    [/\/sales\/companies\/list/i, "companies"],
+    [/\/sales\/companies\/details\/\d+/i, null],      /* a record: the call card, handled below */
+    [/\/sales\/contacts(\/list)?\/?($|\?)/i, "contacts"],
+    [/\/sales\/deals/i, "deals"],
+    [/\/sales\/home/i, "dashboard"],
+  ];
+  function routeFor(path) {
+    for (const [re, v] of ROUTES) if (re.test(String(path || ""))) return v;
+    return null;
+  }
+
+  /* Read once, at boot: the page this iframe was created inside. */
+  function hostRoute() {
+    try { return routeFor(new URL(document.referrer).pathname); } catch { return null; }
+  }
+
   window.addEventListener("message", (e) => {
     const m = e.data;
     if (!m || m.source !== "enout-host") return;
@@ -40,6 +72,9 @@
     }
 
     if (m.type === "dashboard" || m.type === "companies") { lastHanded = m.type; showView(m.type); return; }
+    /* The host may learn to name more pages than it does today (see
+       hostRoute below); anything it sends that maps to a view opens it. */
+    if (m.type === "page" && m.path) { const v = routeFor(m.path); if (v) { lastHanded = m.path; showView(v); } return; }
 
     /* THE SAME RECORD AGAIN IS NOT A NAVIGATION. The host page says which
        record it is on every time the console is opened, not only when the
@@ -65,11 +100,24 @@
     }
 
     if (m.type === "focus") {
+      /* THE FIRST FOCUS IS THE OPEN. The host sends "focus" on every
+         navigation but tells us the path only for the pages it knows, so
+         this is the one chance to act on a page it does not name —
+         /sales/contacts and /sales/deals — using the referrer the iframe
+         was created with. Once only: after that the person is driving, and
+         re-routing them because Kylas moved in the background would throw
+         away whatever they were doing. */
+      if (!routedOnce) {
+        routedOnce = true;
+        const v = hostRoute();
+        if (v && !view && !lastHanded) showView(v);
+      }
       const q = document.getElementById("q");
       if (q) q.blur();
       window.focus();
     }
   });
+  let routedOnce = false;
 
   /* ── the report views ────────────────────── */
   /* These cover the call console rather than replacing it, so the record the

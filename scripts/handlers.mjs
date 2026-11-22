@@ -76,7 +76,8 @@ import { createAllotJobs, performItem as performAllotItem } from "./allot-jobs.m
 import { createWaJobs, waPlan, waVars, renderTemplate, varsUsed, customVarsIn, TEMPLATE_VARS,
          VAR_FALLBACK, TEMPLATE_VISIBILITY, WA_DEFAULTS, WA_STATUS, eligible,
          WARM_STAGES } from "./wa-jobs.mjs";
-import { createDeals, buildDeal, handoverNote, parseBudget, PLAYBOOK_ORDER, REASON_CHIPS } from "./deals.mjs";
+import { createDeals, buildDeal, handoverNote, parseBudget, PLAYBOOK_ORDER, PLAYBOOKS,
+         REASON_CHIPS } from "./deals.mjs";
 
 /* Builds the route table. ASYNC because the company-shape hint is read from the
    store before the Kylas client is constructed — on a laptop that read is a
@@ -2219,10 +2220,36 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
                  radar, and never sent to Kylas — see parseBudget. */
               value: parseBudget(ev.budget),
               playbooks: ["pre_call"] });
-            for (const it of await dealsStore.items(seeded.id)) {
+            /* THE ADMIN'S SLAs, APPLIED. deals.mjs seeds each item at the
+               playbook's built-in hours; if an admin has shortened "raise
+               DMM" to 8h in the panel, that is the number that should be
+               on the clock — and both clocks, because an item born already
+               slipped would report a slip nobody caused. */
+            const slas = JSON.parse((await store.get("deal:slas")) || "{}");
+            const seededItems = await dealsStore.items(seeded.id);
+            /* THE SAME HANDLE THE DEALS STORE USES. createDeals is given
+               `jobsDb || db`, and locally `db` alone is null — so writing
+               through `db` here silently did nothing and the admin's SLA
+               never reached the clock. The task-id write below had the same
+               flaw and was failing just as quietly. */
+            const ddb = jobsDb || db;
+            const fixes = [];
+            for (const it of seededItems) {
+              const h = slas?.[it.playbook]?.[it.item_key];
+              if (!h || !ddb?.prepare) continue;
+              const due = Number(it.created_at) + Number(h) * 3600000;
+              it.current_due_at = due; it.baseline_due_at = due;
+              fixes.push(ddb.prepare(
+                "UPDATE deal_items SET baseline_due_at = ?, current_due_at = ? WHERE id = ?")
+                .bind(due, due, it.id));
+            }
+            if (fixes.length) await ddb.batch(fixes).catch((e) =>
+              log(`! deal SLAs not applied — ${String(e.message).slice(0, 90)}`));
+
+            for (const it of seededItems) {
               await kylas.createTask({ name: it.label, dueDate: new Date(it.current_due_at).toISOString(),
                 relation: { id: Number(dealId), entityType: "deal" } })
-                .then((t) => t?.id && db?.prepare?.(
+                .then((t) => t?.id && ddb?.prepare?.(
                   "UPDATE deal_items SET kylas_task_id = ? WHERE id = ?").bind(String(t.id), it.id).run())
                 .catch((e) => log(`! deal task "${it.label}" — ${String(e.message).slice(0, 80)}`));
             }
@@ -3436,12 +3463,107 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        people out and has to say why — but only an admin moves them, because
        the person who wants the brakes off is never the person who pays for a
        banned number. */
+    /* ── THE ADMIN PANEL ────────────────────────────────────────────
+       Everything here used to be a code change and a deploy: the wording of
+       a stage template, the daily cap, which laptop is seat 3, how long a
+       DMM may take before it is late. None of those are engineering
+       decisions — they are decisions about how the floor runs, made by the
+       person running it, usually at the worst possible moment. So they live
+       in storage and are edited in the console.
+
+       READ IS OPEN, WRITE IS ADMIN. A BD's composer has to say why somebody
+       is greyed out and which seat is sending, so it needs the caps and the
+       mapping; changing them is another matter, and the person who wants
+       the brakes off is never the person who pays for a banned number.
+
+       Seat mapping and SLAs go in the key-value store rather than a table:
+       they are two small documents read on nearly every screen and written
+       about twice a quarter, which is exactly what a KV is for. */
+    /* The bot posts here as it comes up and goes down, so the composer can
+       say whether the seat it is about to send from is actually logged in
+       rather than finding out when nothing arrives. Best effort and
+       deliberately dumb: a timestamp and a state. */
+    "/wa/seat-status": async (url, body) => {
+      if (body && body.seat) {
+        await store.put(`wa:seat:${String(body.seat).slice(0, 20)}`,
+          JSON.stringify({ state: String(body.state || "unknown").slice(0, 20), at: Date.now() }));
+        return { ok: true };
+      }
+      const out = {};
+      for (let i = 1; i <= 8; i++) {
+        const k = `bd-exec-${i}`;
+        const raw = await store.get(`wa:seat:${k}`).catch(() => null);
+        let v = null; try { v = raw ? JSON.parse(raw) : null; } catch { /* corrupt */ }
+        /* Anything older than ten minutes is not "connected", it is a seat
+           that stopped saying anything — which is the case a BD needs to
+           see BEFORE queueing forty messages to it. */
+        const stale = !v || Date.now() - Number(v.at || 0) > 10 * 60000;
+        out[k] = { state: stale ? "unknown" : v.state, at: v?.at || 0, stale };
+      }
+      return { seats: out };
+    },
+    /* ── THE ADMIN PANEL, ON ONE ROUTE ──────────────────────────────
+       Four things used to be a code change and a deploy: the wording of a
+       stage template, the daily cap, which laptop is seat 3, and how long a
+       DMM may take before it is late. None of those are engineering
+       decisions — they are decisions about how the floor runs, made by the
+       person running it, usually at the worst possible moment.
+
+       READ IS OPEN, WRITE IS ADMIN. A BD's composer has to say why somebody
+       is greyed out and which seat is sending, so it needs the caps and the
+       mapping. Changing them is another matter: the person who wants the
+       brakes off is never the person who pays for a banned number.
+
+       One route rather than a second /admin door, because the console
+       reaches this one already and two doors to one room drift apart. Seat
+       mapping and SLAs live in the key-value store rather than a table:
+       two small documents, read on most screens, written twice a quarter. */
     "/wa/settings": async (url, body) => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
       const who = await viewer();
-      if (!body || !Object.keys(body).length)
-        return { settings: await waJobs.settings(), defaults: WA_DEFAULTS, canEdit: !!who.admin };
-      if (!who.admin) throw Object.assign(new Error("Only an admin can change the outreach limits."), { status: 403 });
+      const read = async () => ({
+        settings: await waJobs.settings(), defaults: WA_DEFAULTS, canEdit: !!who.admin,
+        me: who.email,
+        seats: JSON.parse((await store.get("wa:seats")) || "{}"),
+        slas: JSON.parse((await store.get("deal:slas")) || "{}"),
+        /* The built-in hours travel with them, so the panel can show what a
+           blank field falls back to instead of an empty box. */
+        slaDefaults: Object.fromEntries(Object.entries(PLAYBOOKS).map(([k, pb]) =>
+          [k, { label: pb.label, items: pb.items.map((i) => ({ k: i.k, label: i.label, sla: i.sla })) }])),
+        templates: await waJobs.templates(),
+      });
+      if (!body || !Object.keys(body).length) return read();
+      if (!who.admin) throw Object.assign(new Error("Only an admin can change these."), { status: 403 });
+
+      if (body.seats) {
+        /* Both sides cleaned: a stray capital or a space in a pasted
+           address is how a BD silently stops being mapped to a seat. */
+        const clean = {};
+        for (const [email, seat] of Object.entries(body.seats)) {
+          const e = String(email).trim().toLowerCase();
+          const sn = String(seat || "").trim();
+          if (e && /^bd-exec-[1-8]$/.test(sn)) clean[e] = sn;
+        }
+        await store.put("wa:seats", JSON.stringify(clean));
+        log(`admin: seat mapping set by ${who.name} — ${Object.keys(clean).length} BD(s)`);
+      }
+      if (body.slas) {
+        const clean = {};
+        for (const [pb, items] of Object.entries(body.slas)) {
+          if (!PLAYBOOKS[pb]) continue;
+          for (const [k, hours] of Object.entries(items || {})) {
+            const n = Number(hours);
+            if (PLAYBOOKS[pb].items.some((i) => i.k === k) && Number.isFinite(n) && n > 0 && n <= 24 * 30)
+              (clean[pb] ||= {})[k] = n;
+          }
+        }
+        await store.put("deal:slas", JSON.stringify(clean));
+        log(`admin: deal SLAs set by ${who.name}`);
+      }
+      if (body.template) {
+        await waJobs.saveTemplate({ ...body.template, owner: who.email });
+        log(`admin: template ${body.template.id || body.template.name} edited by ${who.name}`);
+      }
       const out = await waJobs.saveSettings(body, who.name || who.email);
       log(`wa settings by ${who.name}: ${Object.entries(body).map(([k, v]) => `${k}=${v}`).join(" ")}`);
       /* Pausing may also clear what is already waiting — asked for
@@ -3449,7 +3571,8 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
          decisions and only one of them is reversible. */
       if (Number(body.killSwitch) && body.cancelQueued)
         out.cancelled = (await waJobs.cancelAllQueued(who.name || who.email)).cancelled;
-      return { settings: out, canEdit: true };
+      void out;
+      return read();
     },
     "/wa/metrics": async () => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
@@ -3504,7 +3627,19 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
     },
     "/wa/status": async () => {
       if (!waJobs) throw Object.assign(new Error("The WhatsApp outbox needs the server's database (D1)."), { status: 503 });
-      return waJobs.status({});
+      const base = await waJobs.status({});
+      /* Which seats are actually logged in. Anything that has not said
+         anything for ten minutes is "unknown", not "connected" — that is
+         the case a BD needs to see BEFORE queueing forty messages to it. */
+      const seats = {};
+      for (let i = 1; i <= 8; i++) {
+        const k = `bd-exec-${i}`;
+        let v = null;
+        try { v = JSON.parse((await store.get(`wa:seat:${k}`)) || "null"); } catch { /* corrupt */ }
+        const stale = !v || Date.now() - Number(v.at || 0) > 10 * 60000;
+        seats[k] = { state: stale ? "unknown" : String(v.state || "unknown"), at: v?.at || 0, stale };
+      }
+      return { ...base, seats };
     },
 
     "/save": async (url, body) => {

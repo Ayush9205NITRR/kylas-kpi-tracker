@@ -7388,9 +7388,17 @@
                   The caps and DND still apply; those protect the number. */
                free: false,
                csv: null,
-               settings: null, canEdit: false, metrics: null, gate: null, custom: [] };
+               settings: null, canEdit: false, metrics: null, gate: null, custom: [],
+               /* The admin drawer is SHUT by default even for an admin: it
+                  is four controls a BD never touches sitting above the one
+                  they use every morning. */
+               adminOpen: false, adminTab: "caps",
+               seats: {}, seatMap: {}, slas: {}, slaDefaults: {} };
 
-  const WA_SEATS = ["", "seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "seat-7", "seat-8"];
+  /* bd-exec-1..8, which is what the seat mapping, the metrics and the bot
+     all call them. The picker said seat-1..8 and nothing else did, so a
+     seat chosen here could never match a seat an admin had mapped. */
+  const WA_SEATS = ["", ...Array.from({ length: 8 }, (_, i) => `bd-exec-${i + 1}`)];
   /* The stage families the composer filters by, in the words the chips use
      elsewhere in the console. */
   const WA_GROUPS = {
@@ -7454,6 +7462,13 @@
       WA.templates = r.templates || []; WA.vars = r.vars || []; WA.fallbacks = { ...(r.fallbacks || {}) };
       WA.visibilities = r.visibilities || ["private", "team", "official"];
       WA.settings = st.settings || null; WA.canEdit = !!st.canEdit;
+      WA.seatMap = st.seats || {}; WA.slas = st.slas || {}; WA.slaDefaults = st.slaDefaults || {};
+      /* The BD's own seat, if an admin has mapped them to one. Chosen for
+         them rather than left on "Any free seat": a BD should not have to
+         know which laptop is theirs. */
+      const mine = WA.seatMap[String(st.me || "").toLowerCase()];
+      if (mine && !WA.seat) WA.seat = mine;
+      try { const liveStatus = await API.waStatus(); WA.seats = liveStatus.seats || {}; } catch { /* no D1 */ }
       WA.metrics = m || null;
       waPickTemplate();
     } catch (e) { WA.err = String(e.message || e).slice(0, 180); }
@@ -7584,24 +7599,76 @@
 
   /* The brakes. A BD sees them and cannot move them; the reason is written
      on the panel rather than left to be discovered. */
+  /* ── THE ADMIN DRAWER ───────────────────────────────────────────────
+     Four things that used to need a deploy — template wording, the caps,
+     which laptop is whose seat, and the SLA on a deal action — behind one
+     shut drawer. Shut by default even for an admin, because they are
+     controls nobody touches on a normal morning sitting above the ones
+     everybody touches every morning.
+
+     A BD sees the summary line and not the controls: the caps explain why
+     somebody is greyed out, so hiding them entirely would make the gating
+     look arbitrary. */
   function waSettingsBar() {
     const st = WA.settings;
     if (!st) return "";
     const killed = Number(st.killSwitch) === 1;
+    if (!WA.adminOpen) {
+      return `<div class="wsLine${killed ? " killed" : ""}">
+        <span class="wsSum">${killed ? "Outreach is PAUSED by an admin"
+          : `Cap ${st.dailyCapPerSeat}/day per phone · ${st.cooldownHours}h between steps`}</span>
+        <button type="button" class="wsOpen" id="waAdmin">${WA.canEdit ? "Admin controls" : "Why am I limited?"} ▾</button>
+      </div>`;
+    }
     const num = (k, lab, hint) => `<label class="wsF" title="${esc(hint)}">${esc(lab)}
       <input type="number" min="0" data-waset="${k}" value="${esc(String(st[k]))}"
         ${WA.canEdit ? "" : "disabled"}></label>`;
-    return `<div class="wsBar${killed ? " killed" : ""}">
-      ${num("dailyCapPerSeat", "Daily cap / phone", "A number that sends hundreds of cold messages a day stops existing")}
-      ${num("maxCnc", "Max CNC steps", "")}
-      ${num("maxWarmup", "Max warmup steps", "")}
-      ${num("cooldownHours", "Cooldown (h)", "The gap between two steps of the same ladder")}
-      <button type="button" class="wsKill${killed ? " on" : ""}" id="waKill"
-        ${WA.canEdit ? "" : "disabled"}
-        title="${killed ? "Outreach is paused for all eight seats" : "Stop all sending immediately, across every seat"}"
-        >${killed ? "Resume outreach" : "Pause all outreach"}</button>
-      ${WA.canEdit ? "" : `<span class="wsNote">Limits are set by an admin.</span>`}
-      ${killed ? `<span class="wsNote bad">Paused — nothing is being sent.</span>` : ""}
+    const tab = (k, lab) => `<button type="button" class="wsTab${WA.adminTab === k ? " on" : ""}"
+      data-watab="${k}">${esc(lab)}</button>`;
+    return `<div class="wsDrawer${killed ? " killed" : ""}">
+      <div class="wsHead">
+        <strong>Admin controls</strong>
+        ${tab("caps", "Limits & kill switch")}${tab("seats", "BD → seat")}
+        ${tab("tpl", "Templates")}${tab("sla", "Deal SLAs")}
+        <button type="button" class="wsX" id="waAdminX" title="Close">×</button>
+      </div>
+      ${WA.canEdit ? "" : `<p class="wsNote">These are set by an admin. Shown so you can see why a contact is held back.</p>`}
+      ${WA.adminTab === "caps" ? `<div class="wsBody">
+        ${num("dailyCapPerSeat", "Daily cap / phone", "A number that sends hundreds of cold messages a day stops existing")}
+        ${num("maxCnc", "Max CNC steps", "")}
+        ${num("maxWarmup", "Max warmup steps", "")}
+        ${num("cooldownHours", "Cooldown (h)", "The gap between two steps of the same ladder")}
+        <button type="button" class="wsKill${killed ? " on" : ""}" id="waKill" ${WA.canEdit ? "" : "disabled"}
+          title="${killed ? "Outreach is paused for all eight seats" : "Stop all sending immediately, across every seat"}"
+          >${killed ? "Resume outreach" : "Pause all outreach"}</button>
+      </div>` : ""}
+      ${WA.adminTab === "seats" ? `<div class="wsBody wsGrid">
+        ${Object.entries(WA.seatMap).concat([["", ""]]).map(([email, seat], i) => `<div class="wsRow">
+          <input type="email" data-wsemail="${i}" value="${esc(email)}" placeholder="bd@enout.in" ${WA.canEdit ? "" : "disabled"}>
+          <select data-wsseat="${i}" ${WA.canEdit ? "" : "disabled"}>
+            <option value="">— no seat —</option>
+            ${Array.from({ length: 8 }, (_, n) => `bd-exec-${n + 1}`).map((sn) => `<option value="${sn}"${
+              seat === sn ? " selected" : ""}>${sn}${WA.seats[sn]?.stale === false ? " · live" : ""}</option>`).join("")}
+          </select></div>`).join("")}
+        ${WA.canEdit ? `<button type="button" class="gbtn sm" id="waSeatsSave">Save mapping</button>` : ""}
+      </div>` : ""}
+      ${WA.adminTab === "tpl" ? `<div class="wsBody wsTpl">
+        <select id="waAdmTpl">${WA.templates.map((t) => `<option value="${esc(t.id)}"${
+          WA.admTpl === t.id ? " selected" : ""}>${esc(t.name)} · ${esc(t.stageGroup)}</option>`).join("")}</select>
+        ${(() => { const t = WA.templates.find((x) => x.id === (WA.admTpl || WA.templates[0]?.id));
+          return t ? `<textarea id="waAdmBody" rows="5" ${WA.canEdit ? "" : "disabled"}>${esc(t.body)}</textarea>
+          <label class="wsAuto"><input type="checkbox" id="waAdmAuto"${t.autoSend ? " checked" : ""}
+            ${WA.canEdit ? "" : "disabled"}> Auto-send at this stage</label>
+          ${WA.canEdit ? `<button type="button" class="gbtn sm" id="waAdmSave">Save template</button>` : ""}` : ""; })()}
+      </div>` : ""}
+      ${WA.adminTab === "sla" ? `<div class="wsBody wsGrid">
+        ${Object.entries(WA.slaDefaults).map(([pb, def]) => `<div class="wsPb"><b>${esc(def.label)}</b>
+          ${def.items.map((it) => `<label class="wsF">${esc(it.label)}
+            <input type="number" min="1" max="720" data-wsla="${esc(pb)}.${esc(it.k)}"
+              value="${esc(String(WA.slas?.[pb]?.[it.k] ?? it.sla))}" ${WA.canEdit ? "" : "disabled"}>
+            <em>h${WA.slas?.[pb]?.[it.k] ? "" : " (default)"}</em></label>`).join("")}</div>`).join("")}
+        ${WA.canEdit ? `<button type="button" class="gbtn sm" id="waSlaSave">Save SLAs</button>` : ""}
+      </div>` : ""}
     </div>`;
   }
 
@@ -7751,6 +7818,19 @@
     const text = WA.previews[i] ?? "";
     return `<div class="waPanel">
       <div class="extools">
+        ${(() => {
+          const sn = WA.seat, info = WA.seats?.[sn];
+          /* THE SEAT, BEFORE THE SEND. "Queued" from a laptop whose
+             WhatsApp Web has logged out looks exactly like "sent" until
+             somebody notices nothing arrived — so the state is on screen
+             at the moment of sending, not in a log. */
+          const state = !sn ? "any" : !info ? "unknown" : info.stale ? "unknown" : info.state;
+          const lab = { ready: "connected", connected: "connected", qr: "needs QR scan",
+                        unknown: "not reporting", any: "any free seat" }[state] || state;
+          return `<span class="waSeatPill s-${esc(String(state).replace(/[^a-z]/gi, ""))}"
+            title="${sn ? esc(`${sn} — ${lab}`) : "No seat chosen; whichever is free will take it"}"
+            ><i aria-hidden="true"></i>${esc(sn || "Any seat")} · ${esc(lab)}</span>`;
+        })()}
         <label class="waSeat">Send from
           <select id="waSeat" aria-label="Which seat sends this">
             ${WA_SEATS.map((s) => `<option value="${esc(s)}"${WA.seat === s ? " selected" : ""}>${
@@ -7879,10 +7959,55 @@
     host.querySelectorAll("[data-waset]").forEach((b) => { b.onchange = async () => {
       WA.busy = "saving…"; redraw();
       try { const r = await API.waSettingsSave({ [b.dataset.waset]: Number(b.value) });
-            WA.settings = r.settings; }
+            WA.settings = r.settings; WA.seatMap = r.seats || WA.seatMap; }
       catch (e) { WA.err = String(e.message || e).slice(0, 180); }
       WA.busy = ""; redraw(); await waGate(); redraw();
     }; });
+    on("waAdmin", () => { WA.adminOpen = true; redraw(); });
+    on("waAdminX", () => { WA.adminOpen = false; redraw(); });
+    host.querySelectorAll("[data-watab]").forEach((b) => { b.onclick = () => {
+      WA.adminTab = b.dataset.watab; redraw();
+    }; });
+    const admSel = host.querySelector("#waAdmTpl");
+    if (admSel) admSel.onchange = () => { WA.admTpl = admSel.value; redraw(); };
+    on("waAdmSave", async () => {
+      const t = WA.templates.find((x) => x.id === (WA.admTpl || WA.templates[0]?.id));
+      if (!t) return;
+      WA.busy = "saving…"; redraw();
+      try {
+        const r = await API.waSettingsSave({ template: { id: t.id, name: t.name,
+          stageGroup: t.stageGroup, visibility: t.visibility,
+          body: host.querySelector("#waAdmBody")?.value ?? t.body,
+          autoSend: !!host.querySelector("#waAdmAuto")?.checked } });
+        WA.templates = r.templates || WA.templates;
+        WA.busy = "saved.";
+      } catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.busy = ""; }
+      redraw();
+    });
+    on("waSeatsSave", async () => {
+      const seats = {};
+      host.querySelectorAll("[data-wsemail]").forEach((inp) => {
+        const i = inp.dataset.wsemail;
+        const seat = host.querySelector(`[data-wsseat="${i}"]`)?.value || "";
+        if (inp.value.trim() && seat) seats[inp.value.trim().toLowerCase()] = seat;
+      });
+      WA.busy = "saving…"; redraw();
+      try { const r = await API.waSettingsSave({ seats }); WA.seatMap = r.seats || seats; WA.busy = "saved."; }
+      catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.busy = ""; }
+      redraw();
+    });
+    on("waSlaSave", async () => {
+      const slas = {};
+      host.querySelectorAll("[data-wsla]").forEach((inp) => {
+        const [pb, k] = inp.dataset.wsla.split(".");
+        const n = Number(inp.value);
+        if (pb && k && Number.isFinite(n) && n > 0) (slas[pb] ||= {})[k] = n;
+      });
+      WA.busy = "saving…"; redraw();
+      try { const r = await API.waSettingsSave({ slas }); WA.slas = r.slas || slas; WA.busy = "saved."; }
+      catch (e) { WA.err = String(e.message || e).slice(0, 180); WA.busy = ""; }
+      redraw();
+    });
     on("waKill", async () => {
       const off = Number(WA.settings?.killSwitch) === 1;
       if (!off && !confirm("Pause outreach on all eight seats?\n\nNothing already queued will be sent until you resume."))
@@ -8008,7 +8133,14 @@
 
     /* step 3 */
     const seat = host.querySelector("#waSeat");
-    if (seat) seat.onchange = () => { WA.seat = seat.value; };
+    /* Repaint: the pill beside this select is the whole point of choosing a
+       seat, and it was reading the previous value. The gate is re-asked too
+       — the daily cap is per phone, so changing seat changes who is
+       eligible. */
+    if (seat) seat.onchange = async () => {
+      WA.seat = seat.value; redraw();
+      await waGate(); redraw();
+    };
     on("waPrev", () => { WA.preview = Math.max(0, WA.preview - 1); redraw(); });
     on("waNext", () => { WA.preview = WA.preview + 1; redraw(); });
     on("waGo", async () => {
