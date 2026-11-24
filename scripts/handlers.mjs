@@ -2333,7 +2333,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   }, async () => {
     const [companies, contacts, transitions, calls, dialler] = await Promise.all([
       airtable.listAll("Companies", { fields: ["Kylas Company ID"], pageSize: 100, maxPages: 2000 }),
-      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date", "Kylas Contact ID", "Has Signal", "Has Complete Row"], pageSize: 100, maxPages: 2000 }),
+      listTolerant(airtable, "Contacts", { fields: ["Company", "Current Stage", "KPI Rank", "Next Call Date", "Next Call Time", "Kylas Contact ID", "Has Signal", "Has Complete Row"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Stage Transitions", { fields: ["To Stage", "Changed At", "Contact"], pageSize: 100, maxPages: 2000 }),
       listTolerant(airtable, "Call Log", { fields: ["Called At", "Owner", "Contact", "Next Call Date"], pageSize: 100, maxPages: 2000 }),
       /* The Kylas dialler's calls — "called" includes them (below-activation.mjs). */
@@ -2740,6 +2740,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
         ...(enrich.get(String(co.id)) || kb ? { enrich: kb ? { ...(enrich.get(String(co.id)) || {}), bp: kb } : enrich.get(String(co.id)) } : {}),
         ...withLastCall(co, lastCalls),
         nextCall: prog.get(String(co.id))?.nextCall || null,
+        nextCallTime: prog.get(String(co.id))?.nextCallTime || "",
         /* ACCOUNT PIPELINE STAGE, CALCULATED — Ayush, 2026-09-29: "it is a
            calculated field, not a reference field ... agar mere pass ek
            account hai usme 3 contact hai, har ek contact ke alag alag

@@ -208,7 +208,9 @@
       if (seed && seed.acctN != null && co.acctN == null) co.acctN = seed.acctN;
       if (seed?.kpi && !co.kpi) co.kpi = seed.kpi;
       if (seed?.offsite?.length) co.offsite = [...new Set([...co.offsite, ...seed.offsite])];
-      if (seed?.nextCall && (!co.nextCall || seed.nextCall < co.nextCall)) co.nextCall = seed.nextCall;
+      if (seed?.nextCall && (!co.nextCall || seed.nextCall < co.nextCall)) {
+        co.nextCall = seed.nextCall; co.nextCallTime = seed.nextCallTime || "";
+      }
       /* The enrichment block from the server, whole — it is one object per
          company and there is nothing here to merge. Left off entirely for a
          company the Company Database has no row for, which is what the
@@ -229,7 +231,7 @@
                            createdBy: co.createdBy, updatedBy: co.updatedBy,
                            ownerId: co.ownerId, batch: co.batch, health: co.accountHealth,
                            lastCalledAt: co.lastCalledAt, kylasStage: co.stage, kpi: co.kpi,
-                           offsite: co.offsite, nextCall: co.nextCall, enrich: co.enrich,
+                           offsite: co.offsite, nextCall: co.nextCall, nextCallTime: co.nextCallTime, enrich: co.enrich,
                            /* The server's calculated account stage — the furthest
                               rung any of this account's contacts has reached. */
                            acctStage: co.acctStage,
@@ -254,7 +256,9 @@
            saved yet — the same rule the server applies (offsite.js). */
         for (const q of global.Offsite ? Offsite.offsiteOf(c) : []) if (!co.offsite.includes(q)) co.offsite.push(q);
         /* A call-back set on this browser's card, possibly not saved yet. */
-        if (c.nextCallDate && (!co.nextCall || c.nextCallDate < co.nextCall)) co.nextCall = c.nextCallDate;
+        if (c.nextCallDate && (!co.nextCall || c.nextCallDate < co.nextCall)) {
+          co.nextCall = c.nextCallDate; co.nextCallTime = c.nextCallTime || "";
+        }
         if (!co.owner && c.owner) co.owner = c.owner;
 
         /* The company sits at the best rung any of its POCs has reached. */
@@ -3806,12 +3810,21 @@
   const nextIn = (co) => (co.nextCall ? global.Day.daysUntil(co.nextCall) : null);
   const nextOf = (co) => { const d = nextIn(co); return d === null ? "none" : d < 0 ? "overdue" : d === 0 ? "today" : d <= 7 ? "week" : "later"; };
   const NEXT_CHIPS = { overdue: "Overdue", today: "Due today", week: "Next 7 days", later: "Later", none: "No call-back" };
+  /* THE SLOT, NOT ONLY THE DAY. "Overdue 39d" says how late it is and not
+     when it was for, and a call booked for 16:00 is a different promise from
+     one booked for 09:00 (Ayush, 2026-11-24). The countdown still leads —
+     that is what triages the list — and the clock time follows it. Blank when
+     nobody set one, because "00:00" is a time nobody chose. */
+  const hhmm = (t) => (/^\d{1,2}:\d{2}/.test(String(t || "")) ? String(t).slice(0, 5) : "");
+  const atTime = (co) => { const t = hhmm(co.nextCallTime); return t ? ` · ${t}` : ""; };
+  const dayText = (iso) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
   const nextText = (co) => {
     const d = nextIn(co);
     if (d === null) return "—";
-    if (d < 0) return `Overdue ${-d}d`;
-    if (d === 0) return "Today";
-    return new Date(co.nextCall + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+    if (d < 0) return `Overdue ${-d}d · ${dayText(co.nextCall)}${atTime(co)}`;
+    if (d === 0) return `Today${atTime(co) || ""}`;
+    return dayText(co.nextCall) + atTime(co);
   };
 
   /* ── the columns ────────────────────────────────────────────────────
@@ -4189,14 +4202,24 @@
   /* The two table filters the block sets ("View all"), as a predicate. */
   const todayMatch = (c) => {
     if (!ACC.todaySet) return true;
-    if (focusOf(c) !== "focus") return false;
     const late = ["overdue", "today"].includes(nextOf(c));
-    return ACC.todaySet === "call" ? late : (!late && c.open?.need === "right");
+    /* "call" follows the card's own population (every account that owes a
+       call); "poc" is still the ★ Focus plan. */
+    if (ACC.todaySet === "call") return late;
+    return focusOf(c) === "focus" && !late && c.open?.need === "right";
   };
+  /* WHAT I OWE, NOT WHAT I STARRED. The call list was filtered to ★ Focus,
+     so the hero read "0 calls to make today" above a table showing dozens
+     Overdue — the card looked frozen because its population was empty, not
+     because the numbers were stale (Ayush, 2026-11-24). The needs beneath it
+     always counted every open account; now the call list agrees with them.
+     ★ Focus is not lost: it sorts first inside the list, and the Right-POC
+     tab beside it is still the Focus plan. */
   function todayPlan(all) {
     const focus = all.filter((c) => focusOf(c) === "focus");
-    const call = focus.filter((c) => ["overdue", "today"].includes(nextOf(c)))
-      .sort((a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0));
+    const call = all.filter((c) => ["overdue", "today"].includes(nextOf(c)))
+      .sort((a, b) => (focusOf(b) === "focus") - (focusOf(a) === "focus")
+        || (nextIn(a) ?? 0) - (nextIn(b) ?? 0));
     const inCall = new Set(call.map((c) => c.id));
     const poc = focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id))
       .sort((a, b) => String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")));
@@ -4206,7 +4229,7 @@
       else if (PREV_NEED.get(id) === "right" && now !== "right") MOVED.set(id, now);
     }
     const moved = focus.filter((c) => MOVED.has(String(c.id)) && !inCall.has(c.id));
-    const done = focus.filter((c) => isToday(c.open?.lastCallAt || c.lastCalledAt) && !inCall.has(c.id)).length;
+    const done = all.filter((c) => isToday(c.open?.lastCallAt || c.lastCalledAt) && !inCall.has(c.id)).length;
     const open = all.filter((c) => c.open);
     const need = (k) => open.filter((c) => c.open.need === k).length;
     return { call, poc, moved, done, open: open.length,
@@ -4601,7 +4624,9 @@
       const owners = [...new Set(TD.rows.map((c) => c.owner).filter(Boolean))].sort();
       const when = (c) => {
         const d = global.Day.daysUntil(c.nextCallDate);
-        return d == null ? "—" : d < 0 ? `Overdue ${-d}d` : d === 0 ? "Today" : `In ${d}d`;
+        const t = atTime(c);
+        return d == null ? "—" : d < 0 ? `Overdue ${-d}d · ${dayText(c.nextCallDate)}${t}`
+             : d === 0 ? `Today${t}` : `In ${d}d${t}`;
       };
       const row = (c) => {
         const tel = (c.phones || [])[0];
@@ -5007,7 +5032,8 @@
       get: (c) => c.lastCalledAt || "",
       cell: (c) => `<i class="sw f-${conFresh(c)}"></i> ${c.lastCalledAt ? esc(since(c.lastCalledAt)) : "never"}` },
     { k: "next", label: "Next call", w: ".75fr", on: true, num: true,
-      get: (c) => c.nextCallDate || "", cell: (c) => esc(c.nextCallDate || "—") },
+      get: (c) => c.nextCallDate || "",
+      cell: (c) => esc(c.nextCallDate ? dayText(c.nextCallDate) + atTime({ nextCallTime: c.nextCallTime }) : "—") },
     /* WHERE THIS PERSON IS ON THE WHATSAPP LADDER. Read from D1 —
        wa_sequences, which the webhook already maintains — so the column and
        the composer's gating cannot disagree, and Airtable gains no rows for

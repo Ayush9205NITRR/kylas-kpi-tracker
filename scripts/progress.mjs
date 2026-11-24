@@ -44,7 +44,7 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
   const byCo = new Map();
   const co = (kid) => {
     if (!byCo.has(kid)) byCo.set(kid, { rung: 0, stage: "", sqlAt: null, done: false, contacts: 0,
-                                        exited: 0, lastCallAt: null, firstCallAt: null, calls: 0, nextCall: null,
+                                        exited: 0, lastCallAt: null, firstCallAt: null, calls: 0, nextCall: null, nextCallTime: "",
                                         dialCalls: 0, dialFirstAt: null, dialLastAt: null, right: false, discovery: false });
     return byCo.get(kid);
   };
@@ -81,7 +81,13 @@ export function accountProgress({ companies = [], contacts = [], transitions = [
     if (QUALIFIED.includes(stage)) p.done = true;
     /* A call-back only counts while the contact is still in play. */
     const next = at(f["Next Call Date"]);
-    if (next && !EXIT_STAGES.includes(stage) && (!p.nextCall || next < p.nextCall)) p.nextCall = next;
+    /* THE TIME RIDES WITH THE DATE IT BELONGS TO. Assigned inside the same
+       branch, never beside it: the earliest call-back wins, and a time left
+       over from a later contact would read as that contact's slot on this
+       one's date (Ayush, 2026-11-24 — "exact time mein dikhao"). */
+    if (next && !EXIT_STAGES.includes(stage) && (!p.nextCall || next < p.nextCall)) {
+      p.nextCall = next; p.nextCallTime = String(f["Next Call Time"] || "");
+    }
   }
 
   for (const r of transitions) {
@@ -162,7 +168,7 @@ export function focusStanding(entry, p, today, tzMin = IST_MIN) {
   const pickedAt = entry?.setAt || null;
   const daysOpen = pickedAt ? between(pickedAt, t, tzMin) : null;
   const base = { daysOpen, stage: p?.stage || "", rung: p?.rung || 0, lastCallAt: p?.lastCallAt || null,
-                 nextCall: p?.nextCall || null, sqlAt: p?.sqlAt || null };
+                 nextCall: p?.nextCall || null, nextCallTime: p?.nextCallTime || "", sqlAt: p?.sqlAt || null };
   if (p?.done) return { ...base, state: "done",
                         tatDays: pickedAt && p.sqlAt ? Math.max(0, between(pickedAt, p.sqlAt, tzMin)) : null };
   if (p?.closed) return { ...base, state: "closed" };
