@@ -2559,6 +2559,9 @@
       global.openCompanyFromView?.(b.dataset.today, b.querySelector(".n")?.textContent || "")));
     host.querySelectorAll(".tdSeg [data-tab]").forEach((b) => b.addEventListener("click", () => { ACC.todayTab = b.dataset.tab; dashboard(host); }));
     const toAccounts = () => { ACC.limit = 100; global.showConsoleView?.("companies"); };
+    host.querySelector("#tdOwn")?.addEventListener("change", (e) => { ACC.todayOwner = e.target.value; dashboard(host); });
+    host.querySelector("#tdSort")?.addEventListener("change", (e) => { ACC.todaySort = e.target.value; dashboard(host); });
+    host.querySelector("#tdClr")?.addEventListener("click", () => { ACC.todayOwner = ""; dashboard(host); });
     host.querySelector("#tdAll")?.addEventListener("click", () => { ACC.todaySet = ACC.todayTab === "poc" ? "poc" : "call"; ACC.openNeed = ""; toAccounts(); });
     host.querySelectorAll(".tdNeed").forEach((b) => b.addEventListener("click", () => { ACC.openNeed = b.dataset.open; ACC.todaySet = ""; toAccounts(); }));
     wireScore(host, () => dashboard(host), toAccounts);
@@ -2780,7 +2783,7 @@
                 ccols: new Set(), ccolsOpen: false,
                 /* The Work today card on the Accounts view: a ribbon by
                    default, the full card when asked for. Remembered. */
-                todayBig: false,
+                todayBig: false, todayOwner: "", todaySort: "",
                 /* The filter drawer. `null` is "never touched", which lets it
                    open itself when something inside it is on; once somebody
                    clicks it the answer is theirs. */
@@ -4202,6 +4205,8 @@
   /* The two table filters the block sets ("View all"), as a predicate. */
   const todayMatch = (c) => {
     if (!ACC.todaySet) return true;
+    /* The card's owner filter travels with the list it opens. */
+    if (ACC.todayOwner && String(c.owner || "") !== ACC.todayOwner) return false;
     const late = ["overdue", "today"].includes(nextOf(c));
     /* "call" follows the card's own population (every account that owes a
        call); "poc" is still the ★ Focus plan. */
@@ -4215,14 +4220,52 @@
      always counted every open account; now the call list agrees with them.
      ★ Focus is not lost: it sorts first inside the list, and the Right-POC
      tab beside it is still the Focus plan. */
-  function todayPlan(all) {
+  /* SORT AND FILTER ON BOTH LISTS (Ayush, 2026-11-24). An admin on "Everyone"
+     was handed one undifferentiated pile: the owner was printed on each row
+     and there was no way to ask for one person's, and the order was fixed.
+
+     The owner filter narrows the WHOLE card — the hero count, the progress
+     bar and the three need-lines with it — because a card that says "12 to
+     go" over a list showing only Sejal's four is the same two-populations
+     bug this card just had. The sort moves only the list it belongs to. */
+  const TD_SORTS = {
+    call: [["due", "Soonest first", (a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0)],
+           ["late", "Most overdue", (a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0)],
+           ["cold", "Coldest first", (a, b) => String(a.lastCalledAt || "").localeCompare(String(b.lastCalledAt || ""))],
+           ["owner", "Owner", (a, b) => String(a.owner || "").localeCompare(String(b.owner || ""))],
+           ["name", "Account name", (a, b) => String(a.name || "").localeCompare(String(b.name || ""))]],
+    poc: [["old", "Oldest tapped", (a, b) => String(a.open?.firstCallAt || "").localeCompare(String(b.open?.firstCallAt || ""))],
+          ["calls", "Most calls", (a, b) => (b.open?.calls || 0) - (a.open?.calls || 0)],
+          ["cold", "Coldest first", (a, b) => String(a.open?.lastCallAt || "").localeCompare(String(b.open?.lastCallAt || ""))],
+          ["owner", "Owner", (a, b) => String(a.owner || "").localeCompare(String(b.owner || ""))],
+          ["name", "Account name", (a, b) => String(a.name || "").localeCompare(String(b.name || ""))]],
+  };
+  const tdSortKey = (tab) => {
+    const keys = TD_SORTS[tab].map(([k]) => k);
+    return keys.includes(ACC.todaySort) ? ACC.todaySort : keys[0];
+  };
+  /* ★ Focus still floats to the top of the default order, and only there —
+     once somebody has asked for "coldest first" it is the sort they asked
+     for, not the sort plus a preference of ours. */
+  const tdArrange = (rows, tab) => {
+    const key = tdSortKey(tab);
+    const cmp = (TD_SORTS[tab].find(([k]) => k === key) || TD_SORTS[tab][0])[2];
+    const out = rows.slice().sort(cmp);
+    if (key === "late") out.reverse();
+    return key === TD_SORTS[tab][0][0]
+      ? out.sort((a, b) => (focusOf(b) === "focus") - (focusOf(a) === "focus") || cmp(a, b))
+      : out;
+  };
+  const tdOwners = (all) => [...new Set(all.map((c) => String(c.owner || "")).filter(Boolean))].sort();
+
+  function todayPlan(all0) {
+    /* The owner filter is only ever offered to an admin looking at more than
+       one person, so for everybody else this is a no-op. */
+    const all = ACC.todayOwner ? all0.filter((c) => String(c.owner || "") === ACC.todayOwner) : all0;
     const focus = all.filter((c) => focusOf(c) === "focus");
-    const call = all.filter((c) => ["overdue", "today"].includes(nextOf(c)))
-      .sort((a, b) => (focusOf(b) === "focus") - (focusOf(a) === "focus")
-        || (nextIn(a) ?? 0) - (nextIn(b) ?? 0));
+    const call = tdArrange(all.filter((c) => ["overdue", "today"].includes(nextOf(c))), "call");
     const inCall = new Set(call.map((c) => c.id));
-    const poc = focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id))
-      .sort((a, b) => String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")));
+    const poc = tdArrange(focus.filter((c) => c.open?.need === "right" && !inCall.has(c.id)), "poc");
     for (const c of focus) {
       const id = String(c.id), now = c.open?.need || "done";
       if (!PREV_NEED.has(id)) PREV_NEED.set(id, now);
@@ -4232,13 +4275,36 @@
     const done = all.filter((c) => isToday(c.open?.lastCallAt || c.lastCalledAt) && !inCall.has(c.id)).length;
     const open = all.filter((c) => c.open);
     const need = (k) => open.filter((c) => c.open.need === k).length;
-    return { call, poc, moved, done, open: open.length,
+    return { call, poc, moved, done, open: open.length, owners: tdOwners(all0),
              needs: { right: need("right"), discovery: need("discovery"), sql: need("sql") } };
   }
   const tdRow = (c, tag, cls, meta) => `<button type="button" class="tdRow${cls === "ok" ? " ok" : ""}" data-today="${esc(c.id)}">
       <span class="tdAv">${esc(String(c.name || "?").trim().charAt(0).toUpperCase())}</span>
       <span class="tdMid"><span class="n">${esc(c.name)}</span><span class="m">${esc(meta)}</span></span>
       <span class="tdTag ${cls}">${esc(tag)}</span><span class="tdArr" aria-hidden="true">›</span></button>`;
+  const tdSortLabel = (tab) =>
+    (TD_SORTS[tab].find(([k]) => k === tdSortKey(tab)) || TD_SORTS[tab][0])[1];
+  /* One row of two plain selects. No new tokens: the card already carries
+     .tdFoot's meta type, and a select is the control the Accounts header and
+     the Today view both use for exactly this. The owner picker appears only
+     where it can do something — an admin with more than one owner in the
+     list; the sort is always there, because everybody re-orders. */
+  function tdTools(P, tab) {
+    const opts = TD_SORTS[tab].map(([k, label]) =>
+      `<option value="${esc(k)}"${tdSortKey(tab) === k ? " selected" : ""}>${esc(label)}</option>`).join("");
+    const canOwn = API.isAdmin && P.owners.length > 1;
+    return `<div class="tdTools">
+      ${canOwn ? `<label class="tdTool"><span>Owner</span>
+        <select id="tdOwn" aria-label="Filter this list by owner">
+          <option value=""${ACC.todayOwner ? "" : " selected"}>Everyone · ${P.owners.length}</option>
+          ${P.owners.map((o) => `<option value="${esc(o)}"${ACC.todayOwner === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
+        </select></label>` : ""}
+      <label class="tdTool"><span>Sort</span>
+        <select id="tdSort" aria-label="Sort this list">${opts}</select></label>
+      ${ACC.todayOwner ? `<button type="button" class="linkbtn" id="tdClr">Clear</button>` : ""}
+    </div>`;
+  }
+
   function todayCard(all, { compact = false } = {}) {
     const P = todayPlan(all);
     if (!P.call.length && !P.poc.length && !P.open && !P.moved.length) return "";
@@ -4302,8 +4368,11 @@
           <button type="button" class="${tab === "call" ? "on" : ""}" data-tab="call">Call today<em>${P.call.length}</em></button>
           <button type="button" class="${tab === "poc" ? "on" : ""}" data-tab="poc">No Right POC yet<em>${P.poc.length}</em></button>
         </div>
-        ${rows.length ? rows.join("") : `<p class="tdEmpty">${tab === "call" ? "No call-back due today on your ★ Focus list." : "Every ★ Focus account you called has a Right POC."}</p>`}
-        ${list.length ? `<div class="tdFoot"><span>Showing ${Math.min(TODAY_TOP, list.length)} of ${list.length} · ${tab === "call" ? "late ones first" : "oldest first"}</span>
+        ${tdTools(P, tab)}
+        ${rows.length ? rows.join("") : `<p class="tdEmpty">${ACC.todayOwner
+            ? `Nothing here for ${esc(firstName(ACC.todayOwner))}.`
+            : tab === "call" ? "No call-back due today." : "Every ★ Focus account you called has a Right POC."}</p>`}
+        ${list.length ? `<div class="tdFoot"><span>Showing ${Math.min(TODAY_TOP, list.length)} of ${list.length} · ${esc(tdSortLabel(tab).toLowerCase())}</span>
           <button type="button" class="linkbtn" id="tdAll">View all ${list.length} in table →</button></div>` : ""}
       </div></div>`;
   }
@@ -5290,8 +5359,13 @@
       || (a.open && b.open ? OPEN_ORDER[a.open.need] - OPEN_ORDER[b.open.need]
            || String(a.open.firstCallAt || "").localeCompare(String(b.open.firstCallAt || "")) : 0);
     /* "View all" from Work today: the list in the block's own order. */
-    const todaySort = ACC.todaySet === "call" ? (a, b) => (nextIn(a) ?? 0) - (nextIn(b) ?? 0)
-      : ACC.todaySet === "poc" ? (a, b) => String(a.open?.firstCallAt || "").localeCompare(String(b.open?.firstCallAt || "")) : null;
+    /* The same comparator the card used, so "View all" opens the list it
+       was showing rather than a differently-ordered one. */
+    const todaySort = ACC.todaySet === "call" || ACC.todaySet === "poc"
+      ? (a, b) => { const t = ACC.todaySet, k = tdSortKey(t);
+          const cmp = (TD_SORTS[t].find(([x]) => x === k) || TD_SORTS[t][0])[2];
+          return k === "late" ? -cmp(a, b) : cmp(a, b); }
+      : null;
     const rows = all.filter((c) => accMatch(c)).sort(todaySort || ((a, b) => pin(a, b) || cmp(a, b)));
     EXPLORER_ROWS = rows;
     const any = ACC.stages.size || ACC.owners.size || srcActive() || ACC.kpis.size || ACC.fresh.size
@@ -5666,7 +5740,8 @@
     }
     if (FILTERS.calledSince) add("calledSince", "", `Called since ${FILTERS.calledSince}`);
     if (ACC.idSet) add("ids", "", ACC.idSet.label);
-    if (ACC.todaySet) add("today", "", `Work today: ${ACC.todaySet === "call" ? "Call today" : "No Right POC yet"}`);
+    if (ACC.todaySet) add("today", "", `Work today: ${ACC.todaySet === "call" ? "Call today" : "No Right POC yet"}${
+      ACC.todayOwner ? ` · ${firstName(ACC.todayOwner)}` : ""}`);
     if (ACC.openNeed && ACC.openNeed !== "all") add("open", "", `Open: ${{ right: "Need Right POC", discovery: "Need discovery call", sql: "Need SQL" }[ACC.openNeed]}`);
 
     if (!chips.length) return "";
@@ -6466,6 +6541,9 @@
       ACC.todayTab = b.dataset.tab; if (ACC.todaySet) ACC.todaySet = b.dataset.tab; redraw(); }));
     const toTable = () => keepPlace(redraw).then(() =>
       host.querySelector(".card.explorer")?.scrollIntoView({ block: "start", behavior: "smooth" })).catch(() => {});
+    on("tdOwn", "change", (e) => { ACC.todayOwner = e.target.value; ACC.limit = 100; redraw(); });
+    on("tdSort", "change", (e) => { ACC.todaySort = e.target.value; redraw(); });
+    on("tdClr", "click", () => { ACC.todayOwner = ""; redraw(); });
     on("tdAll", "click", () => { ACC.todaySet = ACC.todayTab === "poc" ? "poc" : "call"; ACC.openNeed = ""; ACC.limit = 100; toTable(); });
     host.querySelectorAll(".tdNeed").forEach((b) => b.addEventListener("click", () => {
       ACC.openNeed = ACC.openNeed === b.dataset.open ? "" : b.dataset.open; ACC.todaySet = ""; ACC.limit = 100;

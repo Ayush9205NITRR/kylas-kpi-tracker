@@ -1389,6 +1389,17 @@ a.gbtn{text-decoration:none;display:inline-flex;align-items:center}
 .tdTag.now{background:var(--blueSoft);color:var(--blue)}
 .tdTag.ok{background:var(--panel);color:var(--f-fresh)}
 .tdArr{color:var(--text3);font-size:var(--t-sec)}
+/* The Today card's own sort/owner row. Tokens only: .tdFoot's meta type and
+   the same bordered select the Accounts header uses. It sits under the tab
+   strip so the control is beside the list it reorders, never above the tabs
+   where it would read as applying to both at once. */
+.tdTools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px 2px;font-size:var(--t-meta);color:var(--text3)}
+.tdTool{display:inline-flex;align-items:center;gap:6px}
+.tdTool>span{text-transform:uppercase;letter-spacing:.04em}
+.tdTool select{font:inherit;font-family:var(--f);font-size:var(--t-meta);color:var(--text);
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:3px 6px;max-width:16ch}
+.tdTool select:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.tdTools .linkbtn{margin-left:auto;color:var(--blue)}
 .tdFoot{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 10px;font-size:var(--t-meta);color:var(--text2)}
 .tdFoot .linkbtn{font-weight:var(--w-strong);color:var(--blue)}
 .tdEmpty{margin:10px 14px 14px;color:var(--text2);font-size:var(--t-label)}
