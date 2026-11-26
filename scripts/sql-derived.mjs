@@ -37,6 +37,14 @@ import { LADDER, MILESTONE } from "./stages.mjs";
    timestamp half of the score. */
 const SECONDS = (col) => `CAST(strftime('%s', ${col}) AS INTEGER)`;
 const RANK_SCALE = 10000000000;
+/* WORKED STARTS AT RUNG 2. YET_TO_BE_MINED is rung 1 (stages.mjs), so a score
+   of 1 * RANK_SCALE means "nobody has touched this yet" — and `reached` used to
+   test `> 0`, which counted an account nobody had ever called as worked.
+   docs/kpi-spec.md §1 defines Worked as called in the period OR a stage
+   transition; an unmined contact with no calls has had neither. Found by the
+   Twenty/Postgres migration, 2026-11-26, where the same view read 13,314
+   companies reached against 8,977 actually called or progressed. */
+const REACHED_FLOOR = 2 * RANK_SCALE;
 
 /* IF(rank = 1, "01 · …", IF(rank = 2, …)) — generated, so a stage added to
    docs/stages.json appears here without anybody editing SQL. */
@@ -177,8 +185,9 @@ SELECT
   COALESCE(ct.right_poc_contacts, '')         AS "right_poc_contacts",
   COALESCE(ct.discovery_contacts, '')         AS "discovery_contacts",
   -- a stage is evidence of a call too: the live formula is
-  -- OR({Last Call At}, {KPI Stage At}), and KPI Stage At is set iff the score is
-  CASE WHEN ct.last_call_at IS NOT NULL OR COALESCE(ct.kpi_score, 0) > 0 THEN 1 ELSE 0 END AS "reached",
+  -- OR({Last Call At}, {KPI Stage At}), and KPI Stage At is set iff the score is.
+  -- The floor is rung 2, not rung 1 — see REACHED_FLOOR.
+  CASE WHEN ct.last_call_at IS NOT NULL OR COALESCE(ct.kpi_score, 0) >= ${REACHED_FLOOR} THEN 1 ELSE 0 END AS "reached",
   -- reads First Picked At, as the live base does (Ever Picked's MAX over a
   -- checkbox reads blank on Airtable — see schema.mjs)
   CASE WHEN ct.first_picked_at IS NOT NULL THEN 1 ELSE 0 END        AS "phone_picked",
@@ -272,7 +281,7 @@ SELECT
   COALESCE(${ofCo("", 'COUNT(c."name")')}, 0) AS "contact_count",
   COALESCE(${rpN}, '') AS "right_poc_contacts",
   COALESCE(${dN}, '') AS "discovery_contacts",
-  CASE WHEN ${calls('MAX(x."called_at")')} IS NOT NULL OR ${coScore} > 0 THEN 1 ELSE 0 END AS "reached",
+  CASE WHEN ${calls('MAX(x."called_at")')} IS NOT NULL OR ${coScore} >= ${REACHED_FLOOR} THEN 1 ELSE 0 END AS "reached",
   CASE WHEN ${ofCo("", 'MIN(c."first_picked_at")')} IS NOT NULL THEN 1 ELSE 0 END AS "phone_picked",
   CASE WHEN COALESCE(${rpN}, '') <> '' THEN 1 ELSE 0 END AS "right_poc",
   CASE WHEN COALESCE(${dN}, '') <> '' THEN 1 ELSE 0 END AS "successful_discovery",
