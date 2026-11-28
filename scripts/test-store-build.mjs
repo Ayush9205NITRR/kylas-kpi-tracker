@@ -137,7 +137,9 @@ const profile = mkdtempSync(join(tmpdir(), "storeprof-"));
 process.on("exit", () => { try { rmSync(profile, { recursive: true, force: true }); } catch { /* gone */ } });
 const ctx = await chromium.launchPersistentContext(profile, {
   headless: false,
-  executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+  /* Was pinned to chromium-1194, a browser build one machine happened to have;
+     the Playwright imported above finds its own. CHROME_PATH overrides. */
+  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
   args: [`--disable-extensions-except=${dir}`, `--load-extension=${dir}`, "--no-sandbox"],
 });
 try {
