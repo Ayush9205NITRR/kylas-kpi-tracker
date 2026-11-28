@@ -501,6 +501,16 @@ const synced = await get(await coldWorker(25), '/companies?owner=all');
 check('once the sync has run, the company list comes from the copy',
       synced.body.source === 'airtable' && (await reads()) === r0,
       `source=${synced.body.source}, ${(await reads()) - r0} reads`);
+/* 1.97.0 — the copy is the LIVE path, and it carried none of Kylas' audit
+   trail: "Last updated at" filtered a stale value and "Last updated by" had
+   nothing to offer (Ayush, 2026-11-28). They now ride across from the crawl. */
+{
+  const seats = (synced.body.companies || []).find((c) => String(c.id) === '1776620') || {};
+  check('a copied row carries Kylas\' Last updated by', seats.updatedBy === 'Priya Deshmukh', `“${seats.updatedBy}”`);
+  check('...and Created by', seats.createdBy === 'Enout Super Admin', `“${seats.createdBy}”`);
+  check('...and Kylas\' own Last updated at, not the sync\'s', String(seats.updatedAt || '').startsWith('2026-10-01'),
+        `“${seats.updatedAt}”`);
+}
 
 /* ── 9 · saves answered before Kylas and Airtable have them ──────────── */
 /* A save waits its turn at two rate-limited APIs — about 3.5 s live. A

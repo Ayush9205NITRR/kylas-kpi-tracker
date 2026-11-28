@@ -171,7 +171,7 @@ const STAGE_ID = {
 ${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.id},`).join("\n")}
 };
 
-/* 24 is furthest along. callOrder = 25 - rung, so one list serves both. */
+/* 26 is furthest along. callOrder = 27 - rung, so one list serves both. */
 const STAGE_RUNG = {
 ${byCall.map((s) => `  ${pad(key(s.code) + ":", 46)} ${s.rung},`).join("\n")}
 };

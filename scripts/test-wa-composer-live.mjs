@@ -19,6 +19,7 @@
  *     `queued` alone reads a working supersede as a failed queue.
  */
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { WA_DEFAULTS } from './wa-jobs.mjs';
 const EXT='/tmp/claude-0/exttest',HOST='http://127.0.0.1:8778',BASE='http://127.0.0.1:8787';
 const W=(ms)=>new Promise(r=>setTimeout(r,ms));
 let pass=0,fail=0;const ok=(w,c,d='')=>{c?pass++:fail++;console.log(`  ${c?'PASS':'FAIL'}  ${w}${c||!d?'':'  — '+d}`);};
@@ -76,12 +77,19 @@ await f().locator('[data-warung="1"]').click();await W(2500);
 await f().locator('#waAll').click();await W(1200);
 
 console.log('\n1c · the brakes');
-ok('the anti-ban caps are on screen', await f().locator('[data-waset="dailyCapPerSeat"]').count()===1);
-ok('...defaulting to 80 a day per phone',
-   (await f().locator('[data-waset="dailyCapPerSeat"]').inputValue())==='80');
+/* Since 1.94.0 the caps live in the Admin controls drawer, behind a one-line
+   summary — test-wa-admin-live.mjs checks the drawer itself. The default is
+   read from wa-jobs.mjs, not retyped: it was 80 here after the code said 60. */
+ok('the anti-ban limit is summarised on screen', /Cap \d+\/day/.test(await f().locator('.wsSum').innerText().catch(()=>'')));
+if (!(await f().locator('.wsDrawer').count())) { await f().locator('#waAdmin').click(); await W(1200); }
+ok('the anti-ban caps are in the admin drawer', await f().locator('[data-waset="dailyCapPerSeat"]').count()===1);
+ok(`...defaulting to ${WA_DEFAULTS.dailyCapPerSeat} a day per phone`,
+   (await f().locator('[data-waset="dailyCapPerSeat"]').inputValue())===String(WA_DEFAULTS.dailyCapPerSeat),
+   await f().locator('[data-waset="dailyCapPerSeat"]').inputValue());
 ok('...with cooldown and max steps', await f().locator('[data-waset="cooldownHours"]').count()===1
    && await f().locator('[data-waset="maxCnc"]').count()===1);
 ok('and a kill switch', await f().locator('#waKill').count()===1);
+if (await f().locator('.wsDrawer').count()) { await f().locator('#waAdminX').click(); await W(800); }
 
 await f().locator('#waOn').click();await W(1500);
 
@@ -109,7 +117,9 @@ ok('a custom {{var}} is detected and given a mapper row',
    await f().locator('.waMap.custom .waMapR').count()===1,
    `${await f().locator('.waMap.custom .waMapR').count()}`);
 await f().locator('.waMap.custom [data-wafb]').fill('Goa');await f().locator('.waMap.custom [data-wafb]').dispatchEvent('change');await W(1000);
-ok('template visibility can be set', await f().locator('#waVis').count()===1);
+/* 1.92.0 made the copy session-only: "Saving, renaming and deleting playbooks
+   is gone". So there is no visibility control to set, and there must not be. */
+ok('template edits are session-only — no save/visibility control', await f().locator('#waVis').count()===0);
 await f().locator('#waOn').click();await W(3500);
 
 console.log('\n3 · check and queue');
@@ -132,10 +142,12 @@ if(await f().locator('#waNext').isEnabled()){
      (await f().locator('.waPrevH').innerText())!==head,
      (await f().locator('.waPrevH').innerText()).replace(/\n/g,' '));
 }
-await f().locator('#waSeat').selectOption('seat-3');await W(400);
+await f().locator('#waSeat').selectOption('bd-exec-3');await W(400);
 const beforeQ=await (await fetch(BASE+'/wa/status')).json();
 const go=await f().locator('#waGo').innerText();
-ok('the queue button counts them', /Queue WhatsApp \(\d+\)/.test(go), go);
+/* The count is the point; the words changed in 1.92.0 ("Queue WhatsApp" ->
+   "Queue & send at scale"). */
+ok('the queue button counts them', /^Queue\b.*\(\d+\)$/.test(go.trim()), go);
 await f().locator('#waGo').click();await W(4000);
 const after=await (await fetch(BASE+'/wa/status')).json();
 /* TOTAL jobs, not `queued`. Re-queueing the same contact cancels what was
@@ -151,8 +163,8 @@ ok('the queue grew by the number shown on the button', grew>0, `+${grew}`);
    seat and the body are only checked when there is something due; the unit
    suite pins them against a fixed instant either way. */
 const st=await (await fetch(BASE+'/wa/drain',{method:'POST',headers:{'content-type':'application/json'},
-  body:JSON.stringify({seat:'seat-3',limit:50})})).json();
-const mine=(st.jobs||[]).filter(j=>j.seat==='seat-3');
+  body:JSON.stringify({seat:'bd-exec-3',limit:50})})).json();
+const mine=(st.jobs||[]).filter(j=>j.seat==='bd-exec-3');
 if(mine.length){
   ok('jobs are queued under the chosen seat', true, `${mine.length}`);
   ok('...each carrying the exact personalised text',

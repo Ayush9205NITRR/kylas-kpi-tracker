@@ -9,7 +9,9 @@ WITH ev AS (
   SELECT contact_id,
          MAX("has_any_signal") AS has_signal,
          MAX("is_complete")    AS has_complete_row
-  FROM "event_rows" WHERE contact_id IS NOT NULL GROUP BY contact_id
+  -- a REMOVED row counts for nothing (schema: "A marked row counts for
+  -- nothing but is never destroyed") — until 1.97.0 it still counted here
+  FROM "event_rows" WHERE contact_id IS NOT NULL AND "removed_at" IS NULL GROUP BY contact_id
 ),
 cl AS (
   SELECT contact_id,
@@ -141,8 +143,8 @@ SELECT
   c."name",
   c."company_id",
   (SELECT co."kylas_company_id" FROM "companies" co WHERE co."id" = c."company_id") AS "company_kylas_id",
-  COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) AS "has_signal",
-  COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) AS "has_complete_row",
+  COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) AS "has_signal",
+  COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) AS "has_complete_row",
   COALESCE((SELECT COUNT("called_at") FROM "call_log" x WHERE x."contact_id" = c."id"), 0) AS "call_count",
   (SELECT MAX("called_at") FROM "call_log" x WHERE x."contact_id" = c."id") AS "last_call_at",
   (SELECT MIN("called_at") FROM "call_log" x WHERE x."contact_id" = c."id") AS "first_call_at",
@@ -153,10 +155,10 @@ SELECT
        ELSE 0 END AS "avg_call_seconds",
   (SELECT MAX("changed_at") FROM "stage_transitions" x WHERE x."contact_id" = c."id") AS "last_stage_change_at",
   (SELECT MIN("changed_at") FROM "stage_transitions" x WHERE x."contact_id" = c."id") AS "first_stage_change_at",
-  CASE WHEN (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_right_poc" = 1) THEN 1 ELSE 0 END AS "is_right_poc",
-  CASE WHEN (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_right_poc" = 1) THEN c."name" ELSE '' END AS "right_poc_name",
-  CASE WHEN (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_discovery" = 1) THEN 1 ELSE 0 END AS "is_discovery",
-  CASE WHEN (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_discovery" = 1) THEN c."name" ELSE '' END AS "discovery_name",
+  CASE WHEN (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_right_poc" = 1) THEN 1 ELSE 0 END AS "is_right_poc",
+  CASE WHEN (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_right_poc" = 1) THEN c."name" ELSE '' END AS "right_poc_name",
+  CASE WHEN (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_discovery" = 1) THEN 1 ELSE 0 END AS "is_discovery",
+  CASE WHEN (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_discovery" = 1) THEN c."name" ELSE '' END AS "discovery_name",
   CASE WHEN COALESCE(c."kpi_rank", 0) = 2 THEN '02 · POC - Organization - Changed' WHEN COALESCE(c."kpi_rank", 0) = 3 THEN '03 · Not a Decision Maker (NDM)' WHEN COALESCE(c."kpi_rank", 0) = 4 THEN '04 · Invalid Contact' WHEN COALESCE(c."kpi_rank", 0) = 5 THEN '05 · Disqualified - Wrong POC' WHEN COALESCE(c."kpi_rank", 0) = 6 THEN '06 · CNC (Could Not Connect) - 1' WHEN COALESCE(c."kpi_rank", 0) = 7 THEN '07 · CNC (Could Not Connect) - 2' WHEN COALESCE(c."kpi_rank", 0) = 8 THEN '08 · CNC (Could Not Connect) - 3' WHEN COALESCE(c."kpi_rank", 0) = 9 THEN '09 · Connect Later' WHEN COALESCE(c."kpi_rank", 0) = 10 THEN '10 · Not Interested' WHEN COALESCE(c."kpi_rank", 0) = 11 THEN '11 · Offsite Done (Late Reachout)' WHEN COALESCE(c."kpi_rank", 0) = 12 THEN '12 · Offsite Delayed' WHEN COALESCE(c."kpi_rank", 0) = 13 THEN '13 · Activation' WHEN COALESCE(c."kpi_rank", 0) = 14 THEN '14 · MQL (Marketing Qualified Lead)' WHEN COALESCE(c."kpi_rank", 0) = 15 THEN '15 · Followup - CNC' WHEN COALESCE(c."kpi_rank", 0) = 16 THEN '16 · Follow-up (3)' WHEN COALESCE(c."kpi_rank", 0) = 17 THEN '17 · Follow-up (2)' WHEN COALESCE(c."kpi_rank", 0) = 18 THEN '18 · Follow-up (1)' WHEN COALESCE(c."kpi_rank", 0) = 19 THEN '19 · Discovery Call Booked' WHEN COALESCE(c."kpi_rank", 0) = 20 THEN '20 · Discovery Call No-Show' WHEN COALESCE(c."kpi_rank", 0) = 21 THEN '21 · Closing Loops - Low Value' WHEN COALESCE(c."kpi_rank", 0) = 22 THEN '22 · Discovery Call Done - Awaiting Client Inputs' WHEN COALESCE(c."kpi_rank", 0) = 23 THEN '23 · Active Requirement Call Booked' WHEN COALESCE(c."kpi_rank", 0) = 24 THEN '24 · Active Requirement Call No-Show' WHEN COALESCE(c."kpi_rank", 0) = 25 THEN '25 · Active Requirement Call Done – Awaiting Client Inputs' WHEN COALESCE(c."kpi_rank", 0) = 26 THEN '26 · SQL (Sales Qualified Lead)' ELSE '01 · LinkedIn Outreach Initiated' END AS "kpi_stage",
   (CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END) AS "kpi_score"
 FROM "contacts" c;
@@ -177,12 +179,12 @@ SELECT
   COALESCE((SELECT MAX(c."ever_picked") FROM "contacts" c WHERE c."company_id" = co."id"), 0) AS "ever_picked",
   COALESCE((SELECT MAX((CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END)) FROM "contacts" c WHERE c."company_id" = co."id"), 0) AS "kpi_score",
   COALESCE((SELECT COUNT(c."name") FROM "contacts" c WHERE c."company_id" = co."id"), 0) AS "contact_count",
-  COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_right_poc" = 1) ORDER BY c."id")), '') AS "right_poc_contacts",
-  COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_discovery" = 1) ORDER BY c."id")), '') AS "discovery_contacts",
+  COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_right_poc" = 1) ORDER BY c."id")), '') AS "right_poc_contacts",
+  COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_discovery" = 1) ORDER BY c."id")), '') AS "discovery_contacts",
   CASE WHEN (SELECT MAX(x."called_at") FROM "call_log" x JOIN "contacts" c ON c."id" = x."contact_id" WHERE c."company_id" = co."id") IS NOT NULL OR COALESCE((SELECT MAX((CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END)) FROM "contacts" c WHERE c."company_id" = co."id"), 0) >= 20000000000 THEN 1 ELSE 0 END AS "reached",
   CASE WHEN (SELECT MIN(c."first_picked_at") FROM "contacts" c WHERE c."company_id" = co."id") IS NOT NULL THEN 1 ELSE 0 END AS "phone_picked",
-  CASE WHEN COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_right_poc" = 1) ORDER BY c."id")), '') <> '' THEN 1 ELSE 0 END AS "right_poc",
-  CASE WHEN COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0) = 1 OR c."ever_discovery" = 1) ORDER BY c."id")), '') <> '' THEN 1 ELSE 0 END AS "successful_discovery",
+  CASE WHEN COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("has_any_signal") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_right_poc" = 1) ORDER BY c."id")), '') <> '' THEN 1 ELSE 0 END AS "right_poc",
+  CASE WHEN COALESCE((SELECT group_concat("name", ', ') FROM (SELECT c."name" FROM "contacts" c WHERE c."company_id" = co."id" AND c."name" IS NOT NULL AND c."name" <> '' AND (COALESCE((SELECT MAX("is_complete") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0) = 1 OR c."ever_discovery" = 1) ORDER BY c."id")), '') <> '' THEN 1 ELSE 0 END AS "successful_discovery",
   CAST(COALESCE((SELECT MAX((CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END)) FROM "contacts" c WHERE c."company_id" = co."id"), 0) / 10000000000 AS INTEGER) AS "kpi_rank",
   CASE WHEN CAST(COALESCE((SELECT MAX((CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END)) FROM "contacts" c WHERE c."company_id" = co."id"), 0) / 10000000000 AS INTEGER) >= 23 THEN 1 ELSE 0 END AS "sql_meeting_booked",
   CASE WHEN CAST(COALESCE((SELECT MAX((CASE WHEN c."kpi_rank_at" IS NOT NULL THEN COALESCE(c."kpi_rank", 0) * 10000000000 + CAST(strftime('%s', c."kpi_rank_at") AS INTEGER) ELSE COALESCE(c."kpi_rank", 0) * 10000000000 END)) FROM "contacts" c WHERE c."company_id" = co."id"), 0) / 10000000000 AS INTEGER) >= 25 THEN 1 ELSE 0 END AS "sql_meeting_done",

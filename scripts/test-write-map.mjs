@@ -112,7 +112,14 @@ is("a call-back with no offsite",
   { cfNextCallDate: "2026-10-02" });
 
 console.log("\n8. it says what it found");
-ok("both named", describeWriteMap(map).every((l) => /cf/.test(l)), describeWriteMap(map).join(" · "));
+/* Three lines since 1.78.2 added remarks. This fixture's account has no
+   remarks field, so that line must say so rather than name one — the old
+   "every line names a cf field" was written when there were two lines. */
+{
+  const [nc, off, rem] = describeWriteMap(map);
+  ok("next call and offsite named", /cfNextCallDate/.test(nc) && /cfOffsiteTimelineBdNew/.test(off), `${nc} · ${off}`);
+  ok("...and remarks, absent from this account, says so", /no field on this account/.test(rem), rem);
+}
 ok("and says so when there is nothing",
   describeWriteMap(none).every((l) => /no field on this account/.test(l)));
 

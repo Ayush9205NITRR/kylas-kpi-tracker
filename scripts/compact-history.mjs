@@ -33,7 +33,7 @@ import { pathToFileURL } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createAirtable, listTolerant } from "./airtable.mjs";
 import { firstArrivals, touchEvents, dayKey, weekKey, monthKey, quarterKey, yearKey } from "./report.mjs";
-import { STAGE_RUNG, MILESTONE } from "./stages.mjs";
+import { STAGE_RUNG, MILESTONE, NOT_CONNECTED } from "./stages.mjs";
 import { QUALIFIED } from "./progress.mjs";
 
 const DAY = 86400e3;
@@ -53,6 +53,15 @@ export function compactTransitions(rows, companyOf, { now = new Date(), days = 3
   const keep = new Set();
   const first = new Map();                       /* key -> [at, id] */
   const take = (k, t) => { const h = first.get(k); if (!h || String(t.at) < h[0]) first.set(k, [String(t.at), t.id]); };
+  /* THE LAST ROW OF EACH DAY TOO (1.97.0). The ladder's "show the stages
+     these companies ended the period at" reads the LAST stage a company was
+     set to in the period, and its Picked twin the last CONNECTED one
+     (report.mjs, lastStage). Keeping only the first row of a day kept the
+     count and changed the ending stage — a compaction that the gate passed and
+     the ladder did not. The last of a week, month, quarter or year is the last
+     of its last active day, so keeping each day's last keeps all of them. */
+  const last = new Map();                        /* key -> [at, id] */
+  const keepLast = (k, t) => { const h = last.get(k); if (!h || String(t.at) >= h[0]) last.set(k, [String(t.at), t.id]); };
   for (const r of rows) {
     const t = asTransition(r, companyOf);
     if (!t.at || !t.to || String(t.at) >= cut) { keep.add(r.id); continue; }
@@ -61,11 +70,14 @@ export function compactTransitions(rows, companyOf, { now = new Date(), days = 3
     for (const fl of FLOOR_LIST) if (rung >= fl) take(`floor|${t.company}|${o}|${fl}`, t);
     const d = `${dayKey(t.at)}|${yearKey(t.at)}`;
     take(`worked|${t.company}|${o}|${d}`, t);
+    keepLast(`end|${t.company}|${o}|${d}`, t);
+    if (!NOT_CONNECTED.includes(t.to)) keepLast(`endc|${t.company}|${o}|${d}`, t);
     if (touchEvents({ transitions: [t] }).some((e) => e.metric === "picked")) take(`picked|${t.company}|${o}|${d}`, t);
     if (QUALIFIED.includes(t.to)) take(`qual|${t.company}`, t);
     take(`contact|${t.contact}`, t);
   }
   for (const [, [, id]] of first) keep.add(id);
+  for (const [, [, id]] of last) keep.add(id);
   return { keep: rows.filter((r) => keep.has(r.id)), drop: rows.filter((r) => !keep.has(r.id)) };
 }
 
@@ -85,6 +97,22 @@ export function fingerprint(rows, companyOf) {
   const qual = new Map();
   for (const t of ts) if (QUALIFIED.includes(t.to) && t.at && (!qual.has(t.company) || t.at < qual.get(t.company))) qual.set(t.company, t.at);
   out.push("QUAL\n" + [...qual].sort().map((x) => x.join("|")).join("\n"));
+  /* The stage each company ENDED each day at, and its last connected one —
+     what the ladder's stage breakdown reads. Without this the gate passed a
+     compaction that changed it (1.97.0). Per owner and for the team. */
+  const ends = new Map();
+  for (const t of ts) {
+    if (!t.at || !t.to) continue;
+    for (const o of [String(t.owner || ""), "*"]) {
+      for (const [kind, ok] of [["end", true], ["endc", !NOT_CONNECTED.includes(t.to)]]) {
+        if (!ok) continue;
+        const k = `${kind}|${dayKey(t.at)}|${t.company}|${o}`;
+        const h = ends.get(k);
+        if (!h || String(t.at) >= h[0]) ends.set(k, [String(t.at), t.to]);
+      }
+    }
+  }
+  out.push("ENDS\n" + [...ends].map(([k, [, st]]) => `${k}|${st}`).sort().join("\n"));
   return out;
 }
 

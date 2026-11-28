@@ -34,9 +34,25 @@ const ok = (what, cond, detail = "") => {
 };
 fs.rmSync(DL, { recursive: true, force: true }); fs.mkdirSync(DL, { recursive: true });
 
-const atPost = (table, fields) => fetch(`${AT}/${encodeURIComponent(table)}`, {
-  method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer pat_mock" },
-  body: JSON.stringify({ records: [{ fields }] }) }).then((r) => r.json()).catch(() => null);
+/* RETRIED ON 429, AND LOUD WHEN IT CANNOT. The mock enforces Airtable's five a
+   second, and the proxy is reading it at the same moment the fixture is being
+   written. This used to swallow the refusal (.catch(() => null)), so one row
+   of the fixture could silently not exist — the past event row did, and the
+   export check then failed on a row that was never there. A fixture that is
+   half-written agrees with any bug, so a write that never lands is a failure
+   of the run, not a quiet null. */
+const atPost = async (table, fields) => {
+  for (let i = 0; i < 8; i++) {
+    const r = await fetch(`${AT}/${encodeURIComponent(table)}`, {
+      method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer pat_mock" },
+      body: JSON.stringify({ records: [{ fields }] }) }).catch(() => null);
+    if (r?.status === 429 || !r) { await W(1100); continue; }
+    const j = await r.json().catch(() => null);
+    if (j?.records?.length) return j;
+    throw new Error(`fixture write to ${table} refused: ${r.status} ${JSON.stringify(j).slice(0, 160)}`);
+  }
+  throw new Error(`fixture write to ${table} still rate-limited after 8 tries`);
+};
 const api = (path, body) => fetch(BASE + path, { method: "POST",
   headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
 
@@ -194,7 +210,10 @@ try {
   ok("a Columns button is offered on the Contacts half", await f().locator("#cColBtn").count() === 1);
   await f().locator("#cColBtn").click(); await W(600);
   const opts = await f().locator("[data-ccol]").count();
-  ok("...and it lists every optional column", opts === 11, `${opts}`);
+  /* 11 until 1.92.0 added the eight WhatsApp fields and the account stage
+     (wa, waCampaign, waSent, waTpl, waDeliv, waCount, waReply, waSeat,
+     acctStage) — every one of them optional, every one in this picker. */
+  ok("...and it lists every optional column", opts === 20, `${opts}`);
   const before = await f().locator(".ctable .vr.vh span").allTextContents();
   ok("LinkedIn is off by default — it is the widest column and the least read",
      !before.join("|").includes("LinkedIn"), before.join("|"));

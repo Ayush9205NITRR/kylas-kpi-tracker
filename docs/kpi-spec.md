@@ -589,24 +589,37 @@ At, Right POC Contacts and KPI Stage after a seed, the data model holds.
 
 ## 13. The funnel — settled
 
-The funnel is the stage order Ayush gave, read bottom to top. Rung 24 is
-furthest along, rung 1 is untouched.
+The funnel is the stage order Ayush gave, read bottom to top. Rung 26 is
+furthest along, rung 1 is untouched. The source is `docs/stages.json`; this
+table is a copy of it for reading.
+
+> **Updated 2026-11-28.** This section printed the old 24-rung ladder until
+> 1.97.0. The three Active Requirement Call stages were inserted at 23–25 on
+> 2026-09-19, moving SQL from 24 to 26. §1's milestone floors (≥ 23 / ≥ 25 /
+> ≥ 26) were already right; only this table was behind. Anything sized from
+> the old version has its SQL floors two short.
 
 | Rung | Stage | Rung | Stage |
 |---|---|---|---|
-| 24 | SQL | 12 | Offsite Delayed |
-| 22 | Discovery Call Done | 11 | Offsite Done (Late Reachout) |
-| 21 | Closing Loops - Low Value | 10 | Not Interested |
-| 20 | Discovery Call No-Show | 8 | CNC 3 |
-| 19 | Discovery Call Booked | 7 | CNC 2 |
-| 18 | Follow-up 1 | 6 | CNC 1 |
-| 17 | Follow-up 2 | 5 | Disqualified |
-| 16 | Follow-up 3 | 4 | Invalid |
-| 15 | Followup - CNC | 3 | NDM |
-| 14 | MQL | 2 | POC Changed |
-| 13 | Activation | 1 | LinkedIn Outreach Initiated |
+| 26 | SQL (Sales Qualified Lead) | 13 | Activation |
+| 25 | Active Requirement Call Done – Awaiting Client Inputs | 12 | Offsite Delayed |
+| 24 | Active Requirement Call No-Show | 11 | Offsite Done (Late Reachout) |
+| 23 | Active Requirement Call Booked | 10 | Not Interested |
+| 22 | Discovery Call Done - Awaiting Client Inputs | 9 | Connect Later |
+| 21 | Closing Loops - Low Value | 8 | CNC 3 |
+| 20 | Discovery Call No-Show (code `GHOSTED`) | 7 | CNC 2 |
+| 19 | Discovery Call Booked | 6 | CNC 1 |
+| 18 | Follow-up 1 | 5 | Disqualified - Wrong POC |
+| 17 | Follow-up 2 | 4 | Invalid Contact |
+| 16 | Follow-up 3 | 3 | NDM |
+| 15 | Followup - CNC | 2 | POC Changed |
+| 14 | MQL | 1 | LinkedIn Outreach Initiated (code `YET_TO_BE_MINED`) |
 
-**Call order is the same list reversed**: `callOrder = 25 - rung`. That identity
+Two codes do not read like their labels: rung 20 is `GHOSTED` and rung 1 is
+`YET_TO_BE_MINED`. Match on codes, never labels. Rung 25's code contains an
+**en-dash (U+2013)**, not a hyphen — that is what Kylas returns.
+
+**Call order is the same list reversed**: `callOrder = 27 - rung`. That identity
 is asserted in the code, so the two orderings cannot drift apart. It also makes
 sense — a contact further along is a contact worth calling sooner.
 
@@ -632,7 +645,7 @@ captured, regardless of where the stage sits.
 
 Kylas sets a picklist **by value id**, not by code — sending
 `cfPipelineStageBd: "MQL_MARKETING_QUALIFIED_LEAD"` will not work, it needs
-`2862828`. All 24 ids are in `docs/stages.json` and reach both the console and
+`2862828`. All 26 ids are in `docs/stages.json` and reach both the console and
 the scripts through `scripts/gen-stages.mjs`.
 
 ---

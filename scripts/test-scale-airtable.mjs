@@ -129,24 +129,28 @@ console.log(`  a console that paints, and numbers that are of the first N rows.\
    scale test that cries wolf gets switched off, which is this repo's own
    argument about the reconciler. `scope` says what the ceiling is measured
    against. */
+/* 1.97.0: every whole-table read raised to 2000 pages, the mirror's and the
+   report's standard. Five of these were below the live base — the Airtable
+   copy held 22,344 contacts against a 20,000 ceiling, so three reads were
+   dropping 2,344 contacts silently, with a 200, that week. */
 const CEILINGS = [
-  ["airtable.mjs  companies, for the queue", "Companies", 200, "table"],
-  ["airtable.mjs  scanContacts", "Contacts", 200, "table"],
+  ["airtable.mjs  companies, for the queue", "Companies", 2000, "table"],
+  ["airtable.mjs  scanContacts", "Contacts", 2000, "table"],
   ["airtable.mjs  contacts, for one company", "Contacts", 20, "company"],
-  ["airtable.mjs  contacts, for the board", "Contacts", 200, "table"],
-  ["airtable.mjs  companies, for the board", "Companies", 200, "table"],
-  ["airtable.mjs  contacts, for RCA", "Contacts", 400, "table"],
+  ["airtable.mjs  contacts, for the board", "Contacts", 2000, "table"],
+  ["airtable.mjs  companies, for the board", "Companies", 2000, "table"],
+  ["airtable.mjs  contacts, for RCA", "Contacts", 2000, "table"],
   /* Reads EVERY event row and filters client-side, so this one is a full
      scan however few contacts are being shown. */
-  ["airtable.mjs  eventsFor (scans all, filters after)", "Event Rows", 60, "table"],
+  ["airtable.mjs  eventsFor (scans all, filters after)", "Event Rows", 2000, "table"],
   ["handlers.mjs  the report's four tables", "Call Log", 2000, "table"],
-  ["handlers.mjs  owners", "Contacts", 200, "table"],
+  ["handlers.mjs  owners", "Contacts", 2000, "table"],
   /* Was 200 pages here, read whole, for the watermark AND the previous stage —
      the second of which wrote KPI Rank down for contacts past row 20,000. The
      watermark is now one sorted row; the previous stage reads by id or reads
      the whole table with throwIfMore. test-sync-scale.mjs runs both. */
   ["sync-kylas.mjs  previous stage, whole table", "Contacts", 2000, "table"],
-  ["rollup-calls.mjs  the raw call log", "Call Log", 400, "table"],
+  ["rollup-calls.mjs  the raw call log", "Call Log", 2000, "table"],
   ["mirror.mjs  a table build", "Contacts", 2000, "table"],
 ];
 let truncating = 0;
@@ -170,9 +174,9 @@ console.log(`\n3 · THE SAME QUESTION, ASKED OF THE REAL CLIENT`);
 console.log(`${"-".repeat(70)}`);
 const at = createAirtable("pat_mock", "appMOCK", { log: () => {}, apiUrl: BASE });
 const t1 = Date.now();
-const got = await at.listAll("Contacts", { fields: ["Name"], pageSize: 100, maxPages: 200 });
+const got = await at.listAll("Contacts", { fields: ["Name"], pageSize: 100, maxPages: 2000 });
 const secs = (Date.now() - t1) / 1000;
-console.log(`  asked for every contact with maxPages 200`);
+console.log(`  asked for every contact with maxPages 2000`);
 console.log(`  the base holds   ${fmt(counts.Contacts)}`);
 console.log(`  the read returned ${fmt(got.length)}   in ${secs.toFixed(1)}s`);
 check("the read returned every contact, not a prefix", got.length === counts.Contacts,
@@ -183,7 +187,7 @@ check("the read returned every contact, not a prefix", got.length === counts.Con
    fires here is proving the fix exists and is simply not switched on. */
 let threw = "";
 try {
-  await at.listAll("Contacts", { fields: ["Name"], pageSize: 100, maxPages: 200, throwIfMore: true });
+  await at.listAll("Contacts", { fields: ["Name"], pageSize: 100, maxPages: 2000, throwIfMore: true });
 } catch (e) { threw = e.message; }
 check("...and throwIfMore would have caught it", !!threw || got.length === counts.Contacts,
       threw ? threw.slice(0, 90) : "nothing to catch at this size");

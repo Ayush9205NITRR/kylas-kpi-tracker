@@ -59,6 +59,18 @@ ok("…and for every owner", !bad.length, bad.join(", "));
 
 const broken = rows.filter((r) => r.fields["Changed At"] >= cut);
 ok("a compaction that loses history is refused by the gate", gate(rows, broken, companyOf).length > 0);
+/* 1.97.0: the old compaction kept each day's FIRST row only, which kept every
+   count and changed the stage the company ENDED the day at — the ladder's
+   stage breakdown. The gate passed it. It must not any more. */
+{
+  const co = new Map([["recCx", "recCoX"]]);
+  const r = (id, at, to) => ({ id, fields: { Key: id, "Changed At": at, Owner: "Sejal", "To Stage": to, Contact: ["recCx"] } });
+  const day = [r("x1", "2026-05-01T09:00:00Z", "FOLLOW_UP_1"), r("x2", "2026-05-01T17:00:00Z", "MQL_MARKETING_QUALIFIED_LEAD")];
+  ok("a compaction that keeps the day's first row and drops its last is refused (ending stage)",
+     gate(day, [day[0]], co).some((d) => d.startsWith("ENDS")));
+  ok("...and compactTransitions keeps that last row",
+     compactTransitions(day, co, { now: NOW, days: 30 }).keep.some((x) => x.id === "x2"));
+}
 
 console.log("\n  apply, with the undo file");
 const gone = [];

@@ -243,7 +243,14 @@ try {
     await G().locator('.vws .vwtab', { hasText: 'Seeded by another BD' }).first().click(); await W(2000);
     await G().locator('#halfCon').click(); await W(8000);
 
-    const tableOwner = (await G().locator('.ctable .crow').first().locator('span').nth(6).textContent() || '').trim();
+    /* BY HEADER, NOT BY POSITION. This read `span` nth(6), which counted spans
+       inside cells too and broke when 1.92.0 put a tick-box column first — it
+       then read the Calling stage and called it the owner. Header and row are
+       built from the same column list, so the header's index is the cell's. */
+    const heads = (await G().locator('.ctable .vr.vh > span').allTextContents()).map((t) => t.trim());
+    const ownerAt = heads.indexOf('Owner');
+    const tableOwner = ownerAt < 0 ? '' :
+      (await G().locator('.ctable .crow').first().locator(':scope > span').nth(ownerAt).textContent() || '').trim();
     ok('the Contacts table names an owner, not “—”', !!tableOwner && tableOwner !== '—', `“${tableOwner}”`);
 
     await G().locator('.ctable .crow [data-open]').first().click(); await W(7000);

@@ -73,7 +73,9 @@ WITH ev AS (
   SELECT contact_id,
          MAX("has_any_signal") AS has_signal,
          MAX("is_complete")    AS has_complete_row
-  FROM "event_rows" WHERE contact_id IS NOT NULL GROUP BY contact_id
+  -- a REMOVED row counts for nothing (schema: "A marked row counts for
+  -- nothing but is never destroyed") — until 1.97.0 it still counted here
+  FROM "event_rows" WHERE contact_id IS NOT NULL AND "removed_at" IS NULL GROUP BY contact_id
 ),
 cl AS (
   SELECT contact_id,
@@ -219,7 +221,9 @@ LEFT JOIN ct ON ct.company_id = co."id";`);
      store (airtable-d1.mjs) uses these for every read; test-sql-derived
      asserts the two pairs agree on every row and every column. */
   const cl = (agg, extra = "") => `(SELECT ${agg} FROM "call_log" x WHERE x."contact_id" = c."id"${extra})`;
-  const ev = (col) => `COALESCE((SELECT MAX("${col}") FROM "event_rows" x WHERE x."contact_id" = c."id"), 0)`;
+  /* Live rows only, as in v_contacts' ev CTE — the two must agree, and
+     test-sql-derived §11 asserts they do on every row and column. */
+  const ev = (col) => `COALESCE((SELECT MAX("${col}") FROM "event_rows" x WHERE x."contact_id" = c."id" AND x."removed_at" IS NULL), 0)`;
   const st = (agg) => `(SELECT ${agg}("changed_at") FROM "stage_transitions" x WHERE x."contact_id" = c."id")`;
   const rightPoc = `(${ev("has_any_signal")} = 1 OR c."ever_right_poc" = 1)`;
   const discovery = `(${ev("is_complete")} = 1 OR c."ever_discovery" = 1)`;

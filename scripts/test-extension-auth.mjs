@@ -144,7 +144,11 @@ async function serverFetch(url, opts = {}) {
   const body = ok ? { ok: true, user: { name: 'Ayush' }, role: 'admin', version: '1.17.1',
                       companies: [], periods: [], contacts: [], due: [] }
                   : { error: 'not signed in' };
-  return { status: ok ? 200 : 401, ok, json: async () => body };
+  /* `headers` because a real Response always has them, and api.js reads the
+     ETag off every reply since the If-None-Match work (test-etag.mjs). Without
+     it every request threw "reading 'get'" inside health() and this file
+     reported seven sign-in failures that were the harness, not the sign-in. */
+  return { status: ok ? 200 : 401, ok, headers: { get: () => null }, json: async () => body };
 }
 
 /* ── the console frame: api.js ───────────────────────────────────────────── */
@@ -176,6 +180,18 @@ const noCollisions = (label) => check(`${label}: never two flows at once`,
   `max concurrent ${stats.maxConcurrent}, refused ${stats.refused}`);
 
 /* ═══════════════════════════════════════════════════════════════════════ */
+console.log('\n0. api.js names each method once');
+/* An object literal keeps the LAST of two same-named keys and says nothing.
+   1.97.0 added a reader called viewCompanies beside the existing add/remove
+   call of that name, and "+ Add to view" quietly became a read. Static,
+   because at run time there is nothing left to see: the first one is gone. */
+{
+  const keys = [...API_SRC.matchAll(/^    (?:async\s+)?(?:get\s+)?([A-Za-z_$][\w$]*)\s*(?::\s|\()/gm)]
+    .map((m) => m[1]).filter((k) => !['if', 'for', 'while', 'switch', 'catch', 'return'].includes(k));
+  const dup = [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))];
+  check('no method is defined twice', keys.length > 40 && !dup.length, dup.length ? dup.join(', ') : `${keys.length} methods`);
+}
+
 console.log('\n1. a browser that has never signed in opens the console');
 resetStats();
 let API = await openConsole();

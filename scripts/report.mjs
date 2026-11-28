@@ -586,6 +586,13 @@ export function report(period, { calls = [], transitions = [], signals = [], dia
     if (v.conn) m.pickedStages[v.conn] = (m.pickedStages[v.conn] || 0) + 1;
     m.cos.push(company);
   }
+  /* In a stable order: Map insertion follows whichever row was read first,
+     so the same history read in another order — or after compact-history
+     removed a repeat — gave the same counts under shuffled keys. */
+  const sorted = (o) => Object.fromEntries(Object.entries(o).sort(([x], [y]) => x.localeCompare(y)));
+  for (const m of mixes.values()) {
+    m.workedStages = sorted(m.workedStages); m.pickedStages = sorted(m.pickedStages); m.cos.sort();
+  }
   for (const [id, m] of mixes) {
     const target = id.includes("|") ? ownerPeriods.get(id) : rows.get(id);
     if (target) Object.assign(target, m);

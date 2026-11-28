@@ -151,6 +151,14 @@ if (process.env.MOCK_MANY) {
        rather than being the accidental default here. */
     COMPANIES[id] = { id, name: `bulk-${String(i).padStart(3, "0")}`,
       ownerId: i % 2 ? 74726 : 74725,
+      /* MOCK_MANY_CREATORS=<n> spreads Kylas' audit fields over n distinct
+         people, so the Created by / Last updated by chip rows pass their cap
+         of ten and the "+N more" button has something to open (1.97.0). */
+      ...(process.env.MOCK_MANY_CREATORS ? (() => {
+        const n = Number(process.env.MOCK_MANY_CREATORS) || 13;
+        const who = (k) => ({ id: 80000 + k, name: `Creator ${String(k).padStart(2, "0")}` });
+        return { createdBy: who(i % n), updatedBy: who((i + 3) % n), createdAt: "2026-08-01T09:00:00.000Z" };
+      })() : {}),
       /* MOCK_SAME_STAMP=1 gives every bulk company ONE timestamp, which is the
          case that stalls a keyset cursor: more rows share the cursor value
          than a page can return, so asking for "older than X" hands back the
@@ -442,6 +450,10 @@ createServer(async (req, res) => {
     COMPANIES[id] = { ...b, id, name: String(b.name).trim(), ownerId: Number(b.ownerId) || 74725, customFieldValues: b.customFieldValues || {},
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     CREATED_COMPANIES.push(id);
+    /* In the write log too: bulk-tag's canary counts its own creates there
+       to prove it deleted every one. A second handler for this route further
+       down did the logging, and never ran — this one answers first. */
+    WRITES.push({ kind: "company-create", id, body: b });
     return json(res, 200, COMPANIES[id]);
   }
   if (p === "/__companies" && req.method === "GET") return json(res, 200, CREATED_COMPANIES.map((id) => COMPANIES[id]));
@@ -723,17 +735,8 @@ createServer(async (req, res) => {
   /* A company update. Strict about being sent the WHOLE record, as a PUT
      that replaces it would be: a body without the name is refused rather than
      wiping it, so a client that sends only the changed field fails loudly. */
-  /* Create and delete, for bulk-tag-companies.mjs' throwaway canary. A new
-     company is owned by the key's user, as Kylas does. */
-  if (p === "/v1/companies" && req.method === "POST") {
-    const body = JSON.parse(await text(req));
-    if (!body.name) return json(res, 400, { code: "001001", message: "name is required" });
-    const id = 9000000 + Object.keys(COMPANIES).length;
-    COMPANIES[id] = { id, ownerId: 74725, customFieldValues: {}, ...body,
-                      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    WRITES.push({ kind: "company-create", id, body });
-    return json(res, 200, COMPANIES[id]);
-  }
+  /* Delete, for bulk-tag-companies.mjs' throwaway canary. (Its create is the
+     POST /v1/companies handler above; a duplicate of it here was unreachable.) */
   const coDel = p.match(/^\/v1\/companies\/(\d+)$/);
   if (coDel && req.method === "DELETE") {
     if (!COMPANIES[coDel[1]]) return json(res, 404, { message: "no such company" });

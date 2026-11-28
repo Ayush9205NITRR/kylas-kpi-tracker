@@ -426,6 +426,13 @@
     viewCompanies: (id, add, remove) => req("/views/companies", { method: "POST",
       body: { id, add: add || [], remove: remove || [] }, timeout: 20000 }),
     deleteView: (id) => req("/views/delete", { method: "POST", body: { id }, timeout: 20000 }),
+    /* Every ACCOUNT in a view, whoever owns it — a BD's own list is cut to
+       their accounts, and a team view is everybody's (1.97.0). */
+    /* NOT `viewCompanies` — that name is the add/remove call just above, and a
+       second key of the same name in this object silently replaced it, so
+       "+ Add to view" did a read and added nothing (caught by
+       test-views-live §5 in the 1.97.0 sweep). */
+    viewAccounts: (id) => req(`/view-companies?id=${encodeURIComponent(id)}`, { timeout: 60000 }),
     /* Every contact at the view's accounts, for the Contacts half of a view. */
     viewContacts: (id, cap) => req(`/view-contacts?id=${encodeURIComponent(id)}${cap ? `&cap=${cap}` : ""}`,
       { timeout: 60000 }),

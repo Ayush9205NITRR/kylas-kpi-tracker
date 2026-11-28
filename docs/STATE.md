@@ -14,6 +14,53 @@ describe.
 
 ---
 
+## 0 · The one-go bug sweep (1.97.0, pushed, NOT deployed) — 2026-11-28
+
+Ayush: *"search for all product related cases jahan par bug aa rahe hai, fix at
+one go."* Every suite was run (92), failures A/B'd against HEAD on a fresh
+stack, and each one classed as a product bug, a test that rotted, or the
+environment. What changed for a BD:
+
+- **Last updated at / by, Created by** now ride the live path. The Accounts list
+  is served from the Airtable mirror, which carried none of Kylas' audit trail —
+  the date filter tested a stale value and "Last updated by" offered no names.
+  The crawl's row now fills every gap, and its four audit fields always win.
+- **"+N more" opens**, and an opened long row gets a find box. Created by, Last
+  updated by and Sub-industry were capped at ten with no expand flag.
+- **A team view shows all of itself** to every BD who may read it —
+  `/view-companies`, read-only, same `canRead` rule as `/view-contacts`.
+- **Next call's clock time** reaches the Accounts table (1.95.0 had added it to
+  the crawl branch only; the mirror branch is the live one).
+- **Airtable reads no longer truncate.** Thirteen whole-table reads were capped
+  at 6,000–40,000 rows. The base held 22,344 contacts against a 20,000 ceiling,
+  so three reads were silently dropping 2,344 contacts with a 200. All 2000 pages.
+- **History compaction keeps each day's last stage**, and its gate now refuses
+  one that does not — the ladder's "stages these companies ended at" was being
+  changed by a compaction the gate passed.
+- **Removed event rows count for nothing** in `sql-derived.mjs`, and `reached`
+  starts at rung 2 (an unmined, uncalled account is not worked).
+
+Found and fixed inside the sweep itself: `api.js` got a second `viewCompanies`
+key that silently replaced the add/remove one, so **"+ Add to view" stopped
+adding** — `test-extension-auth` §0 now refuses a method defined twice.
+
+**Tests that had rotted, fixed rather than skipped:** `test-extension-auth`
+(its fake fetch had no `headers`, so seven sign-in checks had failed since the
+ETag work — sign-in regressions went uncaught), `test-export-live` (fixture
+writes swallowed 429s; a half-written fixture agrees with any bug),
+`test-wa-composer-live` (1.92/1.94 moved the caps, renamed seats and the queue
+button), `test-views-live` (read the owner by position after a tick-box column
+was added), `test-write-map`, and the mock's duplicate `POST /v1/companies`.
+
+**Still failing, all identical on HEAD — not caused by 1.97.0, not fixed yet:**
+`test-views-live` (2: unnamed owner re-asked per paint; a clip at 980px),
+`test-accounts-ux-live` (6, its fixture paints no rows), `test-ui-live` (4),
+`test-move-live` (4, drags a header spot that is now a button),
+`test-console-live` / `test-airtable-live` (poke internals renamed since),
+`test-writer-live` (needs a real signed-in proxy). Live suites need the stack in
+§2 **with `.save-journal.json` deleted first** — the local proxy keeps views and
+settings between runs and a stale one becomes the fixture.
+
 ## 1 · Status, in one table
 
 | | state |

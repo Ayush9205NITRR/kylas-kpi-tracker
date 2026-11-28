@@ -811,7 +811,7 @@ async function eventsFor(at, recordIds) {
   if (!recordIds.length) return new Map();
   const all = await listTolerant(at, "Event Rows", {
     fields: ["Row Key", "Period", "Event Type", "Budget", "Timeline", "Pax", "Remarks", "Contact"],
-    pageSize: 100, maxPages: 60,
+    pageSize: 100, maxPages: 2000,
   });
   const want = new Set(recordIds);
   const by = new Map();
@@ -839,7 +839,7 @@ async function companyIndex(at, fresh) {
   if (!at.mirrored && !fresh && IDX.byRec && Date.now() - IDX.at < IDX_TTL)
     return { byRec: IDX.byRec, byKid: IDX.byKid };
   const rows = await at.listAll("Companies",
-    { fields: ["Kylas Company ID", "Name", "Owner", "Kylas Owner ID"], pageSize: 100, maxPages: 200 });
+    { fields: ["Kylas Company ID", "Name", "Owner", "Kylas Owner ID"], pageSize: 100, maxPages: 2000 });
   const byRec = new Map(), byKid = new Map();
   for (const r of rows) {
     const co = { id: String(r.fields?.["Kylas Company ID"] || ""),
@@ -922,7 +922,7 @@ export function dropReadCaches() {
 async function allContacts(at) {
   if (!at.mirrored && SCAN.rows && Date.now() - SCAN.at < SCAN_TTL) return SCAN.rows;
   const rows = await listTolerant(at, "Contacts",
-    { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 });
+    { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 2000 });
   if (!at.mirrored) { SCAN.at = Date.now(); SCAN.rows = rows; }
   return rows;
 }
@@ -1038,7 +1038,7 @@ export async function readQueue(at, owner) {
      asking for them together lets it pipeline instead of waiting out a full
      round trip before even starting the second. */
   const [rows, { byRec }] = await Promise.all([
-    listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 200 }),
+    listTolerant(at, "Contacts", { fields: CONTACT_READ_FIELDS, pageSize: 100, maxPages: 2000 }),
     companyIndex(at),
   ]);
   const mine = owner && owner !== "all"
@@ -1072,7 +1072,7 @@ export async function readCompanies(at) {
      by test-kpi-fields, and the mirror columns are new. Asking for them
      together would mean one missing name costs both halves. */
   const [base, kpis] = await Promise.all([
-    listTolerant(at, "Companies", { fields: COMPANY_READ_FIELDS, pageSize: 100, maxPages: 200 }),
+    listTolerant(at, "Companies", { fields: COMPANY_READ_FIELDS, pageSize: 100, maxPages: 2000 }),
     readCompanyKpis(at).catch(() => new Map()),
   ]);
   return base.map((r) => {
@@ -1124,7 +1124,7 @@ export const RCA_READ_FIELDS = [
    fourteen — and a strip that hides itself at zero cannot say so. */
 export async function readRcaDue(at, { owner = "", now = Date.now(), log = () => {}, watch = null } = {}) {
   const [contacts, asked] = await Promise.all([
-    listTolerant(at, "Contacts", { fields: RCA_READ_FIELDS, pageSize: 100, maxPages: 400 }),
+    listTolerant(at, "Contacts", { fields: RCA_READ_FIELDS, pageSize: 100, maxPages: 2000 }),
     listTolerant(at, "RCA", { fields: ["Key", "Gate", "Reason", "Answered At"],
                               pageSize: 100, maxPages: 200 }).catch(() => []),
   ]);
@@ -1197,7 +1197,7 @@ export async function readRcaLog(at, { owner = "", limit = 500 } = {}) {
   const [rows, contacts] = await Promise.all([
     listTolerant(at, "RCA", { fields: ["Key", "Gate", "Reason", "Note", "Answered At", "Answered By", "Owner",
                                        "Stuck Days", "Stuck Since"], pageSize: 100, maxPages: 200 }).catch(() => []),
-    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Company"], pageSize: 100, maxPages: 400 }).catch(() => []),
+    listTolerant(at, "Contacts", { fields: ["Kylas Contact ID", "Name", "Company"], pageSize: 100, maxPages: 2000 }).catch(() => []),
   ]);
   const byKid = new Map(contacts.map((r) => [String(r.fields?.["Kylas Contact ID"] || ""), r.fields || {}]));
   const out = [];
@@ -1299,7 +1299,7 @@ export async function writeTeam(at, people) {
 export async function readFocus(at) {
   const rows = await listTolerant(at, "Focus",
     { fields: ["Kylas Company ID", "Company Name", "Status", "Reason", "Note",
-               "Owner", "Set By", "Set At"], pageSize: 100, maxPages: 60 }).catch(() => []);
+               "Owner", "Set By", "Set At"], pageSize: 100, maxPages: 2000 }).catch(() => []);
   const out = {};
   for (const r of rows) {
     const id = String(r.fields?.["Kylas Company ID"] || "").trim();
@@ -1383,7 +1383,7 @@ export const RESEARCH_COLUMNS = {
 export async function readResearch(at) {
   const rows = await listTolerant(at, "Research",
     { fields: ["Kylas Company ID", ...Object.values(RESEARCH_COLUMNS), "Updated By", "Updated At"],
-      pageSize: 100, maxPages: 60 }).catch(() => []);
+      pageSize: 100, maxPages: 2000 }).catch(() => []);
   const out = {};
   for (const r of rows) {
     const id = String(r.fields?.["Kylas Company ID"] || "").trim();

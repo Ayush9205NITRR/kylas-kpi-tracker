@@ -1571,6 +1571,11 @@ table.ladder tr.substage .cellv{font-size:var(--t-meta)}
 .vwtab.on .vwwho.mine{background:rgba(255,255,255,.18);color:var(--onBlue)}
 .vwfind{border:1px solid var(--line2);background:var(--panel);border-radius:999px;
   padding:5px 12px;font:inherit;font-size:var(--t-label);color:var(--text);min-width:150px}
+/* The find box on an opened chip row: .vwfind's shape, sized to sit among
+   chips rather than above them. Tokens only. */
+.frow .chipfind{min-width:0;width:13ch;padding:3px 10px;font-size:var(--t-meta)}
+.frow .chipfind:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.frow .chip[hidden]{display:none}
 .vwnew{border:1px dashed var(--blueLine);background:transparent;border-radius:999px;
   padding:5px 12px;font:inherit;font-size:var(--t-label);font-weight:var(--w-med);color:var(--blue);cursor:pointer}
 .vwnew:hover{background:var(--blueSoft)}

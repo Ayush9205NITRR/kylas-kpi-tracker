@@ -304,6 +304,47 @@ try {
        `table “${c.owner}” vs card “${card.contact.owner}”`);
   }
 
+  /* ── 9 · a team view shows ALL of itself (1.97.0) ─────────────────────
+     Ayush, 2026-11-28: "I create a view, people are not able to see accounts
+     under that view." A BD's /companies is cut to their own accounts, so a
+     team view built from several owners' accounts showed each BD only their
+     own slice. /view-companies reads the view whole, for anyone who may
+     read the view — and only them. */
+  console.log("\n9 · view-companies");
+  as(ADMIN);
+  const everyone = (await call("/companies?owner=all")).companies || [];
+  const byOwner = new Map();
+  for (const c of everyone) if (c.ownerId && !byOwner.has(String(c.ownerId))) byOwner.set(String(c.ownerId), c);
+  const spread = [...byOwner.values()].slice(0, 3);
+  ok("the fixture has accounts under more than one owner", spread.length >= 2, `${spread.length} owner(s)`);
+  const tv = (await call("/views", { name: "Admin's mixed list", visibility: "team", companies: spread.map((c) => String(c.id)) })).view;
+
+  as(BDS[1]);
+  const ownIds = new Set(((await call("/companies")).companies || []).map((c) => String(c.id)));
+  const foreign = spread.filter((c) => !ownIds.has(String(c.id)));
+  ok("the BD's own list does not hold every account in the view", foreign.length >= 1,
+     `${foreign.length} of ${spread.length} are someone else's`);
+  const vco = await call(`/view-companies?id=${tv.id}`);
+  const got = new Set((vco.companies || []).map((c) => String(c.id)));
+  ok("...but /view-companies returns every one of them", spread.every((c) => got.has(String(c.id))),
+     `${got.size} of ${spread.length}`);
+  ok("...including the ones another BD owns", foreign.every((c) => got.has(String(c.id))));
+  ok("...dressed like an owned row (owner name carried)", (vco.companies || []).every((c) => "owner" in c));
+  ok("...and nothing outside the view", [...got].every((id) => spread.some((c) => String(c.id) === id)));
+
+  ok("a view that does not exist is a 404", (await fails("/view-companies?id=nope"))?.status === 404);
+  ok("no id at all is a 400", (await fails("/view-companies"))?.status === 400);
+  as(BDS[2]);
+  const pv = (await call("/views", { name: "Mayra's private", visibility: "personal", companies: spread.map((c) => String(c.id)) })).view;
+  as(BDS[1]);
+  ok("somebody else's personal view is 403 here too", (await fails(`/view-companies?id=${pv.id}`))?.status === 403);
+  as(BDS[2]);
+  ok("its owner may read it", ((await call(`/view-companies?id=${pv.id}`)).companies || []).length === spread.length);
+  /* Read only: the route widens what a BD can SEE, never what they can write. */
+  as(BDS[1]);
+  ok("reading a view does not let the BD edit someone's personal view",
+     (await fails("/views", { id: pv.id, name: "Mine now" }))?.status === 403);
+
   /* ── and the whole lot survived a reload from the store ─────────────── */
   console.log("\n8 · it is really on the server");
   as(ADMIN);

@@ -75,7 +75,7 @@ export async function run({ env = {}, log = () => {}, apply = false,
 
   const rows = await at.listAll("Call Log", {
     fields: ["Called At", "Owner", "Outcome", "Duration", "Stage Set"],
-    pageSize: 100, maxPages: 400,
+    pageSize: 100, maxPages: 2000,
   });
   log(`\n${rows.length} raw call row(s) in the base`);
 

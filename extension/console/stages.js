@@ -62,7 +62,7 @@ const STAGE_ID = {
   YET_TO_BE_MINED:                               2862826,
 };
 
-/* 24 is furthest along. callOrder = 25 - rung, so one list serves both. */
+/* 26 is furthest along. callOrder = 27 - rung, so one list serves both. */
 const STAGE_RUNG = {
   SQL_SALES_QUALIFIED_LEAD:                      26,
   "ACTIVE_REQUIREMENT_CALL_DONE_–_AWAITING_CLIENT_INPUTS": 25,

@@ -519,7 +519,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
   /* Fills .company on rows that carry a Companies record id in .companyRec, and
      drops the id. One read of the names; a company the copy lacks stays blank. */
   async function nameCompanies(rows) {
-    const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 200 })
+    const names = new Map((await listTolerant(airtable, "Companies", { fields: ["Name"], pageSize: 100, maxPages: 2000 })
       .catch(() => [])).map((r) => [r.id, r.fields?.Name || ""]));
     for (const d of rows) { d.company = names.get(d.companyRec) || ""; delete d.companyRec; }
   }
@@ -912,7 +912,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        it. The copy's own reader drops a missing field the same way. */
     async () => Object.fromEntries(rowsToEnrichment(
       (await listTolerant(researchAt, ENRICH_TABLE,
-        { fields: ENRICH_FIELDS, pageSize: 100, maxPages: 200 })).map((r) => r.fields || {}))));
+        { fields: ENRICH_FIELDS, pageSize: 100, maxPages: 2000 })).map((r) => r.fields || {}))));
 
   const enrichByCompany = async () => {
     if (!researchAt) return new Map();
@@ -2496,8 +2496,12 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        used to, silently hides every company that has been assigned but not yet
        worked, which is exactly the list an associate needs at the start of a day.
        ?owner= for one person, ?owner=all for the team view. */
-    "/companies": async (url) => {
-      const want = await scopeOwner(url.searchParams.get("owner"));
+    /* `internal` is never set by a request — both dispatchers (proxy.mjs,
+       worker/index.mjs) call a route with (url, body) only. /view-companies
+       passes { want: "all" } to read the account through the same dressing
+       this route applies, rather than a second copy of it that could drift. */
+    "/companies": async (url, _body, internal = null) => {
+      const want = internal?.want ?? await scopeOwner(url.searchParams.get("owner"));
       const me = await whoami();
       const all = want === "all";
       const owner = all ? null : (want || me?.id);
@@ -2625,7 +2629,30 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
           const csIdx = await contactStagesByCompany().catch(() => null);
           const lastCalls = await lastCallsByCompany(await progress());
           const kylasBool = new Map((crawlNow?.companies || []).filter((c) => c.booleanPost).map((c) => [String(c.id), c.booleanPost]));
+          /* THE CRAWL'S ROW, WHOLE, for the gaps below (Ayush, 2026-11-28:
+             "last updated at not working", "last updated by should be there").
+             The mirror is the Airtable copy and carries only part of what the
+             crawl holds — no createdBy, no updatedBy, an update time that is
+             the sync's rather than Kylas'. This path is the one that is live
+             ("from Airtable" on the dashboard), so the date filter was testing
+             a stale value and "Last updated by" had nothing to offer. */
+          const crawlRow = new Map((crawlNow?.companies || []).map((c) => [String(c.id), c]));
+          /* Kylas' own audit trail: the crawl is the record, and its fast delta
+             keeps it fresher than the mirror — which is also why an admin's
+             edit never showed as "updated" to a BD. */
+          const AUDIT = ["createdAt", "updatedAt", "createdBy", "updatedBy", "createdById", "updatedById"];
+          /* Carried another way already, or internal to the crawl. */
+          const NOT_COPIED = new Set(["offsiteRaw", "booleanPost"]);
+          const blank = (v) => v === undefined || v === null || v === "";
           for (const co of mirror) {
+            const k = crawlRow.get(String(co.id));
+            if (k) {
+              for (const f of AUDIT) if (!blank(k[f])) co[f] = k[f];
+              /* Every other field only fills a gap: a value the mirror holds
+                 is never overwritten, so no row loses what it showed before. */
+              for (const [f, v] of Object.entries(k))
+                if (!NOT_COPIED.has(f) && !AUDIT.includes(f) && blank(co[f]) && !blank(v)) co[f] = v;
+            }
             /* Only where there is something: a key on every one of six
                thousand rows, holding nine nulls, is the reply's biggest
                single cost and says nothing the absence does not. */
@@ -2636,6 +2663,10 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
             const p = prog.get(String(co.id));
             Object.assign(co, withLastCall(co, lastCalls));
             co.nextCall = p?.nextCall || null;
+            /* The slot rides with the date (1.95.0). It was added to the crawl
+               branch below and missed here — and this branch is the live one,
+               so the exact time shipped and never reached the table. */
+            co.nextCallTime = p?.nextCallTime || "";
             /* THE ACCOUNT'S OWN STAGE, CALCULATED: the highest stage among
                ALL its Kylas contacts, or the KPI base's floor if that is
                higher. See acctFields. */
@@ -3767,7 +3798,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const owner = await nameScope(url.searchParams.get("owner") || "");
       return perKey(modeSplitCache, `mode-split:${owner}`, async () => {
         const rows = await listTolerant(airtable, "Contacts", {
-          fields: ["Current Stage", "Mode of Meeting", "Owner"], pageSize: 100, maxPages: 400 });
+          fields: ["Current Stage", "Mode of Meeting", "Owner"], pageSize: 100, maxPages: 2000 });
         return { configured: true, ...stageModeSplit(rows, { owner }) };
       })();
     },
@@ -3787,7 +3818,7 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
       const [team, companies, contacts] = await Promise.all([
         readTeam(airtable),
         readCompanies(airtable).catch(() => []),
-        listTolerant(airtable, "Contacts", { fields: ["Owner"], pageSize: 100, maxPages: 200 })
+        listTolerant(airtable, "Contacts", { fields: ["Owner"], pageSize: 100, maxPages: 2000 })
           .catch(() => []),
       ]);
       const seen = new Set(companies.map((c) => c.owner).filter(Boolean));
@@ -3974,6 +4005,34 @@ export async function createHandlers({ env = {}, store, log = () => {}, cache = 
        requests (readContactsForCompanies); where it holds nothing for an
        account — one nobody has worked yet — Kylas is asked for that account
        alone, a few at a time, so a brand-new view is not empty. */
+    /* EVERY ACCOUNT IN A VIEW, WHOEVER OWNS IT (Ayush, 2026-11-28: "I create
+       a view, people are not able to see accounts under that view").
+       A view narrowed the list already loaded, and a BD's list is cut to their
+       own accounts (scopeOwner). So a team view built from several owners'
+       accounts showed each BD only their own slice — usually nothing — while
+       the tab advertised the full count. Decision: a team view shows all of it
+       to everyone who may read the view.
+
+       READ ONLY. The same permission check /view-contacts makes (canRead), and
+       nothing about any write route changes: saving still goes through the
+       checks it always did. Rows come from /companies itself, read for the
+       whole account, so a borrowed row is dressed exactly like an owned one. */
+    "/view-companies": async (url) => {
+      const me = await viewer();
+      const id = String(url.searchParams.get("id") || "");
+      if (!id) throw Object.assign(new Error("Which view?"), { status: 400 });
+      const view = await readView(id);
+      if (!view) throw Object.assign(new Error("That view no longer exists"), { status: 404 });
+      if (!canRead(view, me)) throw Object.assign(new Error("That is someone else's personal view"), { status: 403 });
+      const ids = new Set((view.companies || []).slice(0, VIEW_LIMITS.companies).map(String));
+      if (!ids.size) return { view: viewForClient(view, me), companies: [], asked: 0, found: 0 };
+      const whole = await routes["/companies"](new URL("http://local/companies?owner=all"), null, { want: "all" });
+      const companies = (whole?.companies || []).filter((c) => ids.has(String(c.id)));
+      log(`view-companies ${id} — ${companies.length} of ${ids.size} for ${me?.name || me?.email || "?"}`);
+      return { view: viewForClient(view, me), companies, asked: ids.size, found: companies.length,
+               source: whole?.source || "", building: !!whole?.building };
+    },
+
     "/view-contacts": async (url) => {
       const me = await viewer();
       const id = String(url.searchParams.get("id") || "");

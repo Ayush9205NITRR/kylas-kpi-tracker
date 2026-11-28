@@ -208,5 +208,38 @@ console.log("\n11. v_contacts_row and v_companies_row say exactly what the views
   }
 }
 
+/* ── 12. a removed row counts for nothing; reached starts at rung 2 ── */
+console.log("12. removed event rows, and the reached floor (1.97.0)");
+{
+  run(`INSERT INTO companies (kylas_company_id, name) VALUES ('920','Removed Co')`);
+  run(`INSERT INTO companies (kylas_company_id, name) VALUES ('921','Unmined Co')`);
+  /* Mona: her only signal row was removed, and she was never flagged ever_*. */
+  run(`INSERT INTO contacts (kylas_contact_id,name,company_id) VALUES ('720','Mona',?)`, coId('920'));
+  run(`INSERT INTO event_rows (row_key,contact_id,budget,timeline,pax,removed_at)
+       VALUES ('rm1',?,'5L','Q4','80','2026-11-01T00:00:00.000Z')`, ctId('720'));
+  is("a contact whose only signal row was REMOVED is not a Right POC",
+    one(`SELECT is_right_poc FROM v_contacts WHERE id=?`, ctId('720')).is_right_poc, 0);
+  is("...nor a Discovery",
+    one(`SELECT is_discovery FROM v_contacts WHERE id=?`, ctId('720')).is_discovery, 0);
+  is("...and the row view agrees",
+    one(`SELECT is_right_poc FROM v_contacts_row WHERE id=?`, ctId('720')).is_right_poc, 0);
+  /* ...but once flagged ever_right_poc she stays one: removing the row that
+     carried the budget must not drop the rung. */
+  run(`UPDATE contacts SET ever_right_poc=1 WHERE id=?`, ctId('720'));
+  is("ever_right_poc still holds her at Right POC after the row is removed",
+    one(`SELECT is_right_poc FROM v_contacts WHERE id=?`, ctId('720')).is_right_poc, 1);
+
+  /* Nita: YET_TO_BE_MINED (rung 1), no calls. Nobody has touched this account. */
+  run(`INSERT INTO contacts (kylas_contact_id,name,company_id,kpi_rank,kpi_rank_at)
+       VALUES ('721','Nita',?,1,'2026-11-01T00:00:00.000Z')`, coId('921'));
+  is("an account whose only contact is unmined (rung 1) and uncalled is NOT reached",
+    one(`SELECT reached FROM v_companies WHERE id=?`, coId('921')).reached, 0);
+  is("...in the row view too",
+    one(`SELECT reached FROM v_companies_row WHERE id=?`, coId('921')).reached, 0);
+  run(`UPDATE contacts SET kpi_rank=6 WHERE id=?`, ctId('721'));
+  is("...and becomes reached the moment it moves to a real rung (CNC 1)",
+    one(`SELECT reached FROM v_companies WHERE id=?`, coId('921')).reached, 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

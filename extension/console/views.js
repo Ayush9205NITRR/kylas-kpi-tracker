@@ -2803,6 +2803,7 @@
                    from the raw number every time — see enrich.js. */
                 rev: new Set(), emp: new Set(), round: new Set(), fstage: new Set(), ind: new Set(), sub: new Set(), city: new Set(),
                 offsiteSet: new Set(), priMin: "", moreOpen: false,
+                cbyMore: false, ubyMore: false, subMore: false, chipFind: {},
                 /* the demand team's own pipeline stage, out of Company List */
                 apsSet: new Set(), cbySet: new Set(), ubySet: new Set(),
                 /* How the board piles accounts: the six call buckets, or one
@@ -3122,6 +3123,15 @@
         : (a, b) => (cnt.get(b) || 0) - (cnt.get(a) || 0)
           || String(labelOf(a)).localeCompare(String(labelOf(b))));
     const cap = opts.limit || 0;
+    /* A FIND BOX ON A LONG, OPENED ROW (1.97.0). Eleven creators is past the
+       cap; opening the row shows them all, and past a screenful a name is
+       quicker typed than found. Picked chips always survive the filter, for
+       the same reason they survive the cap: a filter you cannot see is a
+       filter you cannot turn off. The typing itself filters in place (see the
+       data-find handler) — this applies the same rule on the next paint. */
+    const searchable = cap && opts.expanded && vals.length > cap;
+    const q = searchable ? String(ACC.chipFind?.[key] || "").trim().toLowerCase() : "";
+    if (q) vals = vals.filter((v) => set.has(v) || String(labelOf(v)).toLowerCase().includes(q));
     let extra = 0;
     if (cap && !opts.expanded && vals.length > cap) {
       const picked = vals.filter((v) => set.has(v));
@@ -3133,9 +3143,11 @@
     const chip = (v) => {
       const n = cnt.get(v) || 0;
       return `<button class="chip${n ? "" : " zero"}" type="button" data-f="${key}" data-v="${esc(String(v))}"
-        aria-pressed="${set.has(v)}">${swatch ? swatch(v) : ""}${esc(labelOf(v))}<span class="k tnum">${n}</span></button>`;
+        data-label="${esc(String(labelOf(v)))}" aria-pressed="${set.has(v)}">${swatch ? swatch(v) : ""}${esc(labelOf(v))}<span class="k tnum">${n}</span></button>`;
     };
-    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${vals.map(chip).join("")}${
+    const find = searchable ? `<input class="vwfind chipfind" type="search" data-find="${esc(key)}"
+        value="${esc(ACC.chipFind?.[key] || "")}" placeholder="Find…" aria-label="Find in ${esc(lbl)}" autocomplete="off">` : "";
+    return `<div class="frow"><span class="lbl">${esc(lbl)}</span>${find}${vals.map(chip).join("")}${
       extra ? `<button class="chip more" type="button" data-more="${esc(key)}">+${extra} more ${
         esc(extra === 1 ? (opts.moreOne || "value") : (opts.moreNoun || "values"))}</button>`
       : opts.expanded && cap ? `<button class="chip more" type="button" data-more="${esc(key)}">Show fewer</button>` : ""}</div>`;
@@ -3772,8 +3784,10 @@
         ${open ? "▾" : "▸"} More filters${moreActive() ? `<span class="k tnum">${moreCount()}</span>` : ""}
       </button>
       ${open ? `<div class="morebody">
-        ${chipRow(all, "Created by", "cby", null, (v) => (v === "—" ? "Not known" : v), ACC.cbySet, null, { limit: 10 })}
-        ${chipRow(all, "Last updated by", "uby", null, (v) => (v === "—" ? "Not known" : v), ACC.ubySet, null, { limit: 10 })}
+        ${chipRow(all, "Created by", "cby", null, (v) => (v === "—" ? "Not known" : v), ACC.cbySet, null,
+          { limit: 10, expanded: ACC.cbyMore, moreNoun: "people", moreOne: "person" })}
+        ${chipRow(all, "Last updated by", "uby", null, (v) => (v === "—" ? "Not known" : v), ACC.ubySet, null,
+          { limit: 10, expanded: ACC.ubyMore, moreNoun: "people", moreOne: "person" })}
         ${bandRow("Revenue", "rev", E.REVENUE_BANDS, ACC.rev)}
         ${chipRow(all, "Employees", "emp", null, (v) => (v === E.UNKNOWN ? "Unknown" : v), ACC.emp,
           null, { byFloor: true })}
@@ -3783,7 +3797,8 @@
         ${chipRow(all, "Industry", "ind", null, (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.ind,
           null, { limit: 8, expanded: ACC.indMore, moreNoun: "industries", moreOne: "industry" })}
         ${ACC.ind.size ? chipRow(all.filter((c) => ACC.ind.has(VALUE_OF.ind(c))), "Sub-industry", "sub", null,
-          (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.sub, null, { limit: 10 }) : ""}
+          (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.sub, null,
+          { limit: 10, expanded: ACC.subMore, moreNoun: "sub-industries", moreOne: "sub-industry" }) : ""}
         ${chipRow(all, "City", "city", null, (v) => (v === E.UNKNOWN ? "Not known" : v), ACC.city,
           null, { limit: 10, expanded: ACC.cityMore, moreNoun: "cities", moreOne: "city" })}
         ${chipRow(all, "Offsite timeline", "offsite", null,
@@ -4393,6 +4408,35 @@
   /* The active view with its companies as a Set — built once per lookup
      rather than per row, because accMatch() runs over every account. */
   let VSET = { id: "", set: new Set() };
+  /* THE VIEW'S ACCOUNTS THIS LIST DOES NOT HOLD (1.97.0). A BD's list is cut
+     to their own accounts on the server, and a view only narrows the list
+     loaded — so a team view built from several owners' accounts showed each BD
+     their own slice, usually nothing, under a tab that said 40. These are the
+     rest, from /view-companies, marked viaView so the row can say whose it is.
+     Cached on the view's id and rev: switching back is instant, and an edited
+     view refetches. Nothing is fetched when the list already holds every
+     account in the view — an admin on "all", or a BD's own private view. */
+  let VCO = { key: "", rows: [], loading: "", err: "" };
+  function viewBorrowed(base, again) {
+    const v = activeView();
+    if (!v || !v.set.size) return [];
+    const have = new Set((base || []).map((c) => String(c.id)));
+    if (![...v.set].some((id) => !have.has(id))) return [];
+    const key = `${v.view.id}:${v.view.rev || 0}`;
+    if (VCO.key === key) return VCO.rows.filter((c) => !have.has(String(c.id)));
+    if (VCO.loading !== key && API.viewAccounts) {
+      VCO.loading = key;
+      API.viewAccounts(v.view.id).then((r) => {
+        VCO = { key, rows: (r?.companies || []).map((c) => ({ ...c, viaView: true })), loading: "", err: "" };
+        again?.();
+      }).catch((e) => {
+        /* An older server has no /view-companies: say nothing loud, keep the
+           list as it was. The view still narrows what this person owns. */
+        VCO = { key, rows: [], loading: "", err: String(e?.message || e).slice(0, 160) };
+      });
+    }
+    return [];
+  }
   function activeView() {
     const v = viewById(ACC.viewId);
     if (!v) return null;
@@ -5765,7 +5809,11 @@
     /* An owner is selected unless the filter is cleared, and "all" is still a
        server-side answer — so in both cases the fetched list is authoritative.
        Only with no list at all (offline) do contact rows stand in. */
-    const base = companiesNow(who);
+    const own = companiesNow(who);
+    /* A view's accounts owned by someone else, joined on so the view shows all
+       of itself (viewBorrowed). Empty — and no fetch — without a view. */
+    const lent = viewBorrowed(own, () => keepPlace(() => companies(host)));
+    const base = lent.length ? [...own, ...lent] : own;
     const all = rollup(DATA, base, base.length > 0);
     /* Options are what the ACCOUNT defines, not what the loaded rows happen to
        contain. Deriving them from the rows meant one company on screen gave a
@@ -6100,11 +6148,31 @@
        reaching the rest is the same gesture as picking one. */
     /* One flag per row that can be capped — named after the row, so adding a
        capped row is one entry here and not a second branch. */
-    const MORE_FLAG = { fstage: "fstageMore", aps: "apsMore", ind: "indMore", city: "cityMore" };
+    /* cby, uby and sub were capped at ten with no flag here, so "+1 more" drew
+       and did nothing (Ayush, 2026-11-28: "+1 more value -> how do I search").
+       Every row that passes `limit` belongs in this table. */
+    const MORE_FLAG = { fstage: "fstageMore", aps: "apsMore", ind: "indMore", city: "cityMore",
+                        cby: "cbyMore", uby: "ubyMore", sub: "subMore" };
     host.querySelectorAll(".chip[data-more]").forEach((b) => b.addEventListener("click", () => {
       const flag = MORE_FLAG[b.dataset.more];
       if (flag) ACC[flag] = !ACC[flag];
+      /* Closing a row forgets what was typed in it: a hidden filter on a
+         collapsed row would be one more thing nobody can see to clear. */
+      if (flag && !ACC[flag]) delete ACC.chipFind[b.dataset.more];
       redraw();
+    }));
+    /* In place, not through redraw(): redraw is async and would take the
+       caret away between keystrokes. Same approach as the owner picker. */
+    host.querySelectorAll("input[data-find]").forEach((inp) => inp.addEventListener("input", () => {
+      const q = inp.value.trim().toLowerCase();
+      ACC.chipFind[inp.dataset.find] = inp.value;
+      inp.closest(".frow")?.querySelectorAll(".chip[data-f]").forEach((c) => {
+        /* The label, not textContent: the count sits in the same button, and
+           "Creator 01" with 5 accounts reads "Creator 015" as text. */
+        const hit = !q || c.getAttribute("aria-pressed") === "true"
+          || String(c.dataset.label || "").toLowerCase().includes(q);
+        c.hidden = !hit;
+      });
     }));
     /* Which set a chip row belongs to. One table, so a row added to the
        markup and forgotten here fails loudly rather than silently toggling
